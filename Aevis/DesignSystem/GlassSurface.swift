@@ -207,7 +207,12 @@ struct AevisBubble: View {
     var plainTextColor: Color
 
     /// 订阅表情包 —— 导入自定义表情后，气泡里的预览要立刻跟着变。
-    @ObservedObject private var emoji = EmojiPack.shared
+    ///
+    /// ⚠️ 这里**不加 private**：这个 struct 是被跨文件全参构造的
+    /// （`AevisBubble(text:look:...)`），而 private 存储属性有可能让
+    /// memberwise initializer 一起降成 private，别的文件就构造不了了。
+    /// 加个默认值就够了，效果一样。
+    @ObservedObject var emoji = EmojiPack.shared
 
     /// 真正显示出来的字。
     /// `[微笑]` 这类文字表情会被换成真正的表情符号，

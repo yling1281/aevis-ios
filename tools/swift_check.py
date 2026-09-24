@@ -632,6 +632,82 @@ def _looks_like_prose(text):
     return text.replace("*", "").strip() != ""
 
 
+# 顶格写的类型声明（有缩进的是嵌套类型，不算独立作用域）
+TOP_LEVEL_TYPE = re.compile(
+    r"^(?:public |internal |private |fileprivate |final |open )*"
+    r"(?:struct|class|enum|extension|actor)\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+
+# 带属性包装器的属性 —— 这些是「某个 View 自己的状态」。
+# 故意只认这一族：它们几乎不可能和别处的局部变量重名，误报就压得住。
+WRAPPED_PROPERTY = re.compile(
+    r"@(?:State|StateObject|ObservedObject|EnvironmentObject|Environment|"
+    r"Binding|FocusState|AppStorage|SceneStorage|Published|Namespace|Query)\b"
+    r"(?:\s*\([^)]*\))?"
+    r"(?:\s+(?:private|public|internal|fileprivate|weak|lazy|static|final))*"
+    r"\s+var\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+
+
+def check_property_scope(sources):
+    """某个类型里用了 `名字.`，而这个名字是**同一个文件里另一个类型**的属性。
+
+    真踩过：给聊天页加表情时，`emoji` 声明在了 `ChatView` 上，
+    真正用它的是同文件里的 `MessageBubble` —— 那个 struct 直接编不过
+    （cannot find 'emoji' in scope），而本地静态检查**一条都没报**，
+    白跑了一轮 CI（十几分钟，最后只能靠推理去定位）。
+
+    两条限制把误报压到接近零：
+    1. 只盯**带属性包装器的属性名**（@State / @ObservedObject / ...）;
+    2. 这个名字必须**在本文件里确实有声明**，只是不在当前这个类型里。
+    """
+    for path, source in sorted(sources.items()):
+        code = strip_code(source)
+        lines = code.splitlines()
+        raw = source.splitlines()
+
+        marks = []
+        for index, line in enumerate(lines):
+            match = TOP_LEVEL_TYPE.match(line)
+            if match:
+                marks.append((index, match.group(1)))
+        if len(marks) < 2:
+            continue  # 只有一个类型，不存在「用错作用域」
+
+        regions = []
+        for order, (start, name) in enumerate(marks):
+            end = marks[order + 1][0] - 1 if order + 1 < len(marks) else len(lines) - 1
+            regions.append((name, start, end))
+
+        # 本文件里每个属性属于哪个类型
+        owners = {}
+        for name, start, end in regions:
+            body = "\n".join(lines[start:end + 1])
+            for prop in WRAPPED_PROPERTY.findall(body):
+                owners.setdefault(prop, set()).add(name)
+        if not owners:
+            continue
+
+        for name, start, end in regions:
+            body = "\n".join(lines[start:end + 1])
+            declared_here = set(
+                re.findall(r"\b(?:let|var|func|case)\s+([A-Za-z_][A-Za-z0-9_]*)", body)
+            )
+            for index in range(start, end + 1):
+                if raw[index].strip().startswith("//"):
+                    continue
+                for used in re.findall(r"(?<![.\w])([a-z_][A-Za-z0-9_]*)\.", lines[index]):
+                    if used not in owners or used in declared_here:
+                        continue
+                    elsewhere = "、".join(sorted(owners[used] - {name}))
+                    report(
+                        "R18", path, index + 1,
+                        "用了「%s.」，但它声明在 %s 里，不在这里 —— 会编不过"
+                        "（cannot find '%s' in scope）"
+                        % (used, elsewhere or "另一个类型", used)
+                    )
+
+
 def collect_definitions(sources):
     """收集项目里定义的类型名，以及哪些类型有 .shared。"""
     types = set()
@@ -698,6 +774,7 @@ def main():
     check_shared_references(sources, types, shared)
     check_card_usage(sources, types)
     check_member_references(sources, types, declared)
+    check_property_scope(sources)
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()

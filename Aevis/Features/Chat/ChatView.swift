@@ -14,9 +14,6 @@ struct ChatView: View {
     /// 用来在用户换字体/调字号时重新渲染。
     @ObservedObject private var fonts = FontStore.shared
 
-    /// 订阅表情包 —— 导入自定义表情后聊天里的表情要立刻跟着变。
-    @ObservedObject private var emoji = EmojiPack.shared
-
     /// 快捷指令送来的信号（要问的话、要弹的界面）在这里等着被取走。
     @ObservedObject private var bridge = BridgeInbox.shared
 
@@ -651,6 +648,12 @@ private struct MessageBubble: View {
     let persona: Persona
     var theme: BubbleTheme
     var simpleMode: Bool = false
+
+    /// 订阅表情包 —— 判断这一条是不是"就是一个表情"要靠它。
+    ///
+    /// ⚠️ 必须声明在**这个** struct 里：`sticker` / `bigSticker` 都属于这里，
+    /// 声明到外层的 ChatView 上，这里就找不到 `emoji` 了（真踩过，整轮编译失败）。
+    @ObservedObject private var emoji = EmojiPack.shared
 
     /// 靠着屏幕那一边至少留这么多空白（也顺手限制了气泡宽度）。
     /// 用「单侧 Spacer 的 minLength」而不是写死像素宽度，这样任何屏幕尺寸都自适应。
