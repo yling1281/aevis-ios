@@ -39,16 +39,16 @@ struct SettingsView: View {
                 Button("清空", role: .destructive) { chat.clear() }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("她会忘掉你们聊过的一切。这个操作不能撤销。")
+                Text("TA 会忘掉你们聊过的一切。这个操作不能撤销。")
             }
         }
     }
 
-    // MARK: - 她的设定
+    // MARK: - TA 的设定
 
     private var personaCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cardTitle("她")
+            cardTitle("TA")
 
             NavigationLink {
                 PersonaEditorView(isFirstRun: false)
@@ -59,7 +59,7 @@ struct SettingsView: View {
                         Text(personaStore.persona.name.isEmpty ? "还没起名字" : personaStore.persona.name)
                             .font(.system(size: 15.5, weight: .medium))
                             .foregroundStyle(.primary)
-                        Text("名字、性格、说话方式、声音")
+                        Text("名字、性别、性格、说话方式、声音")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
@@ -153,7 +153,7 @@ struct SettingsView: View {
             cardTitle("说话")
 
             HStack {
-                Text("她回复时念出来")
+                Text("回复时念出来")
                     .font(.system(size: 14.5))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
@@ -299,7 +299,7 @@ struct SettingsView: View {
         Task { @MainActor in
             do {
                 let reply = try await LLMService.probe(config: config)
-                testResult = "连接正常，她说：「\(reply)」"
+                testResult = "连接正常，TA 说：「\(reply)」"
             } catch {
                 testResult = error.localizedDescription
             }
