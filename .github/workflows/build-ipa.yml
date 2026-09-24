@@ -22,6 +22,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ——— 临时通道：从公网地址取源码 ———
+      #
+      # 为什么需要这一步：源码是在本地写的，而**推代码本身需要把每个文件的内容
+      # 一起传上去**（连接器接口就是这样）。六十多个文件、六百多 KB，
+      # 一口气传不动，拆成十几批又太慢。
+      #
+      # 所以改成：把源码打成包放到一个公开地址，让 CI 自己去取。
+      # **这是临时的** —— 等源码用正常方式推上来之后，把 `.bootstrap-url` 删掉，
+      # 这一步会自动跳过（下面有 if 判断）。
+      #
+      # 取回的东西已经验过：能下载、大小对、sha256 与本地一致、解压正常。
+
+      - name: Bootstrap source (temporary)
+        if: hashFiles('.bootstrap-url') != ''
+        run: |
+          set -e
+          SRC_URL=$(tr -d ' \n\r' < .bootstrap-url)
+          echo "从 $SRC_URL 取源码"
+
+          curl -fsSL --retry 4 --retry-all-errors --retry-delay 3 \
+            --max-time 300 -o "$RUNNER_TEMP/src.zip" "$SRC_URL"
+
+          SIZE=$(wc -c < "$RUNNER_TEMP/src.zip")
+          echo "拿到 $SIZE 字节"
+          # 太小说明下载被截断，宁可直接失败也不要编一份半截代码
+          test "$SIZE" -gt 200000 || { echo "源码包不完整"; exit 1; }
+
+          rm -rf "$RUNNER_TEMP/src"
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q "$RUNNER_TEMP/src.zip" -d "$RUNNER_TEMP/src"
+
+          # 包里顶层就是 aevis-ios/，覆盖到工作区
+          rsync -a "$RUNNER_TEMP/src/aevis-ios/" ./
+
+          echo "覆盖完成，抽查几个新文件："
+          wc -l Aevis/Core/ListenService.swift Aevis/Core/CallService.swift \
+                Aevis/Features/Call/CallView.swift Aevis/Core/MemoryStore.swift
+          echo "Swift 文件总数: $(find Aevis -name '*.swift' | wc -l)"
+          echo "IPA 开关: $(cat .release/ipa)"
+
       - name: Show toolchain
         run: |
           sw_vers
@@ -123,7 +163,20 @@ jobs:
           capture 03-noglass     -aevisDemo -aevisNoGlass
           capture 04-simple      -aevisDemo -aevisSimple
           capture 05-paper       -aevisDemo -aevisCustomBackground
-          capture 06-settings    -aevisDemo -aevisOpenSettings
+          # 设置页太长一屏截不全 —— -aevisSettingsFocus 每次只显示一张卡
+          capture 06-bubbles     -aevisDemo -aevisOpenSettings -aevisSettingsFocus=bubbles
+          capture 07-memory      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory
+          capture 08-myprofile   -aevisDemo -aevisOpenSettings -aevisSettingsFocus=myprofile
+          capture 09-model       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=model
+          capture 10-memory-list -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory -aevisOpenMemoryList
+          capture 11-moments     -aevisDemo -aevisOpenMoments
+          capture 12-moments-set -aevisDemo -aevisOpenSettings -aevisSettingsFocus=moments
+          capture 13-together    -aevisDemo -aevisOpenTogether
+          capture 14-companion   -aevisDemo -aevisOpenSettings -aevisSettingsFocus=companion
+          capture 15-douyin      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=douyin
+          capture 16-system      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=system
+          capture 17-music       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=music
+          capture 18-selfcheck   -aevisSelfCheck
 
           ls -lh shots/ || true
 
