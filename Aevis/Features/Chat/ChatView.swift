@@ -10,6 +10,7 @@ struct ChatView: View {
     @State private var errorText: String?
     @State private var showSettings = false
     @State private var sendTask: Task<Void, Never>?
+    @FocusState private var composerFocused: Bool
 
     private var persona: Persona { personaStore.persona }
 
@@ -30,6 +31,13 @@ struct ChatView: View {
                 .environmentObject(personaStore)
                 .environmentObject(settings)
                 .environmentObject(chat)
+        }
+        // 键盘上方给一个明确的「收起」，比只靠手势可靠
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("收起") { composerFocused = false }
+            }
         }
         .onDisappear {
             sendTask?.cancel()
@@ -54,6 +62,7 @@ struct ChatView: View {
             Spacer(minLength: 8)
 
             Button {
+                composerFocused = false
                 showSettings = true
             } label: {
                 Image(systemName: "slider.horizontal.3")
@@ -96,7 +105,12 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 10)
             }
-            .scrollDismissesKeyboard(.interactively)
+            // 手指一拖就收，不用先把键盘拖回去
+            .scrollDismissesKeyboard(.immediately)
+            // 点消息区任意位置也能收
+            .onTapGesture {
+                composerFocused = false
+            }
             .onChange(of: chat.messages.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo("bottom", anchor: .bottom)
@@ -154,23 +168,27 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - 输入栏
+    // MARK: - 底部输入栏
+    //
+    // 玻璃要整条加在容器上，不能加在 TextField 上 ——
+    // 画在自带样式的输入框上不生效，之前底部就看不到玻璃。
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .bottom, spacing: 8) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.system(size: 15))
-                .padding(.horizontal, 15)
-                .padding(.vertical, 10)
-                .aevisGlass(cornerRadius: 20)
+                .focused($composerFocused)
                 .disabled(isSending)
+                .padding(.vertical, 9)
+                .padding(.leading, 15)
+                .padding(.trailing, 4)
 
             Button(action: send) {
                 Image(systemName: isSending ? "stop.fill" : "arrow.up")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 34, height: 34)
                     .background(
                         Circle().fill(
                             isSending
@@ -181,9 +199,12 @@ struct ChatView: View {
                     .contentShape(Circle())
             }
             .disabled(!canSend && !isSending)
+            .padding(.trailing, 7)
+            .padding(.bottom, 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .aevisGlass(cornerRadius: 26)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
         .padding(.bottom, 6)
     }
 
@@ -262,12 +283,28 @@ private struct MessageBubble: View {
     let message: ChatMessage
     let persona: Persona
 
-    /// 气泡最大宽度：太宽会顶到屏幕两边，读起来反而累。
-    private static let maxBubbleWidth: CGFloat = 280
+    /// 对方那一侧：气泡左边至少留这么多空白，也就限制了气泡最大宽度。
+    /// 用「单侧 Spacer 的 minLength」而不是写死像素宽度，这样任何屏幕尺寸都自适应。
+    private static let userGap: CGFloat = 88
+
+    /// 自己那一侧：头像 26 + 间距 8 = 34，再加 54 与 userGap 对称。
+    private static let assistantGap: CGFloat = 54
 
     private var isUser: Bool { message.role == .user }
 
-    private var content: some View {
+    @ViewBuilder
+    private var bubble: some View {
+        if isUser {
+            bubbleText.background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(red: 0.42, green: 0.35, blue: 0.95))
+            )
+        } else {
+            bubbleText.aevisGlass(cornerRadius: 18)
+        }
+    }
+
+    private var bubbleText: some View {
         Text(message.text.isEmpty ? "…" : message.text)
             .font(.system(size: 15.5))
             .foregroundStyle(isUser ? Color.white : Color.primary)
@@ -278,31 +315,18 @@ private struct MessageBubble: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            if isUser {
-                Spacer(minLength: 40)
-            } else {
+        if isUser {
+            // 只放一个 Spacer。放两个的话剩余空白会被平分，气泡就飘到中间去了。
+            HStack(spacing: 0) {
+                Spacer(minLength: Self.userGap)
+                bubble
+            }
+        } else {
+            HStack(alignment: .bottom, spacing: 8) {
                 AevisAvatar(size: 26, seed: persona.avatarSeed)
-            }
-
-            Group {
-                if isUser {
-                    content.background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color(red: 0.42, green: 0.35, blue: 0.95))
-                    )
-                } else {
-                    content.aevisGlass(cornerRadius: 18)
-                }
-            }
-            .frame(maxWidth: Self.maxBubbleWidth, alignment: isUser ? .trailing : .leading)
-
-            if isUser {
-                Spacer(minLength: 0)
-            } else {
-                Spacer(minLength: 40)
+                bubble
+                Spacer(minLength: Self.assistantGap)
             }
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 }
