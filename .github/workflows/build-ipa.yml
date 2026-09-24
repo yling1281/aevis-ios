@@ -135,6 +135,7 @@ jobs:
           capture 03-noglass     -aevisDemo -aevisNoGlass
           capture 04-simple      -aevisDemo -aevisSimple
           capture 05-paper       -aevisDemo -aevisCustomBackground
+          capture 06-settings    -aevisDemo -aevisOpenSettings
 
           echo "::group::截图结果"
           ls -lh shots/ || true

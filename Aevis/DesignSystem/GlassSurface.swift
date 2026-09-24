@@ -188,8 +188,15 @@ struct AevisAvatar: View {
     var size: CGFloat = 32
     var seed: Int = 0
 
+    /// 备选颜色必须在色环上拉开距离。
+    /// 之前用 `0.70 + seed * 0.055` 算，六个全挤在紫→粉这一小段里，
+    /// 视觉上根本分不出来（截图自检时发现的）。
+    /// seed 0 留给主题色，其余五个是紫 / 青 / 绿 / 橙 / 玫红 / 蓝紫。
+    private static let seedHues: [Double] = [0.72, 0.55, 0.38, 0.09, 0.92, 0.68]
+
     private var hue: Double {
-        0.70 + Double(abs(seed) % 6) * 0.055
+        let index = abs(seed) % Self.seedHues.count
+        return Self.seedHues[index]
     }
 
     var body: some View {

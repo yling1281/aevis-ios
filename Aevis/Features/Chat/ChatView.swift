@@ -38,6 +38,15 @@ struct ChatView: View {
         .onDisappear {
             sendTask?.cancel()
         }
+        .onAppear {
+            // 只在 CI 截图自检时用：带这个参数启动就直接把设置面板打开，
+            // 这样不用点屏幕也能截到设置页。
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenSettings") {
+                showSettings = true
+            }
+            #endif
+        }
     }
 
     // MARK: - 顶部
