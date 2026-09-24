@@ -5,6 +5,9 @@ struct ChatView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var chat: ChatStore
 
+    /// 用来在用户换字体/调字号时重新渲染。
+    @ObservedObject private var fonts = FontStore.shared
+
     @State private var draft = ""
     @State private var isSending = false
     @State private var errorText: String?
@@ -52,10 +55,10 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(persona.name)
-                    .font(.system(size: settings.simpleMode ? 18 : 16, weight: .semibold))
+                    .font(.aevis(settings.simpleMode ? 18 : 16, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(isSending ? "正在输入…" : "在线")
-                    .font(.system(size: settings.simpleMode ? 13 : 11.5))
+                    .font(.aevis(settings.simpleMode ? 13 : 11.5))
                     .foregroundStyle(.secondary)
             }
 
@@ -66,7 +69,7 @@ struct ChatView: View {
                 showSettings = true
             } label: {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.aevis(15, weight: .medium))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
@@ -137,16 +140,16 @@ struct ChatView: View {
             AevisOrb()
                 .scaleEffect(0.72)
             Text("\(persona.pronoun)在这儿。")
-                .font(.system(size: settings.simpleMode ? 19 : 17, weight: .medium))
+                .font(.aevis(settings.simpleMode ? 19 : 17, weight: .medium))
                 .foregroundStyle(.primary)
             if settings.isConfigured {
                 Text("说点什么开始吧。你们聊过的每一句，都会被记得。")
-                    .font(.system(size: settings.simpleMode ? 15 : 13.5))
+                    .font(.aevis(settings.simpleMode ? 15 : 13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {
                 Text("还差一步：右上角设置 →「模型接入」，填上你的 API Key，TA 才会说话。")
-                    .font(.system(size: settings.simpleMode ? 15 : 13.5))
+                    .font(.aevis(settings.simpleMode ? 15 : 13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -159,7 +162,7 @@ struct ChatView: View {
     private func noticeBubble(_ text: String) -> some View {
         HStack {
             Text(text)
-                .font(.system(size: 12.5))
+                .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -179,7 +182,7 @@ struct ChatView: View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
-                .font(.system(size: settings.simpleMode ? 17 : 15))
+                .font(.aevis(settings.simpleMode ? 17 : 15))
                 .focused($composerFocused)
                 .disabled(isSending)
                 .padding(.vertical, settings.simpleMode ? 11 : 9)
@@ -188,7 +191,7 @@ struct ChatView: View {
 
             Button(action: send) {
                 Image(systemName: isSending ? "stop.fill" : "arrow.up")
-                    .font(.system(size: settings.simpleMode ? 16 : 14, weight: .bold))
+                    .font(.aevis(settings.simpleMode ? 16 : 14, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: settings.simpleMode ? 38 : 34, height: settings.simpleMode ? 38 : 34)
                     .background(
@@ -314,7 +317,7 @@ private struct MessageBubble: View {
 
     private var bubbleText: some View {
         Text(message.text.isEmpty ? "…" : message.text)
-            .font(.system(size: bubbleFontSize))
+            .font(.aevis(bubbleFontSize))
             .foregroundStyle(isUser ? Color.white : Color.primary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
