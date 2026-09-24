@@ -1,0 +1,107 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        env:
+          AEVIS_COMMIT: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Aevis.xcodeproj \
+            -target Aevis \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            AEVIS_COMMIT="$AEVIS_COMMIT" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > build.log 2>&1 || { echo "===== BUILD FAILED ====="; tail -n 150 build.log; exit 1; }
+          echo "===== BUILD OK ====="
+          tail -n 8 build.log
+
+      - name: Package IPA
+        run: |
+          set -e
+          APP="build/Release-iphoneos/Aevis.app"
+          if [ ! -d "$APP" ]; then
+            echo "找不到 Aevis.app，输出目录内容："
+            find build -maxdepth 3 -name "*.app" -print
+            ls -R build | head -n 60
+            exit 1
+          fi
+
+          rm -rf Payload Aevis-unsigned.ipa Aevis-adhoc.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/Aevis.app
+          rm -rf Payload/Aevis.app/_CodeSignature
+          rm -f Payload/Aevis.app/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X Aevis-unsigned.ipa Payload
+
+          codesign -f -s - --deep Payload/Aevis.app || true
+          /usr/bin/zip -qry -X Aevis-adhoc.ipa Payload
+
+          ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aevis-ipa
+          path: |
+            Aevis-unsigned.ipa
+            Aevis-adhoc.ipa
+          retention-days: 30
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Aevis build ${{ github.run_number }}
+          prerelease: true
+          body: |
+            Aevis 自动构建产物。
+
+            - 提交：`${{ github.sha }}`
+            - 工具链：macos-26 / Xcode 26.x
+
+            **安装方式（手机端）**
+
+            1. 在 iPhone 上打开本页
+            2. 下载 `Aevis-unsigned.ipa`
+            3. 用「全能签」打开这个文件，签名后安装
+
+            `Aevis-unsigned.ipa` 是未签名版本（推荐给签名工具用）。
+            `Aevis-adhoc.ipa` 已做 ad-hoc 签名，作为备用。
+          files: |
+            Aevis-unsigned.ipa
+            Aevis-adhoc.ipa

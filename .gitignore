@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+!*.xcodeproj/project.pbxproj
+xcuserdata/
+DerivedData/
+build/
+build.log
+
+# 构建产物
+Payload/
+*.ipa
+*.dSYM.zip
+
+# XcodeGen 生成物
+Aevis.xcodeproj/
