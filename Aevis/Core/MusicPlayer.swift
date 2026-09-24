@@ -22,6 +22,13 @@ final class MusicPlayer: NSObject, ObservableObject {
     @Published private(set) var lyric: String = ""
     @Published private(set) var errorText: String?
 
+    /// 留一句话给界面显示。
+    /// `errorText` 保持只读（免得各处乱改它），只在这里开一个写入口 ——
+    /// 快捷指令让她放歌时，「没登录」「没找到」这些得说出来。
+    func note(_ text: String?) {
+        errorText = text
+    }
+
     /// 换歌时回调，给「一起听」用 —— 她可以就着这首歌说点什么。
     var onTrackChanged: ((MusicTrack) -> Void)?
 

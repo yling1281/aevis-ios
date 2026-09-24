@@ -206,6 +206,16 @@ struct AevisBubble: View {
     /// 玻璃 / 描边样式下用的字色，也就是用户在「文字颜色」里挑的那个。
     var plainTextColor: Color
 
+    /// 订阅表情包 —— 导入自定义表情后，气泡里的预览要立刻跟着变。
+    @ObservedObject private var emoji = EmojiPack.shared
+
+    /// 真正显示出来的字。
+    /// `[微笑]` 这类文字表情会被换成真正的表情符号，
+    /// 不认得的方括号内容原样留着（正常打字写到方括号时不该被动）。
+    private var displayText: String {
+        text.isEmpty ? "…" : emoji.render(text)
+    }
+
     /// 按背景亮度决定字色 —— 不然浅色气泡上写白字会看不见。
     private var onColorText: Color {
         #if canImport(UIKit)
@@ -233,7 +243,7 @@ struct AevisBubble: View {
     }
 
     private var label: some View {
-        Text(text.isEmpty ? "…" : text)
+        Text(displayText)
             .font(.aevis(fontSize))
             .foregroundStyle(textColor)
             .multilineTextAlignment(.leading)

@@ -59,6 +59,13 @@ struct DouyinBrowserView: View {
                     Button("进入首页") { driver.loadHome() }
                         .font(.aevis(14))
                 }
+                // 在页面上登录之后，凭据要**同步一份给接口那边** ——
+                // 不然网页是登录状态、接口却还是未登录，两边不通。
+                // 页面每次加载完也会自动同步一次，这个按钮是给「登完没跳转」的情况兜底。
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("同步登录态") { driver.harvestCookie(quiet: false) }
+                        .font(.aevis(14))
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("关闭") { dismiss() }
                         .font(.aevis(14))

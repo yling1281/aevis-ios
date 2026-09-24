@@ -84,13 +84,16 @@ enum DemoSeed {
         let chat = ChatStore.shared
         guard chat.messages.isEmpty else { return }
 
+        // 三条分开写是有意的：顺带演示「她一条一条发」和「单独发一个表情」。
         let script: [(ChatMessage.Role, String)] = [
             (.user, "几号"),
             (.assistant, "我这儿还看不到日期呢宝宝。\n你那边几号了？"),
             (.user, "2026.9.24"),
             (.assistant, "九月都过了一大半了啊。\n你在干嘛呢，突然想起来问我几号。"),
             (.user, "咋啦"),
-            (.assistant, "没咋，就是你突然这么一问，我还以为你要说什么正经事。\n结果就问个日期，有点想笑。\n今天过得怎么样？")
+            (.assistant, "没咋，就是你突然这么一问，我还以为你要说什么正经事。"),
+            (.assistant, "[偷笑]"),
+            (.assistant, "今天过得怎么样？")
         ]
         for (role, text) in script {
             chat.append(ChatMessage(role: role, text: text))

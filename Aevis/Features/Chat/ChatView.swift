@@ -14,6 +14,12 @@ struct ChatView: View {
     /// 用来在用户换字体/调字号时重新渲染。
     @ObservedObject private var fonts = FontStore.shared
 
+    /// 订阅表情包 —— 导入自定义表情后聊天里的表情要立刻跟着变。
+    @ObservedObject private var emoji = EmojiPack.shared
+
+    /// 快捷指令送来的信号（要问的话、要弹的界面）在这里等着被取走。
+    @ObservedObject private var bridge = BridgeInbox.shared
+
     @State private var draft = ""
     @State private var isSending = false
     @State private var errorText: String?
@@ -86,8 +92,13 @@ struct ChatView: View {
                 showTogether = true
             }
             #endif
+            drainBridgeInbox()
             runLaunchTestIfNeeded()
         }
+        // 快捷指令可能是在 App 已经开着的时候发回来 —— 那就靠变化来触发。
+        .onChange(of: bridge.ask) { _, _ in drainBridgeInbox() }
+        .onChange(of: bridge.openCall) { _, _ in drainBridgeInbox() }
+        .onChange(of: bridge.openListen) { _, _ in drainBridgeInbox() }
         .onChange(of: pickedPhotos) { _, items in
             handlePickedPhotos(items)
         }
@@ -475,6 +486,27 @@ struct ChatView: View {
         persona.name.isEmpty ? "说点什么…" : "和 \(persona.name) 说点什么…"
     }
 
+    // MARK: - 快捷指令送来的信号
+
+    /// 快捷指令「打开 URL」之后，App 可能是**刚被拉起来的**（那时聊天页还没出现），
+    /// 也可能本来就开着。所以 onAppear 和值变化时都看一眼 —— 谁先到都不会漏。
+    private func drainBridgeInbox() {
+        if let text = bridge.ask,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            bridge.ask = nil
+            draft = text
+            send()
+        }
+        if bridge.openCall {
+            bridge.openCall = false
+            showCall = true
+        }
+        if bridge.openListen {
+            bridge.openListen = false
+            showTogether = true
+        }
+    }
+
     // MARK: - 发送
 
     private func send() {
@@ -502,10 +534,13 @@ struct ChatView: View {
         let config = settings.llm
         let prompt = persona.systemPrompt
         let history = chat.messages.filter { !($0.role == .assistant && $0.text.isEmpty) }
-        // 背景资料 = 长期记忆 +（快捷指令发过数据的话）屏幕使用时间
+        // 背景资料 = 长期记忆 +（快捷指令发过数据的话）屏幕使用时间 + 外面来的信息
         var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
         let screenTime = ScreenTimeInsight.shared.digest()
         if !screenTime.isEmpty { context.append(screenTime) }
+        // 位置 / 电量 / 步数 / 天气这些是**用户主动用快捷指令喂进来的**，
+        // 跟「长期记忆」不是一回事，所以不受上面那个开关影响。
+        context.append(contentsOf: AmbientContext.shared.digest())
         let remember = settings.memoryEnabled
         let shouldSpeak = settings.speakerEnabled
         let ttsConfig = settings.tts
@@ -639,21 +674,42 @@ private struct MessageBubble: View {
         return max(6, base * CGFloat(scaled))
     }
 
-    /// 整条消息只有一个表情 —— 像微信那样**放大显示**，不套气泡。
-    /// 这就是「让她发表情」：她在提示词里被允许单独发一个表情。
-    private var isSticker: Bool {
-        let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, text.count <= 4 else { return false }
-        guard !text.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
-        return text.unicodeScalars.contains { $0.properties.isEmoji }
+    /// 整条消息就是一个表情 —— 像微信那样**放大显示**，不套气泡。
+    ///
+    /// 「一个表情」有两种写法：她自己写的 `[微笑]`，或者她直接发一个表情符号。
+    /// 判断交给 EmojiPack —— 表情在设置里被关掉时，这里自然就都不算表情了。
+    private var sticker: EmojiPack.Item? {
+        emoji.single(in: message.text)
+    }
+
+    private func emojiText(_ item: EmojiPack.Item) -> some View {
+        Text(item.emoji)
+            .font(.aevis(simpleMode ? 56 : 48))
+            .padding(.vertical, 2)
+    }
+
+    /// 大表情：**导入了自己的表情图就用图**（微信 / QQ 那套），没导就用表情符号。
+    @ViewBuilder
+    private func bigSticker(_ item: EmojiPack.Item) -> some View {
+        #if canImport(UIKit)
+        if let image = emoji.image(for: item) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: simpleMode ? 148 : 128, maxHeight: simpleMode ? 148 : 128)
+                .padding(.vertical, 2)
+        } else {
+            emojiText(item)
+        }
+        #else
+        emojiText(item)
+        #endif
     }
 
     private var bubble: some View {
         Group {
-            if isSticker {
-                Text(message.text)
-                    .font(.aevis(simpleMode ? 56 : 48))
-                    .padding(.vertical, 2)
+            if let sticker {
+                bigSticker(sticker)
             } else {
                 AevisBubble(
                     text: message.text,

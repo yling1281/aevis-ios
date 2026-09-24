@@ -245,6 +245,46 @@ final class DouyinWebDriver: NSObject, ObservableObject {
         out += "\""
         return out
     }
+
+    // MARK: - 把网页的登录态交给接口那边
+
+    /// 从网页的 cookie 里把登录凭据抓出来存进设置。
+    ///
+    /// 为什么要这一步：网页里登录之后，**App 内的网页自己**是登录状态，
+    /// 但走接口的那些功能（比如解析分享链接拿详细信息）读的是 `AppSettings` 里的
+    /// cookie，两者本来不通。抓一次，两边就都通了 —— 用户不用再手动复制。
+    ///
+    /// - Parameter quiet: 自动抓时不要打扰界面（否则会把用户刚点的操作结果冲掉）
+    func harvestCookie(quiet: Bool = true) {
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+            guard let self else { return }
+
+            let header = cookies
+                .filter { cookie in
+                    let domain = cookie.domain.lowercased()
+                    return domain.contains("douyin.com")
+                        || domain.contains("snssdk")
+                        || domain.contains("bytedance")
+                }
+                .map { "\($0.name)=\($0.value)" }
+                .joined(separator: "; ")
+
+            DispatchQueue.main.async {
+                guard header.contains("sessionid") else {
+                    if !quiet {
+                        self.statusLine = header.isEmpty
+                            ? "网页里还没有 cookie —— 先在页面上登录一次。"
+                            : "有 cookie，但里面没有登录凭据（sessionid）。先在页面上登录。"
+                    }
+                    return
+                }
+                guard header != AppSettings.shared.douyinCookie else { return }
+
+                AppSettings.shared.douyinCookie = header
+                self.statusLine = "抖音登录凭据存下来了，接口那边也能用了。"
+            }
+        }
+    }
 }
 
 // MARK: - 页面状态
@@ -257,6 +297,8 @@ extension DouyinWebDriver: WKNavigationDelegate {
                 self.pageTitle = (value as? String) ?? ""
             }
         }
+        // 顺手看一眼登录了没有 —— 用户在网页里登上了，接口那边立刻就能用
+        harvestCookie()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

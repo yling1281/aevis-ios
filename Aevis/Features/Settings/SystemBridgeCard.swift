@@ -11,6 +11,7 @@ import UIKit
 struct SystemBridgeCard: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var screenTime = ScreenTimeInsight.shared
+    @ObservedObject private var ambient = AmbientContext.shared
 
     @State private var editing = ""
     @State private var editingTitle = ""
@@ -115,6 +116,12 @@ struct SystemBridgeCard: View {
 
             rule
 
+            // ——— 外面来的信息 ———
+
+            ambientSection
+
+            rule
+
             // ——— 通用快捷指令 ———
 
             shortcutRow(
@@ -214,6 +221,85 @@ struct SystemBridgeCard: View {
     }
 
     // MARK: - 零件
+
+    // MARK: - 外面来的信息
+    //
+    // 位置、电量、步数这些 Aevis 自己读不到（iOS 不让 App 在后台读），
+    // 但快捷指令读得到。跑完用「打开 URL」发回来，她聊天时就知道了。
+
+    private var ambientSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("把外面的情况告诉她")
+                .font(.aevis(12.5, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Text("这些 Aevis 自己读不到，但快捷指令可以。在快捷指令里最后加一步「打开 URL」，填下面任意一条。点一下就能复制。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !ambient.entries.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(ambient.entries) { entry in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Text(AmbientContext.label(for: entry.kind))
+                                .font(.aevis(12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(entry.text)
+                                .font(.aevis(12))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(11)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+            }
+
+            ForEach(Array(AmbientContext.kinds.enumerated()), id: \.offset) { _, kind in
+                Button {
+                    copy(kind.example)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(kind.label)
+                            .font(.aevis(13.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                        Text(kind.example)
+                            .font(.aevisMono(11.5))
+                            .foregroundStyle(AppSettings.shared.accentColor)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !ambient.entries.isEmpty {
+                Button {
+                    ambient.clear()
+                    note = "外面来的信息都清掉了。"
+                } label: {
+                    Text("清空这些")
+                        .font(.aevis(13))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+    }
 
     private func title(_ text: String) -> some View {
         Text(text)

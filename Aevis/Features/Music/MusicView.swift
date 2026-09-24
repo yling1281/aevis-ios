@@ -2,8 +2,10 @@ import SwiftUI
 
 /// 音乐页：登录、搜歌、播放。
 ///
-/// 登录走「贴 Cookie」——在浏览器里正常登录网易云一次，
-/// 把 Cookie 整段复制过来。比在 App 里做账号密码登录可靠得多。
+/// 登录有两条路：
+/// 1. **在 App 里登录**（推荐）—— 登进去之后凭据自动从 cookie 里抓过来，
+///    不用复制任何东西。之前只有第 2 条路，用户反馈「粘贴给他，他又说没有用」。
+/// 2. 手动贴 Cookie —— 兜底，给习惯自己动手的人。
 struct MusicView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var player = MusicPlayer.shared
@@ -14,6 +16,7 @@ struct MusicView: View {
     @State private var note: String?
     @State private var editingCookie = false
     @State private var cookieDraft = ""
+    @State private var showLogin = false
 
     var body: some View {
         ScrollView {
@@ -33,6 +36,9 @@ struct MusicView: View {
         }
         .navigationTitle("音乐")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showLogin) {
+            NeteaseLoginView()
+        }
         .alert("网易云 Cookie", isPresented: $editingCookie) {
             TextField("MUSIC_U=...; 或整段 Cookie", text: $cookieDraft)
             Button("保存") {
@@ -70,21 +76,36 @@ struct MusicView: View {
                     .foregroundStyle(.red)
                 }
             } else {
-                Text("还没有登录。登录之后我才能帮你搜歌、放歌、陪你听。")
+                Text("还没有登录。在下面这个页面登录一次就行（扫码或手机号），凭据会自动抓过来，不用你复制。")
                     .font(.aevis(13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Button {
-                    cookieDraft = settings.neteaseCookie
-                    editingCookie = true
-                } label: {
-                    Text("贴 Cookie 登录")
-                        .font(.aevis(14, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 9)
-                        .aevisGlass(cornerRadius: 14)
+                HStack(spacing: 10) {
+                    Button {
+                        showLogin = true
+                    } label: {
+                        Text("在 App 里登录")
+                            .font(.aevis(14, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 9)
+                            .aevisGlass(cornerRadius: 14)
+                    }
+
+                    Button {
+                        cookieDraft = settings.neteaseCookie
+                        editingCookie = true
+                    } label: {
+                        Text("手动贴 Cookie")
+                            .font(.aevis(13.5))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .aevisGlass(cornerRadius: 14)
+                    }
+
+                    Spacer(minLength: 0)
                 }
             }
 

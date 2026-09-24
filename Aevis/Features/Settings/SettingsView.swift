@@ -25,6 +25,7 @@ struct SettingsView: View {
                     if shows("persona") { personaCard }
                     if shows("myprofile") { MyProfileCard() }
                     if shows("bubbles") { BubbleSettingsCard() }
+                    if shows("emoji") { EmojiCard() }
                     if shows("appearance") { AppearanceSettingsCard() }
                     if shows("memory") { MemoryCard() }
                     if shows("moments") { MomentsCard() }
