@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// TA 的性别认同。不设定或无性别时，界面统一用中性的「TA」。
 enum GenderIdentity: String, Codable, CaseIterable, Identifiable {
     case unspecified
@@ -116,7 +120,18 @@ final class PersonaStore: ObservableObject {
         didSet { save() }
     }
 
+    /// 用户上传的头像。存成文件，不塞进 persona.json（不然会把存档撑爆）。
+    @Published private(set) var avatarImage: UIImage?
+
     private let fileURL: URL
+
+    private static var avatarFileURL: URL {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("aevis-avatar.jpg")
+    }
 
     private init() {
         let base = FileManager.default
@@ -131,6 +146,12 @@ final class PersonaStore: ObservableObject {
         } else {
             persona = Persona()
         }
+
+        #if canImport(UIKit)
+        if let data = try? Data(contentsOf: Self.avatarFileURL), let image = UIImage(data: data) {
+            avatarImage = image
+        }
+        #endif
     }
 
     private func save() {
@@ -140,5 +161,33 @@ final class PersonaStore: ObservableObject {
 
     func update(_ next: Persona) {
         persona = next
+    }
+
+    // MARK: - 头像
+
+    /// 设置头像。传 nil 就退回默认的色光。
+    func setAvatar(_ image: UIImage?) {
+        #if canImport(UIKit)
+        guard let image else {
+            avatarImage = nil
+            try? FileManager.default.removeItem(at: Self.avatarFileURL)
+            return
+        }
+
+        // 存之前先压一下，头像用不着原图那么大
+        let target: CGFloat = 512
+        let longest = max(image.size.width, image.size.height)
+        let scale = longest > target ? target / longest : 1
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let squared = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+
+        avatarImage = squared
+        if let data = squared.jpegData(compressionQuality: 0.88) {
+            try? data.write(to: Self.avatarFileURL, options: .atomic)
+        }
+        #endif
     }
 }

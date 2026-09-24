@@ -40,6 +40,14 @@ extension View {
     }
 }
 
+/// 底部／顶部的横向长条。比玻璃实，避免内容从底下透上来 —— 用户要的「留白」。
+struct AevisBarBackground: View {
+    var body: some View {
+        Rectangle()
+            .fill(.bar)
+    }
+}
+
 /// 聊天背景。默认给一个「光晕」，但用户能换成纯色、纸感或自己的图片。
 struct AevisBackground: View {
     @ObservedObject private var settings = AppSettings.shared
@@ -107,16 +115,32 @@ struct AevisBackground: View {
     private var customImage: some View {
         #if canImport(UIKit)
         if let data = settings.customBackgroundData, let image = UIImage(data: data) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .ignoresSafeArea()
+            // 关键：用 Color.clear 定尺寸、图片放 overlay。
+            // 直接把 scaledToFill 放进 ZStack 会把整棵布局撑大，
+            // 底部的输入栏会被挤出屏幕 —— 之前就是这个 bug。
+            Color.clear
+                .overlay(
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                )
+                .clipped()
+                .overlay(scrimBackground)
         } else {
             aurora
         }
         #else
         aurora
         #endif
+    }
+
+    /// 背景图上压一层遮罩。不留这一层的话，白字压在花哨的图上根本看不清。
+    private var scrimBackground: some View {
+        Color.black.opacity(scrimOpacity)
+    }
+
+    private var scrimOpacity: Double {
+        scheme == .dark ? 0.46 : 0.30
     }
 }
 
@@ -155,10 +179,11 @@ struct AevisOrb: View {
     }
 }
 
-/// TA 的头像。seed 为 0 时跟随主题色，其余 seed 是固定色。
-/// 以后支持上传图片时，这里会优先用图片。
+/// TA 的头像。
+/// 用户上传了图片就用图片；没有就退回「主题色 / seed 决定的一团光」。
 struct AevisAvatar: View {
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var personaStore = PersonaStore.shared
 
     var size: CGFloat = 32
     var seed: Int = 0
@@ -168,6 +193,23 @@ struct AevisAvatar: View {
     }
 
     var body: some View {
+        #if canImport(UIKit)
+        if let image = personaStore.avatarImage {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.28), lineWidth: 0.6))
+        } else {
+            orb
+        }
+        #else
+        orb
+        #endif
+    }
+
+    private var orb: some View {
         ZStack {
             Circle()
                 .fill(
