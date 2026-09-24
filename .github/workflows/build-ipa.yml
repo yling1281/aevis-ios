@@ -1,4 +1,8 @@
-name: Build IPA
+name: CI
+
+# 每次推代码只做「编译 + 模拟器自检截图」，**不出 IPA**。
+# 需要 IPA 时，把 .release/ipa 的内容改成 1 再推一次；
+# 出完包后 workflow 会自动把它重置回 0（用 [skip ci] 避免死循环）。
 
 on:
   push:
@@ -10,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build unsigned IPA
+    name: Build and self-check
     runs-on: macos-26
     timeout-minutes: 60
 
@@ -23,8 +27,18 @@ jobs:
           sw_vers
           xcodebuild -version
           echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
-          echo "simulators:"
-          xcrun simctl list devices available | grep -m 8 "iPhone" || true
+
+      - name: Decide whether to package an IPA
+        id: decide
+        run: |
+          REQ=$(tr -d ' \n\r' < .release/ipa 2>/dev/null || echo "0")
+          if [ "$REQ" = "1" ]; then
+            echo "should=yes" >> "$GITHUB_OUTPUT"
+            echo "本次会出 IPA"
+          else
+            echo "should=no" >> "$GITHUB_OUTPUT"
+            echo "本次只做自检，不出 IPA"
+          fi
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -35,9 +49,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # ——— 真机用的未签名包 ———
+      # ——— 编译真机版本：只为验证能编过，不出包 ———
 
-      - name: Build (device, unsigned)
+      - name: Compile (device, unsigned)
         env:
           AEVIS_COMMIT: ${{ github.sha }}
         run: |
@@ -54,46 +68,21 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             > build.log 2>&1 || { echo "===== BUILD FAILED ====="; tail -n 200 build.log; exit 1; }
           echo "===== BUILD OK ====="
-          tail -n 8 build.log
-
-      - name: Package IPA
-        if: success()
-        run: |
-          set -e
-          APP="build/Release-iphoneos/Aevis.app"
-          if [ ! -d "$APP" ]; then
-            echo "找不到 Aevis.app，输出目录内容："
-            find build -maxdepth 3 -name "*.app" -print
-            exit 1
-          fi
-
-          rm -rf Payload Aevis-unsigned.ipa Aevis-adhoc.ipa
-          mkdir -p Payload
-          cp -R "$APP" Payload/Aevis.app
-          rm -rf Payload/Aevis.app/_CodeSignature
-          rm -f Payload/Aevis.app/embedded.mobileprovision
-
-          /usr/bin/zip -qry -X Aevis-unsigned.ipa Payload
-
-          codesign -f -s - --deep Payload/Aevis.app || true
-          /usr/bin/zip -qry -X Aevis-adhoc.ipa Payload
-
-          ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
+          tail -n 6 build.log
 
       # ——— 模拟器自检：装进去、跑起来、截图 ———
       #
-      # 这一步是为了「先自己看一眼再交给用户」，能拦住布局类的 bug
-      # （比如元素被挤出屏幕、气泡对不齐）。交互类的 bug 拦不住，那需要真机。
-      # 用 continue-on-error，截图失败也不影响出包。
+      # 这是「交给人之前先自己看一眼」的那一步，能拦住布局类 bug
+      # （元素被挤出屏幕、气泡错位、配色看不清）。
+      # 交互类 bug 拦不住，那需要真机。
 
-      - name: Simulator screenshots
+      - name: Simulator self-check
         if: success()
         continue-on-error: true
         env:
           AEVIS_COMMIT: ${{ github.sha }}
         run: |
           set -e
-          echo "::group::构建模拟器版本"
           xcodebuild \
             -project Aevis.xcodeproj \
             -target Aevis \
@@ -103,7 +92,6 @@ jobs:
             AEVIS_COMMIT="$AEVIS_COMMIT" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             > sim-build.log 2>&1 || { echo "模拟器构建失败"; tail -n 100 sim-build.log; exit 1; }
-          echo "::endgroup::"
 
           APP=$(ls -d build-sim/Debug-iphonesimulator/*.app | head -1)
           echo "APP=$APP"
@@ -112,8 +100,8 @@ jobs:
           if [ -z "$UDID" ]; then
             UDID=$(xcrun simctl list devices available | grep -m1 -oE '\(([0-9A-F-]{36})\)' | tr -d '()')
           fi
+          test -n "$UDID" || { echo "找不到可用模拟器"; exit 1; }
           echo "UDID=$UDID"
-          test -n "$UDID" || { echo "找不到可用模拟器"; xcrun simctl list devices available; exit 1; }
 
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
@@ -137,11 +125,7 @@ jobs:
           capture 05-paper       -aevisDemo -aevisCustomBackground
           capture 06-settings    -aevisDemo -aevisOpenSettings
 
-          echo "::group::截图结果"
           ls -lh shots/ || true
-          echo "::endgroup::"
-
-      # ——— 诊断与产物 ———
 
       - name: Ensure logs exist
         if: always()
@@ -149,34 +133,42 @@ jobs:
           touch build.log sim-build.log
           ls -lh *.log || true
 
-      - name: Upload artifacts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Aevis-build
-          path: |
-            Aevis-unsigned.ipa
-            Aevis-adhoc.ipa
-            shots/*.png
-          retention-days: 30
+      # ——— 出 IPA（只在被要求时） ———
 
-      - name: Publish release
-        if: success()
+      - name: Package IPA
+        if: steps.decide.outputs.should == 'yes'
+        run: |
+          set -e
+          APP="build/Release-iphoneos/Aevis.app"
+          test -d "$APP" || { echo "找不到 Aevis.app"; exit 1; }
+
+          rm -rf Payload Aevis-unsigned.ipa Aevis-adhoc.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/Aevis.app
+          rm -rf Payload/Aevis.app/_CodeSignature
+          rm -f Payload/Aevis.app/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X Aevis-unsigned.ipa Payload
+
+          codesign -f -s - --deep Payload/Aevis.app || true
+          /usr/bin/zip -qry -X Aevis-adhoc.ipa Payload
+
+          ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
+
+      - name: Publish IPA release
+        if: steps.decide.outputs.should == 'yes'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Aevis build ${{ github.run_number }}
+          name: Aevis ${{ github.run_number }}
           prerelease: true
           body: |
-            Aevis 自动构建产物。
+            Aevis 安装包。
 
             - 提交：`${{ github.sha }}`
-            - 工具链：macos-26 / Xcode 26.x
+            - 安装：下载 `Aevis-unsigned.ipa`，用「全能签」签名后安装
 
-            **手机端安装**：下载 `Aevis-unsigned.ipa`，用「全能签」签名后安装。
-
-            另外附上模拟器自检截图（`shots-*.png`）与构建日志（`build.log`、`sim-build.log`），
-            方便排查。`Aevis-adhoc.ipa` 是已做 ad-hoc 签名的备用版本。
+            同一次的自检截图与构建日志也在这里。
           files: |
             Aevis-unsigned.ipa
             Aevis-adhoc.ipa
@@ -184,14 +176,39 @@ jobs:
             build.log
             sim-build.log
 
-      # ——— 失败时把日志也公开出来，便于无 token 环境排查 ———
+      - name: Publish self-check release
+        if: steps.decide.outputs.should != 'yes'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: check-${{ github.run_number }}
+          name: 自检 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            仅自检，**不含 IPA**。
 
-      - name: Publish build log when failing
+            - 提交：`${{ github.sha }}`
+            - 内容：模拟器启动截图 + 构建日志
+          files: |
+            shots/*.png
+            build.log
+            sim-build.log
+
+      - name: Reset IPA request flag
+        if: steps.decide.outputs.should == 'yes'
+        run: |
+          printf '0\n' > .release/ipa
+          git config user.name "aevis-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add .release/ipa
+          git commit -m "chore: 重置 IPA 请求标记 [skip ci]" || true
+          git push || true
+
+      - name: Publish logs when failing
         if: failure()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: log-${{ github.run_number }}
-          name: 构建失败日志 run ${{ github.run_number }}
+          name: 失败日志 ${{ github.run_number }}
           prerelease: true
           body: |
             构建失败。完整日志见下方 Assets。
