@@ -54,7 +54,7 @@ struct AevisBackground: View {
     }
 }
 
-/// 她的雏形：一团会呼吸的光。M1 会在这里换成可自定义的头像。
+/// 她的雏形：一团会呼吸的光。
 struct AevisOrb: View {
     @State private var breathing = false
 
@@ -85,5 +85,36 @@ struct AevisOrb: View {
         }
         .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: breathing)
         .onAppear { breathing = true }
+    }
+}
+
+/// 她的头像。目前是一团有颜色的光；avatarSeed 变了颜色就变，
+/// 所以使用者换人设时头像也跟着换。以后支持上传图片后，这里会优先用图片。
+struct AevisAvatar: View {
+    var size: CGFloat = 32
+    var seed: Int = 0
+
+    private var hue: Double {
+        0.70 + Double(abs(seed) % 6) * 0.055
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color(hue: hue, saturation: 0.60, brightness: 0.99),
+                            Color(hue: hue - 0.16, saturation: 0.62, brightness: 0.78)
+                        ],
+                        center: UnitPoint(x: 0.34, y: 0.28),
+                        startRadius: 1,
+                        endRadius: size * 0.78
+                    )
+                )
+            Circle()
+                .strokeBorder(Color.white.opacity(0.30), lineWidth: 0.6)
+        }
+        .frame(width: size, height: size)
     }
 }
