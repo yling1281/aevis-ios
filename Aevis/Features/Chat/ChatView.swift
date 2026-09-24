@@ -74,7 +74,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 14) {
+                LazyVStack(spacing: 12) {
                     if chat.messages.isEmpty {
                         emptyState
                     }
@@ -85,7 +85,7 @@ struct ChatView: View {
                     }
 
                     if let errorText {
-                        errorBubble(errorText)
+                        noticeBubble(errorText)
                     }
 
                     Color.clear
@@ -114,10 +114,9 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             AevisOrb()
                 .scaleEffect(0.72)
-                .frame(height: 150)
             Text("\(persona.pronoun)在这儿。")
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.primary)
@@ -134,15 +133,17 @@ struct ChatView: View {
                     .padding(.horizontal, 24)
             }
         }
-        .padding(.top, 40)
-        .padding(.bottom, 20)
+        .padding(.top, 30)
+        .padding(.bottom, 16)
     }
 
-    private func errorBubble(_ text: String) -> some View {
+    private func noticeBubble(_ text: String) -> some View {
         HStack {
             Text(text)
-                .font(.system(size: 13))
+                .font(.system(size: 12.5))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 9)
                 .background(
@@ -198,6 +199,7 @@ struct ChatView: View {
             sendTask = nil
             isSending = false
             chat.removeLastIfEmpty()
+            SpeechService.shared.stop()
             return
         }
 
@@ -206,6 +208,7 @@ struct ChatView: View {
 
         draft = ""
         errorText = nil
+        SpeechService.shared.stop()
 
         chat.append(ChatMessage(role: .user, text: text))
         chat.append(ChatMessage(role: .assistant, text: ""))
@@ -214,8 +217,8 @@ struct ChatView: View {
         let prompt = persona.systemPrompt
         let history = chat.messages.filter { !($0.role == .assistant && $0.text.isEmpty) }
         let shouldSpeak = settings.speakerEnabled
-        let rate = settings.speechRate
-        let voice = persona.voiceIdentifier
+        let ttsConfig = settings.tts
+        let systemVoice = persona.voiceIdentifier
 
         isSending = true
         sendTask = Task { @MainActor in
@@ -241,7 +244,13 @@ struct ChatView: View {
             sendTask = nil
 
             if shouldSpeak, !accumulated.isEmpty {
-                SpeechService.shared.speak(accumulated, voiceIdentifier: voice, rate: rate)
+                SpeechService.shared.speak(
+                    accumulated,
+                    config: ttsConfig,
+                    systemVoiceIdentifier: systemVoice
+                ) { message in
+                    errorText = message
+                }
             }
         }
     }
@@ -253,35 +262,47 @@ private struct MessageBubble: View {
     let message: ChatMessage
     let persona: Persona
 
+    /// 气泡最大宽度：太宽会顶到屏幕两边，读起来反而累。
+    private static let maxBubbleWidth: CGFloat = 280
+
     private var isUser: Bool { message.role == .user }
 
-    private var bubbleText: some View {
+    private var content: some View {
         Text(message.text.isEmpty ? "…" : message.text)
             .font(.system(size: 15.5))
             .foregroundStyle(isUser ? Color.white : Color.primary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .textSelection(.enabled)
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 9) {
+        HStack(alignment: .bottom, spacing: 8) {
             if isUser {
-                Spacer(minLength: 52)
+                Spacer(minLength: 40)
             } else {
                 AevisAvatar(size: 26, seed: persona.avatarSeed)
             }
 
+            Group {
+                if isUser {
+                    content.background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(red: 0.42, green: 0.35, blue: 0.95))
+                    )
+                } else {
+                    content.aevisGlass(cornerRadius: 18)
+                }
+            }
+            .frame(maxWidth: Self.maxBubbleWidth, alignment: isUser ? .trailing : .leading)
+
             if isUser {
-                bubbleText.background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color(red: 0.42, green: 0.35, blue: 0.95))
-                )
-                Spacer(minLength: 6)
+                Spacer(minLength: 0)
             } else {
-                bubbleText.aevisGlass(cornerRadius: 18)
-                Spacer(minLength: 52)
+                Spacer(minLength: 40)
             }
         }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 }

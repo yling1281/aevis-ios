@@ -10,6 +10,8 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var testResult: String?
     @State private var showClearConfirm = false
+    @State private var pullingModels = false
+    @State private var modelMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -17,7 +19,7 @@ struct SettingsView: View {
                 VStack(spacing: 16) {
                     personaCard
                     modelCard
-                    speechCard
+                    VoiceSettingsCard()
                     chatCard
                     diagnosticsCard
                 }
@@ -44,7 +46,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - TA 的设定
+    // MARK: - TA
 
     private var personaCard: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -59,7 +61,7 @@ struct SettingsView: View {
                         Text(personaStore.persona.name.isEmpty ? "还没起名字" : personaStore.persona.name)
                             .font(.system(size: 15.5, weight: .medium))
                             .foregroundStyle(.primary)
-                        Text("名字、性别、性格、说话方式、声音")
+                        Text("名字、性别、性格、说话方式、系统音色")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
@@ -84,7 +86,7 @@ struct SettingsView: View {
             cardTitle("模型接入")
 
             labeledField("接口地址", hint: "https://api.deepseek.com/v1", text: $settings.baseURL)
-            divider
+            rule
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("API Key")
@@ -96,17 +98,14 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
                     .padding(.horizontal, 13)
                     .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
+                    .background(fieldBackground)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            divider
+            rule
 
             labeledField("模型名", hint: "deepseek-chat", text: $settings.model)
-            divider
+            rule
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
@@ -125,7 +124,32 @@ struct SettingsView: View {
                     }
                     .disabled(testing)
 
+                    Button(action: pullModels) {
+                        HStack(spacing: 7) {
+                            if pullingModels {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(pullingModels ? "正在拉…" : "拉取模型")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 9)
+                        .aevisGlass(cornerRadius: 14)
+                    }
+                    .disabled(pullingModels)
+
                     Spacer(minLength: 0)
+                }
+
+                if !settings.modelList.isEmpty {
+                    Picker("模型", selection: $settings.model) {
+                        ForEach(settings.modelList, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
                 }
 
                 if let testResult {
@@ -135,46 +159,17 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let modelMessage {
+                    Text(modelMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Text("Key 只存在这台手机的钥匙串里，不会上传到任何地方，也不会进代码仓库。支持任何 OpenAI 兼容接口。")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-        }
-        .aevisGlass(cornerRadius: 20)
-    }
-
-    // MARK: - 说话
-
-    private var speechCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cardTitle("说话")
-
-            HStack {
-                Text("回复时念出来")
-                    .font(.system(size: 14.5))
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 8)
-                Toggle("", isOn: $settings.speakerEnabled)
-                    .labelsHidden()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            divider
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("语速")
-                        .font(.system(size: 14.5))
-                        .foregroundStyle(.primary)
-                    Spacer(minLength: 8)
-                    Text(String(format: "%.2f", settings.speechRate))
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                }
-                Slider(value: $settings.speechRate, in: 0.3...0.7)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
@@ -255,6 +250,11 @@ struct SettingsView: View {
 
     // MARK: - 零件
 
+    private var fieldBackground: some View {
+        RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .fill(Color.primary.opacity(0.05))
+    }
+
     private func cardTitle(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 12.5, weight: .medium))
@@ -264,7 +264,7 @@ struct SettingsView: View {
             .padding(.bottom, 8)
     }
 
-    private var divider: some View {
+    private var rule: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.07))
             .frame(height: 0.5)
@@ -282,14 +282,13 @@ struct SettingsView: View {
                 .autocorrectionDisabled()
                 .padding(.horizontal, 13)
                 .padding(.vertical, 11)
-                .background(
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
-                )
+                .background(fieldBackground)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
+
+    // MARK: - 动作
 
     private func runTest() {
         testing = true
@@ -304,6 +303,25 @@ struct SettingsView: View {
                 testResult = error.localizedDescription
             }
             testing = false
+        }
+    }
+
+    private func pullModels() {
+        pullingModels = true
+        modelMessage = nil
+        let config = settings.llm
+
+        Task { @MainActor in
+            do {
+                let entries = try await ModelCatalog.fetchModels(config: config)
+                settings.modelList = entries.map(\.id)
+                modelMessage = entries.isEmpty
+                    ? "接口没返回模型清单，可以直接手填模型名。"
+                    : "拉到 \(entries.count) 个模型。"
+            } catch {
+                modelMessage = error.localizedDescription
+            }
+            pullingModels = false
         }
     }
 }
