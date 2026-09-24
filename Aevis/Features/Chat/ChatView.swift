@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var isSending = false
     @State private var errorText: String?
+    @State private var toolNote: String?
     @State private var showSettings = false
     @State private var sendTask: Task<Void, Never>?
     @FocusState private var composerFocused: Bool
@@ -19,6 +20,12 @@ struct ChatView: View {
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 她在动手的时候，这里会变成「她看了眼时间…」，比干等一个「正在输入」有信息量。
+    private var statusText: String {
+        if let toolNote { return toolNote + "…" }
+        return isSending ? "正在输入…" : "在线"
     }
 
     var body: some View {
@@ -39,8 +46,7 @@ struct ChatView: View {
             sendTask?.cancel()
         }
         .onAppear {
-            // 只在 CI 截图自检时用：带这个参数启动就直接把设置面板打开，
-            // 这样不用点屏幕也能截到设置页。
+            // 只在 CI 截图自检时用：带这个参数启动就直接把设置面板打开。
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-aevisOpenSettings") {
                 showSettings = true
@@ -51,7 +57,8 @@ struct ChatView: View {
 
     // MARK: - 顶部
     //
-    // 加一条实底，否则换成花哨的自定义背景图时，顶部的名字会看不清。
+    // 之前这里是一整条灰色实底，看着像贴上去的硬条，用户说别扭。
+    // 现在改成「模糊往下载渐隐」：顶部有材质，到底部化开，中间没有硬边。
 
     private var header: some View {
         HStack(spacing: 11) {
@@ -61,7 +68,7 @@ struct ChatView: View {
                 Text(persona.name)
                     .font(.aevis(settings.simpleMode ? 18 : 16, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(isSending ? "正在输入…" : "在线")
+                Text(statusText)
                     .font(.aevis(settings.simpleMode ? 13 : 11.5))
                     .foregroundStyle(.secondary)
             }
@@ -82,8 +89,22 @@ struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .padding(.bottom, 10)
-        .background(Rectangle().fill(.bar))
+        .padding(.bottom, 16)
+        .background(
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.72),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        )
     }
 
     // MARK: - 消息列表
@@ -148,10 +169,11 @@ struct ChatView: View {
                 .font(.aevis(settings.simpleMode ? 19 : 17, weight: .medium))
                 .foregroundStyle(.primary)
             if settings.isConfigured {
-                Text("说点什么开始吧。你们聊过的每一句，都会被记得。")
+                Text("说点什么开始吧。TA 能看时间、翻日历、记提醒、算数、读写剪贴板。")
                     .font(.aevis(settings.simpleMode ? 15 : 13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
             } else {
                 Text("还差一步：右上角设置 →「模型接入」，填上你的 API Key，TA 才会说话。")
                     .font(.aevis(settings.simpleMode ? 15 : 13.5))
@@ -245,6 +267,7 @@ struct ChatView: View {
             sendTask?.cancel()
             sendTask = nil
             isSending = false
+            toolNote = nil
             chat.removeLastIfEmpty()
             SpeechService.shared.stop()
             return
@@ -255,6 +278,7 @@ struct ChatView: View {
 
         draft = ""
         errorText = nil
+        toolNote = nil
         SpeechService.shared.stop()
 
         chat.append(ChatMessage(role: .user, text: text))
@@ -274,8 +298,16 @@ struct ChatView: View {
                 for try await piece in LLMService.streamReply(
                     config: config,
                     systemPrompt: prompt,
-                    history: history
+                    history: history,
+                    tools: DeviceTools.all(),
+                    onToolActivity: { title in
+                        Task { @MainActor in
+                            toolNote = title
+                        }
+                    }
                 ) {
+                    // 她开始说话了，把「她看了眼时间…」收掉
+                    if toolNote != nil { toolNote = nil }
                     accumulated += piece
                     chat.replaceLast(with: accumulated)
                 }
@@ -288,6 +320,7 @@ struct ChatView: View {
             }
 
             isSending = false
+            toolNote = nil
             sendTask = nil
 
             if shouldSpeak, !accumulated.isEmpty {
