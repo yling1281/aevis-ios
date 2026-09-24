@@ -74,13 +74,34 @@ jobs:
           rm -f .bootstrap-url
           git config user.name "aevis-bot"
           git config user.email "bot@users.noreply.github.com"
+
+          # ⚠️ 一定要把 .github 排除在暂存区之外。
+          #
+          # CI 里的 GITHUB_TOKEN **没有 workflows 权限**：暂存区只要带了
+          # `.github/workflows` 下的任何改动，整个 push 都会被 GitHub 拒绝，
+          # 报 "refusing to allow a GitHub App to create or update workflow"。
+          #
+          # 踩过：第一次跑成功，是因为那时 workflow 文件跟仓库里的一模一样；
+          # 后来改了截图列表（加一张 emoji），工作区里的 workflow 就和仓库里的
+          # 有了差异 → 这一步直接挂掉，而且它挂在编译**之前**，
+          # 整个构建连编译都没跑到。
+          #
+          # 这一步的目的只是「把源码落回仓库」，流水线文件本来就在仓库里，
+          # 由正常的推送去更新它。
           git add -A
+          git reset -q .github || true
+
           if git diff --cached --quiet; then
             echo "没什么可提交的"
           else
             git commit -m "chore: 把取到的源码落回仓库，并关闭临时通道 [skip ci]"
-            git push
-            echo "已提交回仓库"
+            if git push > git-push.log 2>&1; then
+              echo "已提交回仓库"
+            else
+              echo "===== 推送失败（原因见下） ====="
+              cat git-push.log
+              exit 1
+            fi
           fi
 
       - name: Show toolchain
@@ -197,14 +218,17 @@ jobs:
           capture 15-douyin      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=douyin
           capture 16-system      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=system
           capture 17-music       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=music
-          capture 18-selfcheck   -aevisSelfCheck
+          capture 18-emoji       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=emoji
+          capture 19-selfcheck   -aevisSelfCheck
 
           ls -lh shots/ || true
 
       - name: Ensure logs exist
         if: always()
         run: |
-          touch build.log sim-build.log
+          # git-push.log 是「回提交源码」那一步留下的 —— 那一步失败时
+          # 它就是唯一能说明原因的东西（失败发布必须带上它）。
+          touch build.log sim-build.log git-push.log
           ls -lh *.log || true
 
       # ——— 出 IPA（只在被要求时） ———
@@ -290,3 +314,4 @@ jobs:
           files: |
             build.log
             sim-build.log
+            git-push.log
