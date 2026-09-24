@@ -7,10 +7,11 @@ import UIKit
 #endif
 
 /// 「外观」设置卡片：能交给用户的都交给用户。
-/// 玻璃要不要、字大不大、用什么字体、背景长什么样、主题什么颜色，全都可改。
+/// 玻璃要不要、图标长什么样、字大不大、用什么字体、背景什么样、主题什么颜色，全都可改。
 struct AppearanceSettingsCard: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var fonts = FontStore.shared
+    @ObservedObject private var icons = AppIconStore.shared
 
     @State private var pickedItem: PhotosPickerItem?
     @State private var imageNote: String?
@@ -28,6 +29,9 @@ struct AppearanceSettingsCard: View {
             rule
 
             accentSection
+            rule
+
+            appIconSection
             rule
 
             fontSection
@@ -74,7 +78,57 @@ struct AppearanceSettingsCard: View {
                 Spacer(minLength: 0)
             }
 
-            Text("会同时改变气泡、按钮、光晕背景和她的默认颜色。")
+            Text("会同时改变气泡、按钮、光晕背景和 TA 的默认颜色。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+    }
+
+    // MARK: - 桌面图标
+
+    private var appIconSection: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            label("桌面图标")
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+                spacing: 12
+            ) {
+                ForEach(AppIconOption.allCases) { option in
+                    Button {
+                        icons.apply(option)
+                    } label: {
+                        VStack(spacing: 5) {
+                            AppIconPreview(color: option.previewColor, size: 48)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                        .strokeBorder(
+                                            icons.current == option
+                                                ? Color.primary.opacity(0.85)
+                                                : Color.clear,
+                                            lineWidth: 2
+                                        )
+                                )
+                            Text(option.label)
+                                .font(.aevis(11))
+                                .foregroundStyle(icons.current == option ? .primary : .secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if let message = icons.message {
+                Text(message)
+                    .font(.aevis(12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("点一下就换，主屏幕上立刻能看到。iOS 只允许在内置图标之间切换，不能拿相册里的图当桌面图标——这是系统限制，任何 App 都做不到。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -356,5 +410,42 @@ struct AppearanceSettingsCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
+    }
+}
+
+/// 桌面图标的预览。
+/// 真正的图标资源编在 Assets 里，运行时不能按名字取出来当图片用，
+/// 所以这里按同样的构图（深色底 + 同色光核 + 细环）画一个小样。
+private struct AppIconPreview: View {
+    var color: Color
+    var size: CGFloat = 48
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.224, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [color.opacity(0.55), Color(red: 0.04, green: 0.04, blue: 0.07)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [color, color.opacity(0.5)],
+                        center: UnitPoint(x: 0.42, y: 0.42),
+                        startRadius: 1,
+                        endRadius: size * 0.34
+                    )
+                )
+                .frame(width: size * 0.54, height: size * 0.54)
+
+            Circle()
+                .strokeBorder(Color.white.opacity(0.20), lineWidth: 0.7)
+                .frame(width: size * 0.76, height: size * 0.76)
+        }
+        .frame(width: size, height: size)
     }
 }
