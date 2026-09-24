@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 
-/// 让她开口说话。
+/// 让 TA 开口说话。
 ///
 /// 音色走系统语音合成（免费、离线、不花钱）。iOS 里可以在
 /// 「设置 → 辅助功能 → 朗读内容 → 声音」里下载更高品质的中文音色，
@@ -14,12 +14,24 @@ final class SpeechService {
     private init() {}
 
     /// 系统里所有中文音色。名称里带 "premium" / "enhanced" 的更好听。
-    static var chineseVoices: [AVSpeechSynthesisVoice] {
+    /// 传 gender 时，把嗓音性别相符的排在前面，省得在一长串里翻。
+    static func chineseVoices(preferring gender: GenderIdentity = .unspecified) -> [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language.hasPrefix("zh") }
             .sorted { lhs, rhs in
-                lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                let leftMatches = matches(lhs, gender)
+                let rightMatches = matches(rhs, gender)
+                if leftMatches != rightMatches { return leftMatches }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
+    }
+
+    private static func matches(_ voice: AVSpeechSynthesisVoice, _ gender: GenderIdentity) -> Bool {
+        switch gender {
+        case .female: return voice.gender == .female
+        case .male: return voice.gender == .male
+        case .genderless, .unspecified: return false
+        }
     }
 
     func speak(_ text: String, voiceIdentifier: String, rate: Double) {
@@ -59,7 +71,7 @@ final class SpeechService {
 
     private static func activateSession() {
         let session = AVAudioSession.sharedInstance()
-        // .duckOthers：她说话时把音乐自动压低，说完恢复。为以后「一起听」做准备。
+        // .duckOthers：TA 说话时把音乐自动压低，说完恢复。为以后「一起听」做准备。
         try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? session.setActive(true)
     }

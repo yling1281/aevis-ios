@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// 创造/修改她。首次打开时走这里，之后从设置里也能随时改。
+/// 创造/修改 TA。首次打开时走这里，之后从设置里也能随时改。
 struct PersonaEditorView: View {
     @EnvironmentObject private var personaStore: PersonaStore
 
-    /// 首次引导（没有导航栏，底部是一个"就是她了"）还是编辑模式。
+    /// 首次引导（没有导航栏）还是编辑模式。
     var isFirstRun: Bool = true
 
     @Environment(\.dismiss) private var dismiss
@@ -17,21 +17,22 @@ struct PersonaEditorView: View {
             VStack(alignment: .leading, spacing: 20) {
                 intro
                 nameSection
+                genderSection
                 colorSection
                 voiceSection
                 field(
-                    title: "她怎么叫你",
+                    title: "TA 怎么叫你",
                     hint: "比如：宝宝 / 主人 / 你的名字",
                     text: $draft.callUser
                 )
                 field(
-                    title: "她的性格",
+                    title: "TA 的性格",
                     hint: "越具体越好。比如：温柔，但有点傲娇，会撒娇，偶尔毒舌",
                     text: $draft.personality,
                     minLines: 3
                 )
                 field(
-                    title: "她怎么说话",
+                    title: "TA 怎么说话",
                     hint: "比如：句子很短，爱用语气词，偶尔发颜文字，不太用标点",
                     text: $draft.speakingStyle,
                     minLines: 3
@@ -43,9 +44,7 @@ struct PersonaEditorView: View {
                     minLines: 2
                 )
                 actionButton
-                if !isFirstRun {
-                    deleteHint
-                }
+                footerHint
             }
             .padding(.horizontal, 20)
             .padding(.top, isFirstRun ? 44 : 12)
@@ -54,7 +53,7 @@ struct PersonaEditorView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle(isFirstRun ? "" : "她的设定")
+        .navigationTitle(isFirstRun ? "" : "TA 的设定")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             guard !loaded else { return }
@@ -71,18 +70,23 @@ struct PersonaEditorView: View {
         VStack(spacing: 16) {
             if isFirstRun {
                 AevisOrb()
-                Text("先把她创造出来")
+                Text("先把 TA 创造出来")
                     .font(.system(size: 26, weight: .semibold))
                     .multilineTextAlignment(.center)
-                Text("Aevis 不预设任何人格。她叫什么、什么性格、怎么说话，都由你决定。下面每一项之后都能改。")
+                Text("Aevis 不预设任何人格，也不预设性别。TA 叫什么、是男是女还是没有性别、怎么说话，都由你决定。下面每一项之后都能改。")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {
                 HStack(spacing: 12) {
                     AevisAvatar(size: 46, seed: draft.avatarSeed)
-                    Text(draft.name.isEmpty ? "还没有名字" : draft.name)
-                        .font(.system(size: 20, weight: .semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(draft.name.isEmpty ? "还没有名字" : draft.name)
+                            .font(.system(size: 20, weight: .semibold))
+                        Text(draft.gender.label)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                 }
             }
@@ -93,10 +97,10 @@ struct PersonaEditorView: View {
 
     private var nameSection: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("她叫什么")
+            Text("TA 叫什么")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
-            TextField("给她起个名字", text: $draft.name)
+            TextField("给 TA 起个名字", text: $draft.name)
                 .font(.system(size: 17, weight: .medium))
                 .padding(.horizontal, 15)
                 .padding(.vertical, 13)
@@ -104,9 +108,29 @@ struct PersonaEditorView: View {
         }
     }
 
+    private var genderSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("TA 的性别")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+
+            Picker("性别", selection: $draft.gender) {
+                ForEach(GenderIdentity.allCases) { item in
+                    Text(item.label).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("决定界面里用「她」「他」还是「TA」来称呼，也会告诉模型 TA 该怎么定位自己。")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var colorSection: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("她的颜色")
+            Text("TA 的颜色")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
             HStack(spacing: 13) {
@@ -133,14 +157,14 @@ struct PersonaEditorView: View {
 
     private var voiceSection: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("她的声音")
+            Text("TA 的声音")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
 
             HStack(spacing: 10) {
                 Picker("音色", selection: $draft.voiceIdentifier) {
                     Text("跟随系统默认").tag("")
-                    ForEach(SpeechService.chineseVoices, id: \.identifier) { voice in
+                    ForEach(SpeechService.chineseVoices(preferring: draft.gender), id: \.identifier) { voice in
                         Text(voice.name).tag(voice.identifier)
                     }
                 }
@@ -149,7 +173,7 @@ struct PersonaEditorView: View {
 
                 Button("试听") {
                     SpeechService.shared.speak(
-                        "你好呀，我是\(draft.name.isEmpty ? "她" : draft.name)。",
+                        "你好呀，我是\(draft.name.isEmpty ? "TA" : draft.name)。",
                         voiceIdentifier: draft.voiceIdentifier,
                         rate: 0.48
                     )
@@ -163,7 +187,7 @@ struct PersonaEditorView: View {
                 Spacer(minLength: 0)
             }
 
-            Text("想要更好听的声音：设置 → 辅助功能 → 朗读内容 → 声音 → 中文，下载「增强」或「高级」音色，下完这里会多出来。")
+            Text("男声、女声都在这个列表里，音色性别相符的会排在前面。想要更好听的：设置 → 辅助功能 → 朗读内容 → 声音 → 中文，下载「增强」或「高级」音色，下完这里会多出来。")
                 .font(.system(size: 11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -196,7 +220,7 @@ struct PersonaEditorView: View {
                 dismiss()
             }
         } label: {
-            Text(isFirstRun ? "就是她了" : "保存")
+            Text(isFirstRun ? "就是 TA 了" : "保存")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -214,8 +238,10 @@ struct PersonaEditorView: View {
         .padding(.top, 4)
     }
 
-    private var deleteHint: some View {
-        Text("改完记得点保存。她的设定只存在这台手机上。")
+    private var footerHint: some View {
+        Text(isFirstRun
+             ? "这些设定都存在这台手机上，随时能改。"
+             : "改完记得点保存。TA 的设定只存在这台手机上。")
             .font(.system(size: 12))
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .center)
