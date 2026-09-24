@@ -535,6 +535,103 @@ def check_yaml_files():
                 report("R16", path, number, "YAML 里不能有 tab 缩进")
 
 
+def collect_localized_names(sources):
+    """把「显示时已经包了 LocalizedStringKey(...)」的名字收进来。
+
+    `Text(LocalizedStringKey(某变量))` 是会渲染 markdown 的，
+    所以那种字符串不该被 R17 报 —— 否则修完了还在叫，规则就没人信了。
+    """
+    names = set()
+    for source in sources.values():
+        code = strip_code(source)
+        for hit in re.findall(r"LocalizedStringKey\(\s*([A-Za-z_][A-Za-z0-9_.]*)", code):
+            names.add(hit)
+            # LocalizedStringKey(ShortcutBridge.lockScreenNote) 里真正要白名单的是
+            # 最后一个点号后面的名字，不然对不上声明
+            names.add(hit.split(".")[-1])
+    return names
+
+
+def check_markdown_in_strings(path, source, localized):
+    r"""`**加粗**` 只在 `Text(LocalizedStringKey(…))` 或 `Text("字面量")` 里生效，
+    直接 `Text(变量)` 会把星号原样显示。
+
+    真踩过：截图里出现「但**快捷指令可以**」—— 那句话是 `static let` 存好的
+    字符串，直接 `Text(那个变量)` 显示的，markdown 没被解析。
+
+    两个必须放过的，不然这条规则会天天误报然后被无视：
+    1. **喂给模型的工具描述**（`description:` / `instruction =`）——
+       提示词里写 markdown 不影响；
+    2. **只由星号组成的字符串**（`"**"`）—— 那是用来删星号的记号，不是文案。
+    """
+    lines = source.splitlines()
+    in_multiline = False
+    start = 0
+    header = ""
+    buffer = []
+
+    for number, line in enumerate(lines, 1):
+        stripped = line.strip()
+
+        if stripped.count('"""') == 1:
+            if not in_multiline:
+                in_multiline = True
+                start = number
+                header = stripped
+                buffer = [stripped]
+            else:
+                buffer.append(stripped)
+                in_multiline = False
+                body = "\n".join(buffer)
+                benign = header.startswith("description:") or "instruction = " in header
+                if _looks_like_prose(body) and not benign:
+                    found = re.search(r"\b(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)", header)
+                    name = found.group(1) if found else ""
+                    if name not in localized:
+                        report("R17", path, start,
+                               "%s 这段有 ** 加粗，但显示时没包 LocalizedStringKey，星号会原样显示"
+                               % (name or "这段文字"))
+            continue
+
+        if in_multiline:
+            buffer.append(stripped)
+            continue
+
+        if stripped.startswith("//"):
+            continue
+
+        index = 0
+        length = len(line)
+        while index < length:
+            if line[index] != '"':
+                index += 1
+                continue
+            scan = index + 1
+            while scan < length:
+                if line[scan] == "\\":
+                    scan += 2
+                    continue
+                if line[scan] == '"':
+                    break
+                scan += 1
+            if scan >= length:
+                break
+            literal = line[index + 1:scan]
+            before = line[:index].rstrip()
+            if _looks_like_prose(literal) and not re.search(r"\bText\(\s*$", before):
+                report("R17", path, number,
+                       "这个字符串有 ** 加粗，但不是 Text 字面量，星号会原样显示")
+                break
+            index = scan + 1
+
+
+def _looks_like_prose(text):
+    """有 ** 之外还得有正文 —— 只由星号组成的是"记号"，不是文案。"""
+    if "**" not in text:
+        return False
+    return text.replace("*", "").strip() != ""
+
+
 def collect_definitions(sources):
     """收集项目里定义的类型名，以及哪些类型有 .shared。"""
     types = set()
@@ -591,6 +688,10 @@ def main():
         check_debug_guard(path, code)
         check_conditional_balance(path, code)
         check_string_quote_leak(path, source)
+
+    localized = collect_localized_names(sources)
+    for path, source in sources.items():
+        check_markdown_in_strings(path, source, localized)
 
     types, shared = collect_definitions(sources)
     declared = collect_declared_names(sources)

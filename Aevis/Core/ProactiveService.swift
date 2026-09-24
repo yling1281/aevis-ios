@@ -61,6 +61,13 @@ final class ProactiveService {
         )
 
         guard settings.proactiveEnabled else { return }
+
+        // 截图自检时不弹系统权限框 —— 它会盖住大半个界面，
+        // 让截图看不出真正的问题（这个是看截图时发现的）。
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-aevisDemo") { return }
+        #endif
+
         _ = await ensureAuthorization()
 
         let lines = await linePool(persona: persona, settings: settings)

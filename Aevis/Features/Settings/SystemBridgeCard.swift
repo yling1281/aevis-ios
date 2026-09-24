@@ -33,7 +33,10 @@ struct SystemBridgeCard: View {
                 }
             )
 
-            Text(ShortcutBridge.lockScreenNote)
+            // 包一层 LocalizedStringKey —— 这样里面的 **加粗** 才会真的渲染。
+            // 直接 Text(某个字符串变量) 是不解析 markdown 的，星号会原样显示
+            // （截图自检时抓到过）。
+            Text(LocalizedStringKey(ShortcutBridge.lockScreenNote))
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -58,7 +61,7 @@ struct SystemBridgeCard: View {
                 Text("现在拿到的：\(screenTime.label)")
                     .font(.aevis(13))
                     .foregroundStyle(.primary)
-                Text(ScreenTimeInsight.explanation)
+                Text(LocalizedStringKey(ScreenTimeInsight.explanation))
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

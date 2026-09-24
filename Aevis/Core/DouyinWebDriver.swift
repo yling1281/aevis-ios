@@ -172,7 +172,7 @@ final class DouyinWebDriver: NSObject, ObservableObject {
         let filled = (await evaluate(fillScript) as? String) ?? ""
         switch filled {
         case "filled":
-            statusLine = "内容写进评论框了 —— **发出去这一步你自己点一下**，我不替你按发送。"
+            statusLine = "内容写进评论框了 —— 发出去这一步你自己点一下，我不替你按发送。"
             return statusLine ?? ""
         case "no-input":
             statusLine = "没找到评论输入框 —— 可能要先点开评论，或者抖音改版了。"
