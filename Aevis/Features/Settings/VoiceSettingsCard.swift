@@ -43,17 +43,17 @@ struct VoiceSettingsCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("语速")
-                    .font(.system(size: 14.5))
+                    .font(.aevis(14.5))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 Text(String(format: "%.2f", settings.speechRate))
-                    .font(.system(size: 12.5))
+                    .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
             }
             Slider(value: $settings.speechRate, in: 0.3...0.7)
 
             Text("免费、离线、不花钱。想更好听：设置 → 辅助功能 → 朗读内容 → 声音 → 中文，下载「增强」或「高级」音色，下完「TA 的设定」里的音色列表会多出来。")
-                .font(.system(size: 11.5))
+                .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -79,7 +79,7 @@ struct VoiceSettingsCard: View {
                                 ProgressView().controlSize(.small)
                             }
                             Text(pullingVoices ? "正在拉…" : "拉取音色")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.aevis(14, weight: .medium))
                         }
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 15)
@@ -90,7 +90,7 @@ struct VoiceSettingsCard: View {
 
                     Button(action: preview) {
                         Text("试听")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.aevis(14, weight: .medium))
                             .foregroundStyle(.primary)
                             .padding(.horizontal, 15)
                             .padding(.vertical, 9)
@@ -101,19 +101,29 @@ struct VoiceSettingsCard: View {
                 }
 
                 if !settings.ttsVoices.isEmpty {
-                    Picker("音色", selection: $settings.ttsVoice) {
-                        Text("未选择").tag("")
-                        ForEach(settings.ttsVoices, id: \.self) { voice in
-                            Text(voice).tag(voice)
+                    // 之前这里是下拉菜单，在 iOS 上只渲染出一个很小的箭头，看着像坏了
+                    // （和「拉取模型」那边是同一个毛病）。改成可点列表，当前项打勾。
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("选一个音色")
+                            .font(.aevis(12))
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 4)
+
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                voiceRow("未选择（用默认）", value: "")
+                                ForEach(settings.ttsVoices, id: \.self) { voice in
+                                    voiceRow(voice, value: voice)
+                                }
+                            }
                         }
+                        .frame(maxHeight: 190)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
                 }
 
                 HStack(spacing: 8) {
                     TextField("也可以手填音色 ID，例如 alloy", text: $manualVoice)
-                        .font(.system(size: 13.5))
+                        .font(.aevis(13.5))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(.horizontal, 12)
@@ -131,19 +141,19 @@ struct VoiceSettingsCard: View {
                         }
                         manualVoice = ""
                     }
-                    .font(.system(size: 14))
+                    .font(.aevis(14))
                     .foregroundStyle(.primary)
                 }
 
                 if let pullMessage {
                     Text(pullMessage)
-                        .font(.system(size: 12))
+                        .font(.aevis(12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text("走的是 OpenAI 兼容的 /audio/speech。地址和 Key 留空时会自动沿用上面「模型接入」里那套，大多数中转站不用重复填。外接失败会自动退回系统音色，不会让 TA 突然哑掉。")
-                    .font(.system(size: 11.5))
+                    .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -151,11 +161,11 @@ struct VoiceSettingsCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("语速")
-                        .font(.system(size: 14.5))
+                        .font(.aevis(14.5))
                         .foregroundStyle(.primary)
                     Spacer(minLength: 8)
                     Text(String(format: "%.2f", settings.speechRate))
-                        .font(.system(size: 12.5))
+                        .font(.aevis(12.5))
                         .foregroundStyle(.secondary)
                 }
                 Slider(value: $settings.speechRate, in: 0.3...0.7)
@@ -202,9 +212,31 @@ struct VoiceSettingsCard: View {
 
     // MARK: - 零件
 
+    /// 列表里的一行音色。点一下就选中，当前项打勾。
+    private func voiceRow(_ text: String, value: String) -> some View {
+        Button {
+            settings.ttsVoice = value
+        } label: {
+            HStack(spacing: 10) {
+                Text(text)
+                    .font(.aevis(14))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if settings.ttsVoice == value {
+                    Image(systemName: "checkmark")
+                        .font(.aevis(13, weight: .semibold))
+                        .foregroundStyle(settings.accentColor)
+                }
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func title(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12.5, weight: .medium))
+            .font(.aevis(12.5, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
             .padding(.top, 15)
@@ -220,14 +252,14 @@ struct VoiceSettingsCard: View {
 
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12.5))
+            .font(.aevis(12.5))
             .foregroundStyle(.secondary)
     }
 
     private func toggleRow(_ text: String, isOn: Binding<Bool>) -> some View {
         HStack {
             Text(text)
-                .font(.system(size: 14.5))
+                .font(.aevis(14.5))
                 .foregroundStyle(.primary)
             Spacer(minLength: 8)
             Toggle("", isOn: isOn)
@@ -241,7 +273,7 @@ struct VoiceSettingsCard: View {
         VStack(alignment: .leading, spacing: 7) {
             label(title)
             TextField(hint, text: text)
-                .font(.system(size: 14))
+                .font(.aevis(14))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 13)
@@ -257,7 +289,7 @@ struct VoiceSettingsCard: View {
         VStack(alignment: .leading, spacing: 7) {
             label(title)
             SecureField(hint, text: text)
-                .font(.system(size: 14))
+                .font(.aevis(14))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 13)

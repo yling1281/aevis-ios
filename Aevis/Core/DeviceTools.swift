@@ -30,6 +30,12 @@ enum DeviceTools {
     static func all() -> [DeviceTool] {
         [timeTool, clipboardReadTool, clipboardWriteTool, calculatorTool,
          calendarListTool, calendarCreateTool, reminderCreateTool]
+        + senseTools
+        + webTools
+        + musicTools
+        + momentTools
+        + systemTools
+        + [shellTool]
     }
 
     /// 发给模型的工具定义（OpenAI function calling 格式）。
@@ -71,13 +77,17 @@ enum DeviceTools {
             parameters: emptyParameters()
         ) { _ in
             let now = Date()
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.locale = Locale(identifier: "zh_CN")
+
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "zh_CN")
             formatter.timeZone = TimeZone.current
             formatter.dateFormat = "yyyy年M月d日 EEEE HH:mm:ss"
 
             let timezone = TimeZone.current
-            let offsetHours = Double(timezone.secondsFromGMT(for: now)) / 3600.0
+            let offsetSeconds = timezone.secondsFromGMT(for: now)
+            let offsetHours = Double(offsetSeconds) / 3600.0
             let sign = offsetHours >= 0 ? "+" : ""
 
             return """
@@ -177,7 +187,7 @@ enum DeviceTools {
         for character in input {
             if character.isNumber || character == "." {
                 number.append(character)
-            } else if "+-*/( )".contains(character) {
+            } else if "+-*/()".contains(character) {
                 if !number.isEmpty { tokens.append(number); number = "" }
                 tokens.append(String(character))
             } else if character != " " {
@@ -303,9 +313,10 @@ enum DeviceTools {
             name: "create_calendar_event",
             title: "往你的日历里加了一条",
             description: """
-            在用户的日历里新建一条日程。用户说「提醒我明天下午三点开会」这种要落到日历的，用它。
-            start 用 ISO8601 格式，例如 2026-09-25T15:00:00。
-            """,
+            在用户的日历里新建一条日程。用户说「提醒我明天下午三点开会」这种要落到日历的，
+            用它。start 用 ISO8601 格式，例如 2026-09-25T15:00:00。
+            """
+            ,
             parameters: [
                 "type": "object",
                 "properties": [
@@ -400,7 +411,8 @@ enum DeviceTools {
 
     // MARK: - 零件
 
-    private static func emptyParameters() -> [String: Any] {
+    /// 无参数工具的 schema。别的文件（SenseTools）也要用，所以不能是 private。
+    static func emptyParameters() -> [String: Any] {
         [
             "type": "object",
             "properties": [:] as [String: Any],
@@ -412,7 +424,8 @@ enum DeviceTools {
     static func parseDate(_ text: String) -> Date? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if let date = ISO8601DateFormatter().date(from: trimmed) { return date }
+        let iso = ISO8601DateFormatter()
+        if let date = iso.date(from: trimmed) { return date }
 
         let formats = [
             "yyyy-MM-dd'T'HH:mm:ss",

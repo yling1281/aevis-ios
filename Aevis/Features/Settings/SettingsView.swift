@@ -5,6 +5,9 @@ struct SettingsView: View {
     @EnvironmentObject private var personaStore: PersonaStore
     @EnvironmentObject private var chat: ChatStore
 
+    /// 音乐卡片要显示"正在放什么"，所以得盯着播放器。
+    @ObservedObject private var player = MusicPlayer.shared
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var testing = false
@@ -12,18 +15,30 @@ struct SettingsView: View {
     @State private var showClearConfirm = false
     @State private var pullingModels = false
     @State private var modelMessage: String?
+    @State private var newSourceName = ""
+    @State private var newSourceTemplate = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    personaCard
-                    ProactiveSettingsCard()
-                    AppearanceSettingsCard()
-                    VoiceSettingsCard()
-                    modelCard
-                    chatCard
-                    aboutCard
+                    if shows("persona") { personaCard }
+                    if shows("myprofile") { MyProfileCard() }
+                    if shows("bubbles") { BubbleSettingsCard() }
+                    if shows("appearance") { AppearanceSettingsCard() }
+                    if shows("memory") { MemoryCard() }
+                    if shows("moments") { MomentsCard() }
+                    if shows("companion") { CompanionCard() }
+                    if shows("proactive") { ProactiveSettingsCard() }
+                    if shows("voice") { VoiceSettingsCard() }
+                    if shows("music") { musicCard }
+                    if shows("douyin") { DouyinCard() }
+                    if shows("console") { consoleCard }
+                    if shows("model") { modelCard }
+                    if shows("search") { searchCard }
+                    if shows("system") { SystemBridgeCard() }
+                    if shows("chat") { chatCard }
+                    if shows("about") { aboutCard }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -46,6 +61,26 @@ struct SettingsView: View {
                 Text("TA 会忘掉你们聊过的一切。这个操作不能撤销。")
             }
         }
+    }
+
+    // MARK: - 截图自检用
+    //
+    // 设置页太长，一屏截不全。带 `-aevisSettingsFocus=<名字>` 启动时只显示那一张卡，
+    // 这样 CI 不用滚屏也能把每张卡截清楚。（只在 Debug 构建里生效。）
+
+    private var focusCard: String? {
+        #if DEBUG
+        let prefix = "-aevisSettingsFocus="
+        for argument in ProcessInfo.processInfo.arguments where argument.hasPrefix(prefix) {
+            return String(argument.dropFirst(prefix.count))
+        }
+        #endif
+        return nil
+    }
+
+    private func shows(_ name: String) -> Bool {
+        guard let focusCard else { return true }
+        return focusCard == name
     }
 
     // MARK: - TA
@@ -81,11 +116,152 @@ struct SettingsView: View {
         .aevisGlass(cornerRadius: 20)
     }
 
+    // MARK: - 音乐
+
+    private var musicCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardTitle("音乐")
+
+            NavigationLink {
+                MusicView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(settings.accentColor)
+                        .frame(width: 40, height: 40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(settings.accentColor.opacity(0.12))
+                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(player.current.map { $0.title } ?? "网易云音乐")
+                            .font(.aevis(15.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(
+                            NeteaseClient.shared.isLoggedIn
+                                ? (player.current.map { $0.display } ?? "已登录，可以搜歌和一起听")
+                                : "还没登录，点进去贴 Cookie"
+                        )
+                        .font(.aevis(12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    if player.isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 14))
+                            .foregroundStyle(settings.accentColor)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .aevisGlass(cornerRadius: 20)
+    }
+
+    // MARK: - 命令台
+
+    private var consoleCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardTitle("命令台")
+
+            NavigationLink {
+                ConsoleView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(settings.accentColor)
+                        .frame(width: 40, height: 40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(settings.accentColor.opacity(0.12))
+                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Shell.provider.displayName)
+                            .font(.aevis(15.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                        Text("她也能用命令行帮你干活")
+                            .font(.aevis(12))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .aevisGlass(cornerRadius: 20)
+    }
+
     // MARK: - 模型接入
 
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardTitle("模型接入")
+
+            // 供应商预设：切一下就自动填好地址和模型名，不用手打 URL
+            VStack(alignment: .leading, spacing: 9) {
+                Text("供应商")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ProviderPreset.allCases) { preset in
+                            Button {
+                                settings.providerPreset = preset
+                                if preset != .custom {
+                                    settings.baseURL = preset.baseURL
+                                    if !preset.defaultModel.isEmpty {
+                                        settings.model = preset.defaultModel
+                                    }
+                                    settings.modelList = []
+                                }
+                                modelMessage = "已切成「\(preset.label)」，去 \(preset.keyHint) 拿 Key。"
+                            } label: {
+                                Text(preset.label)
+                                    .font(.aevis(13, weight: .medium))
+                                    .foregroundStyle(
+                                        settings.providerPreset == preset ? Color.white : Color.primary
+                                    )
+                                    .padding(.horizontal, 13)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        Capsule().fill(
+                                            settings.providerPreset == preset
+                                                ? settings.accentColor
+                                                : Color.primary.opacity(0.07)
+                                        )
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                Text("预设只是帮你把地址和模型名填好，下面两栏随时能改。Key 从 \(settings.providerPreset.keyHint) 拿。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            rule
 
             labeledField("接口地址", hint: "https://api.deepseek.com/v1", text: $settings.baseURL)
             rule
@@ -107,6 +283,69 @@ struct SettingsView: View {
             rule
 
             labeledField("模型名", hint: "deepseek-chat", text: $settings.model)
+            rule
+
+            // 推理预算 + 上下文 + 启动自检
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("推理预算")
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text(settings.reasoningBudget.explanation)
+                            .font(.aevis(11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Picker("推理预算", selection: $settings.reasoningBudget) {
+                        ForEach(ReasoningBudget.allCases) { budget in
+                            Text(budget.label).tag(budget)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("带上多少条历史")
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text("\(settings.contextLimit) 条")
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.primary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.contextLimit) },
+                            set: { settings.contextLimit = Int($0) }
+                        ),
+                        in: 6...200,
+                        step: 2
+                    )
+                    Text("带太多她会又慢又贵，太少她会失忆。40 左右是个平衡点。")
+                        .font(.aevis(11))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("启动时自动测连接")
+                            .font(.aevis(14.5))
+                            .foregroundStyle(.primary)
+                        Text("不通就直接告诉你，免得对着一句没反应的对话框猜")
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("", isOn: $settings.autoTestOnLaunch)
+                        .labelsHidden()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
             rule
 
             VStack(alignment: .leading, spacing: 12) {
@@ -199,6 +438,112 @@ struct SettingsView: View {
             .padding(.vertical, 13)
         }
         .aevisGlass(cornerRadius: 20)
+    }
+
+    // MARK: - 搜索源
+
+    private var searchCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardTitle("联网搜索源")
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(settings.searchSources) { source in
+                    HStack(spacing: 10) {
+                        Button {
+                            settings.activeSearchSource = source.name
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: settings.activeSearchSource == source.name
+                                      ? "largecircle.fill.circle" : "circle")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(
+                                        settings.activeSearchSource == source.name
+                                            ? settings.accentColor : Color.secondary
+                                    )
+                                Text(source.name)
+                                    .font(.aevis(14.5))
+                                    .foregroundStyle(.primary)
+                                Spacer(minLength: 8)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if settings.searchSources.count > 1 {
+                            Button {
+                                settings.searchSources.removeAll { $0.name == source.name }
+                                if settings.activeSearchSource == source.name {
+                                    settings.activeSearchSource = settings.searchSources.first?.name ?? ""
+                                }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("新源的名字（例如 豆包）", text: $newSourceName)
+                        .font(.aevis(13.5))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                    TextField("地址模板，用 {q} 代表关键词", text: $newSourceTemplate)
+                        .font(.aevis(13))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                    Button {
+                        addSearchSource()
+                    } label: {
+                        Text("加到列表")
+                            .font(.aevis(14, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 9)
+                            .aevisGlass(cornerRadius: 14)
+                    }
+                }
+
+                Text("必应是默认。加了别的源之后，如果那个页面抓不出结果列表，她会直接把正文读给你 —— 不会白跑一趟。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+        }
+        .aevisGlass(cornerRadius: 20)
+    }
+
+    private func addSearchSource() {
+        let name = newSourceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let template = newSourceTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, template.contains("{q}") else {
+            modelMessage = "搜索源要有名字，而且地址模板里必须包含 {q}。"
+            return
+        }
+        guard !settings.searchSources.contains(where: { $0.name == name }) else {
+            modelMessage = "已经有一个叫「\(name)」的搜索源了。"
+            return
+        }
+        settings.searchSources.append(SearchSource(name: name, template: template))
+        settings.activeSearchSource = name
+        newSourceName = ""
+        newSourceTemplate = ""
+        modelMessage = "加好了，并且已经切到「\(name)」。"
     }
 
     // MARK: - 对话

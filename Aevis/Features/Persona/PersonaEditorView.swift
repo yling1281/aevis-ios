@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if canImport(UIKit)
 import UIKit
@@ -18,11 +19,16 @@ struct PersonaEditorView: View {
     @State private var loaded = false
     @State private var pickedAvatar: PhotosPickerItem?
     @State private var avatarNote: String?
+    @State private var importingCard = false
+    @State private var cardNote: String?
+    /// 导入卡片时带进来的开场白，保存后可以顺手发出去。
+    @State private var pendingFirstMessage: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 intro
+                cardSection
                 avatarSection
                 nameSection
                 genderSection
@@ -69,6 +75,89 @@ struct PersonaEditorView: View {
             if personaStore.persona.isComplete {
                 draft = personaStore.persona
             }
+        }
+        .fileImporter(
+            isPresented: $importingCard,
+            allowedContentTypes: Self.cardTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleCardImport(result)
+        }
+    }
+
+    // MARK: - 角色卡
+
+    /// 社区里常见的两种：PNG 卡（图里藏了 JSON）和 JSON 卡。
+    private static var cardTypes: [UTType] {
+        [.png, .jpeg, .image, .json]
+    }
+
+    private var cardSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("从角色卡导入")
+                .font(.aevis(13, weight: .medium))
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 10) {
+                Button {
+                    cardNote = nil
+                    importingCard = true
+                } label: {
+                    Text("选一张角色卡")
+                        .font(.aevis(14, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 9)
+                        .aevisGlass(cornerRadius: 14)
+                }
+                Spacer(minLength: 0)
+            }
+
+            if let cardNote {
+                Text(cardNote)
+                    .font(.aevis(12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("支持 PNG 角色卡和 JSON 卡片（SillyTavern 的 V1 / V2 格式都行）。导入会把名字、性格、场景、对话示例填进下面的栏位，你自己再改。卡片里没有的字段——比如性别——不会替它猜。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func handleCardImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+
+            guard let data = try? Data(contentsOf: url) else {
+                cardNote = "这个文件读不出来。"
+                return
+            }
+            guard let card = CharacterCard.parse(data) else {
+                cardNote = "这不像一张角色卡 —— 可能是别的图，或者格式不认识。"
+                return
+            }
+
+            // 已经填过的字段不覆盖，免得辛苦写的人设被卡片冲掉
+            if !card.persona.name.isEmpty { draft.name = card.persona.name }
+            if !card.persona.personality.isEmpty { draft.personality = card.persona.personality }
+            if !card.persona.speakingStyle.isEmpty { draft.speakingStyle = card.persona.speakingStyle }
+            if !card.persona.relationship.isEmpty { draft.relationship = card.persona.relationship }
+
+            pendingFirstMessage = card.firstMessage
+            var line = "已从\(card.origin)导入「\(card.sourceName)」。"
+            if card.firstMessage != nil {
+                line += "卡片里还有一句开场白，保存后会自动成为第一条消息。"
+            }
+            cardNote = line
+
+        case .failure(let error):
+            cardNote = "选文件失败：\(error.localizedDescription)"
         }
     }
 
@@ -120,6 +209,8 @@ struct PersonaEditorView: View {
                         .padding(.vertical, 9)
                         .aevisGlass(cornerRadius: 14)
                 }
+                // 同上：PhotosPicker 的文字会被系统刷成强调色，要显式压回来
+                .tint(Color.primary)
 
                 if personaStore.avatarImage != nil {
                     Button {
@@ -277,6 +368,7 @@ struct PersonaEditorView: View {
     private var actionButton: some View {
         Button {
             personaStore.update(draft)
+            commitFirstMessage()
             if !isFirstRun {
                 dismiss()
             }
@@ -299,6 +391,20 @@ struct PersonaEditorView: View {
         .padding(.top, 4)
     }
 
+    /// 角色卡里带的开场白，保存后成为第一条消息 ——
+    /// 这样一进去就有一句她在说话，不是空白的对话框。
+    /// 只在对话框是空的时候放，免得插进已经聊了一半的对话里。
+    private func commitFirstMessage() {
+        guard let text = pendingFirstMessage,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        pendingFirstMessage = nil
+
+        let chat = ChatStore.shared
+        guard chat.messages.isEmpty else { return }
+        chat.append(ChatMessage(role: .assistant, text: text))
+        chat.commit()
+    }
+
     private var footerHint: some View {
         Text(isFirstRun
              ? "这些设定都存在这台手机上，随时能改。"
@@ -313,19 +419,21 @@ struct PersonaEditorView: View {
     private func loadAvatar(_ item: PhotosPickerItem) {
         avatarNote = nil
         Task { @MainActor in
-            guard let data = try? await item.loadTransferable(type: Data.self) else {
-                avatarNote = "这张图读不出来，换一张试试。"
-                pickedAvatar = nil
-                return
+            do {
+                guard let data = try? await item.loadTransferable(type: Data.self) else {
+                    avatarNote = "这张图读不出来，换一张试试。"
+                    pickedAvatar = nil
+                    return
+                }
+                #if canImport(UIKit)
+                if let image = UIImage(data: data) {
+                    personaStore.setAvatar(image)
+                    avatarNote = "头像换好了。"
+                } else {
+                    avatarNote = "这张图格式不支持，换一张试试。"
+                }
+                #endif
             }
-            #if canImport(UIKit)
-            if let image = UIImage(data: data) {
-                personaStore.setAvatar(image)
-                avatarNote = "头像换好了。"
-            } else {
-                avatarNote = "这张图格式不支持，换一张试试。"
-            }
-            #endif
             pickedAvatar = nil
         }
     }

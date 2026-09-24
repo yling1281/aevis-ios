@@ -8,7 +8,7 @@
     <根目录>/Assets.xcassets/AppIcon.appiconset/            主图标（紫）
     <根目录>/Assets.xcassets/AppIcon-<Color>.appiconset/     备用图标，供用户切换
 
-备用图标配合编译选项 ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS=YES 使用，
+备用图标配合 Info.plist 的 CFBundleAlternateIcons 使用，
 运行时靠 UIApplication.setAlternateIconName(_:) 切换。
 **注意：iOS 只允许在 App 内置的图标里切换，不能拿相册里的图当桌面图标。**
 

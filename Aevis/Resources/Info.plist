@@ -16,6 +16,22 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- 注册自己的 scheme。快捷指令最后加一步「打开 URL」填 aevis://...
+	     就能把数据交回这个 App —— 这是快捷指令输出唯一能回来的路
+	     （shortcuts://run-shortcut 是没有返回值的）。 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.aevis.ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>aevis</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
@@ -24,14 +40,33 @@
 	<string>$(AEVIS_COMMIT)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>shortcuts</string>
+		<string>snssdk1128</string>
+		<string>aweme</string>
+		<string>weixin</string>
+		<string>alipays</string>
+		<string>taobao</string>
+		<string>bilibili</string>
+		<string>zhihu</string>
+		<string>xiaohongshu</string>
+		<string>music</string>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Aevis 需要使用麦克风，这样你可以直接用说话的方式和 TA 聊天。</string>
+	<string>Aevis 需要使用麦克风：你可以直接说话和 TA 聊天，也能和 TA 实时通话。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Aevis 需要语音识别，把你的话转成文字发给 TA。</string>
+	<string>Aevis 需要语音识别，把你的话转成文字发给 TA。识别尽量在本机完成。</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Aevis 需要读取和写入日历，这样 TA 才能告诉你接下来有什么安排、也能帮你把事记进日程。</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Aevis 需要访问提醒事项，这样你让 TA「记一下」的时候才能真的记住。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Aevis 需要知道你大概在哪，这样才能告诉你当地的天气、以及「离家多远」这类事。不会上传位置。</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Aevis 需要读取你的步数、心率和睡眠，这样你问「今天走了多少」「昨晚睡得怎么样」时 TA 答得出来。数据不会离开这台手机。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Aevis 需要使用相机，这样你可以拍一张照片，让 TA 把上面的字读出来。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

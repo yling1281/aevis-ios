@@ -1,4 +1,10 @@
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ChatView: View {
     @EnvironmentObject private var personaStore: PersonaStore
@@ -13,7 +19,17 @@ struct ChatView: View {
     @State private var errorText: String?
     @State private var toolNote: String?
     @State private var showSettings = false
+    @State private var showMoments = false
+    @State private var showTogether = false
+    @State private var showCall = false
     @State private var sendTask: Task<Void, Never>?
+    @State private var didLaunchTest = false
+
+    // 附件：拍照 / 选图 / 选文件 → OCR → 塞进输入框
+    @State private var pickedPhotos: [PhotosPickerItem] = []
+    @State private var showFileImporter = false
+    @State private var showCamera = false
+    @State private var attaching = false
     @FocusState private var composerFocused: Bool
 
     private var persona: Persona { personaStore.persona }
@@ -42,6 +58,15 @@ struct ChatView: View {
                 .environmentObject(settings)
                 .environmentObject(chat)
         }
+        .sheet(isPresented: $showMoments) {
+            MomentsView()
+        }
+        .sheet(isPresented: $showTogether) {
+            TogetherView()
+        }
+        .fullScreenCover(isPresented: $showCall) {
+            CallView()
+        }
         .onDisappear {
             sendTask?.cancel()
         }
@@ -51,7 +76,101 @@ struct ChatView: View {
             if ProcessInfo.processInfo.arguments.contains("-aevisOpenSettings") {
                 showSettings = true
             }
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenMoments") {
+                showMoments = true
+            }
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenTogether") {
+                showTogether = true
+            }
             #endif
+            runLaunchTestIfNeeded()
+        }
+        .onChange(of: pickedPhotos) { _, items in
+            handlePickedPhotos(items)
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: attachmentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handlePickedFile(result)
+        }
+        #if canImport(UIKit)
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { image in
+                attach(from: image, source: "照片")
+            }
+            .ignoresSafeArea()
+        }
+        #endif
+    }
+
+    // MARK: - 附件
+    //
+    // 取出的文字**直接放进输入框**，不是偷偷发出去。
+    // 用户能在后面接着写"帮我总结一下"，发出去的是「内容 + 指令」——
+    // 她收到的是一段能读的文字，不是一张她看不见的图。
+
+    private var attachmentTypes: [UTType] {
+        AttachmentService.allowedFileTypes.compactMap { UTType(filenameExtension: $0) }
+    }
+
+    private func handlePickedPhotos(_ items: [PhotosPickerItem]) {
+        guard let item = items.first else { return }
+        pickedPhotos = []
+        Task { @MainActor in
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                errorText = "这张图读不出来，换一张试试。"
+                return
+            }
+            attach(from: image, source: "图片")
+        }
+    }
+
+    private func attach(from image: UIImage, source: String) {
+        attaching = true
+        Task { @MainActor in
+            defer { attaching = false }
+            let text = await AttachmentService.recognizeText(in: image)
+            guard !text.isEmpty else {
+                errorText = "这张图里没认出文字。拍清楚一点，或者换一张。"
+                return
+            }
+            draft = AttachmentService.composerBlock(text, source: source) + draft
+            errorText = nil
+        }
+    }
+
+    private func handlePickedFile(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            if let text = AttachmentService.readTextFile(at: url) {
+                draft = AttachmentService.composerBlock(text, source: url.lastPathComponent) + draft
+                errorText = nil
+            } else {
+                errorText = "这个文件我读不了文字。现在只支持纯文本类：txt / md / csv / json / log 这些。"
+            }
+        case .failure(let error):
+            errorText = "选文件失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 启动时自动测一次连接。不通就直接说出来 ——
+    /// 免得用户对着一句没反应的对话框猜是哪里坏了。
+    private func runLaunchTestIfNeeded() {
+        guard !didLaunchTest else { return }
+        didLaunchTest = true
+        guard settings.autoTestOnLaunch, settings.isConfigured else { return }
+
+        let config = settings.llm
+        Task { @MainActor in
+            do {
+                _ = try await LLMService.probe(config: config)
+            } catch {
+                errorText = "启动自检没连上：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -74,6 +193,32 @@ struct ChatView: View {
             }
 
             Spacer(minLength: 8)
+
+            // 朋友圈 / 一起听 / 通话都收进这里 —— 顶部只留两个控件，不挤
+            Menu {
+                Button {
+                    showMoments = true
+                } label: {
+                    Label("朋友圈", systemImage: "photo.on.rectangle.angled")
+                }
+                Button {
+                    showTogether = true
+                } label: {
+                    Label("一起听", systemImage: "music.note.list")
+                }
+                Button {
+                    showCall = true
+                } label: {
+                    Label("实时通话", systemImage: "phone.arrow.up.right")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .aevisGlass(cornerRadius: 20)
 
             Button {
                 composerFocused = false
@@ -108,6 +253,22 @@ struct ChatView: View {
     }
 
     // MARK: - 消息列表
+    //
+    // 气泡外观在这里取一份快照传下去 —— 气泡自己是纯渲染，
+    // 不受观察机制影响，也就不会出现「改了设置这边不跟着变」。
+
+    private var bubbleTheme: BubbleTheme {
+        BubbleTheme(
+            myLook: settings.myBubble,
+            aiLook: settings.aiBubble,
+            myColor: settings.bubbleColor(settings.myBubble),
+            aiColor: settings.bubbleColor(settings.aiBubble),
+            cornerScale: settings.cornerScale,
+            fontColor: settings.fontColor,
+            showMyAvatar: settings.showMyAvatar,
+            showAiAvatar: settings.showAiAvatar
+        )
+    }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
@@ -121,7 +282,7 @@ struct ChatView: View {
                         MessageBubble(
                             message: message,
                             persona: persona,
-                            accent: settings.accentColor,
+                            theme: bubbleTheme,
                             simpleMode: settings.simpleMode
                         )
                         .id(message.id)
@@ -209,6 +370,43 @@ struct ChatView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 6) {
+            // 附件：选图（走相册）和拍照/选文件（走菜单）
+            PhotosPicker(selection: $pickedPhotos, maxSelectionCount: 3, matching: .images) {
+                Image(systemName: attaching ? "hourglass" : "photo.on.rectangle")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .disabled(attaching)
+            .padding(.bottom, 5)
+            .padding(.leading, 3)
+
+            Menu {
+                #if canImport(UIKit)
+                if AttachmentService.cameraAvailable {
+                    Button {
+                        showCamera = true
+                    } label: {
+                        Label("拍张照", systemImage: "camera")
+                    }
+                }
+                #endif
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("选一个文件", systemImage: "doc.text")
+                }
+            } label: {
+                Image(systemName: "paperclip")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .disabled(attaching)
+            .padding(.bottom, 5)
+
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.aevis(settings.simpleMode ? 17 : 15))
@@ -287,6 +485,11 @@ struct ChatView: View {
         let config = settings.llm
         let prompt = persona.systemPrompt
         let history = chat.messages.filter { !($0.role == .assistant && $0.text.isEmpty) }
+        // 背景资料 = 长期记忆 +（快捷指令发过数据的话）屏幕使用时间
+        var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
+        let screenTime = ScreenTimeInsight.shared.digest()
+        if !screenTime.isEmpty { context.append(screenTime) }
+        let remember = settings.memoryEnabled
         let shouldSpeak = settings.speakerEnabled
         let ttsConfig = settings.tts
         let systemVoice = persona.voiceIdentifier
@@ -299,6 +502,7 @@ struct ChatView: View {
                     config: config,
                     systemPrompt: prompt,
                     history: history,
+                    memory: context,
                     tools: DeviceTools.all(),
                     onToolActivity: { title in
                         Task { @MainActor in
@@ -323,6 +527,16 @@ struct ChatView: View {
             toolNote = nil
             sendTask = nil
 
+            // 聊够了就顺手提炼一次长期记忆。
+            // 放在回复之后 —— 不挡着说话，失败也只进记忆库的状态行。
+            if remember {
+                await MemoryStore.shared.extractIfNeeded(
+                    config: config,
+                    messages: chat.messages,
+                    persona: persona
+                )
+            }
+
             if shouldSpeak, !accumulated.isEmpty {
                 SpeechService.shared.speak(
                     accumulated,
@@ -338,60 +552,77 @@ struct ChatView: View {
 
 // MARK: - 气泡
 
+/// 气泡外观的一份快照。父视图取好传下来，
+/// 气泡本身只负责画 —— 这样两侧气泡能各改各的，互不影响。
+struct BubbleTheme {
+    var myLook: BubbleLook
+    var aiLook: BubbleLook
+    var myColor: Color
+    var aiColor: Color
+    var cornerScale: Double
+    var fontColor: Color
+    var showMyAvatar: Bool
+    var showAiAvatar: Bool
+}
+
 private struct MessageBubble: View {
     let message: ChatMessage
     let persona: Persona
-    var accent: Color = AppSettings.accentPalette[0]
+    var theme: BubbleTheme
     var simpleMode: Bool = false
 
-    /// 对方那一侧：气泡左边至少留这么多空白，也就限制了气泡最大宽度。
+    /// 靠着屏幕那一边至少留这么多空白（也顺手限制了气泡宽度）。
     /// 用「单侧 Spacer 的 minLength」而不是写死像素宽度，这样任何屏幕尺寸都自适应。
-    private static let userGap: CGFloat = 88
-
-    /// 自己那一侧：头像 26 + 间距 8 = 34，再加 54 与 userGap 对称。
-    private static let assistantGap: CGFloat = 54
+    /// 两侧都留 54：一边是头像 26 + 间距 8 + 20，另一边对称。
+    private static let sideGap: CGFloat = 54
 
     private var isUser: Bool { message.role == .user }
+
+    private var look: BubbleLook { isUser ? theme.myLook : theme.aiLook }
+    private var color: Color { isUser ? theme.myColor : theme.aiColor }
 
     private var bubbleFontSize: CGFloat { simpleMode ? 17.5 : 15.5 }
     private var horizontalPadding: CGFloat { simpleMode ? 16 : 14 }
     private var verticalPadding: CGFloat { simpleMode ? 13 : 10 }
-    private var bubbleCorner: CGFloat { simpleMode ? 20 : 18 }
+    private var avatarSize: CGFloat { simpleMode ? 30 : 26 }
 
-    @ViewBuilder
-    private var bubble: some View {
-        if isUser {
-            bubbleText.background(
-                RoundedRectangle(cornerRadius: bubbleCorner, style: .continuous)
-                    .fill(accent)
-            )
-        } else {
-            bubbleText.aevisGlass(cornerRadius: bubbleCorner)
-        }
+    /// 基础圆角再乘两层系数：全局的 + 这一侧自己的。
+    private var bubbleCorner: CGFloat {
+        let base: CGFloat = simpleMode ? 20 : 18
+        let scaled = theme.cornerScale * look.cornerScale
+        return max(6, base * CGFloat(scaled))
     }
 
-    private var bubbleText: some View {
-        Text(message.text.isEmpty ? "…" : message.text)
-            .font(.aevis(bubbleFontSize))
-            .foregroundStyle(isUser ? Color.white : Color.primary)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, horizontalPadding)
-            .padding(.vertical, verticalPadding)
+    private var bubble: some View {
+        AevisBubble(
+            text: message.text,
+            look: look,
+            color: color,
+            corner: bubbleCorner,
+            fontSize: bubbleFontSize,
+            horizontalPadding: horizontalPadding,
+            verticalPadding: verticalPadding,
+            plainTextColor: theme.fontColor
+        )
     }
 
     var body: some View {
         if isUser {
             // 只放一个 Spacer。放两个的话剩余空白会被平分，气泡就飘到中间去了。
-            HStack(spacing: 0) {
-                Spacer(minLength: Self.userGap)
+            HStack(alignment: .bottom, spacing: 8) {
+                Spacer(minLength: Self.sideGap)
                 bubble
+                if theme.showMyAvatar {
+                    AevisAvatar(source: .me, size: avatarSize)
+                }
             }
         } else {
             HStack(alignment: .bottom, spacing: 8) {
-                AevisAvatar(size: simpleMode ? 30 : 26, seed: persona.avatarSeed)
+                if theme.showAiAvatar {
+                    AevisAvatar(source: .ai, size: avatarSize, seed: persona.avatarSeed)
+                }
                 bubble
-                Spacer(minLength: Self.assistantGap)
+                Spacer(minLength: Self.sideGap)
             }
         }
     }

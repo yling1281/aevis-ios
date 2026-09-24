@@ -22,6 +22,26 @@ final class ChatStore: ObservableObject {
         save()
     }
 
+    /// 现在能不能接收她主动发来的消息。
+    ///
+    /// **正在等她回复的时候不行** —— 最后一条是空的 assistant 占位，
+    /// 这时候插一条会把她正在流式吐出来的半句话顶乱。
+    var canReceiveProactive: Bool {
+        guard let last = messages.last else { return true }
+        return !(last.role == .assistant && last.text.isEmpty)
+    }
+
+    /// 她主动发来的一句话（朋友圈那边触发 / 定时通知之外的那种）。
+    /// 返回是否真的放下了。
+    @discardableResult
+    func appendProactive(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, canReceiveProactive else { return false }
+        messages.append(ChatMessage(role: .assistant, text: trimmed))
+        save()
+        return true
+    }
+
     /// 流式回复期间只改内存，不每次落盘。
     func replaceLast(with text: String) {
         guard let index = messages.indices.last else { return }

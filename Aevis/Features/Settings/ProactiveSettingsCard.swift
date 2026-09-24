@@ -224,7 +224,7 @@ struct ProactiveSettingsCard: View {
                         .truncationMode(.middle)
                 }
 
-                Text("Bark 是另一个 App 提供的推送通道。好处是消息会留在通知历史里；但它需要 App 在运行时才发得出去，所以真正的定时仍然靠上面那两条本地通知。")
+                Text("Bark 是另一个 App 提供的推送通道。好处是消息会留在通知历史里；但**它需要 App 在运行时才发得出去**，所以真正的定时仍然靠上面那两条本地通知。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

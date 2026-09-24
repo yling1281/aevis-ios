@@ -22,7 +22,10 @@ struct AppearanceSettingsCard: View {
         VStack(alignment: .leading, spacing: 0) {
             title("外观")
 
-            toggleRow("用液态玻璃效果", subtitle: "关掉变成纯色卡片，更清爽、也更省电", isOn: $settings.useGlass)
+            glassSection
+            rule
+
+            toneSection
             rule
 
             toggleRow("简易模式", subtitle: "字更大、间距更松，去掉花哨的装饰", isOn: $settings.simpleMode)
@@ -47,6 +50,112 @@ struct AppearanceSettingsCard: View {
         ) { result in
             handleFontImport(result)
         }
+    }
+
+    // MARK: - 玻璃材质（四档）
+
+    private var glassSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            label("玻璃材质")
+
+            Picker("玻璃材质", selection: glassBinding) {
+                ForEach(GlassStyle.allCases) { style in
+                    Text(style.label).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(glassBinding.wrappedValue.explanation)
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+    }
+
+    /// 玻璃四档和原来的开关是同一个东西：选「关闭」就是关掉玻璃。
+    private var glassBinding: Binding<GlassStyle> {
+        Binding(
+            get: { settings.useGlass ? settings.glassStyle : .off },
+            set: { value in
+                if value == .off {
+                    settings.useGlass = false
+                } else {
+                    settings.useGlass = true
+                    settings.glassStyle = value
+                }
+            }
+        )
+    }
+
+    // MARK: - 圆角、上色浓度、文字颜色
+
+    private var toneSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("圆角")
+                        .font(.aevis(14.5))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 8)
+                    Text(String(format: "%.0f%%", settings.cornerScale * 100))
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.cornerScale, in: 0.4...1.8, step: 0.05)
+                Text("越小越方正，越大越圆润。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("上色浓度")
+                        .font(.aevis(14.5))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 8)
+                    Text(String(format: "%.0f%%", settings.tintStrength * 100))
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $settings.tintStrength, in: 0...1.6, step: 0.05)
+                Text("主题色在背景上着得多浓。拉到 0 就只剩底色。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                label("文字颜色")
+                HStack(spacing: 13) {
+                    ForEach(Array(AppSettings.fontColorPalette.enumerated()), id: \.offset) { index, color in
+                        Button {
+                            settings.fontColorIndex = index
+                        } label: {
+                            Circle()
+                                .fill(color)
+                                .frame(width: 28, height: 28)
+                                .overlay(
+                                    Circle().strokeBorder(
+                                        settings.fontColorIndex == index
+                                            ? settings.accentColor
+                                            : Color.primary.opacity(0.15),
+                                        lineWidth: 2
+                                    )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(AppSettings.fontColorNames[index])
+                    }
+                    Spacer(minLength: 0)
+                }
+                Text("聊天页里她的话会跟着变。第一个是跟随系统。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
     }
 
     // MARK: - 主题色
@@ -261,6 +370,9 @@ struct AppearanceSettingsCard: View {
                         .padding(.vertical, 9)
                         .aevisGlass(cornerRadius: 14)
                 }
+                // PhotosPicker 是控件，系统会把强调色刷到它的文字上，
+                // 光写 .foregroundStyle(.primary) 不够 —— 截图自检时发现的（文字是蓝的）。
+                .tint(Color.primary)
 
                 if settings.customBackgroundData != nil {
                     Button {

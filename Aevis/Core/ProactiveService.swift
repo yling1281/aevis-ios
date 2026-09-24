@@ -42,7 +42,8 @@ final class ProactiveService {
 
     func ensureAuthorization() async -> Bool {
         do {
-            return try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            return granted
         } catch {
             return false
         }
@@ -161,7 +162,11 @@ final class ProactiveService {
             return settings.proactiveLines
         }
         if settings.isConfigured {
-            let generated = await generateLines(persona: persona, config: settings.llm, count: 8)
+            let generated = await generateLines(
+                persona: persona,
+                config: settings.llm,
+                count: 8
+            )
             if generated.count >= 2 {
                 settings.proactiveLines = generated
                 return generated
@@ -199,14 +204,15 @@ final class ProactiveService {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .map { line -> String in
                 var text = line
-                for token in ["- ", "* ", "\"", "「", "」"] {
+                for token in ["- ", "* ", "1. ", "\"", "「", "」"] {
                     text = text.replacingOccurrences(of: token, with: "")
                 }
                 // 去掉可能的行首序号
                 while let first = text.first, first.isNumber {
                     text.removeFirst()
                 }
-                return text.trimmingCharacters(in: CharacterSet(charactersIn: ".、。 "))
+                text = text.trimmingCharacters(in: CharacterSet(charactersIn: ".、。 "))
+                return text
             }
             .filter { !$0.isEmpty && $0.count <= 60 }
 
@@ -239,7 +245,8 @@ final class ProactiveService {
         comps.path += "/" + Self.encode(title) + "/" + Self.encode(text)
         comps.queryItems = [
             URLQueryItem(name: "group", value: "Aevis"),
-            URLQueryItem(name: "level", value: "timeSensitive")
+            URLQueryItem(name: "level", value: "timeSensitive"),
+            URLQueryItem(name: "icon", value: "")
         ]
         guard let url = comps.url else { throw BarkError.badURL }
 

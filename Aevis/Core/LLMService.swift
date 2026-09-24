@@ -51,6 +51,7 @@ enum LLMService {
         config: LLMConfig,
         systemPrompt: String,
         history: [ChatMessage],
+        memory: [String] = [],
         tools: [DeviceTool] = [],
         onToolActivity: (@Sendable (String) -> Void)? = nil
     ) -> AsyncThrowingStream<String, Error> {
@@ -61,6 +62,7 @@ enum LLMService {
                         config: config,
                         systemPrompt: systemPrompt,
                         history: history,
+                        memory: memory,
                         tools: tools,
                         onDelta: { piece in
                             _ = continuation.yield(piece)
@@ -95,18 +97,52 @@ enum LLMService {
         return trimmed
     }
 
+    /// 让她知道"现在"是什么时候。
+    /// 单独一条 system 消息，不混进人设提示词 —— 人设是用户写的，不该被我改。
+    private static func timeContext() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日 EEEE HH:mm"
+        let now = formatter.string(from: Date())
+
+        let timezone = TimeZone.current
+        let offset = Double(timezone.secondsFromGMT()) / 3600
+        let sign = offset >= 0 ? "+" : ""
+
+        return "现在是 \(now)（\(timezone.identifier)，UTC\(sign)\(offset)）。"
+            + "你知道今天几号、现在几点，直接用这个回答就行，不用去查。"
+    }
+
     // MARK: - 多轮：她可以用几次手再说
 
     private static func runConversation(
         config: LLMConfig,
         systemPrompt: String,
         history: [ChatMessage],
+        memory: [String],
         tools: [DeviceTool],
         onDelta: @escaping (String) -> Void,
         onTool: (@Sendable (String) -> Void)?
     ) async throws {
-        var messages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
-        for item in history.suffix(40) {
+        // 让她「感知现实时间」：把当前时间直接写进系统提示词，
+        // 不用她每次都去调 get_current_time。
+        var messages: [[String: Any]] = [
+            ["role": "system", "content": systemPrompt],
+            ["role": "system", "content": Self.timeContext()]
+        ]
+        // 长期记忆、屏幕使用时间这类「背景资料」都走这一条 ——
+        // 和人设、时间一样单独成段，不混写在一起，
+        // 这样哪一段出问题都能单独关掉、单独查。
+        if !memory.isEmpty {
+            let block = """
+            这些是你知道的背景（自然地用，别像念资料一样背出来）：
+            \(memory.joined(separator: "\n"))
+            """
+            messages.append(["role": "system", "content": block])
+        }
+        // 带多少条历史由用户决定：太多又慢又贵，太少她会失忆
+        let limit = max(6, min(config.contextLimit, 200))
+        for item in history.suffix(limit) {
             guard !item.text.isEmpty else { continue }
             messages.append([
                 "role": item.role == .user ? "user" : "assistant",
@@ -126,11 +162,15 @@ enum LLMService {
                     tools: tools,
                     onDelta: onDelta
                 )
-            } catch LLMError.http(let status, _) where status == 400 && !tools.isEmpty && round == 0 {
-                // 有些接口不认 tools 字段，去掉再试一次，别直接报错
-                onTool?("这个接口不支持工具调用，这次先空手答")
+            } catch LLMError.http(let status, _) where status == 400
+                && ((!tools.isEmpty) || config.reasoning != .off) && round == 0 {
+                // 有些接口既不认 tools、也不认 reasoning_effort。
+                // 那就退回最保守的请求再试一次 —— 报错总比"她突然不说话了"强。
+                onTool?("这个接口不认工具或推理参数，这次用最保守的方式回答")
+                var plain = config
+                plain.reasoning = .off
                 result = try await sendOnce(
-                    config: config,
+                    config: plain,
                     messages: messages,
                     tools: [],
                     onDelta: onDelta
@@ -196,6 +236,10 @@ enum LLMService {
         if !tools.isEmpty {
             body["tools"] = DeviceTools.definitions()
             body["tool_choice"] = "auto"
+        }
+        // 推理预算：关闭时不传这个字段（有些模型不认，传了反而报错）
+        if let effort = config.reasoning.parameter {
+            body["reasoning_effort"] = effort
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

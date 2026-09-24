@@ -190,4 +190,12 @@ extension Font {
         }
         return .custom(store.selectedPostScriptName, size: scaled).weight(weight)
     }
+
+    /// 等宽字体：命令台这类地方要用。
+    /// **故意不跟随用户的自定义字体**（终端换成宋体就毁了），
+    /// 但字号跟随用户的设置，所以它也是一个正经的字体入口。
+    static func aevisMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let scaled = max(9, size * CGFloat(FontStore.shared.scale))
+        return .system(size: scaled, weight: weight, design: .monospaced)
+    }
 }
