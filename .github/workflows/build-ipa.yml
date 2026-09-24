@@ -52,7 +52,30 @@ jobs:
           echo "===== BUILD OK ====="
           tail -n 8 build.log
 
+      # ——— 失败诊断 ———
+      # 把编译日志发到一个公开 Release 里。因为 Actions 的日志下载接口需要鉴权，
+      # 而 Release 资产是公开可取的，这样在无 token 的环境（例如手机、外部工具）也能拿到错误。
+      - name: Ensure build log exists
+        if: always()
+        run: |
+          touch build.log
+          ls -lh build.log
+
+      - name: Publish build log when failing
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: log-${{ github.run_number }}
+          name: 构建失败日志 run ${{ github.run_number }}
+          prerelease: true
+          body: |
+            构建失败。完整的 `build.log` 在下方 Assets 里。
+            提交：`${{ github.sha }}`
+          files: build.log
+
+      # ——— 成功则出包 ———
       - name: Package IPA
+        if: success()
         run: |
           set -e
           APP="build/Release-iphoneos/Aevis.app"
@@ -77,6 +100,7 @@ jobs:
           ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
 
       - name: Upload artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Aevis-ipa
@@ -86,6 +110,7 @@ jobs:
           retention-days: 30
 
       - name: Publish release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
