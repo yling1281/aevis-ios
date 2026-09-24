@@ -26,7 +26,7 @@ struct ChatView: View {
             header
             messageList
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
         }
         .sheet(isPresented: $showSettings) {
@@ -35,19 +35,14 @@ struct ChatView: View {
                 .environmentObject(settings)
                 .environmentObject(chat)
         }
-        // 键盘上方给一个明确的「收起」，比只靠手势可靠
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("收起") { composerFocused = false }
-            }
-        }
         .onDisappear {
             sendTask?.cancel()
         }
     }
 
     // MARK: - 顶部
+    //
+    // 加一条实底，否则换成花哨的自定义背景图时，顶部的名字会看不清。
 
     private var header: some View {
         HStack(spacing: 11) {
@@ -79,6 +74,7 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 10)
+        .background(Rectangle().fill(.bar))
     }
 
     // MARK: - 消息列表
@@ -113,7 +109,7 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 10)
             }
-            // 手指一拖就收，不用先把键盘拖回去
+            // 手指一拖就收
             .scrollDismissesKeyboard(.immediately)
             // 点消息区任意位置也能收
             .onTapGesture {
@@ -175,19 +171,35 @@ struct ChatView: View {
 
     // MARK: - 底部输入栏
     //
-    // 玻璃要整条加在容器上，不能加在 TextField 上 ——
-    // 画在自带样式的输入框上不生效，之前底部就看不到玻璃。
+    // 三处修正（都是用户实测发现的）：
+    // 1. 玻璃要整条加在容器上，不能加在 TextField 上（自带样式的控件不生效）
+    // 2. 底下垫一条实底，消息不会从输入栏周围透上来
+    // 3. 「收起」放在输入栏同一排，不再飘在键盘上方
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 6) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.aevis(settings.simpleMode ? 17 : 15))
                 .focused($composerFocused)
                 .disabled(isSending)
-                .padding(.vertical, settings.simpleMode ? 11 : 9)
-                .padding(.leading, 15)
-                .padding(.trailing, 4)
+                .padding(.vertical, settings.simpleMode ? 10 : 8)
+                .padding(.leading, 12)
+                .padding(.trailing, 2)
+
+            if composerFocused {
+                Button {
+                    composerFocused = false
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.aevis(13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 4)
+            }
 
             Button(action: send) {
                 Image(systemName: isSending ? "stop.fill" : "arrow.up")
@@ -203,13 +215,14 @@ struct ChatView: View {
                     .contentShape(Circle())
             }
             .disabled(!canSend && !isSending)
-            .padding(.trailing, 7)
-            .padding(.bottom, 6)
+            .padding(.bottom, 1)
         }
+        .padding(6)
         .aevisGlass(cornerRadius: 26)
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(Rectangle().fill(.bar))
     }
 
     private var placeholder: String {

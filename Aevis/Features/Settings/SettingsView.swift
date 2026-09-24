@@ -22,7 +22,7 @@ struct SettingsView: View {
                     VoiceSettingsCard()
                     modelCard
                     chatCard
-                    diagnosticsCard
+                    aboutCard
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -60,10 +60,10 @@ struct SettingsView: View {
                     AevisAvatar(size: 40, seed: personaStore.persona.avatarSeed)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(personaStore.persona.name.isEmpty ? "还没起名字" : personaStore.persona.name)
-                            .font(.system(size: 15.5, weight: .medium))
+                            .font(.aevis(15.5, weight: .medium))
                             .foregroundStyle(.primary)
-                        Text("名字、性别、性格、说话方式、系统音色")
-                            .font(.system(size: 12))
+                        Text("头像、名字、性别、性格、说话方式、系统音色")
+                            .font(.aevis(12))
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
@@ -91,10 +91,10 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("API Key")
-                    .font(.system(size: 12.5))
+                    .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
                 SecureField("sk-...", text: $settings.apiKey)
-                    .font(.system(size: 14))
+                    .font(.aevis(14))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .padding(.horizontal, 13)
@@ -108,7 +108,7 @@ struct SettingsView: View {
             labeledField("模型名", hint: "deepseek-chat", text: $settings.model)
             rule
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
                     Button(action: runTest) {
                         HStack(spacing: 7) {
@@ -116,7 +116,7 @@ struct SettingsView: View {
                                 ProgressView().controlSize(.small)
                             }
                             Text(testing ? "正在试…" : "测试连接")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.aevis(14, weight: .medium))
                         }
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 15)
@@ -131,7 +131,7 @@ struct SettingsView: View {
                                 ProgressView().controlSize(.small)
                             }
                             Text(pullingModels ? "正在拉…" : "拉取模型")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.aevis(14, weight: .medium))
                         }
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 15)
@@ -143,32 +143,54 @@ struct SettingsView: View {
                     Spacer(minLength: 0)
                 }
 
-                if !settings.modelList.isEmpty {
-                    Picker("模型", selection: $settings.model) {
-                        ForEach(settings.modelList, id: \.self) { name in
-                            Text(name).tag(name)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                }
-
                 if let testResult {
                     Text(testResult)
-                        .font(.system(size: 12.5))
+                        .font(.aevis(12.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let modelMessage {
                     Text(modelMessage)
-                        .font(.system(size: 12))
+                        .font(.aevis(12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                // 拉到的模型：做成可点的列表，一眼看得出哪个在用。
+                // 之前用下拉菜单，在 iOS 上只渲染出一个很小的箭头，看着像坏了。
+                if !settings.modelList.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("选一个")
+                            .font(.aevis(12))
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 4)
+
+                        ForEach(settings.modelList, id: \.self) { name in
+                            Button {
+                                settings.model = name
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text(name)
+                                        .font(.aevis(14))
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 8)
+                                    if settings.model == name {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(settings.accentColor)
+                                    }
+                                }
+                                .padding(.vertical, 9)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 Text("Key 只存在这台手机的钥匙串里，不会上传到任何地方，也不会进代码仓库。支持任何 OpenAI 兼容接口。")
-                    .font(.system(size: 11.5))
+                    .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -187,15 +209,15 @@ struct SettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("已记住 \(chat.messages.count) 条消息")
-                        .font(.system(size: 14.5))
+                        .font(.aevis(14.5))
                         .foregroundStyle(.primary)
                     Text("记录只存在这台手机上")
-                        .font(.system(size: 11.5))
+                        .font(.aevis(11.5))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Button("清空") { showClearConfirm = true }
-                    .font(.system(size: 14))
+                    .font(.aevis(14))
                     .foregroundStyle(.red)
                     .disabled(chat.messages.isEmpty)
             }
@@ -205,27 +227,29 @@ struct SettingsView: View {
         .aevisGlass(cornerRadius: 20)
     }
 
-    // MARK: - 关于本机
+    // MARK: - 关于 Aevis
 
-    private var diagnosticsCard: some View {
+    private var aboutCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cardTitle("关于本机")
+            // 这里不是 iOS 的「关于本机」，是 Aevis 自己的版本信息，
+            // 叫法上分开，免得看着像系统设置。
+            cardTitle("关于 Aevis")
 
-            ForEach(Array(diagnosticRows.enumerated()), id: \.offset) { index, row in
+            ForEach(Array(aboutRows.enumerated()), id: \.offset) { index, row in
                 HStack(spacing: 12) {
                     Text(row.0)
-                        .font(.system(size: 13.5))
+                        .font(.aevis(13.5))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 12)
                     Text(row.1)
-                        .font(.system(size: 13.5, weight: .medium))
+                        .font(.aevis(13.5, weight: .medium))
                         .foregroundStyle(.primary)
                         .multilineTextAlignment(.trailing)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
 
-                if index < diagnosticRows.count - 1 {
+                if index < aboutRows.count - 1 {
                     Rectangle()
                         .fill(Color.primary.opacity(0.08))
                         .frame(height: 0.5)
@@ -237,14 +261,13 @@ struct SettingsView: View {
         .aevisGlass(cornerRadius: 20)
     }
 
-    private var diagnosticRows: [(String, String)] {
+    private var aboutRows: [(String, String)] {
         [
-            ("系统版本", Diagnostics.osVersion),
-            ("设备代号", Diagnostics.machine),
-            ("App 版本", Diagnostics.appVersion),
-            ("构建提交", Diagnostics.commit),
+            ("版本", Diagnostics.appVersion),
+            ("构建", Diagnostics.commit),
+            ("运行环境", "iOS \(Diagnostics.osVersion) · \(Diagnostics.machine)"),
             ("液态玻璃", Diagnostics.supportsLiquidGlass ? "可用" : "不可用"),
-            ("签名状态", Diagnostics.isSigned ? "已签名" : "未签名"),
+            ("签名", Diagnostics.isSigned ? "已签名" : "未签名"),
             ("内置 Linux", Diagnostics.hasLinuxSandbox ? "已就绪" : "未接入")
         ]
     }
@@ -258,7 +281,7 @@ struct SettingsView: View {
 
     private func cardTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12.5, weight: .medium))
+            .font(.aevis(12.5, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
             .padding(.top, 15)
@@ -275,10 +298,10 @@ struct SettingsView: View {
     private func labeledField(_ title: String, hint: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
-                .font(.system(size: 12.5))
+                .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
             TextField(hint, text: text)
-                .font(.system(size: 14))
+                .font(.aevis(14))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 13)
