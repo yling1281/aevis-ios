@@ -1,32 +1,67 @@
 import SwiftUI
 
-/// 玻璃表面：iOS 26 上走系统原生液态玻璃，低版本用材质近似。
-/// 全 App 的卡片都走这一个入口，以后想统一调风格只改这里。
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// 玻璃表面。**要不要玻璃由用户决定** —— 关掉就变成纯色卡片。
+/// 全 App 的卡片都走这一个入口，所以一个开关就能全局生效。
 extension View {
     @ViewBuilder
     func aevisGlass(cornerRadius: CGFloat = 22) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(
-                .regular,
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
+        if AppSettings.shared.useGlass {
+            if #available(iOS 26.0, *) {
+                self.glassEffect(
+                    .regular,
+                    in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                )
+            } else {
+                self
+                    .background(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
+            }
         } else {
             self
                 .background(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
+                        .fill(Color.primary.opacity(0.055))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
                 )
         }
     }
 }
 
-/// 背景：深色/浅色都成立的柔和光晕，不依赖 UIKit 颜色。
+/// 聊天背景。默认给一个「光晕」，但用户能换成纯色、纸感或自己的图片。
 struct AevisBackground: View {
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        ZStack {
+            switch settings.backgroundStyle {
+            case .aurora:
+                aurora
+            case .plain:
+                base
+            case .paper:
+                paper
+            case .custom:
+                customImage
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - 各样样式
 
     private var base: Color {
         scheme == .dark
@@ -34,28 +69,60 @@ struct AevisBackground: View {
             : Color(red: 0.96, green: 0.96, blue: 0.98)
     }
 
-    var body: some View {
+    /// 两团光晕，第一团跟着主题色走，所以换主题色连背景都会变。
+    private var aurora: some View {
         ZStack {
             base
             RadialGradient(
-                colors: [Color(red: 0.45, green: 0.36, blue: 0.98).opacity(scheme == .dark ? 0.42 : 0.30), .clear],
+                colors: [settings.accentColor.opacity(scheme == .dark ? 0.42 : 0.26), .clear],
                 center: UnitPoint(x: 0.14, y: 0.04),
                 startRadius: 0,
                 endRadius: 430
             )
             RadialGradient(
-                colors: [Color(red: 0.18, green: 0.76, blue: 0.72).opacity(scheme == .dark ? 0.34 : 0.24), .clear],
+                colors: [Color(red: 0.18, green: 0.76, blue: 0.72).opacity(scheme == .dark ? 0.30 : 0.20), .clear],
                 center: UnitPoint(x: 0.92, y: 0.10),
                 startRadius: 0,
                 endRadius: 400
             )
         }
-        .ignoresSafeArea()
+    }
+
+    /// 暖白／暖灰，看久了眼睛不累。
+    private var paper: some View {
+        ZStack {
+            scheme == .dark
+                ? Color(red: 0.10, green: 0.095, blue: 0.09)
+                : Color(red: 0.965, green: 0.95, blue: 0.925)
+            RadialGradient(
+                colors: [Color(red: 0.85, green: 0.74, blue: 0.58).opacity(scheme == .dark ? 0.10 : 0.16), .clear],
+                center: UnitPoint(x: 0.5, y: 0.0),
+                startRadius: 0,
+                endRadius: 520
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var customImage: some View {
+        #if canImport(UIKit)
+        if let data = settings.customBackgroundData, let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+        } else {
+            aurora
+        }
+        #else
+        aurora
+        #endif
     }
 }
 
-/// 她的雏形：一团会呼吸的光。
+/// TA 的雏形：一团会呼吸的光。跟随主题色。
 struct AevisOrb: View {
+    @ObservedObject private var settings = AppSettings.shared
     @State private var breathing = false
 
     var body: some View {
@@ -64,8 +131,8 @@ struct AevisOrb: View {
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(red: 0.58, green: 0.50, blue: 1.00),
-                            Color(red: 0.28, green: 0.70, blue: 0.86)
+                            settings.accentColor.opacity(0.95),
+                            settings.accentColor.opacity(0.55)
                         ],
                         center: UnitPoint(x: 0.34, y: 0.28),
                         startRadius: 4,
@@ -88,9 +155,11 @@ struct AevisOrb: View {
     }
 }
 
-/// 她的头像。目前是一团有颜色的光；avatarSeed 变了颜色就变，
-/// 所以使用者换人设时头像也跟着换。以后支持上传图片后，这里会优先用图片。
+/// TA 的头像。seed 为 0 时跟随主题色，其余 seed 是固定色。
+/// 以后支持上传图片时，这里会优先用图片。
 struct AevisAvatar: View {
+    @ObservedObject private var settings = AppSettings.shared
+
     var size: CGFloat = 32
     var seed: Int = 0
 
@@ -104,8 +173,10 @@ struct AevisAvatar: View {
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(hue: hue, saturation: 0.60, brightness: 0.99),
-                            Color(hue: hue - 0.16, saturation: 0.62, brightness: 0.78)
+                            seed == 0 ? settings.accentColor : Color(hue: hue, saturation: 0.60, brightness: 0.99),
+                            seed == 0
+                                ? settings.accentColor.opacity(0.62)
+                                : Color(hue: hue - 0.16, saturation: 0.62, brightness: 0.78)
                         ],
                         center: UnitPoint(x: 0.34, y: 0.28),
                         startRadius: 1,
