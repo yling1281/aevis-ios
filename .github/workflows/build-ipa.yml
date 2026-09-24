@@ -226,10 +226,49 @@ jobs:
       - name: Ensure logs exist
         if: always()
         run: |
-          # git-push.log 是「回提交源码」那一步留下的 —— 那一步失败时
-          # 它就是唯一能说明原因的东西（失败发布必须带上它）。
-          touch build.log sim-build.log git-push.log
+          # ⚠️ 每个日志文件都必须**有内容**。
+          #
+          # GitHub 不接受 0 字节的发布资产（报 "size must be greater than or
+          # equal to 1"）。files 里只要有一个空文件，**整个「发布失败日志」
+          # 都会失败** —— 结果就是编译错误一个都看不到，只能靠推理去猜。
+          # 这个坑真踩过：模拟器那步没跑到 → sim-build.log 是 0 字节 →
+          # 连有内容的 build.log 也一起没上传出去。
+          for f in build.log sim-build.log git-push.log; do
+            if [ ! -s "$f" ]; then
+              echo "（这一步没有产生内容）" > "$f"
+            fi
+          done
           ls -lh *.log || true
+
+      # 把编译错误挑出来写进一个文件，发布时直接当 release 正文显示。
+      # 这样失败原因在 release 页面上就能看见，不用下载日志（也下载不动的场合太多）。
+      - name: Collect failure info
+        if: failure()
+        run: |
+          {
+            echo "构建失败。"
+            echo ""
+            echo '提交：`${{ github.sha }}`'
+            echo ""
+            echo "## 编译错误"
+            echo ""
+            echo '```'
+            grep -E "error:" build.log 2>/dev/null | head -60 || true
+            grep -q "error:" build.log 2>/dev/null \
+              || echo "（build.log 里没有 error: 行 —— 可能挂在编译之前的步骤）"
+            echo '```'
+          } > errors.txt
+          cat errors.txt
+
+          # 再把编译错误以 workflow 命令的形式发一遍 —— 它们会出现在页面的
+          # Annotations 区域，而且是**不需要鉴权就能读到**的。
+          #
+          # 为什么要多这一手：下载运行日志的接口
+          # （/actions/jobs/{id}/logs）对开源仓库返回 403，这次就是被它卡住的 ——
+          # 明明只差一条编译错误，却拿不到。Annotations 走另一条路，能读。
+          grep -E "error:" build.log 2>/dev/null | head -15 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
 
       # ——— 出 IPA（只在被要求时） ———
 
@@ -308,10 +347,11 @@ jobs:
           tag_name: log-${{ github.run_number }}
           name: 失败日志 ${{ github.run_number }}
           prerelease: true
-          body: |
-            构建失败。完整日志见下方 Assets。
-            提交：`${{ github.sha }}`
+          # 正文直接用上一步挑出来的编译错误 —— release 页面上就能看见，
+          # 免得又碰到「日志下载要鉴权」那种情况
+          body_path: errors.txt
           files: |
+            errors.txt
             build.log
             sim-build.log
             git-push.log
