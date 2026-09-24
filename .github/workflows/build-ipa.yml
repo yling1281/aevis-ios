@@ -27,6 +27,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Generate app icon
+        run: python3 scripts/make_icon.py Aevis/Resources
+
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -45,7 +48,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            > build.log 2>&1 || { echo "===== BUILD FAILED ====="; tail -n 150 build.log; exit 1; }
+            > build.log 2>&1 || { echo "===== BUILD FAILED ====="; tail -n 200 build.log; exit 1; }
           echo "===== BUILD OK ====="
           tail -n 8 build.log
 

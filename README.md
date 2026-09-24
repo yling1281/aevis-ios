@@ -6,8 +6,9 @@ Aevis 是一个原生 iOS 的 AI 恋人 App。她住在你的手机里，有自�
 
 **她是谁，由你定义。** Aevis 不内置任何固定人设——第一次打开时，你来给她起名字、选头像、写性格、挑音色。这个仓库提供的是「她能存在的条件」，不是「她」。
 
-> 当前状态：**M0（骨架验证版）**。这一版只证明一条链路走得通——
-> 在 Windows 上写的代码，能变成 iPhone 上一个能点开的图标。
+> 当前状态：**M1（她活过来）**。M0 已验收通过——云端编译链路跑通，
+> 能装进手机、能启动、能读到系统信息。M1 在把「她」做出来：
+> 人设系统、聊天界面、跨会话记忆、以及让她开口说话。
 
 ---
 
@@ -41,6 +42,7 @@ Windows 写码  →  GitHub Actions（macos-26 云端 Mac）编译  →  未签�
 
 ```sh
 brew install xcodegen
+python3 scripts/make_icon.py Aevis/Resources   # App 图标由脚本生成，不在版本库里
 xcodegen generate
 open Aevis.xcodeproj
 ```
@@ -54,13 +56,18 @@ open Aevis.xcodeproj
 
 ```
 project.yml                        XcodeGen 工程描述（唯一的工程配置来源）
+scripts/make_icon.py               用纯 Python 生成 App 图标（无第三方依赖）
 Aevis/
-  App/                             入口与根视图
-  DesignSystem/                    玻璃表面、背景、她的雏形
-  Core/                            诊断、工具、以及后续的服务层
+  App/                             入口与根路由（没有人设就走引导，有就进聊天）
+  Models/                          Persona（她是谁）、ChatMessage
+  Core/                            设置、钥匙串、对话存储、模型调用、语音
+  Features/
+    Persona/                       创造她 / 改她
+    Chat/                          聊天界面
+    Settings/                      模型接入、说话、关于本机
+  DesignSystem/                    玻璃表面、背景、头像、她的雏形
   Resources/Info.plist
 .github/workflows/build-ipa.yml    云端编译流程
-docs/                              方案与路线图
 ```
 
 ---
@@ -69,8 +76,8 @@ docs/                              方案与路线图
 
 | 阶段 | 内容 |
 |---|---|
-| **M0** | 骨架验证：云端编译链路跑通，能装能启动 ✅ 当前 |
-| **M1** | 她活过来：液态玻璃界面、聊天、人设自定义、记忆、模型接入、语音 |
+| **M0** | 骨架验证：云端编译链路跑通，能装能启动 ✅ 已完成 |
+| **M1** | 她活过来：液态玻璃界面、聊天、人设自定义、记忆、模型接入、语音 ← 当前 |
 | **M2** | 她的手：时间、剪贴板、计算器、日历、提醒、天气、定位、健康 |
 | **M3** | 她的世界：内置浏览器、搜索引擎、外部 MCP |
 | **M4** | 真 Linux：内置 Alpine 沙箱、命令台、本地 MCP |
@@ -92,9 +99,14 @@ iOS 的系统限制不是靠努力能绕过去的，这些是明确做不到或�
 
 ---
 
+## 隐私
+
+- 人设与聊天记录**只存在这台设备上**（App 沙盒内的 Application Support 目录）
+- 模型 API Key **只存在系统钥匙串**里，不进 UserDefaults，更不进本仓库
+
+---
+
 ## 许可证
 
 GPL-3.0。内置 Linux 沙箱依赖 GPLv3 的 [iSH](https://github.com/ish-app/ish)，
 因此整个作品以 GPLv3 分发。
-
-人格设定与聊天记录只保存在设备本地，不在本仓库中。

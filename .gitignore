@@ -17,3 +17,6 @@ Payload/
 
 # XcodeGen 生成物
 Aevis.xcodeproj/
+
+# 图标是脚本生成的（scripts/make_icon.py），不进版本库
+Aevis/Resources/Assets.xcassets/
