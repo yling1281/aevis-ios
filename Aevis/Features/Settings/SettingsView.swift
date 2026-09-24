@@ -18,6 +18,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     personaCard
+                    ProactiveSettingsCard()
                     AppearanceSettingsCard()
                     VoiceSettingsCard()
                     modelCard
