@@ -12,7 +12,7 @@ jobs:
   build:
     name: Build unsigned IPA
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -23,6 +23,8 @@ jobs:
           sw_vers
           xcodebuild -version
           echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "simulators:"
+          xcrun simctl list devices available | grep -m 8 "iPhone" || true
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -33,7 +35,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build
+      # ——— 真机用的未签名包 ———
+
+      - name: Build (device, unsigned)
         env:
           AEVIS_COMMIT: ${{ github.sha }}
         run: |
@@ -52,28 +56,6 @@ jobs:
           echo "===== BUILD OK ====="
           tail -n 8 build.log
 
-      # ——— 失败诊断 ———
-      # 把编译日志发到一个公开 Release 里。因为 Actions 的日志下载接口需要鉴权，
-      # 而 Release 资产是公开可取的，这样在无 token 的环境（例如手机、外部工具）也能拿到错误。
-      - name: Ensure build log exists
-        if: always()
-        run: |
-          touch build.log
-          ls -lh build.log
-
-      - name: Publish build log when failing
-        if: failure()
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: log-${{ github.run_number }}
-          name: 构建失败日志 run ${{ github.run_number }}
-          prerelease: true
-          body: |
-            构建失败。完整的 `build.log` 在下方 Assets 里。
-            提交：`${{ github.sha }}`
-          files: build.log
-
-      # ——— 成功则出包 ———
       - name: Package IPA
         if: success()
         run: |
@@ -82,7 +64,6 @@ jobs:
           if [ ! -d "$APP" ]; then
             echo "找不到 Aevis.app，输出目录内容："
             find build -maxdepth 3 -name "*.app" -print
-            ls -R build | head -n 60
             exit 1
           fi
 
@@ -99,14 +80,83 @@ jobs:
 
           ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
 
+      # ——— 模拟器自检：装进去、跑起来、截图 ———
+      #
+      # 这一步是为了「先自己看一眼再交给用户」，能拦住布局类的 bug
+      # （比如元素被挤出屏幕、气泡对不齐）。交互类的 bug 拦不住，那需要真机。
+      # 用 continue-on-error，截图失败也不影响出包。
+
+      - name: Simulator screenshots
+        if: success()
+        continue-on-error: true
+        env:
+          AEVIS_COMMIT: ${{ github.sha }}
+        run: |
+          set -e
+          echo "::group::构建模拟器版本"
+          xcodebuild \
+            -project Aevis.xcodeproj \
+            -target Aevis \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            SYMROOT="$PWD/build-sim" \
+            AEVIS_COMMIT="$AEVIS_COMMIT" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            > sim-build.log 2>&1 || { echo "模拟器构建失败"; tail -n 100 sim-build.log; exit 1; }
+          echo "::endgroup::"
+
+          APP=$(ls -d build-sim/Debug-iphonesimulator/*.app | head -1)
+          echo "APP=$APP"
+
+          UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl list devices available | grep -m1 -oE '\(([0-9A-F-]{36})\)' | tr -d '()')
+          fi
+          echo "UDID=$UDID"
+          test -n "$UDID" || { echo "找不到可用模拟器"; xcrun simctl list devices available; exit 1; }
+
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+
+          mkdir -p shots
+          capture () {
+            name="$1"; shift
+            echo "--- 截图 $name 参数: $* ---"
+            xcrun simctl launch "$UDID" com.aevis.ios "$@" || true
+            sleep 8
+            xcrun simctl io "$UDID" screenshot "shots/$name.png" || true
+            xcrun simctl terminate "$UDID" com.aevis.ios || true
+            sleep 2
+          }
+
+          capture 01-onboarding
+          capture 02-chat        -aevisDemo
+          capture 03-noglass     -aevisDemo -aevisNoGlass
+          capture 04-simple      -aevisDemo -aevisSimple
+          capture 05-paper       -aevisDemo -aevisCustomBackground
+
+          echo "::group::截图结果"
+          ls -lh shots/ || true
+          echo "::endgroup::"
+
+      # ——— 诊断与产物 ———
+
+      - name: Ensure logs exist
+        if: always()
+        run: |
+          touch build.log sim-build.log
+          ls -lh *.log || true
+
       - name: Upload artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Aevis-ipa
+          name: Aevis-build
           path: |
             Aevis-unsigned.ipa
             Aevis-adhoc.ipa
+            shots/*.png
           retention-days: 30
 
       - name: Publish release
@@ -122,14 +172,29 @@ jobs:
             - 提交：`${{ github.sha }}`
             - 工具链：macos-26 / Xcode 26.x
 
-            **安装方式（手机端）**
+            **手机端安装**：下载 `Aevis-unsigned.ipa`，用「全能签」签名后安装。
 
-            1. 在 iPhone 上打开本页
-            2. 下载 `Aevis-unsigned.ipa`
-            3. 用「全能签」打开这个文件，签名后安装
-
-            `Aevis-unsigned.ipa` 是未签名版本（推荐给签名工具用）。
-            `Aevis-adhoc.ipa` 已做 ad-hoc 签名，作为备用。
+            另外附上模拟器自检截图（`shots-*.png`）与构建日志（`build.log`、`sim-build.log`），
+            方便排查。`Aevis-adhoc.ipa` 是已做 ad-hoc 签名的备用版本。
           files: |
             Aevis-unsigned.ipa
             Aevis-adhoc.ipa
+            shots/*.png
+            build.log
+            sim-build.log
+
+      # ——— 失败时把日志也公开出来，便于无 token 环境排查 ———
+
+      - name: Publish build log when failing
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: log-${{ github.run_number }}
+          name: 构建失败日志 run ${{ github.run_number }}
+          prerelease: true
+          body: |
+            构建失败。完整日志见下方 Assets。
+            提交：`${{ github.sha }}`
+          files: |
+            build.log
+            sim-build.log

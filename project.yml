@@ -41,6 +41,14 @@ targets:
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "YES"
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+      configs:
+        # 显式定义 DEBUG，别依赖 Xcode 默认模板 ——
+        # DemoSeed 里的 #if DEBUG 要靠它，CI 截图自检也靠它。
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
 
 schemes:
   Aevis:
