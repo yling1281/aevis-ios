@@ -71,7 +71,16 @@ final class AppSettings: ObservableObject {
         static let useGlass = "aevis.useGlass"
         static let simpleMode = "aevis.simpleMode"
         static let backgroundStyle = "aevis.backgroundStyle"
+        static let backgroundDim = "aevis.backgroundDim"
         static let accentIndex = "aevis.accentIndex"
+        static let proactiveEnabled = "aevis.proactiveEnabled"
+        static let fixedTimesEnabled = "aevis.fixedTimesEnabled"
+        static let fixedTimes = "aevis.fixedTimes"
+        static let randomEnabled = "aevis.randomEnabled"
+        static let randomPerDay = "aevis.randomPerDay"
+        static let proactiveLines = "aevis.proactiveLines"
+        static let barkEnabled = "aevis.barkEnabled"
+        static let barkURL = "aevis.barkURL"
         static let llmKeychain = "openai.apiKey"
         static let ttsKeychain = "tts.apiKey"
     }
@@ -142,12 +151,10 @@ final class AppSettings: ObservableObject {
 
     // MARK: - 外观
 
-    /// 用不用液态玻璃。关掉就变纯色卡片。
     @Published var useGlass: Bool {
         didSet { UserDefaults.standard.set(useGlass, forKey: Key.useGlass) }
     }
 
-    /// 简易模式：更大的字、更松的间距、不要花哨装饰。
     @Published var simpleMode: Bool {
         didSet { UserDefaults.standard.set(simpleMode, forKey: Key.simpleMode) }
     }
@@ -156,7 +163,6 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(backgroundStyle.rawValue, forKey: Key.backgroundStyle) }
     }
 
-    /// 自定义背景图（已压缩）。放文件，不放 UserDefaults。
     @Published var customBackgroundData: Data? {
         didSet {
             let url = Self.backgroundFileURL
@@ -170,6 +176,51 @@ final class AppSettings: ObservableObject {
 
     @Published var accentIndex: Int {
         didSet { UserDefaults.standard.set(accentIndex, forKey: Key.accentIndex) }
+    }
+
+    /// 自定义背景图上压的那层遮罩有多重。0 = 不压。压太重会把图糊掉，所以默认很轻。
+    @Published var backgroundDim: Double {
+        didSet { UserDefaults.standard.set(backgroundDim, forKey: Key.backgroundDim) }
+    }
+
+    // MARK: - 主动消息
+
+    /// 总开关。关掉之后不再排任何主动消息。
+    @Published var proactiveEnabled: Bool {
+        didSet { UserDefaults.standard.set(proactiveEnabled, forKey: Key.proactiveEnabled) }
+    }
+
+    /// 定时发消息开关。
+    @Published var fixedTimesEnabled: Bool {
+        didSet { UserDefaults.standard.set(fixedTimesEnabled, forKey: Key.fixedTimesEnabled) }
+    }
+
+    /// 定时的时间点，格式 "HH:mm"。
+    @Published var fixedTimes: [String] {
+        didSet { UserDefaults.standard.set(fixedTimes, forKey: Key.fixedTimes) }
+    }
+
+    /// 不定时发消息开关。
+    @Published var randomEnabled: Bool {
+        didSet { UserDefaults.standard.set(randomEnabled, forKey: Key.randomEnabled) }
+    }
+
+    /// 不定时每天几条。
+    @Published var randomPerDay: Int {
+        didSet { UserDefaults.standard.set(randomPerDay, forKey: Key.randomPerDay) }
+    }
+
+    /// 提前写好的一批「她会主动说的话」。
+    @Published var proactiveLines: [String] {
+        didSet { UserDefaults.standard.set(proactiveLines, forKey: Key.proactiveLines) }
+    }
+
+    @Published var barkEnabled: Bool {
+        didSet { UserDefaults.standard.set(barkEnabled, forKey: Key.barkEnabled) }
+    }
+
+    @Published var barkURL: String {
+        didSet { UserDefaults.standard.set(barkURL, forKey: Key.barkURL) }
     }
 
     private static var backgroundFileURL: URL {
@@ -197,7 +248,16 @@ final class AppSettings: ObservableObject {
         useGlass = defaults.object(forKey: Key.useGlass) as? Bool ?? true
         simpleMode = defaults.object(forKey: Key.simpleMode) as? Bool ?? false
         backgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .aurora
+        backgroundDim = defaults.object(forKey: Key.backgroundDim) as? Double ?? 0.12
         accentIndex = defaults.object(forKey: Key.accentIndex) as? Int ?? 0
+        proactiveEnabled = defaults.object(forKey: Key.proactiveEnabled) as? Bool ?? false
+        fixedTimesEnabled = defaults.object(forKey: Key.fixedTimesEnabled) as? Bool ?? false
+        fixedTimes = defaults.stringArray(forKey: Key.fixedTimes) ?? ["09:00", "13:30", "22:30"]
+        randomEnabled = defaults.object(forKey: Key.randomEnabled) as? Bool ?? false
+        randomPerDay = defaults.object(forKey: Key.randomPerDay) as? Int ?? 2
+        proactiveLines = defaults.stringArray(forKey: Key.proactiveLines) ?? []
+        barkEnabled = defaults.object(forKey: Key.barkEnabled) as? Bool ?? false
+        barkURL = defaults.string(forKey: Key.barkURL) ?? ""
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
     }
 

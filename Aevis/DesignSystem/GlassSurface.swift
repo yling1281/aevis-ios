@@ -134,13 +134,16 @@ struct AevisBackground: View {
         #endif
     }
 
-    /// 背景图上压一层遮罩。不留这一层的话，白字压在花哨的图上根本看不清。
+    /// 背景图上压一层遮罩，保证文字看得清。
+    /// **强度交给用户控制**（backgroundDim），默认很轻 ——
+    /// 之前写死 0.30 / 0.46，用户反馈「换自定义图之后背景整个暗下来，很别扭」。
     private var scrimBackground: some View {
         Color.black.opacity(scrimOpacity)
     }
 
     private var scrimOpacity: Double {
-        scheme == .dark ? 0.46 : 0.30
+        let extra = min(max(settings.backgroundDim, 0), 0.8)
+        return scheme == .dark ? 0.08 + extra : 0.04 + extra
     }
 }
 

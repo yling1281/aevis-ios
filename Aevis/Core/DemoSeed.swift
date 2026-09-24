@@ -7,6 +7,7 @@ import Foundation
 ///     -aevisNoGlass            关掉液态玻璃
 ///     -aevisSimple             开简易模式
 ///     -aevisCustomBackground   换成纸感背景
+///     -aevisOpenSettings       直接打开设置面板
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，跑出「首次引导」和「聊天页」两种画面。
 enum DemoSeed {
@@ -59,6 +60,19 @@ enum DemoSeed {
         if args.contains("-aevisNoGlass") { settings.useGlass = false }
         if args.contains("-aevisSimple") { settings.simpleMode = true }
         if args.contains("-aevisCustomBackground") { settings.backgroundStyle = .paper }
+
+        // 让「主动消息」卡片在截图里是展开状态，否则只能看到一个开关
+        settings.proactiveEnabled = true
+        settings.fixedTimesEnabled = true
+        settings.randomEnabled = true
+        settings.barkEnabled = true
+        settings.barkURL = "https://api.day.app/示例KEY"
+        settings.proactiveLines = [
+            "在干嘛呢",
+            "突然想你了",
+            "记得喝水，别光顾着忙",
+            "今天累不累"
+        ]
     }
     #endif
 }
