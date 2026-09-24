@@ -419,24 +419,33 @@ struct AppearanceSettingsCard: View {
     private func handleFontImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
+            guard !urls.isEmpty else {
+                fontNote = "没有选到文件。"
+                return
+            }
             var ok: [String] = []
-            var failed = 0
+            var problems: [String] = []
             for url in urls {
-                if let name = fonts.importFont(from: url) {
-                    ok.append(name)
-                } else {
-                    failed += 1
+                do {
+                    ok.append(try fonts.importFont(from: url))
+                } catch {
+                    // 把原因说出来 —— 之前失败什么都不显示，看着像「点了没反应」
+                    problems.append("\(url.lastPathComponent)：\(error.localizedDescription)")
                 }
             }
             if ok.isEmpty {
-                fontNote = "没能导入（可能是字体文件有问题，或这个格式 iOS 不支持）。"
-            } else if failed == 0 {
-                fontNote = "已导入并切换为「\(ok[0])」。"
+                fontNote = problems.isEmpty
+                    ? "没能导入。"
+                    : "没能导入：\n" + problems.joined(separator: "\n")
             } else {
-                fontNote = "已导入「\(ok[0])」，另有 \(failed) 个文件没成功。"
+                var line = "已导入并切换为「\(ok[0])」。"
+                if !problems.isEmpty {
+                    line += "\n另外这几个没成：\n" + problems.joined(separator: "\n")
+                }
+                fontNote = line
             }
         case .failure(let error):
-            fontNote = "导入失败：\(error.localizedDescription)"
+            fontNote = "打开文件选择器失败：\(error.localizedDescription)"
         }
     }
 

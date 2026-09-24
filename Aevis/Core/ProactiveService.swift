@@ -246,27 +246,60 @@ final class ProactiveService {
         guard !base.isEmpty else { throw BarkError.notConfigured }
         while base.hasSuffix("/") { base.removeLast() }
 
-        guard var comps = URLComponents(string: base), comps.host != nil else {
+        guard let parsed = URL(string: base), let host = parsed.host, !host.isEmpty else {
             throw BarkError.badURL
         }
+        // 设备 key 就是地址最后那一段：https://api.day.app/你的KEY
+        let key = parsed.lastPathComponent
+
+        // ——— 首选：POST + JSON ———
+        //
+        // 中文直接放在 JSON 正文里，**不用拼进 URL 做百分号转义**。
+        // 之前走的是 `/<标题>/<内容>` 那种路径写法，中文会被转成一长串 %E5%…，
+        // 用户看到的就是「符号转码」。
+        if !key.isEmpty, let pushURL = URL(string: base + "/push") {
+            var payload: [String: Any] = [
+                "device_key": key,
+                "title": title,
+                "body": text,
+                "group": "Aevis"
+            ]
+            payload["level"] = "timeSensitive"
+
+            var request = URLRequest(url: pushURL)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 20
+            request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+            if let result = try? await Self.perform(request) {
+                return
+            }
+            // 失败就往下走兜底 —— 老版本 Bark 或自建服务可能没有 /push
+        }
+
+        // ——— 兜底：路径那种老写法（中文照旧要转义，但至少能用） ———
+        guard var comps = URLComponents(string: base) else { throw BarkError.badURL }
         comps.path += "/" + Self.encode(title) + "/" + Self.encode(text)
         comps.queryItems = [
             URLQueryItem(name: "group", value: "Aevis"),
-            URLQueryItem(name: "level", value: "timeSensitive"),
-            URLQueryItem(name: "icon", value: "")
+            URLQueryItem(name: "level", value: "timeSensitive")
         ]
         guard let url = comps.url else { throw BarkError.badURL }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 20
+        _ = try await Self.perform(request)
+    }
 
+    /// 发一次请求，成功返回；失败抛出人话。
+    private static func perform(_ request: URLRequest) async throws -> Bool {
         let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
             throw BarkError.rejected(code: code, message: "")
         }
-
         // Bark 正常会返回 {"code":200,"message":"success"}
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let inner = object["code"] as? Int,
@@ -274,6 +307,7 @@ final class ProactiveService {
             let message = (object["message"] as? String) ?? ""
             throw BarkError.rejected(code: inner, message: message)
         }
+        return true
     }
 
     private static func encode(_ text: String) -> String {

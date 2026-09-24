@@ -53,6 +53,25 @@ final class ChatStore: ObservableObject {
         save()
     }
 
+    /// 流式过程中「这一条说完了」：把它定稿，再开一条新的空占位接着收。
+    ///
+    /// 她在提示词里被要求「像真人发消息、短句」—— 所以**她换行就等于换一条消息**，
+    /// 这样看起来才是一条一条发出来的，而不是一大段。
+    func finishStreamingLine(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let index = messages.indices.last,
+           messages[index].role == .assistant,
+           messages[index].text.isEmpty {
+            messages[index].text = trimmed
+        } else {
+            messages.append(ChatMessage(role: .assistant, text: trimmed))
+        }
+        // 再开一条空占位，接着收下一行
+        messages.append(ChatMessage(role: .assistant, text: ""))
+    }
+
     /// 出错或被打断时，把没内容的占位消息扔掉。
     func removeLastIfEmpty() {
         if let last = messages.last, last.text.isEmpty {

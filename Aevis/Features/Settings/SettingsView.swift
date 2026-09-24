@@ -608,14 +608,21 @@ struct SettingsView: View {
     }
 
     private var aboutRows: [(String, String)] {
-        [
+        // 正式版只留用户看得懂的：版本 / 构建 / 运行环境。
+        // 「液态玻璃可用」「签名」「内置 Linux」是**开发排查用的**，摆在这里只会
+        // 让人困惑（用户直接问过「为什么还是有液态玻璃可用之类的」），
+        // 所以它们只在 Debug 构建里出现。
+        var rows: [(String, String)] = [
             ("版本", Diagnostics.appVersion),
             ("构建", Diagnostics.commit),
-            ("运行环境", "iOS \(Diagnostics.osVersion) · \(Diagnostics.machine)"),
-            ("液态玻璃", Diagnostics.supportsLiquidGlass ? "可用" : "不可用"),
-            ("签名", Diagnostics.isSigned ? "已签名" : "未签名"),
-            ("内置 Linux", Diagnostics.hasLinuxSandbox ? "已就绪" : "未接入")
+            ("运行环境", "iOS \(Diagnostics.osVersion) · \(Diagnostics.machine)")
         ]
+        #if DEBUG
+        rows.append(("液态玻璃", Diagnostics.supportsLiquidGlass ? "可用" : "不可用"))
+        rows.append(("签名", Diagnostics.isSigned ? "已签名" : "未签名"))
+        rows.append(("内置 Linux", Diagnostics.hasLinuxSandbox ? "已就绪" : "未接入"))
+        #endif
+        return rows
     }
 
     // MARK: - 零件

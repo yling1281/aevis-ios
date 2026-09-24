@@ -57,7 +57,10 @@ final class FontStore: ObservableObject {
         }
     }
 
-    /// 导入时允许的文件类型。用扩展名构造，比直接依赖某个 UTType 常量稳。
+    /// 导入时允许的文件类型。
+    /// 除了字体扩展名，还放开了 `.data` 和 `.item` ——
+    /// 有些字体文件在系统里没有对应的类型标识，会被文件选择器灰掉选不了
+    /// （用户反馈「点了没反应」很可能就是这个）。
     static var allowedTypes: [UTType] {
         var types: [UTType] = []
         for ext in ["ttf", "otf", "ttc", "woff", "woff2"] {
@@ -66,14 +69,32 @@ final class FontStore: ObservableObject {
             }
         }
         types.append(.data)
+        types.append(.item)
         return types
     }
 
     // MARK: - 导入 / 删除
 
-    /// 导入一个字体文件。成功返回显示名，失败返回 nil。
+    /// 导入失败的原因。**每种都单独说清楚** ——
+    /// 之前失败只返回 nil，界面什么都不显示，看起来就像"点了没反应"。
+    enum ImportFailure: LocalizedError {
+        case unreadable(String)
+        case noFontInside(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unreadable(let name):
+                return "「\(name)」读不出来。如果它在 iCloud 里，先下载到本机再试一次。"
+            case .noFontInside(let name):
+                return "「\(name)」里面没找到可用的字体。iOS 只认 ttf / otf / ttc，"
+                    + "woff / woff2 是网页字体，装不了。"
+            }
+        }
+    }
+
+    /// 导入一个字体文件。成功返回显示名；失败**抛出原因**（不要再静默返回 nil）。
     @discardableResult
-    func importFont(from url: URL) -> String? {
+    func importFont(from url: URL) throws -> String {
         // 从「文件」里选的 URL 需要先取权限，否则读不到
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
@@ -87,7 +108,7 @@ final class FontStore: ObservableObject {
             }
             try FileManager.default.copyItem(at: url, to: target)
         } catch {
-            return nil
+            throw ImportFailure.unreadable(fileName)
         }
 
         Self.register(url: target)
@@ -95,7 +116,7 @@ final class FontStore: ObservableObject {
         let found = Self.descriptors(of: target)
         guard !found.isEmpty else {
             try? FileManager.default.removeItem(at: target)
-            return nil
+            throw ImportFailure.noFontInside(fileName)
         }
 
         var added: [Installed] = []
@@ -106,7 +127,7 @@ final class FontStore: ObservableObject {
         if added.isEmpty {
             // 这个文件里的字体之前就导过，直接选中它
             selectedPostScriptName = found.first?.id ?? selectedPostScriptName
-            return found.first?.name
+            return found.first?.name ?? fileName
         }
 
         installed.append(contentsOf: added)

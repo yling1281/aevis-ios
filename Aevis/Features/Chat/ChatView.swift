@@ -50,7 +50,10 @@ struct ChatView: View {
             messageList
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composer
+            VStack(spacing: 0) {
+                composer
+                bottomBar
+            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -176,8 +179,8 @@ struct ChatView: View {
 
     // MARK: - 顶部
     //
-    // 之前这里是一整条灰色实底，看着像贴上去的硬条，用户说别扭。
-    // 现在改成「模糊往下载渐隐」：顶部有材质，到底部化开，中间没有硬边。
+    // 和底部输入栏**用同一种材质** —— 之前上面是渐隐模糊、下面是实底，
+    // 两条颜色不一样，看着别扭（用户说的「上面颜色统一一下」）。
 
     private var header: some View {
         HStack(spacing: 11) {
@@ -194,32 +197,6 @@ struct ChatView: View {
 
             Spacer(minLength: 8)
 
-            // 朋友圈 / 一起听 / 通话都收进这里 —— 顶部只留两个控件，不挤
-            Menu {
-                Button {
-                    showMoments = true
-                } label: {
-                    Label("朋友圈", systemImage: "photo.on.rectangle.angled")
-                }
-                Button {
-                    showTogether = true
-                } label: {
-                    Label("一起听", systemImage: "music.note.list")
-                }
-                Button {
-                    showCall = true
-                } label: {
-                    Label("实时通话", systemImage: "phone.arrow.up.right")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.aevis(15, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
-            }
-            .aevisGlass(cornerRadius: 20)
-
             Button {
                 composerFocused = false
                 showSettings = true
@@ -234,22 +211,9 @@ struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .padding(.bottom, 16)
-        .background(
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.72),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-        )
+        .padding(.bottom, 10)
+        // 和底部那条同一种材质，颜色统一
+        .background(Rectangle().fill(.bar).ignoresSafeArea(edges: .top))
     }
 
     // MARK: - 消息列表
@@ -449,9 +413,62 @@ struct ChatView: View {
         .padding(6)
         .aevisGlass(cornerRadius: 26)
         .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        // 和顶栏、底部功能栏同一种材质，颜色统一
         .background(Rectangle().fill(.bar))
+    }
+
+    // MARK: - 底部功能栏（微信那样的一排）
+    //
+    // 用户要求：朋友圈这些入口别藏在右上角三个点里，要像微信那样摆在底下一排。
+    //
+    // 顺便修掉那个「输入框下面有一条白」：那条是**背景没铺到屏幕最下沿**导致的 ——
+    // 这里给功能栏的背景加 `ignoresSafeArea(edges: .bottom)`，
+    // 一直铺到屏幕底边，就不再留白了。
+
+    private var bottomBar: some View {
+        HStack(spacing: 0) {
+            barItem("朋友圈", "photo.on.rectangle.angled") {
+                composerFocused = false
+                showMoments = true
+            }
+            barItem("一起听", "music.note.list") {
+                composerFocused = false
+                showTogether = true
+            }
+            barItem("通话", "phone.arrow.up.right") {
+                composerFocused = false
+                showCall = true
+            }
+            barItem("设置", "slider.horizontal.3") {
+                composerFocused = false
+                showSettings = true
+            }
+        }
+        .padding(.top, 7)
+        .padding(.bottom, 4)
+        .background(
+            Rectangle()
+                .fill(.bar)
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    private func barItem(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.aevis(17, weight: .medium))
+                    .foregroundStyle(.primary)
+                Text(title)
+                    .font(.aevis(10.5))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var placeholder: String {
@@ -496,7 +513,33 @@ struct ChatView: View {
 
         isSending = true
         sendTask = Task { @MainActor in
+            // accumulated = 整段（念出来、提炼记忆都用它）
+            // pending     = 还没定稿的这一条
             var accumulated = ""
+            var pending = ""
+            var finished = 0
+
+            /// 她换行就等于换一条消息 —— 这样看起来才是一条一条发出来的。
+            func flushLines(force: Bool) {
+                while let index = pending.firstIndex(of: "\n") {
+                    let line = String(pending[pending.startIndex..<index])
+                    pending.removeSubrange(pending.startIndex...index)
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { continue }
+                    chat.finishStreamingLine(trimmed)
+                    finished += 1
+                }
+                if force, !pending.trimmingCharacters(in: .whitespaces).isEmpty {
+                    chat.finishStreamingLine(pending)
+                    finished += 1
+                    pending = ""
+                }
+                // 正在吐的这条实时显示
+                if finished == 0 || !pending.isEmpty {
+                    chat.replaceLast(with: pending)
+                }
+            }
+
             do {
                 for try await piece in LLMService.streamReply(
                     config: config,
@@ -513,8 +556,11 @@ struct ChatView: View {
                     // 她开始说话了，把「她看了眼时间…」收掉
                     if toolNote != nil { toolNote = nil }
                     accumulated += piece
-                    chat.replaceLast(with: accumulated)
+                    pending += piece
+                    flushLines(force: false)
                 }
+                flushLines(force: true)
+                chat.removeLastIfEmpty()
                 chat.commit()
             } catch {
                 chat.removeLastIfEmpty()
@@ -593,17 +639,34 @@ private struct MessageBubble: View {
         return max(6, base * CGFloat(scaled))
     }
 
+    /// 整条消息只有一个表情 —— 像微信那样**放大显示**，不套气泡。
+    /// 这就是「让她发表情」：她在提示词里被允许单独发一个表情。
+    private var isSticker: Bool {
+        let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 4 else { return false }
+        guard !text.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
+        return text.unicodeScalars.contains { $0.properties.isEmoji }
+    }
+
     private var bubble: some View {
-        AevisBubble(
-            text: message.text,
-            look: look,
-            color: color,
-            corner: bubbleCorner,
-            fontSize: bubbleFontSize,
-            horizontalPadding: horizontalPadding,
-            verticalPadding: verticalPadding,
-            plainTextColor: theme.fontColor
-        )
+        Group {
+            if isSticker {
+                Text(message.text)
+                    .font(.aevis(simpleMode ? 56 : 48))
+                    .padding(.vertical, 2)
+            } else {
+                AevisBubble(
+                    text: message.text,
+                    look: look,
+                    color: color,
+                    corner: bubbleCorner,
+                    fontSize: bubbleFontSize,
+                    horizontalPadding: horizontalPadding,
+                    verticalPadding: verticalPadding,
+                    plainTextColor: theme.fontColor
+                )
+            }
+        }
     }
 
     var body: some View {
