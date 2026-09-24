@@ -48,14 +48,14 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 11) {
-            AevisAvatar(size: 36, seed: persona.avatarSeed)
+            AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(persona.name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: settings.simpleMode ? 18 : 16, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(isSending ? "正在输入…" : "在线")
-                    .font(.system(size: 11.5))
+                    .font(.system(size: settings.simpleMode ? 13 : 11.5))
                     .foregroundStyle(.secondary)
             }
 
@@ -68,10 +68,10 @@ struct ChatView: View {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.primary)
-                    .frame(width: 38, height: 38)
+                    .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
             }
-            .aevisGlass(cornerRadius: 19)
+            .aevisGlass(cornerRadius: 20)
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
@@ -83,14 +83,19 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: settings.simpleMode ? 16 : 12) {
                     if chat.messages.isEmpty {
                         emptyState
                     }
 
                     ForEach(chat.messages) { message in
-                        MessageBubble(message: message, persona: persona)
-                            .id(message.id)
+                        MessageBubble(
+                            message: message,
+                            persona: persona,
+                            accent: settings.accentColor,
+                            simpleMode: settings.simpleMode
+                        )
+                        .id(message.id)
                     }
 
                     if let errorText {
@@ -132,16 +137,16 @@ struct ChatView: View {
             AevisOrb()
                 .scaleEffect(0.72)
             Text("\(persona.pronoun)在这儿。")
-                .font(.system(size: 17, weight: .medium))
+                .font(.system(size: settings.simpleMode ? 19 : 17, weight: .medium))
                 .foregroundStyle(.primary)
             if settings.isConfigured {
                 Text("说点什么开始吧。你们聊过的每一句，都会被记得。")
-                    .font(.system(size: 13.5))
+                    .font(.system(size: settings.simpleMode ? 15 : 13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {
                 Text("还差一步：右上角设置 →「模型接入」，填上你的 API Key，TA 才会说话。")
-                    .font(.system(size: 13.5))
+                    .font(.system(size: settings.simpleMode ? 15 : 13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -160,10 +165,7 @@ struct ChatView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.orange.opacity(0.14))
-                )
+                .aevisGlass(cornerRadius: 14)
             Spacer(minLength: 30)
         }
     }
@@ -177,23 +179,22 @@ struct ChatView: View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
-                .font(.system(size: 15))
+                .font(.system(size: settings.simpleMode ? 17 : 15))
                 .focused($composerFocused)
                 .disabled(isSending)
-                .padding(.vertical, 9)
+                .padding(.vertical, settings.simpleMode ? 11 : 9)
                 .padding(.leading, 15)
                 .padding(.trailing, 4)
 
             Button(action: send) {
                 Image(systemName: isSending ? "stop.fill" : "arrow.up")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: settings.simpleMode ? 16 : 14, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
+                    .frame(width: settings.simpleMode ? 38 : 34, height: settings.simpleMode ? 38 : 34)
                     .background(
                         Circle().fill(
-                            isSending
-                                ? Color.gray.opacity(0.55)
-                                : (canSend ? Color(red: 0.42, green: 0.35, blue: 0.95) : Color.gray.opacity(0.35))
+                            isSending ? Color.gray.opacity(0.55)
+                            : (canSend ? settings.accentColor : Color.gray.opacity(0.35))
                         )
                     )
                     .contentShape(Circle())
@@ -282,6 +283,8 @@ struct ChatView: View {
 private struct MessageBubble: View {
     let message: ChatMessage
     let persona: Persona
+    var accent: Color = AppSettings.accentPalette[0]
+    var simpleMode: Bool = false
 
     /// 对方那一侧：气泡左边至少留这么多空白，也就限制了气泡最大宽度。
     /// 用「单侧 Spacer 的 minLength」而不是写死像素宽度，这样任何屏幕尺寸都自适应。
@@ -292,26 +295,31 @@ private struct MessageBubble: View {
 
     private var isUser: Bool { message.role == .user }
 
+    private var bubbleFontSize: CGFloat { simpleMode ? 17.5 : 15.5 }
+    private var horizontalPadding: CGFloat { simpleMode ? 16 : 14 }
+    private var verticalPadding: CGFloat { simpleMode ? 13 : 10 }
+    private var bubbleCorner: CGFloat { simpleMode ? 20 : 18 }
+
     @ViewBuilder
     private var bubble: some View {
         if isUser {
             bubbleText.background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(red: 0.42, green: 0.35, blue: 0.95))
+                RoundedRectangle(cornerRadius: bubbleCorner, style: .continuous)
+                    .fill(accent)
             )
         } else {
-            bubbleText.aevisGlass(cornerRadius: 18)
+            bubbleText.aevisGlass(cornerRadius: bubbleCorner)
         }
     }
 
     private var bubbleText: some View {
         Text(message.text.isEmpty ? "…" : message.text)
-            .font(.system(size: 15.5))
+            .font(.system(size: bubbleFontSize))
             .foregroundStyle(isUser ? Color.white : Color.primary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
     }
 
     var body: some View {
@@ -323,7 +331,7 @@ private struct MessageBubble: View {
             }
         } else {
             HStack(alignment: .bottom, spacing: 8) {
-                AevisAvatar(size: 26, seed: persona.avatarSeed)
+                AevisAvatar(size: simpleMode ? 30 : 26, seed: persona.avatarSeed)
                 bubble
                 Spacer(minLength: Self.assistantGap)
             }
