@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -24,9 +25,13 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Aevis 需要使用麦克风，这样你可以直接用说话的方式和她聊天。</string>
+	<string>Aevis 需要使用麦克风，这样你可以直接用说话的方式和 TA 聊天。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Aevis 需要语音识别，把你的话转成文字发给她。</string>
+	<string>Aevis 需要语音识别，把你的话转成文字发给 TA。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Aevis 需要读取和写入日历，这样 TA 才能告诉你接下来有什么安排、也能帮你把事记进日程。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Aevis 需要访问提醒事项，这样你让 TA「记一下」的时候才能真的记住。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>
