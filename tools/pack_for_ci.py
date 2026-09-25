@@ -61,6 +61,10 @@ MUST_HAVE = [
     "Aevis/Features/Contacts/ContactsView.swift",
     "Aevis/Features/Discover/DiscoverView.swift",
     "Aevis/Features/Me/MeView.swift",
+    # ——— 全屏播放器（仿网易云）———
+    "Aevis/Features/Music/PlayerView.swift",
+    "Aevis/Features/Music/MusicView.swift",
+    "Aevis/Core/MusicPlayer.swift",
     ".github/shots.txt",
 ]
 

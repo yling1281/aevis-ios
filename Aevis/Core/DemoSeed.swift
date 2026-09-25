@@ -180,6 +180,16 @@ enum DemoSeed {
             "记得喝水，别光顾着忙",
             "今天累不累"
         ]
+
+        // 播放界面空的没法看 —— 塞一首假歌进去（模拟器里放不出声、也没有封面）
+        if args.contains("-aevisOpenPlayer") {
+            MusicPlayer.shared.seedDemo()
+        }
+        // 两个人头像那一行要「一起听」开着才出现，真机上得有 API Key 才会开始 ——
+        // 所以截图时假装她已经开着、已经说过话。
+        if args.contains("-aevisTogetherDemo") {
+            ListenTogetherService.shared.seedDemo()
+        }
     }
     #endif
 }

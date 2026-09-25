@@ -309,6 +309,8 @@ final class AppSettings: ObservableObject {
         static let lockShortcutName = "aevis.lockShortcutName"
         static let screenTimeShortcutName = "aevis.screenTimeShortcutName"
         static let listenTogetherMode = "aevis.listenTogetherMode"
+        /// 放歌就自动一起听（出厂开）
+        static let listenTogetherAutoStart = "aevis.listenTogetherAutoStart"
         /// 网易云走哪条通道：`plain`（明文，默认）/ `weapi`（加密）。
         static let neteaseChannel = "aevis.netease.channel"
         static let neteaseCookieKeychain = "netease.cookie"
@@ -673,6 +675,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(listenTogetherMode, forKey: Key.listenTogetherMode) }
     }
 
+    /// 在 App 里放歌时，**自动开始一起听**。
+    ///
+    /// 用户的原话：「在 App 内放音乐的话，默认一起听。」
+    /// 出厂是开的 —— 但**这是个开关**，不想让她插嘴的人可以关掉。
+    @Published var listenTogetherAutoStart: Bool {
+        didSet { UserDefaults.standard.set(listenTogetherAutoStart, forKey: Key.listenTogetherAutoStart) }
+    }
+
     /// 网易云用哪条通道。
     ///
     /// 默认 `plain`（明文接口）—— 实测加密的 weapi 通道**已经被网易掐掉**：
@@ -818,6 +828,10 @@ final class AppSettings: ObservableObject {
         lockShortcutName = defaults.string(forKey: Key.lockShortcutName) ?? ""
         screenTimeShortcutName = defaults.string(forKey: Key.screenTimeShortcutName) ?? ""
         listenTogetherMode = defaults.string(forKey: Key.listenTogetherMode) ?? ListenTogetherMode.sync.rawValue
+        // ⚠️ 必须用 object(forKey:) 判「有没有设过」。
+        // 直接 bool(forKey:) 在没设过时返回 false —— 而出厂值是 **true**（开），
+        // 用错就把默认值反过来了。
+        listenTogetherAutoStart = defaults.object(forKey: Key.listenTogetherAutoStart) as? Bool ?? true
         neteaseCookie = Keychain.get(Key.neteaseCookieKeychain) ?? ""
         douyinCookie = Keychain.get(Key.douyinCookieKeychain) ?? ""
         neteaseChannel = defaults.string(forKey: Key.neteaseChannel) ?? "plain"

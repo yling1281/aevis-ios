@@ -9,6 +9,11 @@ struct MusicTrack: Identifiable, Hashable {
     var duration: Double
     /// 播放地址，拿到之前是空的（网易的地址是临时的，每次都要现取）
     var url: URL?
+    /// 专辑封面。**要单独问一次接口才有**（见 `NeteaseClient.attachCovers`），
+    /// 拿不到就是 nil —— 播放界面会退回一个渐变圆盘，不影响听歌。
+    ///
+    /// 给了默认值：这样 `MusicTrack(...)` 的老调用处不用跟着改一遍。
+    var coverURL: URL? = nil
     /// 网易的收费标记：0 免费 / 1 会员专享 / 4 需要买专辑 / 8 低音质免费。
     /// 只用来把「为什么放不了」说准确 —— 光报一个错误码对用户没有意义。
     var fee: Int = 0
@@ -139,7 +144,45 @@ final class NeteaseClient {
               let songs = result["songs"] as? [[String: Any]] else {
             throw NeteaseError.badResponse("搜索结果里没有 songs（\(Self.brief(json))）")
         }
-        return songs.compactMap(Self.track(from:))
+        return await attachCovers(to: songs.compactMap(Self.track(from:)))
+    }
+
+    // MARK: - 封面
+    //
+    // ⚠️ **明文搜索的返回里没有封面地址** —— 只给了一个 `album.picId` 数字，
+    // 拼不出图来（加密版才有 `al.picUrl`）。所以封面必须单独问一次
+    // `/api/v3/song/detail`。
+    //
+    // 好消息是它支持一次问多首（`c` 是一个 JSON 数组），所以整页结果只花一次请求。
+    // 失败就静默跳过：播放界面会退回一个渐变圆盘，不影响听歌。
+
+    /// 给一批歌补上封面地址。
+    func attachCovers(to tracks: [MusicTrack]) async -> [MusicTrack] {
+        guard !tracks.isEmpty else { return tracks }
+        let ids = tracks.prefix(60).map(\.id)
+        let payload = "[" + ids.map { "{\"id\":\($0)}" }.joined(separator: ",") + "]"
+
+        guard let json = try? await plainRequest("/api/v3/song/detail", ["c": payload]),
+              let songs = json["songs"] as? [[String: Any]] else {
+            return tracks
+        }
+
+        var covers: [String: URL] = [:]
+        for song in songs {
+            guard let id = Self.idString(song["id"]),
+                  let album = song["al"] as? [String: Any],
+                  let text = album["picUrl"] as? String, !text.isEmpty,
+                  let url = URL(string: text) else { continue }
+            covers[id] = url
+        }
+        guard !covers.isEmpty else { return tracks }
+
+        return tracks.map { track in
+            guard let cover = covers[track.id] else { return track }
+            var copy = track
+            copy.coverURL = cover
+            return copy
+        }
     }
 
     // MARK: - 歌单与推荐
@@ -153,7 +196,7 @@ final class NeteaseClient {
               let tracks = playlist["tracks"] as? [[String: Any]] else {
             throw NeteaseError.badResponse("歌单里没有 tracks（\(Self.brief(json))）")
         }
-        return tracks.compactMap(Self.track(from:))
+        return await attachCovers(to: tracks.compactMap(Self.track(from:)))
     }
 
     func dailyRecommend() async throws -> [MusicTrack] {
@@ -169,7 +212,7 @@ final class NeteaseClient {
         guard !tracks.isEmpty else {
             throw NeteaseError.badResponse("每日推荐里没有歌（\(Self.brief(json))）")
         }
-        return tracks.compactMap(Self.track(from:))
+        return await attachCovers(to: tracks.compactMap(Self.track(from:)))
     }
 
     // MARK: - 播放地址与歌词

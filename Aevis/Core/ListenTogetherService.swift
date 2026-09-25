@@ -181,4 +181,22 @@ final class ListenTogetherService: ObservableObject {
         let line = MusicPlayer.shared.currentLyricLine ?? "（还没到歌词）"
         await react(to: line)
     }
+
+    #if DEBUG
+    /// 截图自检用：假装一起听开着，而且她已经说过两句。
+    ///
+    /// 真机上「两个人的头像」那一行要等她真的开口（得有 API Key）才出现，
+    /// 模拟器里永远等不到 —— 那就截不到用户点名要看的那一块。
+    /// **只在 Debug 生效。**
+    func seedDemo() {
+        active = true
+        mode = .sync
+        thinking = false
+        statusLine = nil
+        herLines = [
+            "这句我从初中听到现在",
+            "副歌前面那四小节最好听"
+        ]
+    }
+    #endif
 }

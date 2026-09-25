@@ -231,14 +231,78 @@ final class MusicPlayer: NSObject, ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    // MARK: - 给「一起听」用的歌词
+    // MARK: - 截图自检
+    //
+    // CI 上跑的是模拟器：没有网易云登录、也放不出声。播放界面要是空着，
+    // 截出来就是一片「还没在放歌」，没法确认界面做对了没有。
+    // 所以塞一首假歌进去 —— **只在 Debug 生效**，真机上没有这条路。
+
+    #if DEBUG
+    func seedDemo() {
+        queue = [
+            MusicTrack(
+                id: "0",
+                title: "晴天",
+                artist: "周杰伦",
+                album: "叶惠美",
+                duration: 269,
+                url: nil
+            )
+        ]
+        index = 0
+        duration = 269
+        progress = 62
+        lyric = """
+        [00:00.00] 晴天 - 周杰伦
+        [00:58.00] 故事的小黄花
+        [01:02.00] 从出生那年就飘着
+        [01:06.00] 童年的荡秋千
+        [01:10.00] 随记忆一直晃到现在
+        """
+        isPlaying = true
+    }
+    #endif
+
+    // MARK: - 给播放界面和「一起听」用的歌词
+
+    /// 解析好的歌词（`[mm:ss.xx] 内容` 那套格式）。
+    ///
+    /// **缓存一份**：一首歌的歌词好几 KB、上百行，而 `progress` 每 0.5 秒跳一次，
+    /// 每次都重新解析会白白烧掉不少 CPU —— 播放界面上会明显看到卡顿。
+    private var lineCache: (source: String, lines: [(time: Double, text: String)]) = ("", [])
+
+    private var lyricLines: [(time: Double, text: String)] {
+        if lineCache.source == lyric { return lineCache.lines }
+        let lines = Self.parse(lyric)
+        lineCache = (lyric, lines)
+        return lines
+    }
+
+    /// 唱到第几句了。没有就是 nil。
+    var lyricCursor: Int? {
+        let lines = lyricLines
+        guard !lines.isEmpty else { return nil }
+        return lines.lastIndex(where: { $0.time <= progress + 0.2 })
+    }
 
     /// 当前这一句歌词（去掉时间轴）。她可以就着这句吐槽。
     var currentLyricLine: String? {
-        guard !lyric.isEmpty else { return nil }
-        let lines = lyric.split(separator: "\n").compactMap { raw -> (Double, String)? in
-            // 形如：[01:23.45] 歌词内容
-            guard let closing = raw.firstIndex(of: "]") else { return nil }
+        guard let index = lyricCursor else { return nil }
+        return lyricLines[index].text
+    }
+
+    /// 下一句（播放界面里做「下一句」的小字用）。
+    var nextLyricLine: String? {
+        guard let index = lyricCursor, index + 1 < lyricLines.count else { return nil }
+        return lyricLines[index + 1].text
+    }
+
+    /// 把 `[01:23.45] 歌词内容` 拆成「几秒 + 文字」。
+    ///
+    /// 认不出来的行直接跳过 —— 歌词文件里常有 `[ti:]`、`[by:]` 这类元信息。
+    private static func parse(_ raw: String) -> [(time: Double, text: String)] {
+        raw.split(separator: "\n").compactMap { line -> (Double, String)? in
+            guard let closing = line.firstIndex(of: "]") else { return nil }
 
             // ⚠️ 这一行挡的是**闪退**，不是格式问题。
             // 如果 `]` 正好在行首，下面那个 `index(after: startIndex)` 会**越过** closing，
@@ -246,18 +310,18 @@ final class MusicPlayer: NSObject, ObservableObject {
             //
             // 踩过：修好歌词接口之后，「点歌就闪退」。因为以前歌词根本拿不到，
             // 这段代码从来没有真正执行过 —— 一个潜伏了很久的崩溃被"修好"给暴露了。
-            guard closing > raw.startIndex else { return nil }
+            guard closing > line.startIndex else { return nil }
 
-            let stamp = raw[raw.index(after: raw.startIndex)..<closing]
+            let stamp = line[line.index(after: line.startIndex)..<closing]
             let parts = stamp.split(separator: ":")
             guard parts.count == 2,
                   let minutes = Double(parts[0]),
                   let seconds = Double(parts[1]) else { return nil }
-            let text = raw[raw.index(after: closing)...].trimmingCharacters(in: .whitespaces)
+
+            let text = line[line.index(after: closing)...]
+                .trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { return nil }
             return (minutes * 60 + seconds, text)
         }
-
-        return lines.last(where: { $0.0 <= progress + 0.2 })?.1
     }
 }

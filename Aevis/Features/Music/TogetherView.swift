@@ -92,6 +92,21 @@ struct TogetherView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // 出厂就开着：「在 App 内放音乐的话，默认一起听」。
+            // 但**这是个开关** —— 不想让她插嘴的人可以关掉。
+            Toggle(isOn: $settings.listenTogetherAutoStart) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("放歌就一起听")
+                        .font(.aevis(14))
+                        .foregroundStyle(.primary)
+                    Text("在 App 里点一首歌，自动就进一起听（全屏播放界面上也能关）")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(settings.accentColor)
+
             HStack(spacing: 10) {
                 Button {
                     if together.active {

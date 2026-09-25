@@ -15,6 +15,8 @@ final class AppRouter: ObservableObject {
     @Published var showMoments = false
     @Published var showTogether = false
     @Published var showCall = false
+    /// 全屏播放器（仿网易云那个封面转盘）。**在列表里点一首歌就弹它。**
+    @Published var showPlayer = false
 
     private init() {}
 }

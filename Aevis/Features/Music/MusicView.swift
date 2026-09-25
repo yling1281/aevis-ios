@@ -10,6 +10,9 @@ struct MusicView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var player = MusicPlayer.shared
 
+    /// 点一首歌就弹全屏播放器 —— 和网易云一样，点了直接进播放界面。
+    @ObservedObject private var router = AppRouter.shared
+
     @State private var keyword = ""
     @State private var results: [MusicTrack] = []
     @State private var searching = false
@@ -185,7 +188,10 @@ struct MusicView: View {
                 label("结果")
                 Spacer(minLength: 8)
                 Button("全部播放") {
-                    Task { await player.play(results) }
+                    Task { @MainActor in
+                        await player.play(results)
+                        router.showPlayer = true
+                    }
                 }
                 .font(.aevis(13))
                 .foregroundStyle(settings.accentColor)
@@ -196,7 +202,12 @@ struct MusicView: View {
 
             ForEach(Array(results.prefix(30).enumerated()), id: \.element.id) { index, track in
                 Button {
-                    Task { await player.play(queue: results, index: index) }
+                    // 点了直接进全屏播放器（网易云也是这个行为）——
+                    // 先在后台把播放地址取回来，取到再弹，这样画面一出来就是对的封面和歌词。
+                    Task { @MainActor in
+                        await player.play(queue: results, index: index)
+                        router.showPlayer = true
+                    }
                 } label: {
                     HStack(spacing: 10) {
                         Text("\(index + 1)")
@@ -239,7 +250,15 @@ struct MusicView: View {
 
     private var nowPlayingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            label("正在播放")
+            HStack(spacing: 8) {
+                label("正在播放")
+                Spacer(minLength: 8)
+                if player.current != nil {
+                    Button("全屏播放界面") { router.showPlayer = true }
+                        .font(.aevis(13))
+                        .foregroundStyle(settings.accentColor)
+                }
+            }
 
             if let track = player.current {
                 VStack(alignment: .leading, spacing: 3) {

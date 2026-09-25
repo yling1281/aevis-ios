@@ -84,6 +84,10 @@ struct MainTabView: View {
             CallView()
                 .environmentObject(personaStore)
         }
+        // 全屏播放器（仿网易云那个）。点一首歌就弹它。
+        .fullScreenCover(isPresented: $router.showPlayer) {
+            PlayerView()
+        }
         .onAppear(perform: applyLaunchOptions)
         .onAppear {
             // 录屏的进度要**全程**刷新，不能只在设置页里刷。
@@ -110,6 +114,7 @@ struct MainTabView: View {
         if args.contains("-aevisOpenSettings") { router.showSettings = true }
         if args.contains("-aevisOpenMoments") { router.showMoments = true }
         if args.contains("-aevisOpenTogether") { router.showTogether = true }
+        if args.contains("-aevisOpenPlayer") { router.showPlayer = true }
         #endif
     }
 }
