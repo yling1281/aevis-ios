@@ -17,6 +17,7 @@
   R24 对**可选**属性直接接 `.isEmpty` 之类  → 编译错误（build-44 就挂在它上）
   R25 `Keychain.set(x, forKey:)` 标签写错     → 编译错误（build-50）
   R26 UIKit 的 `UIImage` 直接 `.resizable()`  → 编译错误（build-53 挂在两句上）
+  R27 三元里 `? .secondary : .orange`        → 编译错误（build-54 挂在它上）
 
 （R10–R19 的由来写在各自函数的 docstring 里，这里只列最先立起来的那批。）
 
@@ -978,6 +979,38 @@ def check_keychain_labels(sources):
                     break
 
 
+# R27 用到的两组名字：层级样式（HierarchicalShapeStyle）和具名颜色（Color）
+TERNARY_LEVELS = ("primary", "secondary", "tertiary", "quaternary", "quinary")
+TERNARY_COLORS = ("red", "orange", "yellow", "green", "mint", "teal", "cyan", "blue",
+                  "indigo", "purple", "pink", "brown", "white", "black", "gray", "grey")
+
+
+def check_ternary_style_types(path, code):
+    """三元表达式写成 `? .secondary : .orange` —— 两个分支类型对不上，编译不过。
+
+    真踩过（**build-54 整轮 CI 挂在它上**）：
+        .foregroundStyle(gate.problem == nil ? .secondary : .orange)
+    → `error: member 'orange' in 'HierarchicalShapeStyle' produces result of type
+       'Color', but context expects 'HierarchicalShapeStyle'`。
+
+    为什么只有这个顺序会炸：`.secondary` **既是** `HierarchicalShapeStyle` 的成员、
+    **又是** `Color` 的成员，编译器优先挑前者；于是 `:` 那边的 `.orange`
+    只能落到 `ShapeStyle` 扩展上（返回 `Color`）→ 两边类型不一致。
+    - 反过来写（`.orange : .secondary`）第一个分支只有 `Color` 有 → 推断成 `Color`，两边都是 Color，没事；
+    - `.primary : .secondary` 也安全（两边都是层级样式）。
+    修法一律是**两边都写全**：`Color.secondary : Color.orange`。
+    """
+    pattern = re.compile(
+        r"\?\s*\.(%s)\s*:\s*\.(%s)\b"
+        % ("|".join(TERNARY_LEVELS), "|".join(TERNARY_COLORS)))
+    for number, line in enumerate(code.splitlines(), 1):
+        found = pattern.search(line)
+        if found:
+            report("R27", path, number,
+                   "三元里 `.%s`（层级样式）与 `.%s`（Color）类型不同 —— 两边都写成 Color.xxx"
+                   % (found.group(1), found.group(2)))
+
+
 def check_uiimage_resizable(sources):
     """`UIImage` 变量后面直接接 `.resizable()` —— 编译不过。
 
@@ -1231,6 +1264,7 @@ def main():
         check_balance(path, source, code)
         # 下面这些都只看「代码」——注释和字符串里提到关键字不算问题
         check_scaled_to_fill(path, code)
+        check_ternary_style_types(path, code)
         check_double_spacer(path, source, code)
         check_nsexpression(path, code)
         check_cf_memory(path, code)

@@ -181,7 +181,11 @@ struct DeviceGateView: View {
 
             Text(gate.statusLine)
                 .font(.aevis(12.5))
-                .foregroundStyle(gate.problem == nil ? .secondary : .orange)
+                // ⚠️ 三元的两边**必须同类型**：`.secondary` 是 HierarchicalShapeStyle、
+                // `.orange` 是 Color —— 写成 `.secondary : .orange` 编译器会报
+                // "member 'orange' in 'HierarchicalShapeStyle' produces result of type 'Color'"。
+                // build-54 就挂在它上。都写成 `Color.` 才是同一个类型。
+                .foregroundStyle(gate.problem == nil ? Color.secondary : Color.orange)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
