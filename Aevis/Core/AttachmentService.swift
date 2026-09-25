@@ -78,9 +78,9 @@ enum AttachmentService {
         case "pdf":
             return pdfText(data)
         case "docx":
-            return richText(data, type: .officeOpenXML)
+            return docxText(data)
         case "rtf":
-            return richText(data, type: .rtf)
+            return richText(data)
         case "doc":
             // 老的 .doc 是二进制格式，系统读不了 —— 不假装能读
             return nil
@@ -100,15 +100,12 @@ enum AttachmentService {
         #endif
     }
 
-    /// docx / rtf 抽文字 —— 走系统自带的富文本解析。
-    ///
-    /// 为什么不自己解 zip：docx 本质是个 zip 包，正文在 `word/document.xml` 里，
-    /// 自己解要写一个 ZIP 读取器 + inflate。系统本来就会，没必要重造。
-    private static func richText(_ data: Data, type: NSAttributedString.DocumentType) -> String? {
+    /// RTF 抽文字 —— 走系统自带的富文本解析。
+    private static func richText(_ data: Data) -> String? {
         #if canImport(UIKit)
         guard let attributed = try? NSAttributedString(
             data: data,
-            options: [.documentType: type],
+            options: [.documentType: NSAttributedString.DocumentType.rtf],
             documentAttributes: nil
         ) else { return nil }
         let text = attributed.string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -116,6 +113,147 @@ enum AttachmentService {
         #else
         return nil
         #endif
+    }
+
+    // MARK: - docx
+    //
+    // ⚠️ 为什么不能像 rtf 那样走系统解析：**`NSAttributedString.DocumentType.officeOpenXML`
+    // 在 iOS 上根本不存在**（那是 macOS 才有的），写上去就是**编译错误**。
+    // 这一条是 CI 报出来的（`AccountCard` 那个可选值 `.isEmpty` 是同一轮的另一处）。
+    //
+    // 所以 docx 只能自己拆。它本质是个 zip，正文在 `word/document.xml` 里。
+    // 需要两样东西，都只用系统自带的：
+    // 1. **读 zip 目录** —— 格式几十年没变，几十行就够（下面）
+    // 2. **解开裸 DEFLATE** —— 用 Foundation 的 `decompressed(using: .zlib)`。
+    //    Apple 文档里 `.zlib` 就是**裸 DEFLATE**（RFC 1951），正好对上 zip 里存的。
+
+    /// 从 docx 里抽出可读文字。
+    private static func docxText(_ data: Data) -> String? {
+        guard let xml = zipEntry(named: "word/document.xml", in: data),
+              let raw = String(data: xml, encoding: .utf8) else { return nil }
+        let text = stripXML(raw)
+        return text.isEmpty ? nil : text
+    }
+
+    /// 从 zip 里取出一个成员。
+    ///
+    /// 只支持「不压缩（0）」和「deflate（8）」两种方式 —— docx 用的就是这两种。
+    /// 加密的 zip 直接放弃（返回 nil），不假装能读。
+    private static func zipEntry(named name: String, in archive: Data) -> Data? {
+        // 1) 先找「中央目录结尾记录」（EOCD）。它一定在文件最后，
+        //    后面最多跟 65535 字节的注释，所以从尾巴往前扫一段就够了。
+        guard let eocd = lastIndex(of: 0x06054b50, in: archive, window: 66_000),
+              let count = u16(archive, eocd + 10),
+              let directoryOffset = u32(archive, eocd + 16),
+              count > 0, count < 10_000 else { return nil }
+
+        // 2) 顺着中央目录逐个比对名字
+        var cursor = directoryOffset
+        for _ in 0..<count {
+            guard u32(archive, cursor) == 0x02014b50,
+                  let method = u16(archive, cursor + 10),
+                  let compressedSize = u32(archive, cursor + 20),
+                  let nameLength = u16(archive, cursor + 28),
+                  let extraLength = u16(archive, cursor + 30),
+                  let commentLength = u16(archive, cursor + 32),
+                  let localOffset = u32(archive, cursor + 42) else { return nil }
+
+            let nameStart = cursor + 46
+            guard nameStart + nameLength <= archive.count else { return nil }
+            let entryName = String(
+                decoding: archive[(archive.startIndex + nameStart)
+                                  ..< (archive.startIndex + nameStart + nameLength)],
+                as: UTF8.self
+            )
+
+            if entryName == name {
+                // 3) ⚠️ 尺寸一律用**中央目录**里这份，不用本地头里的 ——
+                //    本地头可能是 0（用了「数据描述符」的 zip 就是那样）。
+                guard u32(archive, localOffset) == 0x04034b50,
+                      let localNameLength = u16(archive, localOffset + 26),
+                      let localExtraLength = u16(archive, localOffset + 28) else { return nil }
+
+                let start = localOffset + 30 + localNameLength + localExtraLength
+                guard compressedSize > 0, start + compressedSize <= archive.count else { return nil }
+                let payload = archive.subdata(
+                    in: (archive.startIndex + start)..<(archive.startIndex + start + compressedSize)
+                )
+
+                if method == 0 { return payload }
+                guard method == 8 else { return nil }
+                guard let inflated = try? (payload as NSData).decompressed(using: .zlib)
+                else { return nil }
+                return inflated as Data
+            }
+
+            cursor = nameStart + nameLength + extraLength + commentLength
+        }
+        return nil
+    }
+
+    /// 从 XML 里把可读文字抠出来。
+    ///
+    /// 不做完整的 XML 解析 —— docx 的正文结构很固定：
+    /// 段落是 `</w:p>`，文字在标签之间。所以「段落换行 + 其余标签丢掉 + 实体还原」就够读了。
+    private static func stripXML(_ xml: String) -> String {
+        var marked = xml
+        for marker in ["</w:p>", "<w:br/>", "<w:br />", "</a:p>"] {
+            marked = marked.replacingOccurrences(of: marker, with: "\n")
+        }
+
+        var text = ""
+        var insideTag = false
+        for character in marked {
+            if character == "<" { insideTag = true; continue }
+            if character == ">" { insideTag = false; continue }
+            if !insideTag { text.append(character) }
+        }
+
+        let entities = [
+            "&amp;": "&", "&lt;": "<", "&gt;": ">",
+            "&quot;": "\"", "&apos;": "'", "&#39;": "'"
+        ]
+        for (entity, value) in entities {
+            text = text.replacingOccurrences(of: entity, with: value)
+        }
+        return condenseLines(text)
+    }
+
+    private static func condenseLines(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    // MARK: - 直接读字节的小工具（都是**小端**）
+
+    private static func u16(_ data: Data, _ offset: Int) -> Int? {
+        guard offset >= 0, offset + 2 <= data.count else { return nil }
+        let base = data.startIndex + offset
+        return Int(data[base]) | (Int(data[base + 1]) << 8)
+    }
+
+    private static func u32(_ data: Data, _ offset: Int) -> Int? {
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        let base = data.startIndex + offset
+        var value = 0
+        for index in (0..<4).reversed() {
+            value = (value << 8) | Int(data[base + index])
+        }
+        return value
+    }
+
+    /// 从尾巴往前找一个四字节魔数，最多回看 window 字节。
+    private static func lastIndex(of magic: Int, in data: Data, window: Int) -> Int? {
+        guard data.count >= 4 else { return nil }
+        let lowest = max(0, data.count - window)
+        var index = data.count - 4
+        while index >= lowest {
+            if u32(data, index) == magic { return index }
+            index -= 1
+        }
+        return nil
     }
 
     /// 纯文本。UTF-8 读不出来就按 GB18030 再试一次 ——

@@ -41,9 +41,9 @@ struct AccountCard: View {
                     .padding(.vertical, 12)
             }
 
-            if !account.lastError.isEmpty {
+            if let error = account.lastError, !error.isEmpty {
                 rule
-                Text(account.lastError)
+                Text(error)
                     .font(.aevis(12))
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)

@@ -14,6 +14,7 @@
   R8  X.shared 引用的类型没定义          → 编译错误，本地先发现
   R9  调用自定义类型/方法但项目里没有定义
   R20 一行里的双引号是奇数个              → 字符串被拦腰截断，后半截变成代码
+  R24 对**可选**属性直接接 `.isEmpty` 之类  → 编译错误（build-44 就挂在它上）
 
 （R10–R19 的由来写在各自函数的 docstring 里，这里只列最先立起来的那批。）
 
@@ -884,6 +885,74 @@ WRAPPED_PROPERTY = re.compile(
 )
 
 
+def check_optional_suffix_use(sources):
+    """对**可选类型**的属性直接接 `.isEmpty` / `.count` 之类 —— 编译不过。
+
+    真踩过（build-44 整轮失败）：
+
+        @Published var lastError: String?
+        if !account.lastError.isEmpty { ... }
+        // error: value of optional type 'String?' must be unwrapped
+
+    这类错**本地一条都报不出来**，只能等 CI（十几分钟一轮）。
+
+    做法：先把**全项目**声明成可选的属性名收一份，再看谁在名字后面
+    直接接了那些成员，而且那一行没有 `if let` / `guard let` 解包。
+    收全项目而不是逐个文件，是因为"声明在 A 文件、用在 B 文件"正是这次的情况。
+
+    ⚠️ 两道收紧，都是被误报逼出来的（第一版 118 处、第二版还剩 25 处，
+    真出事的那一行反而被淹掉 —— **检查器一旦不被信任就等于没有**）：
+
+    1. **名字前面必须带一个点**（`账户.名字.isEmpty`）。带点的写法一定是某个对象的
+       成员，不会是同名局部变量 —— 这一条就把 `text` / `path` 那类误报清掉了。
+    2. **只盯「全项目里只以可选形式出现过」的名字**。`apiKey` 在 `AppSettings` 里是
+       普通的 `String`、在 `Payload` 里是 `String?` —— 这种名字直接跳过，
+       因为光看一行代码分不出用的是哪一个。真出事的 `lastError` 全项目只有可选那一种，
+       照样抓得到。
+    """
+    declaration = re.compile(
+        r"\b(?:(?:private|fileprivate|internal|public|open)\s+)?"
+        r"(?:static\s+)?(?:var|let)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=\{\n]+)"
+    )
+    members = ("isEmpty", "count", "first", "last", "uppercased", "lowercased",
+               "trimmingCharacters", "split", "hasPrefix", "hasSuffix")
+
+    optional_names = set()
+    plain_names = set()
+    for source in sources.values():
+        for name, type_text in declaration.findall(strip_code(source)):
+            if type_text.strip().endswith("?"):
+                optional_names.add(name)
+            else:
+                plain_names.add(name)
+
+    # 在别处是「一定有的」就不判 —— 分不出这一行用的是哪一个
+    suspects = optional_names - plain_names
+    if not suspects:
+        return
+
+    for path, source in sorted(sources.items()):
+        for number, line in enumerate(strip_code(source).splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("//"):
+                continue
+            for name in suspects:
+                # 前面那个点不是可选的 —— 这就是精度的来源
+                pattern = r"\.\s*%s\s*\.\s*(?:%s)\b" % (re.escape(name), "|".join(members))
+                if not re.search(pattern, line):
+                    continue
+                # 已经解包过的放过：`if let x` / `guard let x` / `x ??` / `x!`
+                if re.search(r"\b(?:if|guard)\s+let\s+%s\b" % re.escape(name), line):
+                    continue
+                if re.search(r"%s\s*(\?\?|!)" % re.escape(name), line):
+                    continue
+                report(
+                    "R24", path, number,
+                    "`%s` 是可选的，不能直接接「.成员」—— 先解包（if let / guard let / ??）"
+                    % name
+                )
+
+
 def check_property_scope(sources):
     """某个类型里用了 `名字.`，而这个名字是**同一个文件里另一个类型**的属性。
 
@@ -1128,6 +1197,7 @@ def main():
     check_card_usage(sources, types)
     check_member_references(sources, types, declared)
     check_property_scope(sources)
+    check_optional_suffix_use(sources)
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()

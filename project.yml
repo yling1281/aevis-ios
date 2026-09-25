@@ -11,9 +11,9 @@ settings:
   base:
     # 版本号要**跟着构建号走** —— 否则每一版都是同一个号，
     # 装到手机上根本分不出新旧（用户真的因此以为我给了旧包）。
-    # 出包前把这两个数改成即将产生的 build 号（40/41/42/43 已经用掉，所以这次是 44）。
-    MARKETING_VERSION: "0.0.44"
-    CURRENT_PROJECT_VERSION: "44"
+    # 出包前把这两个数改成即将产生的 build 号（40–44 已经用掉，所以这次是 45）。
+    MARKETING_VERSION: "0.0.45"
+    CURRENT_PROJECT_VERSION: "45"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
