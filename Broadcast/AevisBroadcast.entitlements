@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  必须和主 App 的完全一致，否则两个进程的容器不是同一个，
+	  扩展认出来的文字主 App 读不到（界面上会明确报出来）。
+	-->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.aevis.ios</string>
+	</array>
+</dict>
+</plist>

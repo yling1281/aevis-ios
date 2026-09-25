@@ -44,11 +44,53 @@ struct CompanionCard: View {
 
             // ——— 录屏陪伴 ———
 
+            // ——— 系统级录屏：录整个屏幕，要的就是这个 ———
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 8) {
+                    Text("录整个屏幕")
+                        .font(.aevis(14.5))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 6)
+                    Text(companion.systemRunning ? "正在录" : "没在录")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(companion.systemRunning ? Color.green : Color.secondary)
+                }
+
+                Text("开始之后，你切到微信、抖音，她照样看得到 —— 这是录整个屏幕的那条路。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                BroadcastStartButton()
+
+                Text(ScreenCompanion.howToStart)
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // 共享容器不通 = 扩展认出来的字传不回主 App。
+                // 这是签名层面的问题，用户自己改不了，所以**必须明说**，
+                // 不能让他对着一个不工作的开关猜。
+                if let problem = companion.extensionProblem {
+                    Text(problem)
+                        .font(.aevis(11))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+
+            rule
+
+            // ——— App 内抓帧：兜底，只看得到 Aevis 自己 ———
+
             toggleRow(
-                "录屏陪伴",
-                subtitle: "她看你的屏幕 —— 画面不出手机，只在本机认文字",
+                "只看 Aevis 自己",
+                subtitle: "不用装扩展的兜底办法，但切到别的 App 她就看不到了。",
                 isOn: Binding(
-                    get: { companion.active || settings.companionEnabled },
+                    get: { companion.inAppActive || settings.companionEnabled },
                     set: { value in
                         settings.companionEnabled = value
                         if value {
@@ -63,7 +105,7 @@ struct CompanionCard: View {
                 )
             )
 
-            if settings.companionEnabled || companion.active {
+            if settings.companionEnabled || companion.inAppActive {
                 rule
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -77,41 +119,60 @@ struct CompanionCard: View {
                             .foregroundStyle(.secondary)
                     }
                     Slider(value: $companion.interval, in: 5...60, step: 5)
-                    Text("越勤越费电。她看到的是屏幕上的文字，所以图片和视频里的内容她看不到。")
+                    Text("越勤越费电。")
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
+            }
+
+            rule
+
+            // ——— 两条通道合起来的进度 ———
+
+            VStack(alignment: .leading, spacing: 7) {
+                // 到底在不在工作 —— 光看开关判断不出来，把两条通道分别摊开
+                Text(companion.diagnostics)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(ScreenCompanion.ocrLimit)
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let error = companion.errorText {
-                    rule
                     Text(error)
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+
+            if !companion.lastSeen.isEmpty {
+                rule
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("她最近看到的")
                         .font(.aevis(12))
                         .foregroundStyle(.secondary)
+                    Text(companion.lastSeen)
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 11)
                 }
-
-                if !companion.lastSeen.isEmpty {
-                    rule
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("她最近看到的")
-                            .font(.aevis(12))
-                            .foregroundStyle(.secondary)
-                        Text(companion.lastSeen)
-                            .font(.aevis(12.5))
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
         }
         .aevisGlass(cornerRadius: 20)
+        // 扩展在**另一个进程**里写「我录到哪了」，只能主动去读。
+        // 卡片在前台时每 5 秒读一次，离开就停 —— 别在后台白耗电。
+        .onAppear { companion.startPolling() }
+        .onDisappear { companion.stopPolling() }
         .sheet(isPresented: $showTogether) {
             TogetherView()
         }

@@ -11,9 +11,9 @@ settings:
   base:
     # 版本号要**跟着构建号走** —— 否则每一版都是同一个号，
     # 装到手机上根本分不出新旧（用户真的因此以为我给了旧包）。
-    # 出包前把这两个数改成即将产生的 build 号，例如 build-32 → 0.0.32 / 32。
-    MARKETING_VERSION: "0.0.32"
-    CURRENT_PROJECT_VERSION: "32"
+    # 出包前把这两个数改成即将产生的 build 号（上一次跑到 32，所以这次是 33）。
+    MARKETING_VERSION: "0.0.33"
+    CURRENT_PROJECT_VERSION: "33"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
@@ -24,6 +24,8 @@ settings:
     AEVIS_COMMIT: "dev"
 
 targets:
+  # ——— 主 App ———
+
   Aevis:
     type: application
     platform: iOS
@@ -32,12 +34,24 @@ targets:
       - path: Aevis
         excludes:
           - "Resources/Info.plist"
+          # 权限声明文件是给签名用的，不该被当成资源打进包里
+          - "Aevis.entitlements"
+    # >>> extension-dep:start
+    # 这一段和下面的 AevisBroadcast target 是**成对**的：
+    # scripts/strip_extension.py 会按标记一起摘掉，用来在
+    # 「嵌套扩展签不过、整个 App 装不上」时快速退回到纯 App。
+    dependencies:
+      - target: AevisBroadcast
+        embed: true
+    # <<< extension-dep:end
     settings:
       base:
         PRODUCT_NAME: Aevis
         PRODUCT_BUNDLE_IDENTIFIER: com.aevis.ios
         INFOPLIST_FILE: Aevis/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
+        # App Group（和扩展共用）—— 录屏靠它把文字传回主 App
+        CODE_SIGN_ENTITLEMENTS: Aevis/Aevis.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # 把 Assets 里所有 appiconset 都编进去，备用图标才能被
         # UIApplication.setAlternateIconName(_:) 找到
@@ -53,11 +67,51 @@ targets:
         Release:
           SWIFT_COMPILATION_MODE: "wholemodule"
 
+  # >>> extension:start
+  # ——— 系统录屏扩展 ———
+  #
+  # 它**不是**给用户点的界面，是给系统用的：开始录屏之后，收画面的是这个
+  # 跑在独立进程里的扩展，所以切到微信、抖音也一直录得到。
+  # 主 App 只管把启动它的系统控件摆出来。
+  #
+  # 它和主 App 之间**没有别的通道**，只能靠 App Group 传（见 ScreenShareStore）。
+  AevisBroadcast:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Broadcast
+        excludes:
+          - "Info.plist"
+          - "AevisBroadcast.entitlements"
+      # 这个文件**两个 target 都要编** —— 它是两边的契约，只此一份
+      - path: Aevis/Core/ScreenShareStore.swift
+    settings:
+      base:
+        PRODUCT_NAME: AevisBroadcast
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.ios.broadcast
+        INFOPLIST_FILE: Broadcast/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: Broadcast/AevisBroadcast.entitlements
+        SKIP_INSTALL: "YES"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+  # <<< extension:end
+
 schemes:
   Aevis:
     build:
       targets:
         Aevis: all
+        # >>> extension-scheme:start
+        AevisBroadcast: all
+        # <<< extension-scheme:end
     run:
       config: Debug
     archive:

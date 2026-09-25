@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  主 App 和「系统录屏扩展」靠这个容器互相传东西。
+	  扩展是独立进程，除了 App Group 没有别的合法共享方式。
+
+	  ⚠️ 这个 id 必须和 Signing & Capabilities 里那个一致，
+	  也必须出现在描述文件里 —— 对不上时容器拿不到（会优雅降级，不会崩）。
+	-->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.aevis.ios</string>
+	</array>
+</dict>
+</plist>

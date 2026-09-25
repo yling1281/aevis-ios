@@ -117,8 +117,11 @@ final class NeteaseLogin: NSObject, ObservableObject {
 
     /// 抓到凭据**当场验一次**。
     ///
-    /// 不验的话用户不知道到底成没成 —— 要等到让她放歌的时候才发现不行，
-    /// 那时候更难判断是哪一环出的问题。
+    /// ⚠️ 验证失败**不等于登录失败** —— 凭据已经存进设置里了，很可能只是刚登录、
+    /// 服务端还没完全生效。所以这里把两件事分开说清楚：凭据拿到没有、搜索通不通。
+    ///
+    /// 踩过：用户看到一句「格式错误」以为白登了，其实已经能用了，
+    /// 于是跑来问「为什么说格式错误但我登上去了」。
     @MainActor
     private func verify() async {
         guard !verifying else { return }
@@ -127,14 +130,18 @@ final class NeteaseLogin: NSObject, ObservableObject {
 
         do {
             let tracks = try await NeteaseClient.shared.search("晴天", limit: 1)
+            loggedIn = true
             if tracks.isEmpty {
-                statusLine = "凭据拿到了，但还搜不到歌。可能刚登录还没生效，过几秒再进来看看。"
+                statusLine = "凭据已经存下了。这次没搜到歌，多半是刚登录还没生效 —— "
+                    + "过一会儿去「音乐」里搜一下试试。"
             } else {
-                loggedIn = true
                 statusLine = "登录成功，能搜到歌了 —— 可以关掉这个页面。"
             }
         } catch {
-            statusLine = "凭据拿到了，但搜歌失败：\(error.localizedDescription)"
+            // 搜索不通也照样算登录成功：凭据是真的存下来了
+            loggedIn = true
+            statusLine = "凭据已经存下来了（能用的）。这次试搜没通过，"
+                + "可能是刚登录还没生效 —— 过一会儿去「音乐」里搜首歌试试。"
         }
     }
 }

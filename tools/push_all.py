@@ -35,9 +35,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                     # aevis-ios/
 TOKEN_FILE = os.path.join(os.path.dirname(ROOT), ".secrets", "github_token.txt")
 
-# 不推的东西：构建产物、缓存、系统垃圾
+# 不推的东西：构建产物、缓存、系统垃圾、探针临时文件
+#
+# `.done` / `.probe-bak` 是本地验证脚本留下的 —— 沙箱里删不掉文件、只能改名，
+# 所以它们会散在目录里。**一旦被当成源码推上去就是脏提交**，这里挡掉。
 SKIP_DIRS = {".git", "build", "build-sim", "DerivedData", "__pycache__"}
-SKIP_EXT = {".pyc", ".ipa", ".zip", ".log"}
+SKIP_EXT = {".pyc", ".ipa", ".zip", ".log", ".done", ".probe-bak"}
 
 
 def should_skip(rel):

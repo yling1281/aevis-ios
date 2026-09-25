@@ -145,25 +145,35 @@ extension DeviceTools {
             name: "look_at_screen",
             title: "看了眼你的屏幕",
             description: """
-            看用户屏幕上**最近认出来的文字**（这是录屏陪伴攒下来的）。
+            看用户屏幕上**最近认出来的文字**（录屏陪伴攒下来的）。
             对方问「你看到我在干嘛吗」时用它。
-            注意：只有对方打开了「录屏陪伴」才有内容；
-            而且屏幕上如果是图片或视频、没有文字，你也看不到。
+            两条来源：系统级录屏（能看整个屏幕，包括他切去的别的 App）
+            和 App 内抓帧（只看得到 Aevis 自己）。
+            屏幕上如果只有图片或视频、没有文字，你也看不到 —— 如实说。
             """,
             parameters: emptyParameters()
         ) { _ in
+            // 先现读一次共享容器 —— 扩展在**另一个进程**里写，
+            // 界面上的那份可能还是几秒前的
+            let fresh = ScreenShareStore.shared.readEntries().prefix(3).map(\.text)
             let companion = ScreenCompanion.shared
-            guard companion.active else {
-                return "对方没开录屏陪伴，我看不到他的屏幕。"
+
+            guard companion.systemRunning || companion.inAppActive else {
+                return """
+                对方没在录屏，我看不到他的屏幕。
+                跟他说：设置 → 陪伴 → 点「开始录屏」，从系统弹出的列表里选 Aevis 录屏。
+                或者从控制中心：长按录屏按钮 → 选 Aevis 录屏。
+                """
             }
-            guard !companion.lastSeen.isEmpty else {
-                return "开着，但我还没看到有文字的内容。"
+
+            let recent = fresh.isEmpty ? companion.observations.prefix(3).map { $0 } : Array(fresh)
+            guard !recent.isEmpty else {
+                return "在录，但我还没看到有文字的内容（屏幕上如果只有图片、视频，我认不出来）。"
             }
-            let recent = companion.observations.prefix(3)
-                .enumerated()
+            let listed = recent.enumerated()
                 .map { "\($0.offset + 1). \($0.element)" }
                 .joined(separator: "\n")
-            return "他屏幕上最近的文字：\n\(recent)"
+            return "他屏幕上最近的文字：\n\(listed)"
         }
     }
 

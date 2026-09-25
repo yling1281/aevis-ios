@@ -25,6 +25,45 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Aevis")
 INFO_PLIST = os.path.join(ROOT, "Resources", "Info.plist")
+PROJECT = os.path.dirname(ROOT)
+
+# 除了主 App，还要扫「系统录屏扩展」那个 target 的源码。
+# 它虽然是个独立 target，但一样是 Swift、一样会编不过 ——
+# 漏掉它等于漏一半，而它恰恰是更难在真机上调试的那一半。
+SWIFT_ROOTS = [
+    ROOT,
+    os.path.join(PROJECT, "Broadcast"),
+]
+
+# 每个 target 的 Info.plist 都要验。
+# 扩展那份写错一个键，表现是「系统录屏列表里根本没有 Aevis」——
+# 编译能过、装也装得上、界面上不报任何错，属于最难查的一类。
+INFO_PLISTS = {
+    INFO_PLIST: "Aevis",
+    os.path.join(PROJECT, "Broadcast", "Info.plist"): "AevisBroadcast",
+}
+
+# 主 App 与扩展的权限声明文件。两份必须声明**同一个**应用组。
+ENTITLEMENTS = {
+    "app": os.path.join(ROOT, "Aevis.entitlements"),
+    "extension": os.path.join(PROJECT, "Broadcast", "AevisBroadcast.entitlements"),
+}
+
+# 用了对应框架就必须在 Info.plist 里有的键 —— 缺了一调用就崩（不是弹窗失败）
+REQUIRED_PERMISSIONS = {
+    "NSCalendarsFullAccessUsageDescription": "EventKit",
+    "NSRemindersFullAccessUsageDescription": "EventKit",
+    "NSMicrophoneUsageDescription": "AVAudioEngine",
+    "NSSpeechRecognitionUsageDescription": "SFSpeechRecognizer",
+    "NSCameraUsageDescription": "UIImagePickerController",
+    "NSLocationWhenInUseUsageDescription": "CLLocationManager",
+    "NSHealthShareUsageDescription": "HKHealthStore",
+}
+
+# 系统录屏扩展的注册点。写错它，扩展就永远不会出现在系统列表里。
+BROADCAST_EXTENSION_POINT = "com.apple.broadcast-services-upload"
+
+STORE_PATH = os.path.join(ROOT, "Core", "ScreenShareStore.swift")
 
 # 苹果系统类型：它们的 .shared 不是我们定义的，检查时要放过，
 # 否则一堆误报会让人把检查器整个无视掉，那就等于没有。
@@ -104,11 +143,29 @@ def strip_code(source):
 
 
 def swift_files():
-    for base, dirs, files in os.walk(ROOT):
-        dirs[:] = [d for d in dirs if d not in ("Resources", ".git")]
-        for name in sorted(files):
-            if name.endswith(".swift"):
-                yield os.path.join(base, name)
+    for root in SWIFT_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        for base, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in ("Resources", ".git")]
+            for name in sorted(files):
+                if name.endswith(".swift"):
+                    yield os.path.join(base, name)
+
+
+def read_swift_sources():
+    """把所有要扫的 Swift 源码拼成一大段（给「用了某框架吗」这类判断用）。"""
+    out = ""
+    for root in SWIFT_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        for base, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in ("Resources", ".git")]
+            for name in sorted(files):
+                if name.endswith(".swift"):
+                    with open(os.path.join(base, name), encoding="utf-8") as handle:
+                        out += handle.read()
+    return out
 
 
 def check_balance(path, source, code):
@@ -466,42 +523,145 @@ def check_member_references(sources, types, declared):
 
 
 def check_info_plist():
-    """Info.plist 必须是合法 plist。
+    """每个 target 的 Info.plist 都必须是合法 plist。
 
     格式错一个字符，`xcodebuild` 会直接失败，而且报错在构建日志深处。
-    这里用标准库 plistlib 先解一遍，顺带确认那些**缺了就会崩**的权限键还在。
+    这里用标准库 plistlib 先解一遍，顺带确认那些**缺了就会崩**的权限键还在，
+    以及录屏扩展的注册信息没写错。
     """
-    if not os.path.exists(INFO_PLIST):
-        report("R15", INFO_PLIST, 0, "Info.plist 不存在")
+    parsed = {}
+    for path in INFO_PLISTS:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "rb") as handle:
+                parsed[path] = plistlib.load(handle)
+        except Exception as error:  # noqa: BLE001
+            report("R15", path, 0, "plist 解析失败：%s" % error)
+
+    if INFO_PLIST not in parsed and os.path.exists(INFO_PLIST):
+        return  # 主 App 的解析已经报过了
+
+    app_plist = parsed.get(INFO_PLIST)
+    if app_plist is not None:
+        sources = read_swift_sources()
+        for key, framework in REQUIRED_PERMISSIONS.items():
+            if framework in sources and key not in app_plist:
+                report("R15", INFO_PLIST, 0, "用了 %s 但缺 %s（一调用就崩）" % (framework, key))
+
+    check_extension_plist(parsed)
+
+
+def check_extension_plist(parsed):
+    """录屏扩展的注册信息。
+
+    这一块出错的表现非常隐蔽：编译能过、装也装得上，
+    但系统录屏列表里**根本没有 Aevis**，界面上也不会报任何错。
+    所以把关键几点在这里钉死。
+    """
+    path = os.path.join(PROJECT, "Broadcast", "Info.plist")
+    data = parsed.get(path)
+    if data is None:
         return
+
+    extension = data.get("NSExtension")
+    if not isinstance(extension, dict):
+        report("R15", path, 0, "缺 NSExtension —— 这个扩展永远不会出现在系统录屏列表里")
+        return
+
+    point = extension.get("NSExtensionPointIdentifier")
+    if point != BROADCAST_EXTENSION_POINT:
+        report("R15", path, 0,
+               "NSExtensionPointIdentifier 必须是 %s，现在是 %r"
+               % (BROADCAST_EXTENSION_POINT, point))
+
+    principal = extension.get("NSExtensionPrincipalClass") or ""
+    if not principal.endswith(".SampleHandler"):
+        report("R15", path, 0,
+               "NSExtensionPrincipalClass 要以 .SampleHandler 结尾，现在是 %r" % principal)
+
+    if not data.get("CFBundleDisplayName"):
+        report("R15", path, 0, "缺 CFBundleDisplayName —— 系统录屏列表里会显示成空名字")
+
+
+def check_app_group_wiring():
+    """主 App 与扩展的「管子」接对了没有。
+
+    三件事，任何一件错了都是**静默失效**（不崩、不报错，只是永远没内容），
+    所以值得单独钉：
+
+    1. 两份 entitlements 声明的应用组必须**完全一样**。
+       不一样的话，两个进程拿到的容器不是同一个。
+    2. Swift 里写死的 `appGroupID` 必须就在那份清单里。
+       改了一边忘另一边，容器直接是 nil。
+    3. Swift 里写死的 `extensionBundleID` 必须等于 project.yml 里
+       给扩展设的 bundle id。不一样的话，系统录屏控件不会预选我们那个扩展，
+       用户得自己在一堆扩展里翻 —— 表现像「点了没反应」。
+    """
+    app_groups = read_entitlement_groups(ENTITLEMENTS["app"])
+    ext_groups = read_entitlement_groups(ENTITLEMENTS["extension"])
+    if app_groups is None or ext_groups is None:
+        return
+
+    if not app_groups or not ext_groups:
+        report("R15", ENTITLEMENTS["extension"], 0,
+               "两个 target 都必须声明应用组，否则主 App 和扩展没法共享容器")
+        return
+
+    if set(app_groups) != set(ext_groups):
+        report("R15", ENTITLEMENTS["extension"], 0,
+               "两份权限声明的应用组不一致：%s 对 %s" % (app_groups, ext_groups))
+        return
+
+    if not os.path.exists(STORE_PATH):
+        report("R15", STORE_PATH, 0, "找不到共享容器的声明文件")
+        return
+
+    with open(STORE_PATH, encoding="utf-8") as handle:
+        store = handle.read()
+
+    group = first_match(store, r'static let appGroupID\s*=\s*"([^"]+)"')
+    if group is None:
+        report("R15", STORE_PATH, 0, "读不到 appGroupID —— 扩展和主 App 没法约定同一个容器")
+    elif group not in app_groups:
+        report("R15", STORE_PATH, 0,
+               "代码里用的 %s 不在权限清单 %s 里 —— 容器会是 nil，录屏文字传不回来"
+               % (group, app_groups))
+
+    bundle = first_match(store, r'static let extensionBundleID\s*=\s*"([^"]+)"')
+    if bundle is None:
+        report("R15", STORE_PATH, 0, "读不到 extensionBundleID —— 系统录屏控件没法预选我们的扩展")
+    else:
+        spec_path = os.path.join(PROJECT, "project.yml")
+        if os.path.exists(spec_path):
+            with open(spec_path, encoding="utf-8") as handle:
+                spec = handle.read()
+            # 工程被 strip_extension.py 摘掉扩展时，这里不该再报 ——
+            # 那是**故意**没有扩展的，不是接线错了。
+            if "AevisBroadcast" in spec and ("PRODUCT_BUNDLE_IDENTIFIER: " + bundle) not in spec:
+                report("R15", spec_path, 0,
+                       "project.yml 里没有 PRODUCT_BUNDLE_IDENTIFIER: %s —— "
+                       "和代码里的 extensionBundleID 对不上，录屏控件无法预选" % bundle)
+
+
+def read_entitlement_groups(path):
+    """读一份 entitlements 里声明的应用组。文件不存在返回 None。"""
+    if not os.path.exists(path):
+        return None
     try:
-        with open(INFO_PLIST, "rb") as handle:
+        with open(path, "rb") as handle:
             data = plistlib.load(handle)
-    except Exception as error:  # noqa: BLE001
-        report("R15", INFO_PLIST, 0, "plist 解析失败：%s" % error)
-        return
+    except Exception:  # noqa: BLE001
+        return None
+    value = data.get("com.apple.security.application-groups")
+    if not isinstance(value, list):
+        return []
+    return value
 
-    # 用了对应框架就必须有这些键，否则一调用就崩（不是弹窗失败）
-    required = {
-        "NSCalendarsFullAccessUsageDescription": "EventKit",
-        "NSRemindersFullAccessUsageDescription": "EventKit",
-        "NSMicrophoneUsageDescription": "AVAudioEngine",
-        "NSSpeechRecognitionUsageDescription": "SFSpeechRecognizer",
-        "NSCameraUsageDescription": "UIImagePickerController",
-        "NSLocationWhenInUseUsageDescription": "CLLocationManager",
-        "NSHealthShareUsageDescription": "HKHealthStore",
-    }
-    sources = ""
-    for base, dirs, files in os.walk(ROOT):
-        dirs[:] = [d for d in dirs if d not in ("Resources", ".git")]
-        for name in files:
-            if name.endswith(".swift"):
-                with open(os.path.join(base, name), encoding="utf-8") as handle:
-                    sources += handle.read()
 
-    for key, framework in required.items():
-        if framework in sources and key not in data:
-            report("R15", INFO_PLIST, 0, "用了 %s 但缺 %s（一调用就崩）" % (framework, key))
+def first_match(text, pattern):
+    hit = re.search(pattern, text)
+    return hit.group(1) if hit else None
 
 
 def check_yaml_files():
@@ -778,6 +938,7 @@ def main():
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()
+    check_app_group_wiring()
     check_yaml_files()
 
     notes.append("扫描 %d 个 Swift 文件，定义 %d 个类型" % (len(sources), len(types)))

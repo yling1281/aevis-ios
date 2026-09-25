@@ -90,6 +90,9 @@ struct ChatView: View {
             }
             #endif
             drainBridgeInbox()
+            // 录屏扩展在另一个进程里攒着文字，进聊天页先拉一次 ——
+            // 这样你刚看完抖音回来问她，她就已经知道了。
+            ScreenCompanion.shared.refreshFromExtension()
             runLaunchTestIfNeeded()
         }
         // 快捷指令可能是在 App 已经开着的时候发回来 —— 那就靠变化来触发。
@@ -549,25 +552,24 @@ struct ChatView: View {
             // pending     = 还没定稿的这一条
             var accumulated = ""
             var pending = ""
-            var finished = 0
 
             /// 她换行就等于换一条消息 —— 这样看起来才是一条一条发出来的。
-            func flushLines(force: Bool) {
+            ///
+            /// ⚠️ 这里**绝对不能**在流结束时再「强制定稿一次」。
+            /// 踩过的坑：`pending` 一直是靠 `replaceLast` 实时显示在最后一条上的，
+            /// 结束时再调一次 `finishStreamingLine(pending)`，它会发现最后一条已经
+            /// 不是空的了，于是**又追加一条一模一样的内容** ——
+            /// 表现就是她每句话都说两遍。
+            func flushLines() {
                 while let index = pending.firstIndex(of: "\n") {
                     let line = String(pending[pending.startIndex..<index])
                     pending.removeSubrange(pending.startIndex...index)
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
                     guard !trimmed.isEmpty else { continue }
                     chat.finishStreamingLine(trimmed)
-                    finished += 1
                 }
-                if force, !pending.trimmingCharacters(in: .whitespaces).isEmpty {
-                    chat.finishStreamingLine(pending)
-                    finished += 1
-                    pending = ""
-                }
-                // 正在吐的这条实时显示
-                if finished == 0 || !pending.isEmpty {
+                // 正在吐的这条实时显示在最后一条上
+                if !pending.isEmpty {
                     chat.replaceLast(with: pending)
                 }
             }
@@ -589,9 +591,10 @@ struct ChatView: View {
                     if toolNote != nil { toolNote = nil }
                     accumulated += piece
                     pending += piece
-                    flushLines(force: false)
+                    flushLines()
                 }
-                flushLines(force: true)
+                // 收尾：剩下的 pending 早就显示在最后一条上了，这里只要清掉
+                // 多余的空占位就行 —— **不要再定稿一次**（见上面那段注释）。
                 chat.removeLastIfEmpty()
                 chat.commit()
             } catch {
