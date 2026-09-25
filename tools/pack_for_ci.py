@@ -40,6 +40,8 @@ MUST_HAVE = [
     "Broadcast/Info.plist",
     "Broadcast/AevisBroadcast.entitlements",
     "Aevis/Core/ScreenShareStore.swift",
+    # 环回备用通道：App Group 对不上时靠它把文字送回来（两个 target 共用）
+    "Aevis/Core/ExtensionLink.swift",
     "Aevis/Core/BroadcastPicker.swift",
     "Aevis/Aevis.entitlements",
     "scripts/strip_extension.py",

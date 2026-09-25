@@ -41,6 +41,19 @@ final class ScreenCompanion: ObservableObject {
     @Published private(set) var systemHits = 0
     @Published private(set) var systemLastAt: Date?
 
+    // ——— 通道三：环回备用通道（见 ExtensionLink）———
+    //
+    // 扩展把文字 POST 到 127.0.0.1 送过来。存在的唯一理由：
+    // App Group 容器在重签之后有可能是 nil，那条路就断了 ——
+    // 而这条不依赖任何签名能力。
+
+    @Published private(set) var linkRunning = false
+    @Published private(set) var linkFrames = 0
+    @Published private(set) var linkHits = 0
+    @Published private(set) var linkLastAt: Date?
+    /// 备用通道**收到过东西**没有。收到过就说明这条路是通的。
+    @Published private(set) var linkSeen = false
+
     /// 她「看到」的内容（两条通道合在一起，新的在前）。
     @Published private(set) var observations: [String] = []
     @Published private(set) var lastSeen = ""
@@ -61,12 +74,16 @@ final class ScreenCompanion: ObservableObject {
 
     /// 任意一条通道在给我看，就算在陪。
     var active: Bool {
-        inAppActive || systemRunning
+        inAppActive || systemRunning || linkRunning
     }
 
-    /// 共享容器能不能用。**不能用等于扩展白装** —— 它认出的字传不回来。
+    /// 扩展把文字送回来的路通不通。**两条通道加起来看** ——
+    /// 容器能用算通；容器不能用但备用通道收到过东西，也算通。
+    ///
+    /// 早先只认容器：签名对不上时这里恒为 false，界面就一直报
+    /// 「扩展白装了」，而其实环回那条路可能活得好好的。
     var extensionUsable: Bool {
-        ScreenShareStore.shared.isUsable
+        ScreenShareStore.shared.isUsable || linkSeen
     }
 
     /// 屏幕现在是不是正被录制或投屏 —— **任何一种录制方式都算**，
@@ -88,7 +105,9 @@ final class ScreenCompanion: ObservableObject {
     }
 
     var extensionProblem: String? {
-        ScreenShareStore.shared.unavailableReason
+        // 备用通道收到过东西就说明没坏，别再把「应用组对不上」挂出来吓人。
+        guard !extensionUsable else { return nil }
+        return ScreenShareStore.shared.unavailableReason
     }
 
     private let context = CIContext()
@@ -217,6 +236,7 @@ final class ScreenCompanion: ObservableObject {
 
     /// 界面在前台时轮询 —— 5 秒一次，两次小文件读，可以忽略不计。
     func startPolling() {
+        startLink()
         guard pollTimer == nil else { return }
         refreshFromExtension()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -224,15 +244,42 @@ final class ScreenCompanion: ObservableObject {
         }
     }
 
+    /// 开环回备用通道。**幂等**，反复调不会起两份。
+    private func startLink() {
+        let link = ExtensionLinkListener.shared
+        link.onEntry = { [weak self] text, at in
+            guard let self else { return }
+            self.linkSeen = true
+            self.linkLastAt = at
+            self.linkEntries.insert(ScreenShareStore.Entry(text: text, at: at), at: 0)
+            if self.linkEntries.count > 40 { self.linkEntries.removeLast() }
+            self.rebuildObservations()
+            if self.observations.first != self.lastSeen, let newest = self.observations.first {
+                self.lastSeen = newest
+                self.onObservation?(newest)
+            }
+        }
+        link.onState = { [weak self] running, frames, hits, at in
+            guard let self else { return }
+            self.linkSeen = true
+            self.linkRunning = running
+            self.linkFrames = frames
+            self.linkHits = max(self.linkHits, hits)
+            self.linkLastAt = at
+        }
+        link.start()
+    }
+
     func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
     }
 
-    /// 把扩展攒下来的清掉（两条通道一起）。
+    /// 把扩展攒下来的清掉（所有通道一起）。
     func clearHistory() {
         ScreenShareStore.shared.clear()
         systemEntries = []
+        linkEntries = []
         inAppLog = []
         observations = []
         lastSeen = ""
@@ -245,15 +292,23 @@ final class ScreenCompanion: ObservableObject {
         systemLastAt = nil
         systemRunning = false
         systemStale = false
+        linkFrames = 0
+        linkHits = 0
+        linkLastAt = nil
+        linkRunning = false
     }
 
     // MARK: - 合并
 
     private var systemEntries: [ScreenShareStore.Entry] = []
 
+    /// 备用通道收到的，只活在内存里（见 ExtensionLink）。
+    private var linkEntries: [ScreenShareStore.Entry] = []
+
     private func rebuildObservations() {
         var pairs: [(text: String, at: Date)] = inAppLog
         pairs.append(contentsOf: systemEntries.map { (text: $0.text, at: $0.at) })
+        pairs.append(contentsOf: linkEntries.map { (text: $0.text, at: $0.at) })
 
         var seen = Set<String>()
         var out: [String] = []
@@ -274,13 +329,25 @@ final class ScreenCompanion: ObservableObject {
     var diagnostics: String {
         var lines: [String] = []
 
-        if systemRunning {
-            lines.append("系统级：正在录（\(systemFrames) 帧 · 认出文字 \(systemHits) 次）")
+        if systemRunning || linkRunning {
+            let frames = max(systemFrames, linkFrames)
+            let hits = max(systemHits, linkHits)
+            lines.append("系统级：正在录（\(frames) 帧 · 认出文字 \(hits) 次）")
         } else if systemStale {
             // 和「没在录」分开说：一个要重开，一个还没开过
             lines.append("系统级：开过，但已经不再更新了（多半被系统掐掉了）—— 重新点一次「开始录屏」")
         } else {
             lines.append("系统级：没在录")
+        }
+
+        // 备用通道单独说一句。它是「应用组对不上」时唯一的救命路，
+        // 所以通没通必须能一眼看出来 —— 这台机器上就靠这一行定位。
+        if linkSeen {
+            lines.append("备用通道：通（拿到 \(linkHits) 条 · 上报 \(linkFrames) 帧）")
+        } else if ExtensionLinkListener.shared.isListening {
+            lines.append("备用通道：在听，还没收到东西")
+        } else {
+            lines.append("备用通道：没起来（端口被占？）")
         }
 
         if inAppActive {

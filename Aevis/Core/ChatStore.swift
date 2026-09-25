@@ -70,8 +70,64 @@ final class ChatStore: ObservableObject {
     // MARK: - 读写
 
     func append(_ message: ChatMessage) {
+        guard !isRepeat(message) else { return }
         messages.append(message)
         save()
+    }
+
+    /// 要不要把这条丢掉。
+    ///
+    /// 规则分两种，因为两种重复的成因不一样：
+    /// - **她的话**（assistant）：不管隔多久，同一句连着来两条就只留一条 ——
+    ///   那是流式定稿的回声，不是她真想重复。
+    /// - **自己的话**（user）：只有**一秒半之内**完全一样才算手滑重复发送；
+    ///   隔了一会再发一遍同样的话，那是真的要发，不能替他删掉。
+    private func isRepeat(_ message: ChatMessage) -> Bool {
+        // 图片消息不参与去重：两张长得一样的图也得各显示一张
+        guard message.imageData == nil else { return false }
+        guard let last = messages.last(where: { !$0.text.isEmpty }) else { return false }
+        guard last.imageData == nil, last.role == message.role else { return false }
+        guard Self.isSameLine(last.text, message.text) else { return false }
+
+        if message.role == .assistant { return true }
+        return message.date.timeIntervalSince(last.date) < 1.5
+    }
+
+    /// 这两段字算不算「同一句」。
+    ///
+    /// 用户的原话：「检查一下你发的和他发的两段字是不是一样的，
+    /// 或者加了个符号之类的 —— 一样的就删掉其中一个。」
+    ///
+    /// 比较前先把两边都洗成**只留字**（去掉空白、标点、表情、markdown 星号），
+    /// 所以「你好」「你好。」「**你好**」「你好！ 」在它眼里是同一条。
+    ///
+    /// 只有一个字的（「嗯」「哦」）不合并 —— 连着说两遍本来就是正常的说话方式。
+    static func isSameLine(_ left: String, _ right: String) -> Bool {
+        let a = reduced(left)
+        let b = reduced(right)
+        guard a.count >= 2, b.count >= 2 else { return false }
+        return a == b
+    }
+
+    /// 只留 ASCII 字母数字和汉字，其余（标点、空白、emoji、星号）全丢掉。
+    ///
+    /// ⚠️ 这里**故意不用 `CharacterSet.alphanumerics`** —— 它是 Unicode 语义的，
+    /// 而且项目里已经因为它踩过一次坑（拼 URL 时中文一个字符都没被编码）。
+    /// 手写范围反而更清楚：要留下什么，一眼就能看懂。
+    ///
+    /// 按「字符」而不是「码点」过滤：一个 emoji 往往由好几个码点拼成，
+    /// 按码点筛会把它拆成半截乱码。
+    private static func reduced(_ text: String) -> String {
+        let kept = text.filter { character in
+            let scalars = character.unicodeScalars
+            guard scalars.count == 1, let scalar = scalars.first else { return false }
+            let value = scalar.value
+            return (value >= 0x30 && value <= 0x39)     // 0-9
+                || (value >= 0x41 && value <= 0x5A)     // A-Z
+                || (value >= 0x61 && value <= 0x7A)     // a-z
+                || (value >= 0x4E00 && value <= 0x9FFF) // 汉字
+        }
+        return kept.lowercased()
     }
 
     /// 往**指定联系人**的对话里放一条消息。
@@ -109,6 +165,12 @@ final class ChatStore: ObservableObject {
     func appendProactive(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, canReceiveProactive else { return false }
+        // 她主动来的这句跟上一句一模一样就别再发一遍
+        if let last = messages.last(where: { !$0.text.isEmpty }),
+           last.role == .assistant,
+           Self.isSameLine(last.text, trimmed) {
+            return false
+        }
         messages.append(ChatMessage(role: .assistant, text: trimmed))
         save()
         return true
@@ -132,6 +194,26 @@ final class ChatStore: ObservableObject {
     func finishStreamingLine(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // ⚠️ **这一行是「她每句话都说两遍」的真凶。**
+        //
+        // 她正在吐的那半句是靠 `replaceLast` **实时写在最后一条上**的
+        // （见 ChatView.flushLines）。所以当模型接着吐出一个换行、这一行被
+        // 正式定稿时，屏幕上那条**已经是同一句话了** —— 再追加一条，
+        // 就变成「B」显示两次。
+        //
+        // 触发条件很常见：模型先吐「B」，隔一会才吐「\n」。
+        // 前面那句"结束时不要再定稿一次"只挡住了整段结束的那一刻，
+        // 挡不住**每一行**的这一下。用户的原话是
+        // 「检查一下你发的和我发的是不是一样的，加了个符号之类的，一样的删掉一个」。
+        if let index = messages.indices.last,
+           messages[index].role == .assistant,
+           Self.isSameLine(messages[index].text, trimmed) {
+            // 定稿的动作跳过，但**空占位必须补上** —— 不补的话下一条
+            // 半句会直接覆盖掉刚定稿的这一条。
+            messages.append(ChatMessage(role: .assistant, text: ""))
+            return
+        }
 
         if let index = messages.indices.last,
            messages[index].role == .assistant,

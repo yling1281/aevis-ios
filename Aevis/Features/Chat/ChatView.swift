@@ -78,6 +78,9 @@ struct ChatView: View {
         // 顶栏是我们自己画的（微信那种：返回 + 头像 + 名字），
         // 所以把系统的导航栏藏掉，不然会顶着两个头。
         .toolbar(.hidden, for: .navigationBar)
+        // 进了聊天就把底下那四个 tab 收掉 —— 微信也是这个行为，聊天页占满整屏。
+        // 用户的原话：「我进入聊天了的话，下面那四个栏你就不用带上了。」
+        .toolbar(.hidden, for: .tabBar)
         .onDisappear {
             sendTask?.cancel()
         }
@@ -158,13 +161,22 @@ struct ChatView: View {
         attaching = true
         Task { @MainActor in
             defer { attaching = false }
+            // 认字用原图（字大一点更容易认出来）；显示用的那份先压好。
+            let picture = AttachmentService.compressed(image)
             let text = await AttachmentService.recognizeText(in: image)
-            guard !text.isEmpty else {
-                errorText = "这张图里没认出文字。拍清楚一点，或者换一张。"
+
+            guard picture != nil || !text.isEmpty else {
+                errorText = "这张图读不出来，换一张试试。"
                 return
             }
-            draft = AttachmentService.composerBlock(text, source: source) + draft
             errorText = nil
+
+            // 图留在聊天里显示，她拿到的是从图里认出来的文字。
+            // 没认出字也要说一句 —— 不然她会以为收到了一张空图，转头胡猜。
+            let block = text.isEmpty
+                ? "（我发了一张图片，但里面没认出文字。）"
+                : AttachmentService.composerBlock(text, source: source)
+            send(text: block, image: picture)
         }
     }
 
@@ -610,12 +622,7 @@ struct ChatView: View {
 
     private func send() {
         if isSending {
-            sendTask?.cancel()
-            sendTask = nil
-            isSending = false
-            toolNote = nil
-            chat.removeLastIfEmpty()
-            SpeechService.shared.stop()
+            stopSending()
             return
         }
 
@@ -623,11 +630,32 @@ struct ChatView: View {
         guard !text.isEmpty else { return }
 
         draft = ""
+        send(text: text, image: nil)
+    }
+
+    /// 打断她正在生成的那句。
+    private func stopSending() {
+        sendTask?.cancel()
+        sendTask = nil
+        isSending = false
+        toolNote = nil
+        chat.removeLastIfEmpty()
+        SpeechService.shared.stop()
+    }
+
+    /// 真正干活的发送。
+    ///
+    /// `image` 只影响**显示**：聊天里出现一张图，而发给模型的是 `text`
+    /// —— 从那张图里 OCR 出来的文字。用户要的就是这个：
+    /// 「走的还是图片，只不过 TA 那边收到的是文字识别的东西。」
+    private func send(text: String, image: Data?) {
+        if isSending { stopSending() }
+
         errorText = nil
         toolNote = nil
         SpeechService.shared.stop()
 
-        chat.append(ChatMessage(role: .user, text: text))
+        chat.append(ChatMessage(role: .user, text: text, imageData: image))
         chat.append(ChatMessage(role: .assistant, text: ""))
 
         let config = settings.llm
@@ -813,22 +841,71 @@ private struct MessageBubble: View {
 
     private var bubble: some View {
         Group {
+            #if canImport(UIKit)
+            if let data = message.imageData, let image = UIImage(data: data) {
+                // 图就是这条消息的全部内容 —— 那张图里 OCR 出来的文字在
+                // `message.text` 里，是**给她看的**，不该再显示一遍。
+                pictureBubble(image)
+            } else if let sticker {
+                bigSticker(sticker)
+            } else {
+                textBubble
+            }
+            #else
             if let sticker {
                 bigSticker(sticker)
             } else {
-                AevisBubble(
-                    text: message.text,
-                    look: look,
-                    color: color,
-                    corner: bubbleCorner,
-                    fontSize: bubbleFontSize,
-                    horizontalPadding: horizontalPadding,
-                    verticalPadding: verticalPadding,
-                    plainTextColor: theme.fontColor
-                )
+                textBubble
             }
+            #endif
         }
     }
+
+    private var textBubble: some View {
+        AevisBubble(
+            text: message.text,
+            look: look,
+            color: color,
+            corner: bubbleCorner,
+            fontSize: bubbleFontSize,
+            horizontalPadding: horizontalPadding,
+            verticalPadding: verticalPadding,
+            plainTextColor: theme.fontColor
+        )
+    }
+
+    #if canImport(UIKit)
+    /// 聊天里那张图。
+    ///
+    /// 用 `Color.clear` 撑尺寸、图放 overlay —— 跟背景图一个路子。
+    /// 直接把 `scaledToFill` 摆进布局里会把整棵布局撑大（这条踩过）。
+    private func pictureBubble(_ image: UIImage) -> some View {
+        let size = Self.pictureSize(for: image)
+        return Color.clear
+            .frame(width: size.width, height: size.height)
+            .overlay(
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            )
+            .clipShape(RoundedRectangle(cornerRadius: bubbleCorner, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: bubbleCorner, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            )
+    }
+
+    /// 图上显示的尺寸：按原始比例缩到框里，不拉伸。
+    private static func pictureSize(for image: UIImage) -> CGSize {
+        let maxWidth: CGFloat = 200
+        let maxHeight: CGFloat = 260
+        let width = image.size.width
+        let height = image.size.height
+        guard width > 0, height > 0 else { return CGSize(width: 120, height: 120) }
+        let scale = min(maxWidth / width, maxHeight / height, 1)
+        return CGSize(width: max(60, width * scale), height: max(60, height * scale))
+    }
+    #endif
 
     var body: some View {
         if isUser {

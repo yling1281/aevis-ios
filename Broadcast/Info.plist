@@ -27,5 +27,16 @@
 		<key>RPBroadcastProcessMode</key>
 		<string>RPBroadcastProcessModeSampleBuffer</string>
 	</dict>
+	<!-- ATS 是**按进程读各自 bundle 的 Info.plist** 的，所以扩展这份也得写一遍。
+	     扩展要往 127.0.0.1 发一条 http 请求（把认出来的文字送回主 App）——
+	     这条通道不依赖 App Group，是签名对不上时唯一的救命路。
+	     不放开的话请求会被系统直接掐掉，表现同样是「她看不到屏幕」。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

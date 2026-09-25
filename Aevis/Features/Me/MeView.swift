@@ -69,6 +69,9 @@ struct MeView: View {
                         entry("音乐", "music.note", "网易云登录与搜索") {
                             route = SettingsRoute(focus: "music")
                         }
+                        entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
+                            route = SettingsRoute(focus: "baidupan")
+                        }
                     }
 
                     defaultTabCard
@@ -165,6 +168,15 @@ struct MeView: View {
 
     private var modelLine: String {
         settings.isConfigured ? "已填好，能用" : "还没填 API Key，她不会说话"
+    }
+
+    /// 百度网盘那一行。**必须能一眼看出卡在哪一步** ——
+    /// 用户之前压根找不到这个入口，以为功能没做（其实一直在设置页里）。
+    private var baiduLine: String {
+        if !BaiduPanClient.shared.isConfigured {
+            return "备份、搬家、让我读你的网盘（要填 AppKey）"
+        }
+        return BaiduPanClient.shared.isAuthorized ? "已授权，可以备份和搬家" : "凭据填好了，还差一步授权"
     }
 
     // MARK: - 零件

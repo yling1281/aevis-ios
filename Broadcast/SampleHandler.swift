@@ -75,7 +75,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
         lock.unlock()
 
         if shouldReport {
-            ScreenShareStore.shared.markRunning(true, frames: frameIndex, hits: hitIndex)
+            report(running: true, frames: frameIndex, hits: hitIndex)
         }
         guard shouldOCR else { return }
 
@@ -119,8 +119,13 @@ final class SampleHandler: RPBroadcastSampleHandler {
             self.lock.unlock()
 
             guard fresh else { return }
+            // **两条通道都发**：
+            // - 容器那条：签名里的应用组对得上时才有用（进程退出后还能翻历史）
+            // - 环回那条：不依赖任何签名能力 —— 应用组对不上时全靠它
+            //   （症状就是「列表里有 Aevis 录屏，她却看不到屏幕」）
             ScreenShareStore.shared.append(text)
-            ScreenShareStore.shared.markRunning(true, frames: snapshot.0, hits: snapshot.1)
+            ExtensionLink.post(.entry(text))
+            report(running: true, frames: snapshot.0, hits: snapshot.1)
         }
         // `.fast` 就够用了 —— 我们要的是「屏幕上大概是什么」，
         // 不是把每个字都认准。准确度换来的时间在这是浪费电。
@@ -151,7 +156,13 @@ final class SampleHandler: RPBroadcastSampleHandler {
         lock.lock()
         let snapshot = (frames, hits)
         lock.unlock()
-        ScreenShareStore.shared.markRunning(running, frames: snapshot.0, hits: snapshot.1)
+        report(running: running, frames: snapshot.0, hits: snapshot.1)
+    }
+
+    /// 上报状态给主 App —— **两条通道都发**（理由见 `ExtensionLink`）。
+    private func report(running: Bool, frames: Int, hits: Int) {
+        ScreenShareStore.shared.markRunning(running, frames: frames, hits: hits)
+        ExtensionLink.post(.state(running: running, frames: frames, hits: hits))
     }
 
     // MARK: - 零件

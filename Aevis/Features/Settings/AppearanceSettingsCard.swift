@@ -15,6 +15,10 @@ struct AppearanceSettingsCard: View {
 
     @State private var pickedItem: PhotosPickerItem?
     @State private var imageNote: String?
+    /// 背景图失败的原因 —— 用一个**弹窗**说出来。
+    /// 之前只写进那一行小字里，用户翻不到，反馈就变成「选完图没变化」。
+    @State private var imageAlert = ""
+    @State private var showImageAlert = false
     @State private var importingFont = false
     @State private var fontNote: String?
 
@@ -401,6 +405,34 @@ struct AppearanceSettingsCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // 当前那张的缩略图 + 尺寸/大小。
+            // 为什么要有：用户报「选完图没变化」，可那张图到底设进去没有，
+            // 光看背景是看不出来的（背景变化本来就很轻）。把这个摆出来，
+            // 「到底有没有生效」一眼就能确认。
+            if let data = settings.customBackgroundData,
+               let preview = UIImage(data: data) {
+                HStack(spacing: 11) {
+                    Color.clear
+                        .frame(width: 54, height: 54)
+                        .overlay(
+                            Image(uiImage: preview)
+                                .resizable()
+                                .scaledToFill()
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("已经设成背景了")
+                            .font(.aevis(13))
+                            .foregroundStyle(.primary)
+                        Text("\(Int(preview.size.width))×\(Int(preview.size.height)) · \(data.count / 1024) KB")
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
             Text("选了图会自动切成「我的图片」，图会被压缩后只存在这台手机上。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
@@ -411,6 +443,11 @@ struct AppearanceSettingsCard: View {
         .onChange(of: pickedItem) { _, item in
             guard let item else { return }
             load(item)
+        }
+        .alert("聊天背景", isPresented: $showImageAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(imageAlert)
         }
     }
 
@@ -452,23 +489,42 @@ struct AppearanceSettingsCard: View {
     private func load(_ item: PhotosPickerItem) {
         imageNote = nil
         Task { @MainActor in
-            do {
-                guard let raw = try await item.loadTransferable(type: Data.self) else {
-                    imageNote = "这张图读不出来，换一张试试。"
-                    return
-                }
-                guard let compressed = Self.compress(raw) else {
-                    imageNote = "这张图格式不支持，换一张试试。"
-                    return
-                }
-                settings.customBackgroundData = compressed
-                settings.backgroundStyle = .custom
-                imageNote = "好了，已经换成这张。"
-            } catch {
-                imageNote = "读取失败：\(error.localizedDescription)"
+            defer { pickedItem = nil }
+
+            // 相册里有两种图**第一次读不出来**：还在 iCloud 上的、刚拍完没写完的。
+            // 隔一下再试一次这两种都能过。只试一次的表现就是
+            // 「选完图什么都没发生」—— 用户以为功能坏了，其实只是要多等一秒。
+            var raw = await Self.transfer(item)
+            if raw == nil {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                raw = await Self.transfer(item)
             }
-            pickedItem = nil
+
+            guard let raw else {
+                fail("这张图没能从相册读出来 —— 多半是还在 iCloud 里没下载到本机。"
+                     + "等它下载完再选一次；或者先在相册里打开它一遍。")
+                return
+            }
+            guard let compressed = Self.compress(raw) else {
+                fail("这张图解码不了（\(raw.count / 1024) KB）。换成 JPG 或 PNG 再试一次。")
+                return
+            }
+
+            settings.customBackgroundData = compressed
+            settings.backgroundStyle = .custom
+            imageNote = "好了，已经换成这张。"
         }
+    }
+
+    /// 失败要说清楚，而且要说在**用户一定看得见的地方**。
+    private func fail(_ reason: String) {
+        imageNote = reason
+        imageAlert = reason
+        showImageAlert = true
+    }
+
+    private static func transfer(_ item: PhotosPickerItem) async -> Data? {
+        try? await item.loadTransferable(type: Data.self)
     }
 
     /// 压到最长边 1600、JPEG 0.82 —— 手机上看足够清楚，又不至于占地方。

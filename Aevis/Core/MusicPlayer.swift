@@ -150,7 +150,9 @@ final class MusicPlayer: NSObject, ObservableObject {
         loadingTask?.cancel()
         errorText = nil
         progress = 0
-        duration = track.duration
+        // 时长来自接口，偶尔会是 0 或者 NaN（网易那边偶尔就不给）。
+        // 后面进度条是拿它做除数的，所以这里就夹成「一个正常的非负数」。
+        duration = track.duration.isFinite && track.duration > 0 ? track.duration : 0
         lyric = ""
 
         onTrackChanged?(track)
@@ -210,12 +212,19 @@ final class MusicPlayer: NSObject, ObservableObject {
 
     private func updateNowPlaying() {
         guard let track = current else { return }
+
+        // ⚠️ 锁屏 / 控制中心那套只认「正常的数」。
+        // 把 NaN 或者无穷大塞进去是**没有意义的**，所以先夹一下 ——
+        // 上一处 NaN 已经在进度回调里挡掉了，这里是同一路的第二道。
+        let safeDuration = duration.isFinite && duration > 0 ? duration : 0
+        let safeProgress = progress.isFinite && progress >= 0 ? progress : 0
+
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist,
             MPMediaItemPropertyAlbumTitle: track.album,
-            MPMediaItemPropertyPlaybackDuration: duration,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: progress,
+            MPMediaItemPropertyPlaybackDuration: safeDuration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: safeProgress,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0
         ]
         info[MPMediaItemPropertyAlbumTitle] = track.album

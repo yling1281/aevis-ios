@@ -256,8 +256,13 @@ struct MusicView: View {
                 VStack(spacing: 4) {
                     Slider(
                         value: Binding(
-                            get: { player.duration > 0 ? player.progress / player.duration : 0 },
-                            set: { player.seek(to: $0) }
+                            get: {
+                                // ⚠️ 进度条的值必须落在 0…1 里，而且不能是 NaN。
+                                // AVPlayer 在某些时刻会给 NaN，NaN 传进 SwiftUI 就是崩溃。
+                                guard player.duration > 0, player.progress.isFinite else { return 0 }
+                                return min(max(player.progress / player.duration, 0), 1)
+                            },
+                            set: { player.seek(to: min(max($0, 0), 1)) }
                         ),
                         in: 0...1
                     )

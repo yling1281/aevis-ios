@@ -158,7 +158,10 @@ extension DeviceTools {
             let fresh = ScreenShareStore.shared.readEntries().prefix(3).map(\.text)
             let companion = ScreenCompanion.shared
 
-            guard companion.systemRunning || companion.inAppActive else {
+            // 用 active 而不是逐个通道判断 —— 它把**环回备用通道**也算进去了。
+            // 早先这里只看容器那条通道，签名对不上时她会一直说「你没在录」，
+            // 哪怕红点正亮着、备用通道正源源不断往里送文字。
+            guard companion.active else {
                 // 这里必须把两种情况分开说 —— 它们对用户来说长得一模一样：
                 // 都是「状态栏亮着红点，你却说看不到」。
                 if companion.screenIsCaptured {

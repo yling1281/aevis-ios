@@ -150,10 +150,14 @@ struct TogetherView: View {
                     }
                 }
 
-                if !player.lyric.isEmpty {
-                    Text("「\(player.lyric)」")
+                // ⚠️ 这里**只能显示当前那一句**，不能把整份歌词塞进一个 Text。
+                // 一首歌的歌词是好几 KB、上百行 —— 整段丢给 Text 渲染又慢又占内存，
+                // 而且本来也没法看。用 currentLyricLine 拿「唱到哪句」。
+                if let line = player.currentLyricLine {
+                    Text("「\(line)」")
                         .font(.aevis(13))
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 

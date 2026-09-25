@@ -106,6 +106,35 @@ enum AttachmentService {
         return block
     }
 
+    // MARK: - 压缩
+
+    /// 压成一张能存进聊天记录的 JPEG。
+    ///
+    /// 最长边 1280、质量 0.8：聊天里看得清，又不至于把消息存档撑大
+    /// （消息是按 JSON 整个读写的，一条几 MB 的图会让每次落盘都变慢）。
+    static func compressed(
+        _ image: UIImage,
+        maxSide: CGFloat = 1280,
+        quality: CGFloat = 0.8
+    ) -> Data? {
+        #if canImport(UIKit)
+        let longest = max(image.size.width, image.size.height)
+        guard longest > 0 else { return nil }
+
+        let scale = longest > maxSide ? maxSide / longest : 1
+        let target = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let scaled = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        return scaled.jpegData(compressionQuality: quality)
+        #else
+        return nil
+        #endif
+    }
+
     // MARK: - 零件
 
     #if canImport(UIKit)

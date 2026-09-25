@@ -108,8 +108,7 @@ struct ChatListView: View {
     /// 最后一条说了什么。微信会在自己发的前面加「我：」。
     private func preview(_ contact: Contact) -> String {
         guard let last = chat.lastMessage(for: contact.id) else { return "还没聊过" }
-        let text = last.text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = last.previewText
             .replacingOccurrences(of: "\n", with: " ")
         guard !text.isEmpty else { return "还没聊过" }
         return last.role == .user ? "我：\(text)" : text
