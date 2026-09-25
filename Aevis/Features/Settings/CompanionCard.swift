@@ -178,7 +178,7 @@ struct CompanionCard: View {
             entry(
                 symbol: "square.stack.3d.up",
                 title: "应用组",
-                detail: ScreenShareStore.isUsable
+                detail: ScreenShareStore.shared.isUsable
                     ? ScreenShareStore.appGroupID
                     : "容器不通 · 点这里手动填一个（现在自动挑的是 \(ScreenShareStore.appGroupID)）"
             ) {
