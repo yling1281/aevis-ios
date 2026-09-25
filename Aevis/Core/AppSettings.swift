@@ -183,6 +183,49 @@ struct SearchSource: Codable, Identifiable, Hashable {
     ]
 }
 
+/// 一套「API 商家」的配置快照 —— 用户可以存很多套、随时切换。
+///
+/// ## 为什么不做成"由它派生当前的配置"
+/// 现在生效的那三栏（`AppSettings.baseURL` / `.model` / `.apiKey`）被全项目
+/// 几十处直接用（`settings.llm` 就是拿它们拼的）。把它们改成从 profile 派生
+/// 等于动地基，一改就是一大堆编译错误 —— 而本机没有 Xcode，试一次十几分钟。
+///
+/// 所以这里走的是**最小改动**：profile 只是一份「**命名快照**」。
+/// - 切预设 → 把它的值**写进**那三栏
+/// - 用户手改那三栏 → 再**回写**进当前这套（`syncIntoActiveProfile`）
+///
+/// 这样 `settings.llm` 和所有调用点一个字都不用动。
+///
+/// ## ⚠️ Key 不在这里
+/// `apiProfiles` 会以 JSON 存进 UserDefaults（明文 plist），所以**不能放 Key**。
+/// 每套的 Key 单独进钥匙串，账号名 `aevis.apiProfile.key.<id>`。
+struct APIProfile: Codable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    /// `ProviderPreset.rawValue`
+    var provider: String
+    var baseURL: String
+    var model: String
+    /// 收藏的置顶显示。
+    var favorite: Bool = false
+    /// 给自己看的备注，比如「余额 20」「便宜但慢」。
+    var note: String = ""
+    var createdAt: Double = 0
+    var lastUsedAt: Double = 0
+
+    var preset: ProviderPreset { ProviderPreset(rawValue: provider) ?? .custom }
+
+    static func newID() -> String { UUID().uuidString }
+
+    /// 从地址里取个能认出来的短标签，给列表当副标题。
+    var hostLabel: String {
+        guard let host = URL(string: baseURL)?.host, !host.isEmpty else {
+            return baseURL.isEmpty ? "还没填地址" : baseURL
+        }
+        return host
+    }
+}
+
 /// 玻璃材质四档。用户要能自己挑，所以不做成写死的。
 enum GlassStyle: String, CaseIterable, Identifiable {
     case standard
@@ -263,6 +306,8 @@ final class AppSettings: ObservableObject {
         static let reasoningBudget = "aevis.reasoningBudget"
         static let contextLimit = "aevis.contextLimit"
         static let searchSources = "aevis.searchSources"
+        static let apiProfiles = "aevis.apiProfiles"
+        static let activeProfile = "aevis.apiProfile.active"
         static let activeSearchSource = "aevis.activeSearchSource"
         static let autoTestOnLaunch = "aevis.autoTestOnLaunch"
         static let speakerEnabled = "aevis.speakerEnabled"
@@ -405,11 +450,17 @@ final class AppSettings: ObservableObject {
     // MARK: - 模型接入
 
     @Published var baseURL: String {
-        didSet { UserDefaults.standard.set(baseURL, forKey: Key.baseURL) }
+        didSet {
+            UserDefaults.standard.set(baseURL, forKey: Key.baseURL)
+            syncIntoActiveProfile()      // 手改了就回写进"当前那套 API 预设"
+        }
     }
 
     @Published var model: String {
-        didSet { UserDefaults.standard.set(model, forKey: Key.model) }
+        didSet {
+            UserDefaults.standard.set(model, forKey: Key.model)
+            syncIntoActiveProfile()
+        }
     }
 
     @Published var modelList: [String] {
@@ -417,12 +468,21 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var apiKey: String {
-        didSet { Keychain.set(apiKey, for: Key.llmKeychain) }
+        didSet {
+            Keychain.set(apiKey, for: Key.llmKeychain)          // 老位置，兼容老逻辑
+            // 当前这套预设也存一份 —— 切走再切回来时，Key 得跟着回来
+            if !activeProfileID.isEmpty {
+                Keychain.set(apiKey, for: Self.profileKeychainKey(activeProfileID))
+            }
+        }
     }
 
     /// 当前用的是哪个预设供应商。切预设会自动填地址和模型名。
     @Published var providerPreset: ProviderPreset {
-        didSet { UserDefaults.standard.set(providerPreset.rawValue, forKey: Key.providerPreset) }
+        didSet {
+            UserDefaults.standard.set(providerPreset.rawValue, forKey: Key.providerPreset)
+            syncIntoActiveProfile()
+        }
     }
 
     /// 推理预算：关闭 / LOW / MEDIUM / HIGH。
@@ -451,6 +511,142 @@ final class AppSettings: ObservableObject {
     /// 启动时自动测一次连接，不通就直接在聊天页提示。
     @Published var autoTestOnLaunch: Bool {
         didSet { UserDefaults.standard.set(autoTestOnLaunch, forKey: Key.autoTestOnLaunch) }
+    }
+
+    // MARK: - API 预设（能存很多套，随时切）
+    //
+    // 用户要的：「每个 App 可以添加很多个 API 商家，能收藏、有记忆」。
+    // 所以是一个列表 + 一个「当前在用哪套」，不是一套写死的配置。
+    // ⚠️ 具体设计取舍见 `APIProfile` 的注释（为什么不改成派生）。
+
+    @Published var apiProfiles: [APIProfile] {
+        didSet {
+            if let data = try? JSONEncoder().encode(apiProfiles) {
+                UserDefaults.standard.set(data, forKey: Key.apiProfiles)
+            }
+        }
+    }
+
+    @Published var activeProfileID: String {
+        didSet { UserDefaults.standard.set(activeProfileID, forKey: Key.activeProfile) }
+    }
+
+    var activeProfile: APIProfile? {
+        apiProfiles.first { $0.id == activeProfileID }
+    }
+
+    /// 列表顺序：**收藏的在前，然后最近用过的在前**。
+    /// 不用列表原始顺序 —— 用户存了十几套以后，翻找是件很烦的事。
+    var sortedProfiles: [APIProfile] {
+        apiProfiles.sorted { a, b in
+            if a.favorite != b.favorite { return a.favorite }
+            if a.lastUsedAt != b.lastUsedAt { return a.lastUsedAt > b.lastUsedAt }
+            return a.createdAt > b.createdAt
+        }
+    }
+
+    static func profileKeychainKey(_ id: String) -> String { "aevis.apiProfile.key." + id }
+
+    func apiKey(forProfile id: String) -> String {
+        Keychain.get(Self.profileKeychainKey(id)) ?? ""
+    }
+
+    /// 切到某一套：把它的地址 / 模型 / Key 一起换过去。
+    @discardableResult
+    func useProfile(_ id: String) -> Bool {
+        guard let index = apiProfiles.firstIndex(where: { $0.id == id }) else { return false }
+        // ⚠️ 顺序要紧：**先认下"在用哪套"，再写那三栏** ——
+        // 反过来的话，写 baseURL 会触发回写逻辑，把新值写进**上一套**里。
+        activeProfileID = id
+        providerPreset = apiProfiles[index].preset
+        baseURL = apiProfiles[index].baseURL
+        model = apiProfiles[index].model
+        apiKey = apiKey(forProfile: id)
+        modelList = []
+        apiProfiles[index].lastUsedAt = Date().timeIntervalSince1970
+        return true
+    }
+
+    /// 把**当前生效的配置**存成一套新的预设，并切到它。
+    @discardableResult
+    func saveCurrentAsProfile(name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stamp = Date().timeIntervalSince1970
+        var profile = APIProfile(
+            id: APIProfile.newID(),
+            name: trimmed.isEmpty ? Self.fallbackProfileName(baseURL: baseURL,
+                                                            provider: providerPreset) : trimmed,
+            provider: providerPreset.rawValue,
+            baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: model.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        profile.createdAt = stamp
+        profile.lastUsedAt = stamp
+        apiProfiles.append(profile)
+        activeProfileID = profile.id
+        Keychain.set(apiKey, for: Self.profileKeychainKey(profile.id))
+        return profile.id
+    }
+
+    private static func fallbackProfileName(baseURL: String, provider: ProviderPreset) -> String {
+        if let host = URL(string: baseURL)?.host, !host.isEmpty { return host }
+        return provider.label
+    }
+
+    func renameProfile(_ id: String, to name: String, note: String) {
+        guard let index = apiProfiles.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { apiProfiles[index].name = trimmed }
+        apiProfiles[index].note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func toggleFavorite(_ id: String) {
+        guard let index = apiProfiles.firstIndex(where: { $0.id == id }) else { return }
+        apiProfiles[index].favorite.toggle()
+    }
+
+    /// 复制一份（改坏了能退回去；或者同一个商家开两个 Key 分别用）。
+    @discardableResult
+    func duplicateProfile(_ id: String) -> String? {
+        guard let source = apiProfiles.first(where: { $0.id == id }) else { return nil }
+        var copy = source
+        copy.id = APIProfile.newID()
+        copy.name = source.name + " 副本"
+        copy.favorite = false
+        copy.createdAt = Date().timeIntervalSince1970
+        copy.lastUsedAt = 0
+        apiProfiles.append(copy)
+        // 钥匙串里的 Key 也要跟着复制一份 —— 不然切过去是空的，用户会以为丢了
+        let key = apiKey(forProfile: source.id)
+        if !key.isEmpty { Keychain.set(key, for: Self.profileKeychainKey(copy.id)) }
+        return copy.id
+    }
+
+    func deleteProfile(_ id: String) {
+        apiProfiles.removeAll { $0.id == id }
+        // 删的是当前在用的那套 → 退回收藏里的第一个（没有就留空）
+        if activeProfileID == id {
+            activeProfileID = sortedProfiles.first?.id ?? ""
+            if let next = activeProfile { useProfile(next.id) }
+        }
+    }
+
+    /// 用户手改了地址 / 模型 / 服务商 → **回写进当前这套**。
+    /// 不回写的话，他改完切走再切回来，改动就没了 —— 那才是真的坑。
+    /// ⚠️ 只在值真的变了才写，否则每敲一个字都要编码一遍整个数组。
+    private func syncIntoActiveProfile() {
+        guard !activeProfileID.isEmpty,
+              let index = apiProfiles.firstIndex(where: { $0.id == activeProfileID })
+        else { return }
+        var profile = apiProfiles[index]
+        var changed = false
+        if profile.baseURL != baseURL { profile.baseURL = baseURL; changed = true }
+        if profile.model != model { profile.model = model; changed = true }
+        if profile.provider != providerPreset.rawValue {
+            profile.provider = providerPreset.rawValue
+            changed = true
+        }
+        if changed { apiProfiles[index] = profile }
     }
 
     // MARK: - 说话
@@ -1155,6 +1351,24 @@ final class AppSettings: ObservableObject {
         baiduPanExpiresAt = defaults.double(forKey: Key.baiduPanExpiresAt)
         baiduPanLastError = defaults.string(forKey: Key.baiduPanLastError) ?? ""
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
+
+        // —— API 预设（放在 init 最末尾：这时候所有属性都已就位，才能调方法）——
+        if let data = defaults.data(forKey: Key.apiProfiles),
+           let list = try? JSONDecoder().decode([APIProfile].self, from: data) {
+            apiProfiles = list
+        } else {
+            apiProfiles = []
+        }
+        activeProfileID = defaults.string(forKey: Key.activeProfile) ?? ""
+        // 老用户升级上来：本地已经填着一套能用的配置，替他存成一个预设，
+        // 免得他升级完发现"我的 API 怎么没了"（其实是没坏，只是没有预设）。
+        if apiProfiles.isEmpty, !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            activeProfileID = saveCurrentAsProfile(name: "")
+        }
+        // 当前那套被删掉了 → 退回到排序后的第一个
+        if !activeProfileID.isEmpty, activeProfile == nil {
+            activeProfileID = sortedProfiles.first?.id ?? ""
+        }
     }
 
     // MARK: - 派生

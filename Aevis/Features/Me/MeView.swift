@@ -200,7 +200,13 @@ struct MeView: View {
     }
 
     private var modelLine: String {
-        settings.isConfigured ? "已填好，能用" : "还没填 API Key，她不会说话"
+        guard settings.isConfigured else { return "还没填 API Key，她不会说话" }
+        let count = settings.apiProfiles.count
+        if let profile = settings.activeProfile {
+            return count > 1 ? "在用「\(profile.name)」，共 \(count) 套预设"
+                             : "在用「\(profile.name)」"
+        }
+        return count > 1 ? "已填好，能用（存了 \(count) 套预设）" : "已填好，能用"
     }
 
     /// 百度网盘那一行。**必须能一眼看出卡在哪一步** ——

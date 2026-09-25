@@ -21,6 +21,14 @@ struct SettingsView: View {
     @State private var modelMessage: String?
     @State private var newSourceName = ""
     @State private var newSourceTemplate = ""
+    // —— API 预设 ——
+    @State private var showNewProfile = false
+    @State private var newProfileName = ""
+    @State private var editingProfileID = ""
+    @State private var renameDraft = ""
+    @State private var renameNote = ""
+    @State private var deleteTarget: APIProfile?
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -226,9 +234,177 @@ struct SettingsView: View {
 
     // MARK: - 模型接入
 
+    // MARK: - API 预设
+    //
+    // 用户口径：「每个 App 可以添加很多个 API 商家，然后能收藏这些 API，有记忆的 API，
+    // 可以自定义很多个，一个预设等于一个 API」。
+    //
+    // 所以这一块只干两件事：**列出所有预设** + **点一下切过去**。
+    // 改具体内容（地址 / 模型 / Key）还是用下面那三栏 —— 免得同一个字段有两套输入框。
+
+    private var profileSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("我的 API 预设")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button("存为预设") {
+                    newProfileName = ""
+                    showNewProfile = true
+                }
+                .font(.aevis(12.5))
+                .buttonStyle(.borderless)
+            }
+
+            if settings.apiProfiles.isEmpty {
+                Text("还没有预设。把现在这套「存为预设」起个名字，以后填别的商家再存一套，"
+                     + "就能一键切换 —— 地址、模型、Key 会一起换过去。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(settings.sortedProfiles) { profile in
+                    profileRow(profile)
+                }
+                Text("点一行就切过去；长按可以收藏、改名、复制、删除。收藏的排在前面。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .alert("存为预设", isPresented: $showNewProfile) {
+            TextField("给它起个名字，比如「DeepSeek 主号」", text: $newProfileName)
+            Button("保存") {
+                settings.saveCurrentAsProfile(name: newProfileName)
+                newProfileName = ""
+                modelMessage = "存好了。以后切别的商家时，点一下就能换回来。"
+            }
+            Button("取消", role: .cancel) { newProfileName = "" }
+        } message: {
+            Text("会记住当前的地址、模型和 Key。")
+        }
+        .alert("改名 / 备注", isPresented: Binding(
+            get: { !editingProfileID.isEmpty },
+            set: { if !$0 { editingProfileID = "" } }
+        )) {
+            TextField("名字", text: $renameDraft)
+            TextField("备注（可留空）", text: $renameNote)
+            Button("保存") {
+                settings.renameProfile(editingProfileID, to: renameDraft, note: renameNote)
+                editingProfileID = ""
+            }
+            Button("取消", role: .cancel) { editingProfileID = "" }
+        } message: {
+            Text("备注是给你自己看的，比如「余额 20」「便宜但慢」。")
+        }
+        .alert("删除这个预设？", isPresented: $showDeleteConfirm) {
+            Button("删除", role: .destructive) {
+                if let target = deleteTarget { settings.deleteProfile(target.id) }
+                deleteTarget = nil
+            }
+            Button("取消", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text("只删掉这套预设（名字、地址、Key）。聊天记录和别的设置都不受影响。")
+        }
+    }
+
+    private func profileRow(_ profile: APIProfile) -> some View {
+        let active = settings.activeProfileID == profile.id
+        let missingKey = settings.apiKey(forProfile: profile.id)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return Button {
+            guard !active else { return }
+            settings.useProfile(profile.id)
+            modelMessage = "已切到「\(profile.name)」。"
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: active ? "largecircle.fill.circle" : "circle")
+                    .font(.aevis(15))
+                    .foregroundStyle(active ? settings.accentColor : Color.secondary.opacity(0.55))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(profile.name)
+                            .font(.aevis(14.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if profile.favorite {
+                            Image(systemName: "star.fill")
+                                .font(.aevis(9.5))
+                                .foregroundStyle(.yellow)
+                        }
+                    }
+                    Text(profileSubtitle(profile))
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+
+                if missingKey {
+                    Text("缺 Key")
+                        .font(.aevis(11))
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(active ? settings.accentColor.opacity(0.12)
+                                 : Color.primary.opacity(0.045))
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                settings.toggleFavorite(profile.id)
+            } label: {
+                Label(profile.favorite ? "取消收藏" : "收藏（置顶）", systemImage: "star")
+            }
+            Button {
+                renameDraft = profile.name
+                renameNote = profile.note
+                editingProfileID = profile.id
+            } label: {
+                Label("改名 / 备注", systemImage: "pencil")
+            }
+            Button {
+                settings.duplicateProfile(profile.id)
+            } label: {
+                Label("复制一份", systemImage: "doc.on.doc")
+            }
+            Divider()
+            Button(role: .destructive) {
+                deleteTarget = profile
+                showDeleteConfirm = true
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+    }
+
+    /// 一行副标题：模型 · 域名 ·（备注）。认得出是哪个商家就够了，不铺太满。
+    private func profileSubtitle(_ profile: APIProfile) -> String {
+        var parts: [String] = []
+        if !profile.model.isEmpty { parts.append(profile.model) }
+        parts.append(profile.hostLabel)
+        if !profile.note.isEmpty { parts.append(profile.note) }
+        return parts.joined(separator: " · ")
+    }
+
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardTitle("模型接入")
+
+            // 我的 API 预设放在最上头 —— 用户要的「能加很多个商家、能收藏、有记忆」
+            // 就是这一块。它管的是"用哪一套"，下面三栏是"这一套具体长什么样"。
+            profileSection
+            rule
 
             // 供应商预设：切一下就自动填好地址和模型名，不用手打 URL
             VStack(alignment: .leading, spacing: 9) {
@@ -271,7 +447,9 @@ struct SettingsView: View {
                     .padding(.vertical, 2)
                 }
 
-                Text("预设只是帮你把地址和模型名填好，下面两栏随时能改。Key 从 \(settings.providerPreset.keyHint) 拿。")
+                Text("预设只是帮你把地址和模型名填好，下面两栏随时能改。"
+                     + "改了会存进「当前那套」预设 —— 想试别的又不想动现在这套，"
+                     + "先长按「复制一份」。Key 从 \(settings.providerPreset.keyHint) 拿。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
