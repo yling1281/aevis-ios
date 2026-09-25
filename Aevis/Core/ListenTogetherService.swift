@@ -124,7 +124,12 @@ final class ListenTogetherService: ObservableObject {
                 guard self.lyricCount % max(1, self.linesPerComment) == 0 else { return }
                 guard Date().timeIntervalSince(self.lastSpokeAt) >= self.minimumGap else { return }
 
-                Task { await self.react(to: trimmed) }
+                // ⚠️ 必须是 `@MainActor` 的 Task。
+                // `.sink` 虽然 `receive(on: .main)`，但闭包本身**不是** MainActor 隔离的 ——
+                // 直接 `Task { await self.react(...) }` 会落到全局并发池上跑，
+                // 于是 `thinking` / `herLines` / `statusLine` 这些 `@Published`
+                // 全在后台线程被改（一起听时偶发闪退就是它）。
+                Task { @MainActor in await self.react(to: trimmed) }
             }
     }
 

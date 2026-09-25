@@ -407,6 +407,9 @@ final class AppSettings: ObservableObject {
         static let deviceAuthorized = "aevis.device.authorized"
         /// 授权时绑的那个账号（服务器给的就是打码邮箱），只用来显示。
         static let deviceAuthorizedAccount = "aevis.device.authorizedAccount"
+        /// 通话时「说完一句」要等多久（秒）。
+        /// **这个值直接决定她会不会抢话** —— 出厂 2.5 秒，设置里能调（1.5 / 2.5 / 3.5）。
+        static let callSilenceSeconds = "aevis.call.silenceSeconds"
         static let llmKeychain = "openai.apiKey"
         static let ttsKeychain = "tts.apiKey"
         static let baiduPanAppKey = "baidu.pan.appKey"
@@ -1209,6 +1212,15 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// 通话时「你停顿多久才算这一句说完了」。
+    ///
+    /// 用户报过：说完话只停一下下（1 秒出头）她就接了，像是在抢话。
+    /// 现在默认 **2.5 秒**，并且设置里给三档 —— 这个只他本人体感最准，
+    /// 不该由我们定死。
+    @Published var callSilenceSeconds: Double {
+        didSet { UserDefaults.standard.set(callSilenceSeconds, forKey: Key.callSilenceSeconds) }
+    }
+
     // MARK: - 第三方登录凭据
 
     /// 网易云的 Cookie。**只进钥匙串**，和 API Key 一个待遇。
@@ -1407,6 +1419,8 @@ final class AppSettings: ObservableObject {
         accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)
         deviceAuthorized = defaults.object(forKey: Key.deviceAuthorized) as? Bool ?? false
         deviceAuthorizedAccount = defaults.string(forKey: Key.deviceAuthorizedAccount) ?? ""
+        // ⚠️ 必须用 object(forKey:) 判「有没有设过」—— 出厂值不是 0
+        callSilenceSeconds = defaults.object(forKey: Key.callSilenceSeconds) as? Double ?? 2.5
         neteaseChannel = defaults.string(forKey: Key.neteaseChannel) ?? "plain"
         // 百度网盘凭据：**用户自己填的优先，没填就用编译时注入的那份**
         // （见 BuiltInSecrets 的说明：仓库里那份是空值，真值只在 CI 注入）。

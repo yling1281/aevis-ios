@@ -44,6 +44,39 @@ struct CompanionCard: View {
 
             rule
 
+            // ——— 通话：多久算「你说完了」———
+            //
+            // 用户报过：说完话只停一秒出头她就接了，像在抢话。
+            // **这件事只有他本人体感最准，所以给三档让他自己定**，不替他选死。
+            // 改的是 `ListenService` 的静音判句阈值。
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("停顿多久算说完")
+                        .font(.aevis(14))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 8)
+                    Text(Self.silenceLabel(settings.callSilenceSeconds))
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                }
+
+                Picker("", selection: $settings.callSilenceSeconds) {
+                    Text("快").tag(1.5)
+                    Text("标准").tag(2.5)
+                    Text("慢").tag(3.5)
+                }
+                .pickerStyle(.segmented)
+
+                Text("定太短她会抢话（你还没说完就接上了），太长你会觉得她不吭声。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+
+            rule
+
             // ——— 录屏陪伴 ———
 
             // ——— 系统级录屏：录整个屏幕，要的就是这个 ———
@@ -227,6 +260,14 @@ struct CompanionCard: View {
             .fill(Color.primary.opacity(0.07))
             .frame(height: 0.5)
             .padding(.leading, 16)
+    }
+
+    /// 把秒数说成人话。**必须和 `Picker` 里那几个 tag 对得上** ——
+    /// 老用户存的是 1.3（初版那个值）时也不会显示成空白。
+    private static func silenceLabel(_ seconds: Double) -> String {
+        if seconds < 2 { return "1.5 秒" }
+        if seconds < 3 { return "2.5 秒" }
+        return "3.5 秒"
     }
 
     private func entry(

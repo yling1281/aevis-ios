@@ -34,6 +34,14 @@ final class MusicPlayer: NSObject, ObservableObject {
 
     private var player: AVPlayer?
     private var timeObserver: Any?
+    /// 上面那个观察者**注册在哪台 player 上**。
+    ///
+    /// ⚠️ 必须和 `timeObserver` **成对保存**。踩过的血案（用户报「点歌就闪退」）：
+    /// `loadCurrent()` 是先把 `player` 换成新的、再调 `observeProgress`，
+    /// 而里面用 `self.player?.removeTimeObserver(旧token)` —— 拿**旧 token**
+    /// 去**新的 player** 上移除，AVFoundation 直接抛异常，App 当场闪退。
+    /// 路径极短：搜歌 → 点一首 → 再点一首（第二次 `loadCurrent` 必炸）。
+    private var observedPlayer: AVPlayer?
     private var loadingTask: Task<Void, Never>?
 
     var current: MusicTrack? {
@@ -131,6 +139,13 @@ final class MusicPlayer: NSObject, ObservableObject {
 
     func stop() {
         loadingTask?.cancel()
+        // ⚠️ 趁 player 还活着先把观察者摘掉 —— 下面 `player = nil` 之后就再也没机会了
+        // （那颗 token 只能交回注册它的那台实例）。
+        if let timeObserver, let old = observedPlayer {
+            old.removeTimeObserver(timeObserver)
+        }
+        timeObserver = nil
+        observedPlayer = nil
         player?.pause()
         player = nil
         isPlaying = false
@@ -182,13 +197,24 @@ final class MusicPlayer: NSObject, ObservableObject {
     }
 
     private func observeProgress(of player: AVPlayer) {
-        if let timeObserver {
-            self.player?.removeTimeObserver(timeObserver)
-            self.timeObserver = nil
+        // ⚠️ 摘观察者必须用**当初注册它的那台实例**（见 `observedPlayer` 的说明）。
+        // 顺带解释另一个症状：旧观察者以前从来没被真正摘掉过，
+        // 于是一路活着继续回调 —— 上一首的状态盖到下一首上、还会反复触发 next()，
+        // 表现就是「歌自己乱跳」。
+        if let timeObserver, let old = observedPlayer {
+            old.removeTimeObserver(timeObserver)
         }
+        timeObserver = nil
+        observedPlayer = nil
+
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self else { return }
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: interval,
+            queue: .main
+        ) { [weak self, weak player] time in
+            guard let self, let player else { return }
+            // 换歌之后旧 player 的回调可能还在路上 —— 只认当前这首。
+            guard player === self.observedPlayer else { return }
 
             // ⚠️ 必须挡一下 NaN。AVPlayer 在"还没就绪 / 流有问题 / 刚 seek"这些时刻
             // 会给一个 NaN 的时间，而 NaN 会顺着 progress 一路传到界面的 Slider 上 ——
@@ -208,6 +234,7 @@ final class MusicPlayer: NSObject, ObservableObject {
                 Task { await self.next() }
             }
         }
+        observedPlayer = player
     }
 
     private func updateNowPlaying() {

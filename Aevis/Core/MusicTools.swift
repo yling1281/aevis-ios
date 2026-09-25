@@ -87,7 +87,10 @@ extension DeviceTools {
                 return "没找到要放的那首歌。换个说法再试，或者先把歌名告诉我。"
             }
 
-            await MusicPlayer.shared.play([picked])
+            // 播放同样要跳回主线程（理由见 `music_control` 那段说明）。
+            // 给它一点时间把播放地址取回来，这样「放不出来」能当场说清楚。
+            await MainActor.run { _ = Task { await MusicPlayer.shared.play([picked]) } }
+            try? await Task.sleep(nanoseconds: 900_000_000)
             if let message = MusicPlayer.shared.errorText {
                 return "找到了《\(picked.title)》，但放不出来：\(message)"
             }
@@ -114,22 +117,29 @@ extension DeviceTools {
             guard let action = (args["action"] as? String)?.lowercased() else {
                 return "没给要做什么。"
             }
+            // ⚠️ 每个动作都必须**跳回主线程**再动播放器。
+            // 这些工具是在 `LLMService` 的 `Task.detached` 里跑的（**不在主线程**），
+            // 而 `MusicPlayer` 一边改 `@Published`、一边动 AVFoundation 和 MediaPlayer ——
+            // 这几样都只能在主线程碰。以前直接在后台线程调，是「她说放首歌就崩」的隐患。
             let player = MusicPlayer.shared
             switch action {
             case "pause":
-                player.pause()
+                await MainActor.run { player.pause() }
                 return "暂停了。"
             case "resume":
-                player.resume()
+                await MainActor.run { player.resume() }
                 return "继续放了。"
             case "next":
-                await player.next()
+                await MainActor.run { _ = Task { await player.next() } }
+                // 换歌要现取播放地址，给它一点时间再读结果
+                try? await Task.sleep(nanoseconds: 350_000_000)
                 return player.current.map { "换成了《\($0.display)》" } ?? "队列是空的。"
             case "previous":
-                await player.previous()
+                await MainActor.run { _ = Task { await player.previous() } }
+                try? await Task.sleep(nanoseconds: 350_000_000)
                 return player.current.map { "回到《\($0.display)》" } ?? "队列是空的。"
             case "stop":
-                player.stop()
+                await MainActor.run { player.stop() }
                 return "停了。"
             default:
                 return "不认识这个动作：\(action)"

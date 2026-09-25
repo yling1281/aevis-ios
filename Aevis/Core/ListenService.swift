@@ -200,12 +200,31 @@ final class ListenService: ObservableObject {
         silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
             guard let self, self.isListening else { return }
             guard !self.transcript.isEmpty else { return }
-            // 一秒多没有新内容，就认为这句说完了
-            if Date().timeIntervalSince(self.lastChangeAt) > 1.3 {
+
+            // ⚠️ **这一处直接决定「她会不会抢话」。**
+            // 初版拍的是 1.3 秒 —— 用户只是想了半拍就被当成"说完了"，
+            // 于是话没说完她就接上了（原话：「我说完话之后，如果一秒之内
+            // 我没有说话，他就给我回复」）。现在默认放宽，并且设置里能调。
+            //
+            // 另外：**光看"识别结果有没有变"是不够的** —— 人在「嗯……」「那个……」
+            // 的时候识别结果常常一动不动。所以再加一道音量判断：
+            // 麦克风里明显还有声音，就一律不算停。
+            if self.level > Self.speakingLevel {
+                self.lastChangeAt = Date()
+                return
+            }
+            if Date().timeIntervalSince(self.lastChangeAt) > AppSettings.shared.callSilenceSeconds {
                 self.flushUtterance()
             }
         }
     }
+
+    /// 判定「麦克风里明显有人在说话」的音量线。
+    ///
+    /// `level` 是 RMS × 11 再夹到 0…1：安静房间的底噪大概 0.01~0.06，正常说话 0.2 往上。
+    /// 取 0.16 是为了**只挡真人声** —— 定得太低，空调声、马路噪音一来就永远不判句，
+    /// 那会变成"她再也不回话"，比抢话更糟。
+    private static let speakingLevel: Double = 0.16
 
     // MARK: - 音量
 

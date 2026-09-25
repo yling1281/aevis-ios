@@ -43,6 +43,14 @@ final class DeviceGate: ObservableObject {
     private var inFlight = false
 
     private init() {
+        // ⚠️ 截图专用开关：`-aevisShowGate` 时**必须当成"从没授权过的新设备"**。
+        // 否则 demo 数据里的联系人会命中下面那条"老用户免过"，
+        // 于是门禁页上会出现「已经授权了。」这种自相矛盾的话（build-55 的截图里就是这样）。
+        // 正式版没有这个参数，走不到这里。
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-aevisShowGate") { return }
+        #endif
+
         let settings = AppSettings.shared
         if settings.deviceAuthorized {
             authorized = true
