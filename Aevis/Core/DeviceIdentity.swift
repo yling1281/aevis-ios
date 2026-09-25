@@ -42,7 +42,8 @@ enum DeviceIdentity {
             return saved
         }
         let made = make()
-        Keychain.set(made, forKey: keychainKey)
+        // ⚠️ 标签是 `for:` 不是 `forKey:` —— 全项目的 Keychain 都是这个签名。
+        Keychain.set(made, for: keychainKey)
         return made
     }
 

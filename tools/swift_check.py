@@ -953,6 +953,29 @@ def check_optional_suffix_use(sources):
                 )
 
 
+def check_keychain_labels(sources):
+    """`Keychain.set(value, for: account)` —— 第二个标签是 `for:`。
+
+    真踩过：新写的 `DeviceIdentity` 里写成了 `forKey:`，编译器报
+    `incorrect argument label in call (have '_:forKey:', expected '_:for:')`，
+    而本地检查器**一条都没报** → 白烧一整轮 CI（十几分钟）。
+
+    "参数标签写错"没法用通用规则抓（会把所有自定义方法都卷进来，误报成灾），
+    但对项目里那几个**签名固定、调用点多**的小工具，手工立一条完全值得 ——
+    规则一旦有误报就等于没有，所以宁可窄，不可宽。
+    """
+    wrong = ("forKey:", "forAccount:", "forAccount ")
+    for path, source in sorted(sources.items()):
+        for number, line in enumerate(strip_code(source).splitlines(), 1):
+            if "Keychain.set(" not in line:
+                continue
+            for label in wrong:
+                if label in line:
+                    report("R25", path, number,
+                           "Keychain.set 的第二个标签是 `for:`，不是 `%s`" % label.rstrip(": "))
+                    break
+
+
 def check_property_scope(sources):
     """某个类型里用了 `名字.`，而这个名字是**同一个文件里另一个类型**的属性。
 
@@ -1198,6 +1221,7 @@ def main():
     check_member_references(sources, types, declared)
     check_property_scope(sources)
     check_optional_suffix_use(sources)
+    check_keychain_labels(sources)
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()
