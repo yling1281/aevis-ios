@@ -13,6 +13,9 @@
   R7  文件用了 .aevis( 却还残留 .font(.system(size:  → 用户换字体时那一处不跟着变
   R8  X.shared 引用的类型没定义          → 编译错误，本地先发现
   R9  调用自定义类型/方法但项目里没有定义
+  R20 一行里的双引号是奇数个              → 字符串被拦腰截断，后半截变成代码
+
+（R10–R19 的由来写在各自函数的 docstring 里，这里只列最先立起来的那批。）
 
 用法:
     python3 tools/swift_check.py            # 检查 Aevis/ 目录
@@ -465,6 +468,68 @@ def check_string_quote_leak(path, source):
                 )
                 break
             index += 1
+
+
+RAW_LITERAL = re.compile(r'#+"(?:.|\n)*?"#+')
+
+
+def mask_raw_literals(source):
+    """把 Swift 的 raw string（`#"..."#`）整段换成等量空白。
+
+    为什么要掩掉：raw string 里**允许直接写引号**（这正是它存在的意义），
+    所以 `#"<a href="([^"]+)">"#` 这种行的引号个数天然是奇数。
+    不掩掉就会误报 —— 而误报会让整份检查器失去信任，那还不如没有。
+
+    换成**等量空白**而不是占位符，是为了保住行号（行内字符数不变）。
+    """
+    def blank(match):
+        return "".join("\n" if char == "\n" else " " for char in match.group(0))
+
+    return RAW_LITERAL.sub(blank, source)
+
+
+def check_quote_parity(path, source):
+    r"""一整行里的 ASCII 双引号必须是**偶数**个（raw string 先掩掉）。
+
+    真踩过（就在写网易云客户端的时候）：想拼一句带插值的提示，
+    中间手滑多打了一对引号，那行就在插值中间多出了「三个连续引号」——
+    字符串被从中间截断，后半截直接变成了代码。这类错误的特征非常好认：
+    **这一行的引号个数变成了奇数**。而编译器只会在很远的地方报
+    「expected expression」，根本指不到出事的那一行。
+
+    多行字符串的定界符要跳过 —— 它的定界符行本来就可能是奇数个引号。
+    但判定必须**看行首/行尾**：上面那个坏行里恰好也含连续三个引号，
+    用「行内是否含三引号」去判会把它当成多行字符串的起点而放过（试过，真会漏）。
+    """
+    cleaned = mask_raw_literals(strip_comments(source))
+    in_multiline = False
+    for number, line in enumerate(cleaned.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith('"""') or stripped.endswith('"""'):
+            in_multiline = not in_multiline
+            continue
+        if in_multiline:
+            continue
+
+        count = 0
+        index = 0
+        length = len(line)
+        while index < length:
+            char = line[index]
+            if char == "\\":
+                # 跳过转义对：\" 只算半个，不该计入
+                index += 2
+                continue
+            if char == '"':
+                count += 1
+            index += 1
+
+        if count % 2 == 1:
+            report(
+                "R20", path, number,
+                "这一行有 %d 个双引号（奇数），多半有一个没转义或被吃掉了：%s"
+                % (count, stripped[:44])
+            )
 
 
 # CaseIterable / Identifiable 这些协议会自动提供成员，不算"没声明"。
@@ -952,6 +1017,7 @@ def main():
         check_debug_guard(path, code)
         check_conditional_balance(path, code)
         check_string_quote_leak(path, source)
+        check_quote_parity(path, source)
 
     localized = collect_localized_names(sources)
     for path, source in sources.items():

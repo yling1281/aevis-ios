@@ -46,6 +46,7 @@ enum DeviceTools {
         + webTools
         + musicTools
         + momentTools
+        + panTools
         + systemTools
         + [shellTool]
     }

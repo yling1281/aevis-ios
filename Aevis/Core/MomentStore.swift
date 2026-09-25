@@ -606,3 +606,31 @@ final class MomentStore: ObservableObject {
         "今天走了很多路，脚有点酸"
     ]
 }
+
+// MARK: - 备份与搬家
+
+extension MomentStore: BackupableStore {
+    var backupName: String { "moments" }
+
+    func exportBackup() throws -> Data {
+        stash()
+        let flat = byOwner.reduce(into: [String: [Moment]]()) { result, item in
+            result[item.key.uuidString] = item.value
+        }
+        return try JSONEncoder().encode(Archive(byOwner: flat))
+    }
+
+    /// 恢复朋友圈。
+    ///
+    /// ⚠️ 动态里配的**图片不进包**（它们本来就是按文件单独存的，塞进 JSON 会爆），
+    /// 所以恢复完带图的动态会变成纯文字 —— 这条得告诉用户。
+    func importBackup(_ data: Data) throws {
+        let archive = try JSONDecoder().decode(Archive.self, from: data)
+        byOwner = archive.byOwner.reduce(into: [:]) { result, item in
+            guard let id = UUID(uuidString: item.key) else { return }
+            result[id] = item.value
+        }
+        moments = owner.flatMap { byOwner[$0] } ?? []
+        save()
+    }
+}

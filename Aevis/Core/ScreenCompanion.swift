@@ -35,6 +35,8 @@ final class ScreenCompanion: ObservableObject {
     // ——— 通道二：系统级（扩展在另一个进程里跑）———
 
     @Published private(set) var systemRunning = false
+    /// 上报过「在录」但已经不再更新 —— 多半被系统回收了。和「没在录」分开说。
+    @Published private(set) var systemStale = false
     @Published private(set) var systemFrames = 0
     @Published private(set) var systemHits = 0
     @Published private(set) var systemLastAt: Date?
@@ -65,6 +67,24 @@ final class ScreenCompanion: ObservableObject {
     /// 共享容器能不能用。**不能用等于扩展白装** —— 它认出的字传不回来。
     var extensionUsable: Bool {
         ScreenShareStore.shared.isUsable
+    }
+
+    /// 屏幕现在是不是正被录制或投屏 —— **任何一种录制方式都算**，
+    /// 包括控制中心那个只存相册的系统录屏。
+    ///
+    /// 这一条是能把话说清楚的关键。用户说「我明明在录屏，你怎么看不到」时，
+    /// 光看我们自己的状态只能回一句「你没开」；有了它就能指出
+    /// 「你在录，但用的不是我这个扩展，所以我拿不到内容」。
+    ///
+    /// 这个区别在 iOS 上是真实存在的两套东西：
+    /// - **系统录屏**（控制中心那个红点）：录成视频**存进相册**，App 收不到任何画面。
+    /// - **广播扩展**（我们这种）：画面交给扩展，本机 OCR 出文字再传回来，不落盘。
+    /// 用户分不清太正常了 —— 两个都叫「录屏」，都会亮红点。
+    ///
+    /// ⚠️ `UIScreen.main` 在 iOS 16 起被标成 deprecated（建议从 window 拿），
+    /// 但这里只要一个布尔、跟哪个屏幕无关，所以照用；真要改也只是消除一条警告。
+    var screenIsCaptured: Bool {
+        UIScreen.main.isCaptured
     }
 
     var extensionProblem: String? {
@@ -123,7 +143,9 @@ final class ScreenCompanion: ObservableObject {
             inAppActive = false
             RPScreenRecorder.shared().stopCapture { _ in }
         }
-        stopPolling()
+        // 注意：**这里不能停轮询**。
+        // 轮询是给「系统级录屏」读进度用的，由根视图统一管；
+        // 从这里停掉会让用户关掉 App 内通道之后，系统级的进度也跟着不刷新了。
     }
 
     // MARK: - App 内：看
@@ -183,6 +205,7 @@ final class ScreenCompanion: ObservableObject {
                 self.systemHits = state.hits
                 self.systemLastAt = state.updatedAt
                 self.systemRunning = live
+                self.systemStale = store.isStale()
                 self.systemEntries = entries
                 self.rebuildObservations()
                 if let newest = self.observations.first, newest != self.lastSeen {
@@ -221,6 +244,7 @@ final class ScreenCompanion: ObservableObject {
         lastLookAt = nil
         systemLastAt = nil
         systemRunning = false
+        systemStale = false
     }
 
     // MARK: - 合并
@@ -252,6 +276,9 @@ final class ScreenCompanion: ObservableObject {
 
         if systemRunning {
             lines.append("系统级：正在录（\(systemFrames) 帧 · 认出文字 \(systemHits) 次）")
+        } else if systemStale {
+            // 和「没在录」分开说：一个要重开，一个还没开过
+            lines.append("系统级：开过，但已经不再更新了（多半被系统掐掉了）—— 重新点一次「开始录屏」")
         } else {
             lines.append("系统级：没在录")
         }
@@ -269,6 +296,16 @@ final class ScreenCompanion: ObservableObject {
             lines.append("最后一次看到内容：\(seconds <= 3 ? "刚刚" : "\(seconds) 秒前")")
         }
 
+        // 屏幕正在被录、但录的人不是我们 —— 用户最容易误会的一种情况。
+        // 他明明看到状态栏有红点，界面上却说「没在录」，看着就像功能坏了。
+        if !systemRunning, !inAppActive, screenIsCaptured {
+            lines.append(
+                "⚠️ 屏幕现在确实在录，但用的不是 Aevis 的扩展 —— "
+                + "多半是控制中心那个系统录屏（只把视频存相册）。"
+                + "要停掉它，再从上面那个「开始录屏」按钮选「Aevis 录屏」。"
+            )
+        }
+
         // 把「实际用了哪个应用组」也摊出来 ——
         // 万一共享容器还是不通，这一行就是唯一能定位的线索。
         lines.append(ScreenShareStore.diagnosticLine)
@@ -277,9 +314,10 @@ final class ScreenCompanion: ObservableObject {
 
     /// 系统级那条该怎么开 —— 直接抄。
     static let howToStart = """
-    点下面的「开始录屏」，从系统弹出的列表里选「Aevis 录屏」。
-    也可以从控制中心：长按录屏按钮 → 选 Aevis 录屏。
-    开始之后状态栏会有一个红点，这时候你切到微信、抖音，她都看得到。
+    点下面的「开始录屏」，系统会弹出列表，选「Aevis 录屏」。
+    ⚠️ 控制中心那个录屏按钮是「系统录屏」：它把视频存进相册，她看不到。
+    两个都会亮红点，但只有「Aevis 录屏」会把画面给到她（只在本机认文字，不存相册）。
+    选对之后切到微信、抖音，她照样看得到。
     """
 
     /// 屏幕上没有文字的内容（图片、视频）她认不出来 —— 这是 OCR 的边界，不是 bug。

@@ -309,10 +309,23 @@ final class AppSettings: ObservableObject {
         static let lockShortcutName = "aevis.lockShortcutName"
         static let screenTimeShortcutName = "aevis.screenTimeShortcutName"
         static let listenTogetherMode = "aevis.listenTogetherMode"
+        /// 网易云走哪条通道：`plain`（明文，默认）/ `weapi`（加密）。
+        static let neteaseChannel = "aevis.netease.channel"
         static let neteaseCookieKeychain = "netease.cookie"
         static let douyinCookieKeychain = "douyin.cookie"
         static let llmKeychain = "openai.apiKey"
         static let ttsKeychain = "tts.apiKey"
+        static let baiduPanAppKey = "baidu.pan.appKey"
+        static let baiduPanSecretKey = "baidu.pan.secretKey"
+        static let baiduPanToken = "baidu.pan.token"
+        static let baiduPanRefreshToken = "baidu.pan.refreshToken"
+        /// 授权完成后百度往哪跳。填 `oob` 就是「把授权码显示在页面上」。
+        static let baiduPanRedirect = "aevis.baiduPan.redirect"
+        /// 通行证的到期时刻（秒）。到点前用 refresh_token 悄悄续，不让用户重授权。
+        static let baiduPanExpiresAt = "aevis.baiduPan.expiresAt"
+        /// 最近一次授权/续期失败的原文。界面上要显示出来 ——
+        /// 光说一句"授权失败"用户和我都没法判断是回调不合法还是 SecretKey 错了。
+        static let baiduPanLastError = "aevis.baiduPan.lastError"
     }
 
     /// 主题色候选。用户挑一个，界面里所有强调色跟着变。
@@ -660,6 +673,18 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(listenTogetherMode, forKey: Key.listenTogetherMode) }
     }
 
+    /// 网易云用哪条通道。
+    ///
+    /// 默认 `plain`（明文接口）—— 实测加密的 weapi 通道**已经被网易掐掉**：
+    /// 无论怎么签名、带不带 cookie，搜索都恒定返回 `{"code":50000005}`，
+    /// 而同一台机器上走明文 `/api/search/get` 立刻能搜到 335 条结果。
+    ///
+    /// 留这个开关不是给用户玩的，是给自己留后路：万一哪天明文也被掐，
+    /// 在诊断页切回 `weapi` 就能当场验证，不用重新出包。
+    @Published var neteaseChannel: String {
+        didSet { UserDefaults.standard.set(neteaseChannel, forKey: Key.neteaseChannel) }
+    }
+
     // MARK: - 第三方登录凭据
 
     /// 网易云的 Cookie。**只进钥匙串**，和 API Key 一个待遇。
@@ -670,6 +695,51 @@ final class AppSettings: ObservableObject {
     /// 抖音的 Cookie。同理。
     @Published var douyinCookie: String {
         didSet { Keychain.set(douyinCookie, for: Key.douyinCookieKeychain) }
+    }
+
+    // MARK: - 百度网盘
+
+    /// 百度网盘开放平台的应用凭据。
+    ///
+    /// **SecretKey 也进钥匙串** —— 它能换 token，和 Cookie、API Key 一个待遇。
+    /// 为什么要用户自己申请：App 拿不到"用户的网盘"，
+    /// 必须由开发者应用出面走一次 OAuth 授权，这是百度的规矩。
+    @Published var baiduPanAppKey: String {
+        didSet { Keychain.set(baiduPanAppKey, for: Key.baiduPanAppKey) }
+    }
+
+    @Published var baiduPanSecretKey: String {
+        didSet { Keychain.set(baiduPanSecretKey, for: Key.baiduPanSecretKey) }
+    }
+
+    /// 授权后拿到的通行证（约 30 天）和用来续期的 refresh_token。
+    @Published var baiduPanToken: String {
+        didSet { Keychain.set(baiduPanToken, for: Key.baiduPanToken) }
+    }
+
+    @Published var baiduPanRefreshToken: String {
+        didSet { Keychain.set(baiduPanRefreshToken, for: Key.baiduPanRefreshToken) }
+    }
+
+    /// 授权完成后百度往哪跳。
+    ///
+    /// 默认 `oob`：百度会把**授权码直接显示在页面上**，用户复制回来就能用。
+    /// 开发者后台如果登记的是内网地址（`http://192.168.x.x/...`），
+    /// 手机上多半打不开那个页面 —— 但地址栏里会带 `?code=xxx`，
+    /// 复制出来一样能用。所以两种情况这个字段都不用改，
+    /// 填成跟后台一致的那个值就行。
+    @Published var baiduPanRedirect: String {
+        didSet { UserDefaults.standard.set(baiduPanRedirect, forKey: Key.baiduPanRedirect) }
+    }
+
+    /// 通行证到期时刻（Unix 秒）。0 表示还没授权过。
+    @Published var baiduPanExpiresAt: Double {
+        didSet { UserDefaults.standard.set(baiduPanExpiresAt, forKey: Key.baiduPanExpiresAt) }
+    }
+
+    /// 最近一次授权失败的原因原文，直接显示给用户。
+    @Published var baiduPanLastError: String {
+        didSet { UserDefaults.standard.set(baiduPanLastError, forKey: Key.baiduPanLastError) }
     }
 
     private static var backgroundFileURL: URL {
@@ -750,6 +820,19 @@ final class AppSettings: ObservableObject {
         listenTogetherMode = defaults.string(forKey: Key.listenTogetherMode) ?? ListenTogetherMode.sync.rawValue
         neteaseCookie = Keychain.get(Key.neteaseCookieKeychain) ?? ""
         douyinCookie = Keychain.get(Key.douyinCookieKeychain) ?? ""
+        neteaseChannel = defaults.string(forKey: Key.neteaseChannel) ?? "plain"
+        // 百度网盘凭据：**用户自己填的优先，没填就用编译时注入的那份**
+        // （见 BuiltInSecrets 的说明：仓库里那份是空值，真值只在 CI 注入）。
+        // 这样两种人都能用 —— 你自己填自己的，朋友拿到包直接开箱。
+        let storedAppKey = Keychain.get(Key.baiduPanAppKey) ?? ""
+        baiduPanAppKey = storedAppKey.isEmpty ? BuiltInSecrets.baiduPanAppKey : storedAppKey
+        let storedSecret = Keychain.get(Key.baiduPanSecretKey) ?? ""
+        baiduPanSecretKey = storedSecret.isEmpty ? BuiltInSecrets.baiduPanSecretKey : storedSecret
+        baiduPanToken = Keychain.get(Key.baiduPanToken) ?? ""
+        baiduPanRefreshToken = Keychain.get(Key.baiduPanRefreshToken) ?? ""
+        baiduPanRedirect = defaults.string(forKey: Key.baiduPanRedirect) ?? "oob"
+        baiduPanExpiresAt = defaults.double(forKey: Key.baiduPanExpiresAt)
+        baiduPanLastError = defaults.string(forKey: Key.baiduPanLastError) ?? ""
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
     }
 

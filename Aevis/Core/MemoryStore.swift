@@ -458,3 +458,29 @@ final class MemoryStore: ObservableObject {
         var items: [MemoryItem]
     }
 }
+
+// MARK: - 备份与搬家
+
+extension MemoryStore: BackupableStore {
+    var backupName: String { "memory" }
+
+    /// 导出**所有人的**记忆，不只当前这个 ——
+    /// 类里已有的 `exportData()` 只导当前联系人那份，搬家要搬的是全部。
+    func exportBackup() throws -> Data {
+        stash()
+        let flat = byOwner.reduce(into: [String: [MemoryItem]]()) { result, item in
+            result[item.key.uuidString] = item.value
+        }
+        return try JSONEncoder().encode(Archive(byOwner: flat))
+    }
+
+    func importBackup(_ data: Data) throws {
+        let archive = try JSONDecoder().decode(Archive.self, from: data)
+        byOwner = archive.byOwner.reduce(into: [:]) { result, item in
+            guard let id = UUID(uuidString: item.key) else { return }
+            result[id] = item.value
+        }
+        items = owner.flatMap { byOwner[$0] } ?? []
+        save()
+    }
+}

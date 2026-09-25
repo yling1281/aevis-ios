@@ -159,10 +159,21 @@ extension DeviceTools {
             let companion = ScreenCompanion.shared
 
             guard companion.systemRunning || companion.inAppActive else {
+                // 这里必须把两种情况分开说 —— 它们对用户来说长得一模一样：
+                // 都是「状态栏亮着红点，你却说看不到」。
+                if companion.screenIsCaptured {
+                    return """
+                    对方手机上确实在录屏，但用的不是我的录屏扩展。
+                    那是控制中心的系统录屏 —— 它只把视频存进相册，画面我一点都拿不到。
+                    跟他说：先把控制中心那个录屏停掉，然后回到 Aevis，
+                    设置 → 陪伴 → 点「开始录屏」，在弹出的列表里选「Aevis 录屏」。
+                    区别在于：选我的这个不存相册，只在本机认文字给我看。
+                    """
+                }
                 return """
                 对方没在录屏，我看不到他的屏幕。
-                跟他说：设置 → 陪伴 → 点「开始录屏」，从系统弹出的列表里选 Aevis 录屏。
-                或者从控制中心：长按录屏按钮 → 选 Aevis 录屏。
+                跟他说：设置 → 陪伴 → 点「开始录屏」，从系统弹出的列表里选「Aevis 录屏」。
+                别用控制中心那个录屏按钮 —— 那是系统录屏，只存相册，我看不到。
                 """
             }
 

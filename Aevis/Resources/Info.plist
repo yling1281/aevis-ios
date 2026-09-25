@@ -67,6 +67,27 @@
 	<string>Aevis 需要读取你的步数、心率和睡眠，这样你问「今天走了多少」「昨晚睡得怎么样」时 TA 答得出来。数据不会离开这台手机。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Aevis 需要使用相机，这样你可以拍一张照片，让 TA 把上面的字读出来。</string>
+	<!-- 允许明文 http。
+	     实测：网易云给的播放地址是 http://m701.music.126.net/... —— 
+	     不放开这条，歌能搜到也放不出来（ATS 会直接掐掉请求）。
+	     同样的道理适用于本机 MCP 服务、Bark 推送、QQ 桥接、自建搜索源。
+	     这个 App 不上架、只给自己和朋友签，所以整段放开比逐个域名列白名单省事。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+	<!-- iOS 14 起，访问 192.168.x.x 这类局域网地址必须声明这一条，
+	     否则连接会被系统静默拒绝（连报错都不给，就单纯连不上）。
+	     要用电脑上的 MCP 服务、本地安装源、QQ 桥接都得靠它。 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Aevis 需要访问你的局域网：连接你在电脑上跑的服务（外接能力、安装源、消息桥接）。不声明的话系统会直接拦截，连报错都不给。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Aevis 需要读取相册，这样你可以挑一张图给 TA 看、或者拿来当聊天背景和头像。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Aevis 需要保存图片到相册，这样你可以把 TA 生成或收到的图片存下来。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

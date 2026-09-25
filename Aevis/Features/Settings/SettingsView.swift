@@ -41,6 +41,7 @@ struct SettingsView: View {
                     if shows("console") { consoleCard }
                     if shows("model") { modelCard }
                     if shows("search") { searchCard }
+                    if shows("baidupan") { BaiduPanCard() }
                     if shows("system") { SystemBridgeCard() }
                     if shows("mcp") { MCPCard() }
                     if shows("chat") { chatCard }

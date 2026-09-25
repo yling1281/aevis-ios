@@ -334,3 +334,28 @@ final class PersonaStore: ObservableObject {
         try? data.write(to: fileURL, options: .atomic)
     }
 }
+
+// MARK: - 备份与搬家
+
+extension PersonaStore: BackupableStore {
+    var backupName: String { "contacts" }
+
+    func exportBackup() throws -> Data {
+        try JSONEncoder().encode(Archive(contacts: contacts, activeID: activeID))
+    }
+
+    /// 恢复通讯录。
+    ///
+    /// ⚠️ 头像**不进包**：一张几 MB 的图塞进 JSON 会把包撑爆，
+    /// 所以恢复之后头像得自己重新设一次 —— 这条要明确告诉用户，别让他以为东西丢了。
+    func importBackup(_ data: Data) throws {
+        let archive = try JSONDecoder().decode(Archive.self, from: data)
+        contacts = archive.contacts
+        activeID = archive.activeID ?? archive.contacts.first?.id
+        // 对话 / 记忆 / 朋友圈都挂在联系人身上，换完通讯录得通知它们跟着切
+        if let activeID {
+            broadcastSwitch(to: activeID)
+        }
+        save()
+    }
+}

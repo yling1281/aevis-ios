@@ -11,6 +11,8 @@ struct CompanionCard: View {
 
     @State private var showTogether = false
     @State private var showCall = false
+    @State private var editingGroup = false
+    @State private var groupDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -167,12 +169,40 @@ struct CompanionCard: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
+
+            rule
+
+            // 共享容器不通时的**自救口子**。
+            // 重签之后那个组 id 可能不在我们手里，自动挑只能看到本进程的权限清单 ——
+            // 用户要是能从签工具里看到真正生效的组名，填进来就能立刻救活录屏。
+            entry(
+                symbol: "square.stack.3d.up",
+                title: "应用组",
+                detail: ScreenShareStore.isUsable
+                    ? ScreenShareStore.appGroupID
+                    : "容器不通 · 点这里手动填一个（现在自动挑的是 \(ScreenShareStore.appGroupID)）"
+            ) {
+                groupDraft = ScreenShareStore.appGroupID
+                editingGroup = true
+            }
         }
         .aevisGlass(cornerRadius: 20)
         // 扩展在**另一个进程**里写「我录到哪了」，只能主动去读。
-        // 卡片在前台时每 5 秒读一次，离开就停 —— 别在后台白耗电。
-        .onAppear { companion.startPolling() }
-        .onDisappear { companion.stopPolling() }
+        // 轮询已经在根视图（`MainTabView`）里全程跑着，这里进来补读一次就够 ——
+        // 千万不能在这里 `stopPolling`，那会把全局的轮询一起停掉。
+        .onAppear { companion.refreshFromExtension() }
+        .alert("应用组", isPresented: $editingGroup) {
+            TextField("group.xxx", text: $groupDraft)
+            Button("保存") {
+                UserDefaults.standard.set(
+                    groupDraft.trimmingCharacters(in: .whitespacesAndNewlines),
+                    forKey: ScreenShareStore.manualKey
+                )
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("留空就是自动挑。填上之后主 App 和录屏扩展都会用它 —— 改完要重新开一次录屏才生效。")
+        }
         .sheet(isPresented: $showTogether) {
             TogetherView()
         }

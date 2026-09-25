@@ -27,7 +27,21 @@ final class ScreenShareStore {
     /// 写死的话容器直接是 nil —— 录屏就白装了，而界面上只会表现成
     /// 「扩展没反应」，极难查。所以这里会退一步，从本进程的权限清单里
     /// 挑一个真能用的。
-    static let appGroupID = resolveGroupID()
+    ///
+    /// 还挑不出来怎么办：**让用户自己填**（设置 → 陪伴 → 应用组）。
+    /// 自动挑只能看本进程的权限清单，而清单里的组名可能压根不是给 Aevis 用的；
+    /// 用户如果从签工具的详情里看到真正生效的那个组名，填进来就能立刻救活。
+    static var appGroupID: String {
+        let manual = UserDefaults.standard.string(forKey: manualKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return manual.isEmpty ? resolvedGroupID : manual
+    }
+
+    /// 用户手动指定的应用组。填了就完全听他的。
+    static let manualKey = "aevis.appGroupOverride"
+
+    /// 自动挑的结果。**进程内算一次就够** —— 探测要读权限清单，不该反复做。
+    private static let resolvedGroupID = resolveGroupID()
 
     private static let securityPath =
         "/System/Library/Frameworks/Security.framework/Security"
@@ -68,17 +82,24 @@ final class ScreenShareStore {
         guard !isUsable else { return nil }
         let tried = Self.candidates().joined(separator: "、")
         return "两个进程没能共享到同一个容器 —— 签名里的「应用程序组」一个都没对上。"
-            + "试过：\(tried)。那组 id 在卖证书的人手里，重签的时候如果没带上，"
-            + "系统录屏就只能录、文字传不回来。"
+            + "自动试过：\(tried)。"
+            + "如果你能从签工具里看到真正生效的那一个组名，"
+            + "就去「设置 → 陪伴 → 应用组」手动填上，填完立刻生效。"
     }
 
-    /// 给诊断用：实际用了哪个组、试过哪些。
+    /// 给诊断用：实际用了哪个组、是手填还是自动挑的、试过哪些。
     static var diagnosticLine: String {
+        let manual = UserDefaults.standard.string(forKey: manualKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !manual.isEmpty {
+            let usable = container(for: manual) != nil ? "容器可用" : "容器打不开"
+            return "应用组：\(manual)（手动指定 · \(usable)）"
+        }
         let tried = candidates()
         if tried.count <= 1 {
-            return "应用组：\(appGroupID)"
+            return "应用组：\(appGroupID)（自动挑的）"
         }
-        return "应用组：\(appGroupID)（在本机权限里找到 \(tried.count) 个，按可用性试）"
+        return "应用组：\(appGroupID)（自动挑的，在本机权限里找到 \(tried.count) 个候选）"
     }
 
     private var containerURL: URL? {
@@ -230,10 +251,24 @@ final class ScreenShareStore {
     ///
     /// 只看 running 不够 —— 扩展被系统杀掉时没机会上报「我停了」，
     /// 那个标记会一直挂着。所以再要求它最近更新过。
-    func isLive(within seconds: TimeInterval = 40) -> Bool {
+    ///
+    /// 窗口给到 60 秒：扩展是 4 秒一帧、状态也不是每帧都写，
+    /// 中间夹着 OCR 和写盘。窗口太紧会把「正常在录」误判成「没在录」，
+    /// 那比漏判更糟 —— 用户会以为功能坏了。
+    func isLive(within seconds: TimeInterval = 60) -> Bool {
         let state = readState()
         guard state.running, let updatedAt = state.updatedAt else { return false }
         return Date().timeIntervalSince(updatedAt) <= seconds
+    }
+
+    /// 上报过「在录」，但最近不再更新了 —— 多半是被系统回收了。
+    ///
+    /// 这跟「压根没开始录」是两回事，界面必须分开说：
+    /// 一个是「你还没开」，一个是「开了但被掐了，重开一次」。
+    func isStale(within seconds: TimeInterval = 60) -> Bool {
+        let state = readState()
+        guard state.running, let updatedAt = state.updatedAt else { return false }
+        return Date().timeIntervalSince(updatedAt) > seconds
     }
 
     func clear() {

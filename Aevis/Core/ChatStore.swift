@@ -74,6 +74,26 @@ final class ChatStore: ObservableObject {
         save()
     }
 
+    /// 往**指定联系人**的对话里放一条消息。
+    ///
+    /// 为什么需要它：通话可以从任何地方拉起来（联系人页、发现页、`aevis://call`），
+    /// 那一刻 `currentID` 不一定是"正在通话的这个人"。
+    /// 早先通话直接用 `append`，后果有两个，一个比一个隐蔽：
+    /// 消息落进别人的会话（用户在正确的人那里看不到），
+    /// 以及 `currentID` 为 nil 时 `stash()` 什么也不写 —— **消息连盘都不落**，重启就没了。
+    func append(_ message: ChatMessage, for id: UUID?) {
+        guard let id else {
+            append(message)
+            return
+        }
+        if currentID == id {
+            messages.append(message)
+        } else {
+            byContact[id, default: []].append(message)
+        }
+        save()
+    }
+
     /// 现在能不能接收她主动发来的消息。
     ///
     /// **正在等她回复的时候不行** —— 最后一条是空的 assistant 占位，
@@ -181,5 +201,31 @@ final class ChatStore: ObservableObject {
         }
         guard let data = try? JSONEncoder().encode(Archive(byContact: flat)) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+}
+
+// MARK: - 备份与搬家
+
+extension ChatStore: BackupableStore {
+    var backupName: String { "chats" }
+
+    /// 导出**所有人**的对话。按联系人的 uuidString 存，恢复时才能对上号。
+    func exportBackup() throws -> Data {
+        stash()
+        let flat = byContact.reduce(into: [String: [ChatMessage]]()) { result, item in
+            result[item.key.uuidString] = item.value
+        }
+        return try JSONEncoder().encode(Archive(byContact: flat))
+    }
+
+    func importBackup(_ data: Data) throws {
+        let archive = try JSONDecoder().decode(Archive.self, from: data)
+        byContact = archive.byContact.reduce(into: [:]) { result, item in
+            guard let id = UUID(uuidString: item.key) else { return }
+            result[id] = item.value
+        }
+        // 当前看着的那个人也得跟着换一份，否则界面上还是旧内容
+        messages = currentID.flatMap { byContact[$0] } ?? []
+        save()
     }
 }

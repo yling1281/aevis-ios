@@ -85,6 +85,13 @@ struct MainTabView: View {
                 .environmentObject(personaStore)
         }
         .onAppear(perform: applyLaunchOptions)
+        .onAppear {
+            // 录屏的进度要**全程**刷新，不能只在设置页里刷。
+            // 早先只有 `CompanionCard` 在轮询：用户在聊天界面眼巴巴等着她
+            // 「看到屏幕」，界面却永远停在进设置那一刻的样子，
+            // 于是反馈就变成了「录屏还是不行」。
+            ScreenCompanion.shared.startPolling()
+        }
     }
 
     /// 进哪个 tab 是**用户设的**（出厂状态是「通讯录」）。

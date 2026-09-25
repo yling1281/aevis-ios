@@ -43,6 +43,14 @@ MUST_HAVE = [
     "Aevis/Core/BroadcastPicker.swift",
     "Aevis/Aevis.entitlements",
     "scripts/strip_extension.py",
+    # ——— 百度网盘这一批（2026-09-25 新增）———
+    "Aevis/Core/BaiduPanClient.swift",
+    "Aevis/Core/BaiduPanTools.swift",
+    "Aevis/Core/BackupService.swift",
+    # 凭据文件必须带上（仓库/包里那份的值永远是空的，真值由 CI 注入）
+    "Aevis/Core/BuiltInSecrets.swift",
+    "Aevis/Features/Settings/BaiduPanCard.swift",
+    "scripts/inject_secrets.py",
     # ——— 微信式结构：四个 tab + 多联系人 ———
     "Aevis/App/MainTabView.swift",
     "Aevis/App/AppRouter.swift",

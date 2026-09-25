@@ -38,6 +38,7 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var attaching = false
+    @State private var showScreenPanel = false
     @FocusState private var composerFocused: Bool
 
     private var persona: Persona { personaStore.persona }
@@ -125,6 +126,9 @@ struct ChatView: View {
             .ignoresSafeArea()
         }
         #endif
+        .sheet(isPresented: $showScreenPanel) {
+            screenPanel
+        }
     }
 
     // MARK: - 附件
@@ -495,6 +499,13 @@ struct ChatView: View {
 
             Button {
                 closeMorePanel()
+                showScreenPanel = true
+            } label: {
+                moreTile("看屏幕", "record.circle")
+            }
+
+            Button {
+                closeMorePanel()
                 router.showSettings = true
             } label: {
                 moreTile("设置", "slider.horizontal.3")
@@ -503,6 +514,49 @@ struct ChatView: View {
         .padding(.horizontal, 18)
         .padding(.top, 16)
         .padding(.bottom, 20)
+    }
+
+    /// 「让她看屏幕」—— 从聊天里直接开录屏，不用绕到设置去。
+    ///
+    /// 为什么非得在这儿也放一个：用户报「她说看不到我的屏幕」，
+    /// 而录屏按钮埋在「设置 → 陪伴」里，他压根没找到，就以为功能坏了。
+    /// 这里把按钮、说明、诊断三样摆在一起，点一下就知道卡在哪。
+    private var screenPanel: some View {
+        let companion = ScreenCompanion.shared
+        return NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(ScreenCompanion.howToStart)
+                        .font(.aevis(13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    BroadcastStartButton(width: 260)
+
+                    if let problem = companion.extensionProblem {
+                        Text(problem)
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text(companion.diagnostics)
+                        .font(.aevis(12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(ScreenCompanion.ocrLimit)
+                        .font(.aevis(12))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+            .navigationTitle("让她看屏幕")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear { ScreenCompanion.shared.refreshFromExtension() }
+        }
     }
 
     private func closeMorePanel() {

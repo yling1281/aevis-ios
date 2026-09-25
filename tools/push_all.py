@@ -42,6 +42,16 @@ TOKEN_FILE = os.path.join(os.path.dirname(ROOT), ".secrets", "github_token.txt")
 SKIP_DIRS = {".git", "build", "build-sim", "DerivedData", "__pycache__"}
 SKIP_EXT = {".pyc", ".ipa", ".zip", ".log", ".done", ".probe-bak"}
 
+# 必须从仓库里**删掉**的文件：本地已经撤了，但远端可能还留着。
+#
+# `.bootstrap-url` 是那个临时通道的开关 —— CI 一看到它就先去某个地址拉源码包
+# 覆盖工作区。本地已经撤走，仓库里要是留着，CI 会拿**旧源码**把这次的改动整个
+# 盖掉，而且日志上看着还挺成功。所以必须和这次改动在同一次提交里删掉它。
+#
+# ⚠️ 只删**点名**的文件，绝不做「远端有、本地没有就删」的全量同步：
+# 仓库里可能有 CI 自己提交回去的东西，全量删会误伤。
+ENSURE_REMOVED = {".bootstrap-url"}
+
 
 def should_skip(rel):
     """生成出来的 App 图标不进仓库 ——
@@ -226,12 +236,15 @@ def main():
         return 1
 
     targets = result["added"] + result["changed"]
-    if not targets:
+    removals = sorted(ENSURE_REMOVED & set(result["removed"]))
+    if not targets and not removals:
         print("本地和远端一模一样，没什么可推的。")
         return 0
 
     print("需要推 %d 个文件（新增 %d / 改动 %d），没变的 %d 个跳过"
           % (len(targets), len(result["added"]), len(result["changed"]), result["same"]))
+    if removals:
+        print("  顺带从仓库删掉：%s" % "、".join(removals))
 
     entries = []
     for index, (path, full) in enumerate(targets, 1):
@@ -257,6 +270,10 @@ def main():
         })
         if index % 10 == 0 or index == len(targets):
             print("  已上传 %d/%d" % (index, len(targets)))
+
+    # GitHub 的规矩：tree 里给 `sha: null` 就等于删除该文件。
+    for path in removals:
+        entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
 
     # 3) 建一棵新树（带上原树，未改动的文件自动保留）
     tree, err = call(
