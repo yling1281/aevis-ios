@@ -41,6 +41,8 @@ struct MomentsView: View {
     @State private var busy = false
     @State private var note: String?
     @State private var showClearConfirm = false
+    /// 「装扮朋友圈」开没开。
+    @State private var showDecor = false
 
     private var persona: Persona { personaStore.persona }
 
@@ -75,6 +77,7 @@ struct MomentsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: cardSpacing) {
+                    coverHeader
                     composer
 
                     if moments.moments.isEmpty {
@@ -115,6 +118,12 @@ struct MomentsView: View {
                         }
                         .disabled(busy || !settings.isConfigured)
 
+                        Button {
+                            showDecor = true
+                        } label: {
+                            Label("装扮朋友圈", systemImage: "paintbrush")
+                        }
+
                         Button(role: .destructive) {
                             showClearConfirm = true
                         } label: {
@@ -135,6 +144,9 @@ struct MomentsView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("所有动态和图片都会删掉。这个操作不能撤销。")
+            }
+            .sheet(isPresented: $showDecor) {
+                MomentsDecorSheet()
             }
             .alert("评论", isPresented: Binding(
                 get: { commentingOn != nil },
@@ -157,6 +169,46 @@ struct MomentsView: View {
     }
 
     // MARK: - 我发一条
+
+    /// 朋友圈封面 + 那句话（用户自己装扮的那块）。
+    ///
+    /// **没设就不显示** —— 不留一块空白占地方（他可以在「⋯ → 装扮朋友圈」里加上）。
+    @ViewBuilder
+    private var coverHeader: some View {
+        if let data = settings.momentCoverData, let image = UIImage(data: data) {
+            Color.clear
+                .frame(height: 170)
+                .overlay(image.resizable().scaledToFill())
+                // ⚠️ overlay **不裁剪** → 不补这句，图会撑大整棵布局（踩过）
+                .clipped()
+                .overlay(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.02), Color.black.opacity(0.5)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .overlay(alignment: .bottomLeading) {
+                    if !settings.momentSignature.isEmpty {
+                        Text(settings.momentSignature)
+                            .font(mfont(15, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: cardCorner, style: .continuous))
+        }
+
+        if settings.momentCoverData == nil, !settings.momentSignature.isEmpty {
+            Text(settings.momentSignature)
+                .font(mfont(14))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .aevisGlass(cornerRadius: cardCorner)
+        }
+    }
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 10) {

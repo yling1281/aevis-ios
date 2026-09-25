@@ -23,6 +23,8 @@ struct ChatView: View {
     @State private var toolNote: String?
     /// 底下那个「更多」面板（微信的加号）开没开。
     @State private var showMorePanel = false
+    /// 右上角「TA 的资料」开没开。
+    @State private var showPersona = false
     @State private var sendTask: Task<Void, Never>?
     @State private var didLaunchTest = false
 
@@ -131,6 +133,12 @@ struct ChatView: View {
         #endif
         .sheet(isPresented: $showScreenPanel) {
             screenPanel
+        }
+        // 右上角那个头像按钮开的页 —— 只放"和这个人有关"的东西
+        .sheet(isPresented: $showPersona) {
+            PersonaSheet()
+                .environmentObject(personaStore)
+                .environmentObject(settings)
         }
     }
 
@@ -245,12 +253,15 @@ struct ChatView: View {
 
             Spacer(minLength: 8)
 
+            // ⚠️ 这里以前是**全局设置**按钮 —— 用户明确说过不对：
+            // 「打开这个人的右上角，为什么跟设置一样的？联系人右上角应该是给对方
+            //  改头像、姓名、人设、背景图之类的呀」。现在开的是「TA 的资料」。
             Button {
                 composerFocused = false
-                router.showSettings = true
+                showPersona = true
             } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.aevis(15, weight: .medium))
+                Image(systemName: "person.crop.circle")
+                    .font(.aevis(16, weight: .medium))
                     .foregroundStyle(.primary)
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())

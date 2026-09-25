@@ -353,6 +353,7 @@ final class AppSettings: ObservableObject {
         static let momentMaxReplies = "aevis.momentMaxReplies"
         static let momentDMEnabled = "aevis.momentDMEnabled"
         static let momentDMChance = "aevis.momentDMChance"
+        static let momentSignature = "aevis.momentSignature"
         // ——— 朋友圈个性化 ———
         static let momentStylePrompt = "aevis.momentStylePrompt"
         static let momentImageMode = "aevis.momentImageMode"
@@ -749,6 +750,29 @@ final class AppSettings: ObservableObject {
                 try? FileManager.default.removeItem(at: url)
             }
         }
+    }
+
+    // MARK: - 朋友圈装扮
+    //
+    // 用户要「每个人都能装扮自己的朋友圈」。⚠️ 但朋友圈现在**是共享的一份**
+    // （不是按联系人分开存的），所以装扮先做成整页的：封面 + 一句签名。
+    // 想做成"每个人一套"，得先把朋友圈本身改成按联系人分库 —— 那是数据结构改动。
+
+    /// 朋友圈封面图（已压缩）。跟背景图一样放文件。
+    @Published var momentCoverData: Data? {
+        didSet {
+            let url = Self.momentCoverFileURL
+            if let data = momentCoverData {
+                try? data.write(to: url, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    /// 朋友圈封面上的那句签名（留空就不显示）。
+    @Published var momentSignature: String {
+        didSet { UserDefaults.standard.set(momentSignature, forKey: Key.momentSignature) }
     }
 
     @Published var accentIndex: Int {
@@ -1231,6 +1255,20 @@ final class AppSettings: ObservableObject {
         return base.appendingPathComponent("aevis-background.img")
     }
 
+    /// 朋友圈封面（用户自己挑的图）。
+    static var momentCoverFileURL: URL {
+        Self.storageURL("aevis-moment-cover.img")
+    }
+
+    /// 应用支持目录里的一个文件（背景图、朋友圈封面都放这儿）。
+    static func storageURL(_ name: String) -> URL {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent(name)
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         baseURL = defaults.string(forKey: Key.baseURL) ?? "https://api.deepseek.com/v1"
@@ -1293,6 +1331,7 @@ final class AppSettings: ObservableObject {
         momentMaxReplies = defaults.object(forKey: Key.momentMaxReplies) as? Int ?? 1
         momentDMEnabled = defaults.object(forKey: Key.momentDMEnabled) as? Bool ?? true
         momentDMChance = defaults.object(forKey: Key.momentDMChance) as? Double ?? 0.4
+        momentSignature = defaults.string(forKey: Key.momentSignature) ?? ""
         // ——— 朋友圈个性化（默认值刻意「不改变现状」：风格留空 = 自由发挥；
         //      四个时段都填 50 = 相对比例全是 1，等价于原来的平均间隔）———
         momentStylePrompt = defaults.string(forKey: Key.momentStylePrompt) ?? ""
@@ -1361,6 +1400,7 @@ final class AppSettings: ObservableObject {
         baiduPanExpiresAt = defaults.double(forKey: Key.baiduPanExpiresAt)
         baiduPanLastError = defaults.string(forKey: Key.baiduPanLastError) ?? ""
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
+        momentCoverData = try? Data(contentsOf: Self.momentCoverFileURL)
 
         // —— API 预设（放在 init 最末尾：这时候所有属性都已就位，才能调方法）——
         if let data = defaults.data(forKey: Key.apiProfiles),

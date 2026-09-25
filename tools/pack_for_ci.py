@@ -89,6 +89,9 @@ MUST_HAVE = [
     # 设备码（App 显示 → 网页绑定）
     # 系统浏览器登录（账号 + 百度网盘都用它）
     # 界面里指代 TA 的那个词（不许再写死「她」）
+    # 「TA 的资料」（聊天页右上角）
+    "Aevis/Features/Chat/PersonaSheet.swift",
+    "Aevis/Features/Moments/MomentsDecorSheet.swift",
     "Aevis/Core/Pronoun.swift",
     "Aevis/Core/WebAuth.swift",
     "Aevis/Core/DeviceIdentity.swift",
