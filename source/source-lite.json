@@ -1,0 +1,19 @@
+{
+  "name": "Aevis",
+  "identifier": "com.aevis.source.lite",
+  "apps": [
+    {
+      "name": "Aevis",
+      "version": "0.0.38",
+      "versionDate": "2026-09-25T15:00:14+08:00",
+      "versionDescription": "构建 38 · 提交 6713499d",
+      "downloadURL": "https://1a7bfbebf19d4bc89bade61cdcbcbd2f.app.workbuddy.host/Aevis-v38.ipa",
+      "iconURL": "https://1a7bfbebf19d4bc89bade61cdcbcbd2f.app.workbuddy.host/icon.png",
+      "size": "5828390.00",
+      "tintColor": "5B53D6",
+      "type": "3",
+      "isLanZouCloud": "0",
+      "lock": "0"
+    }
+  ]
+}

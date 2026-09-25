@@ -1,0 +1,31 @@
+{
+  "name": "Aevis",
+  "identifier": "com.aevis.source",
+  "subtitle": "住在你手机里的她",
+  "description": "Aevis 的安装源。装完可在「我 - 关于」里核对构建号那一行。",
+  "iconURL": "https://1a7bfbebf19d4bc89bade61cdcbcbd2f.app.workbuddy.host/icon.png",
+  "tintColor": "#5B53D6",
+  "apps": [
+    {
+      "name": "Aevis",
+      "bundleIdentifier": "com.aevis.ios",
+      "developerName": "Aevis",
+      "subtitle": "AI 恋人",
+      "localizedDescription": "原生 SwiftUI 写的 iOS AI 恋人。没有服务端，人设和聊天记录只存在这台手机上。",
+      "iconURL": "https://1a7bfbebf19d4bc89bade61cdcbcbd2f.app.workbuddy.host/icon.png",
+      "tintColor": "#5B53D6",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "0.0.38",
+          "buildVersion": "38",
+          "date": "2026-09-25T15:00:14+08:00",
+          "size": 5828390,
+          "downloadURL": "https://1a7bfbebf19d4bc89bade61cdcbcbd2f.app.workbuddy.host/Aevis-v38.ipa",
+          "localizedDescription": "构建 38 · 提交 6713499d"
+        }
+      ]
+    }
+  ],
+  "news": []
+}
