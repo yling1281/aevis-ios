@@ -304,6 +304,9 @@ struct AevisAvatar: View {
     var source: Source = .ai
     var size: CGFloat = 32
     var seed: Int = 0
+    /// 直接指定一张图 —— 通讯录/会话列表里要显示**别的联系人**的头像时用。
+    /// 不给就按 `source` 走原来的逻辑（当前联系人 / 我）。
+    var image: UIImage? = nil
 
     /// 备选颜色必须在色环上拉开距离。
     /// 之前用 `0.70 + seed * 0.055` 算，六个全挤在紫→粉这一小段里，
@@ -317,6 +320,7 @@ struct AevisAvatar: View {
     }
 
     private var uploadedImage: UIImage? {
+        if let image { return image }
         switch source {
         case .ai: return personaStore.avatarImage
         case .me: return profileStore.avatarImage

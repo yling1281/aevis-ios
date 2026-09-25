@@ -304,6 +304,8 @@ final class AppSettings: ObservableObject {
         static let companionEnabled = "aevis.companionEnabled"
         static let companionInterval = "aevis.companionInterval"
         static let shortcutName = "aevis.shortcutName"
+        /// 打开 App 先进哪个 tab（通讯录 / 聊天 / 发现 / 我）。
+        static let defaultTab = "aevis.defaultTab"
         static let lockShortcutName = "aevis.lockShortcutName"
         static let screenTimeShortcutName = "aevis.screenTimeShortcutName"
         static let listenTogetherMode = "aevis.listenTogetherMode"
@@ -642,6 +644,12 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(lockShortcutName, forKey: Key.lockShortcutName) }
     }
 
+    /// 打开 App 先进哪个 tab。存的是 `MainTab` 的 rawValue。
+    /// 出厂是「通讯录」—— 用户要求「进去就是联系人」。
+    @Published var defaultTab: String {
+        didSet { UserDefaults.standard.set(defaultTab, forKey: Key.defaultTab) }
+    }
+
     /// 「屏幕使用时间」快捷指令的名字 —— 数据靠它跑完用 aevis:// 发回来。
     @Published var screenTimeShortcutName: String {
         didSet { UserDefaults.standard.set(screenTimeShortcutName, forKey: Key.screenTimeShortcutName) }
@@ -736,6 +744,7 @@ final class AppSettings: ObservableObject {
         companionEnabled = defaults.object(forKey: Key.companionEnabled) as? Bool ?? false
         companionInterval = defaults.object(forKey: Key.companionInterval) as? Double ?? 20
         shortcutName = defaults.string(forKey: Key.shortcutName) ?? ""
+        defaultTab = defaults.string(forKey: Key.defaultTab) ?? "contacts"
         lockShortcutName = defaults.string(forKey: Key.lockShortcutName) ?? ""
         screenTimeShortcutName = defaults.string(forKey: Key.screenTimeShortcutName) ?? ""
         listenTogetherMode = defaults.string(forKey: Key.listenTogetherMode) ?? ListenTogetherMode.sync.rawValue

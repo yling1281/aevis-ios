@@ -48,11 +48,18 @@ struct MemoryItem: Codable, Identifiable, Equatable {
 final class MemoryStore: ObservableObject {
     static let shared = MemoryStore()
 
+    /// 当前联系人的长期记忆（老入口，保持不变）。
     @Published private(set) var items: [MemoryItem] = []
 
+    /// 每个人的记忆分开放 —— 不然换了人之后她还会「记得」上一个人的事，
+    /// 那比不记得更糟。
+    private var byOwner: [UUID: [MemoryItem]] = [:]
+    private var owner: UUID?
+
     /// 上次提炼是在消息数到多少时做的。避免每说一句话就去调一次模型。
+    /// **按联系人分开记** —— 否则换了人之后，提炼进度会被上一个人的对话条数带偏。
     @Published var extractedUpTo: Int {
-        didSet { UserDefaults.standard.set(extractedUpTo, forKey: Self.extractedKey) }
+        didSet { UserDefaults.standard.set(extractedUpTo, forKey: currentExtractedKey) }
     }
 
     @Published private(set) var working = false
@@ -61,34 +68,105 @@ final class MemoryStore: ObservableObject {
 
     private static let extractedKey = "aevis.memoryExtractedUpTo"
     private let fileURL: URL
+    private let legacyFileURL: URL
     private let backupDirectory: URL
+    /// 新格式的存档读到了没有 —— 没读到才有必要去认老的那一份。
+    private var loadedArchive = false
+    /// 老存档只认一次，别每切一次人就搬一遍。
+    private var adoptedLegacy = false
+
+    private var currentExtractedKey: String {
+        guard let owner else { return Self.extractedKey }
+        return Self.extractedKey + "." + owner.uuidString
+    }
 
     private init() {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        fileURL = base.appendingPathComponent("aevis-memory.json")
+        fileURL = base.appendingPathComponent("aevis-memory-by-contact.json")
+        legacyFileURL = base.appendingPathComponent("aevis-memory.json")
 
         backupDirectory = base.appendingPathComponent("AevisMemoryBackups", isDirectory: true)
         try? FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
 
-        extractedUpTo = UserDefaults.standard.integer(forKey: Self.extractedKey)
+        // 初始化时赋值**不会**触发 didSet，所以这里写 0 不会把老键上的进度冲掉。
+        extractedUpTo = 0
         load()
+    }
+
+    // MARK: - 切人
+
+    /// 切到某个联系人。`PersonaStore` 切人的时候会来调它。
+    func setOwner(_ id: UUID?) {
+        stash()
+        owner = id
+
+        guard let id else {
+            items = []
+            return
+        }
+
+        // 老版本只有一份记忆、没分人 —— 认给第一个进来的人。
+        // 只在「没有新格式存档」并且「还没认过」的时候做一次。
+        if !loadedArchive, !adoptedLegacy {
+            adoptedLegacy = true
+            if let legacy = readLegacy(), !legacy.isEmpty {
+                byOwner[id] = legacy
+            }
+        }
+
+        items = byOwner[id] ?? []
+        extractedUpTo = UserDefaults.standard.integer(forKey: currentExtractedKey)
+    }
+
+    /// 把某个联系人的记忆整个删掉（删联系人时用）。
+    func forget(_ id: UUID) {
+        byOwner[id] = nil
+        if owner == id { items = [] }
+        UserDefaults.standard.removeObject(forKey: Self.extractedKey + "." + id.uuidString)
+        save()
     }
 
     // MARK: - 读写
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
-        if let decoded = try? JSONDecoder().decode([MemoryItem].self, from: data) {
-            items = decoded
+        guard let data = try? Data(contentsOf: fileURL),
+              let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
+            return
         }
+        byOwner = archived.byOwner.reduce(into: [:]) { result, item in
+            guard let id = UUID(uuidString: item.key) else { return }
+            result[id] = item.value
+        }
+        loadedArchive = true
+    }
+
+    private func readLegacy() -> [MemoryItem]? {
+        guard let data = try? Data(contentsOf: legacyFileURL) else { return nil }
+        return try? JSONDecoder().decode([MemoryItem].self, from: data)
+    }
+
+    /// 把当前这份写回字典。任何落盘之前都要先做一次。
+    private func stash() {
+        if let owner { byOwner[owner] = items }
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(items) else { return }
+        stash()
+        // 空字典不落盘 —— 否则第一次启动还没认人，就会写一份空存档，
+        // 下次就再也认不到老的那份记忆了。
+        guard !byOwner.isEmpty else { return }
+        let flat = byOwner.reduce(into: [String: [MemoryItem]]()) { result, item in
+            result[item.key.uuidString] = item.value
+        }
+        guard let data = try? JSONEncoder().encode(Archive(byOwner: flat)) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    private struct Archive: Codable {
+        var byOwner: [String: [MemoryItem]] = [:]
     }
 
     // MARK: - 增删改

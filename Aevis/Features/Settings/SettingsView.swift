@@ -8,6 +8,10 @@ struct SettingsView: View {
     /// 音乐卡片要显示"正在放什么"，所以得盯着播放器。
     @ObservedObject private var player = MusicPlayer.shared
 
+    /// 只显示某一张卡（「我」那一页的直达入口用）。
+    /// 不给就是整页 —— 跟以前一样。
+    var focus: String? = nil
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var testing = false
@@ -70,6 +74,12 @@ struct SettingsView: View {
     // 设置页太长，一屏截不全。带 `-aevisSettingsFocus=<名字>` 启动时只显示那一张卡，
     // 这样 CI 不用滚屏也能把每张卡截清楚。（只在 Debug 构建里生效。）
 
+    /// 两个来源：从「我」那一页点进来的 `focus`，或者截图自检的启动参数。
+    private var activeFocus: String? {
+        if let focus { return focus }
+        return focusCard
+    }
+
     private var focusCard: String? {
         #if DEBUG
         let prefix = "-aevisSettingsFocus="
@@ -81,8 +91,8 @@ struct SettingsView: View {
     }
 
     private func shows(_ name: String) -> Bool {
-        guard let focusCard else { return true }
-        return focusCard == name
+        guard let activeFocus else { return true }
+        return activeFocus == name
     }
 
     // MARK: - TA

@@ -95,10 +95,12 @@ struct RootView: View {
 
     @ViewBuilder
     private var normal: some View {
-        if personaStore.persona.isComplete {
-            ChatView()
-        } else {
+        if personaStore.isEmpty {
+            // 一个联系人都没有 —— 先把「她」造出来。
+            // 建好之后落到主界面（默认进的是通讯录）。
             PersonaEditorView(isFirstRun: true)
+        } else {
+            MainTabView()
         }
     }
 }

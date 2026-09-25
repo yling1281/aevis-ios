@@ -268,6 +268,10 @@ final class ScreenCompanion: ObservableObject {
             let seconds = Int(Date().timeIntervalSince(last))
             lines.append("最后一次看到内容：\(seconds <= 3 ? "刚刚" : "\(seconds) 秒前")")
         }
+
+        // 把「实际用了哪个应用组」也摊出来 ——
+        // 万一共享容器还是不通，这一行就是唯一能定位的线索。
+        lines.append(ScreenShareStore.diagnosticLine)
         return lines.joined(separator: "\n")
     }
 

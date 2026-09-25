@@ -43,6 +43,14 @@ MUST_HAVE = [
     "Aevis/Core/BroadcastPicker.swift",
     "Aevis/Aevis.entitlements",
     "scripts/strip_extension.py",
+    # ——— 微信式结构：四个 tab + 多联系人 ———
+    "Aevis/App/MainTabView.swift",
+    "Aevis/App/AppRouter.swift",
+    "Aevis/Models/Contact.swift",
+    "Aevis/Features/Chat/ChatListView.swift",
+    "Aevis/Features/Contacts/ContactsView.swift",
+    "Aevis/Features/Discover/DiscoverView.swift",
+    "Aevis/Features/Me/MeView.swift",
     ".github/shots.txt",
 ]
 

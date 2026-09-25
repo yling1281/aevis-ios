@@ -309,19 +309,27 @@ def check_photos_picker_tint(path, source):
 def check_debug_guard(path, source):
     """读启动参数的代码必须包在 #if DEBUG 里 ——
     否则截图自检用的那些开关（-aevisDemo、-aevisOpenSettings…）会被编进正式版，
-    谁在命令行里带上参数就能改你的行为。"""
-    lines = source.splitlines()
-    for number, line in enumerate(lines, 1):
+    谁在命令行里带上参数就能改你的行为。
+
+    ⚠️ 这里按**整个文件的条件编译状态**判断，不是「往上数几行」。
+    固定回看窗口有过一次真实误报：一个 `#if DEBUG` 块里塞了四个开关，
+    从第四个开关往上数就够不到那一行了 —— 修过一次的东西不该再犯。
+    """
+    debug_stack = []
+    for number, line in enumerate(source.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("#if"):
+            # `#if !DEBUG` 是「不是调试」，别当成调试
+            in_debug = "DEBUG" in stripped and "!DEBUG" not in stripped
+            debug_stack.append(in_debug)
+            continue
+        if stripped.startswith("#endif"):
+            if debug_stack:
+                debug_stack.pop()
+            continue
         if "ProcessInfo.processInfo.arguments" not in line:
             continue
-        guarded = False
-        for back in range(number - 1, max(-1, number - 8), -1):
-            if "#if DEBUG" in lines[back - 1]:
-                guarded = True
-                break
-            if "#endif" in lines[back - 1]:
-                break
-        if not guarded:
+        if not any(debug_stack):
             report("R11", path, number, "读启动参数但没包在 #if DEBUG 里，会被编进正式版")
 
 
@@ -620,13 +628,15 @@ def check_app_group_wiring():
     with open(STORE_PATH, encoding="utf-8") as handle:
         store = handle.read()
 
-    group = first_match(store, r'static let appGroupID\s*=\s*"([^"]+)"')
+    group = first_match(store, r'static let preferredAppGroup\s*=\s*"([^"]+)"')
     if group is None:
-        report("R15", STORE_PATH, 0, "读不到 appGroupID —— 扩展和主 App 没法约定同一个容器")
+        report("R15", STORE_PATH, 0,
+               "读不到 preferredAppGroup —— 扩展和主 App 没法约定同一个容器")
     elif group not in app_groups:
         report("R15", STORE_PATH, 0,
-               "代码里用的 %s 不在权限清单 %s 里 —— 容器会是 nil，录屏文字传不回来"
-               % (group, app_groups))
+               "代码里首选的应用组 %s 不在权限清单 %s 里。"
+               "运行时会退而求其次去权限里挑一个能用的，但首选对不上说明"
+               "两份声明和代码没对齐 —— 值得查一下" % (group, app_groups))
 
     bundle = first_match(store, r'static let extensionBundleID\s*=\s*"([^"]+)"')
     if bundle is None:

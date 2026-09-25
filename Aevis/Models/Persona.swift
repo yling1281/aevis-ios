@@ -121,64 +121,131 @@ extension Persona {
 }
 
 /// 人设的本地存储。只存在这台设备上，不进代码仓库。
+///
+/// **通讯录里可以有多个联系人** —— 用户要的是「跟微信一样，能自己加联系人」，
+/// 所以存档从一个 `Persona` 变成了 `[Contact]` 加一个「现在在跟谁聊」的 id。
+///
+/// 为了不动项目里几十处 `personaStore.persona` 的读法，
+/// `persona` 保留成**计算属性**（读的就是当前联系人的人设）——
+/// 这样聊天、通话、一起听、朋友圈那些地方一行都不用改。
 final class PersonaStore: ObservableObject {
     static let shared = PersonaStore()
 
-    @Published var persona: Persona {
-        didSet { save() }
-    }
+    /// 通讯录里的所有人。
+    @Published private(set) var contacts: [Contact] = []
 
-    /// 用户上传的头像。存成文件，不塞进 persona.json（不然会把存档撑爆）。
-    @Published private(set) var avatarImage: UIImage?
+    /// 现在正在跟谁聊。
+    @Published private(set) var activeID: UUID?
+
+    /// 头像按联系人分开存成文件（塞进 json 会把存档撑爆）。
+    /// 这个字典是内存缓存，改了它就等于通知界面刷新。
+    @Published private(set) var avatars: [UUID: UIImage] = [:]
 
     private let fileURL: URL
 
-    private static var avatarFileURL: URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("aevis-avatar.jpg")
-    }
-
     private init() {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let base = Self.baseDirectory()
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        fileURL = base.appendingPathComponent("aevis-persona.json")
-
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode(Persona.self, from: data) {
-            persona = decoded
-        } else {
-            persona = Persona()
-        }
-
-        #if canImport(UIKit)
-        if let data = try? Data(contentsOf: Self.avatarFileURL), let image = UIImage(data: data) {
-            avatarImage = image
-        }
-        #endif
+        fileURL = base.appendingPathComponent("aevis-contacts.json")
+        load()
     }
 
-    private func save() {
-        guard let data = try? JSONEncoder().encode(persona) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    // MARK: - 现在在跟谁聊
+
+    var active: Contact? {
+        guard let activeID else { return contacts.first }
+        return contacts.first { $0.id == activeID } ?? contacts.first
     }
 
+    var isEmpty: Bool { contacts.isEmpty }
+
+    /// 当前联系人的人设 —— 保持这个老入口不变。
+    var persona: Persona {
+        get { active?.persona ?? Persona() }
+        set { update(newValue) }
+    }
+
+    /// 当前联系人的头像。老入口，`AevisAvatar` 在用。
+    var avatarImage: UIImage? {
+        guard let id = active?.id else { return nil }
+        return avatars[id]
+    }
+
+    /// 指定联系人的头像（会话列表、通讯录每行都要用）。
+    func avatar(for id: UUID) -> UIImage? { avatars[id] }
+
+    // MARK: - 增删改
+
+    /// 加一个联系人并切过去。返回它的 id。
+    @discardableResult
+    func add(_ persona: Persona) -> UUID {
+        let contact = Contact(persona: persona)
+        contacts.append(contact)
+        activeID = contact.id
+        save()
+        broadcastSwitch(to: contact.id)
+        return contact.id
+    }
+
+    /// 改当前联系人的人设。一个联系人都没有时（第一次进来）顺手建一个。
     func update(_ next: Persona) {
-        persona = next
+        guard let id = active?.id else {
+            add(next)
+            return
+        }
+        guard let index = contacts.firstIndex(where: { $0.id == id }) else { return }
+        contacts[index].persona = next
+        save()
+    }
+
+    /// 切换正在聊的人。
+    func select(_ id: UUID) {
+        guard contacts.contains(where: { $0.id == id }) else { return }
+        guard activeID != id else { return }
+        activeID = id
+        save()
+        broadcastSwitch(to: id)
+    }
+
+    /// 删一个联系人 —— 人设、头像、对话、记忆、朋友圈一起删。
+    func remove(_ id: UUID) {
+        contacts.removeAll { $0.id == id }
+        avatars[id] = nil
+        try? FileManager.default.removeItem(at: Self.avatarURL(for: id))
+
+        ChatStore.shared.forget(id)
+        MemoryStore.shared.forget(id)
+        MomentStore.shared.forget(id)
+
+        if activeID == id || activeID == nil {
+            activeID = contacts.first?.id
+            broadcastSwitch(to: activeID)
+        }
+        save()
+    }
+
+    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈）。
+    ///
+    /// **集中在这一处**：以后再加「按人分开存」的东西时，
+    /// 只要往这里加一行，就不会出现「换了人但某一块没跟着切」。
+    private func broadcastSwitch(to id: UUID?) {
+        ChatStore.shared.switchTo(id)
+        MemoryStore.shared.setOwner(id)
+        MomentStore.shared.setOwner(id)
     }
 
     // MARK: - 头像
 
-    /// 设置头像。传 nil 就退回默认的色光。
     func setAvatar(_ image: UIImage?) {
+        guard let id = active?.id else { return }
+        setAvatar(image, for: id)
+    }
+
+    func setAvatar(_ image: UIImage?, for id: UUID) {
         #if canImport(UIKit)
         guard let image else {
-            avatarImage = nil
-            try? FileManager.default.removeItem(at: Self.avatarFileURL)
+            avatars[id] = nil
+            try? FileManager.default.removeItem(at: Self.avatarURL(for: id))
             return
         }
 
@@ -192,10 +259,78 @@ final class PersonaStore: ObservableObject {
             image.draw(in: CGRect(origin: .zero, size: size))
         }
 
-        avatarImage = squared
+        avatars[id] = squared
         if let data = squared.jpegData(compressionQuality: 0.88) {
-            try? data.write(to: Self.avatarFileURL, options: .atomic)
+            try? data.write(to: Self.avatarURL(for: id), options: .atomic)
         }
         #endif
+    }
+
+    // MARK: - 存档
+
+    private struct Archive: Codable {
+        var contacts: [Contact] = []
+        var activeID: UUID?
+    }
+
+    private static func baseDirectory() -> URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    }
+
+    private static func avatarURL(for id: UUID) -> URL {
+        baseDirectory().appendingPathComponent("aevis-avatar-\(id.uuidString).jpg")
+    }
+
+    private func load() {
+        if let data = try? Data(contentsOf: fileURL),
+           let archived = try? JSONDecoder().decode(Archive.self, from: data) {
+            contacts = archived.contacts
+            activeID = archived.activeID ?? archived.contacts.first?.id
+        } else {
+            migrateFromSinglePersona()
+        }
+
+        loadAvatars()
+        // 让对话 / 记忆 / 朋友圈也切到这个人。顺序很重要：
+        // 它们要等我们把通讯录读出来之后，才知道该切到谁。
+        broadcastSwitch(to: activeID)
+    }
+
+    /// 老版本只有一个「她」，存在 `aevis-persona.json` 里。
+    /// **不能丢** —— 搬成第一个联系人，顺便把老的对话记录认到这个人名下。
+    private func migrateFromSinglePersona() {
+        let base = Self.baseDirectory()
+        let legacy = base.appendingPathComponent("aevis-persona.json")
+        guard let data = try? Data(contentsOf: legacy),
+              let old = try? JSONDecoder().decode(Persona.self, from: data),
+              old.isComplete else { return }
+
+        let contact = Contact(persona: old)
+        contacts = [contact]
+        activeID = contact.id
+
+        let legacyAvatar = base.appendingPathComponent("aevis-avatar.jpg")
+        if let image = try? Data(contentsOf: legacyAvatar) {
+            try? image.write(to: Self.avatarURL(for: contact.id), options: .atomic)
+        }
+
+        save()
+        ChatStore.shared.adoptLegacyMessages(for: contact.id)
+    }
+
+    private func loadAvatars() {
+        for contact in contacts {
+            guard let data = try? Data(contentsOf: Self.avatarURL(for: contact.id)),
+                  let image = UIImage(data: data) else { continue }
+            avatars[contact.id] = image
+        }
+    }
+
+    private func save() {
+        let archive = Archive(contacts: contacts, activeID: activeID)
+        guard let data = try? JSONEncoder().encode(archive) else { return }
+        try? data.write(to: fileURL, options: .atomic)
     }
 }

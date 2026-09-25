@@ -8,19 +8,31 @@ import Foundation
 ///
 /// 这个文件**同时编进两个 target**，所以契约只有一份，
 /// 不会出现「两边各写一套、对不上」的情况。
-///
-/// 现实约束（要如实反映到界面上，不能装作没问题）：
-/// App Group 的 id 必须**同时**出现在两个 target 的签名权限里。
-/// 我们用的是第三方共享证书，那个组的 id 不在自己手里 ——
-/// 一旦对不上，容器就是 nil：功能不可用，但**不会崩**，只是要明说。
 final class ScreenShareStore {
     static let shared = ScreenShareStore()
 
-    /// 两边必须完全一致 —— 改这里就等于改契约。
-    static let appGroupID = "group.com.aevis.ios"
+    // MARK: - 应用组怎么定
+
+    /// 我们自己写在描述文件里的那个（首选）。
+    static let preferredAppGroup = "group.com.aevis.ios"
 
     /// 扩展自己的 bundle id。主 App 要告诉系统「用哪个扩展来录」。
     static let extensionBundleID = "com.aevis.ios.broadcast"
+
+    /// **实际用得上的那个**应用组。见 `resolveGroupID()`。
+    ///
+    /// 为什么不直接用 `preferredAppGroup`：
+    /// 我们的 IPA 是在手机上用第三方工具重签的，那份描述文件里的
+    /// 「应用程序组」很可能是**卖证书那个人的 id**，而不是我们自己写的那个。
+    /// 写死的话容器直接是 nil —— 录屏就白装了，而界面上只会表现成
+    /// 「扩展没反应」，极难查。所以这里会退一步，从本进程的权限清单里
+    /// 挑一个真能用的。
+    static let appGroupID = resolveGroupID()
+
+    private static let securityPath =
+        "/System/Library/Frameworks/Security.framework/Security"
+
+    // MARK: - 数据
 
     /// 她「看到」的一条。
     struct Entry: Codable {
@@ -47,7 +59,6 @@ final class ScreenShareStore {
     // MARK: - 容器
 
     /// 共享容器是不是真的能用。
-    /// 不能用的原因基本只有一个：签名里的「应用程序组」跟 `appGroupID` 对不上。
     var isUsable: Bool {
         containerURL != nil
     }
@@ -55,16 +66,106 @@ final class ScreenShareStore {
     /// 不能用的原因，直接给用户看。能用就返回 nil。
     var unavailableReason: String? {
         guard !isUsable else { return nil }
-        return "两个进程没能共享到同一个容器。基本可以确定是签名里的「应用程序组」跟 "
-            + Self.appGroupID + " 对不上 —— 那组 id 在卖证书的人手里。"
+        let tried = Self.candidates().joined(separator: "、")
+        return "两个进程没能共享到同一个容器 —— 签名里的「应用程序组」一个都没对上。"
+            + "试过：\(tried)。那组 id 在卖证书的人手里，重签的时候如果没带上，"
+            + "系统录屏就只能录、文字传不回来。"
+    }
+
+    /// 给诊断用：实际用了哪个组、试过哪些。
+    static var diagnosticLine: String {
+        let tried = candidates()
+        if tried.count <= 1 {
+            return "应用组：\(appGroupID)"
+        }
+        return "应用组：\(appGroupID)（在本机权限里找到 \(tried.count) 个，按可用性试）"
     }
 
     private var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID)
+        Self.container(for: Self.appGroupID)
     }
 
     private func fileURL(_ name: String) -> URL? {
         containerURL?.appendingPathComponent(name, isDirectory: false)
+    }
+
+    // MARK: - 挑一个能用的应用组
+
+    /// 按「先自己写的、再本机权限里有的」顺序，挑第一个真能用的。
+    ///
+    /// 两边（主 App 和扩展）都是同一个描述文件签的，**读到的清单是同一份**，
+    /// 所以各自独立地挑，也会挑中同一个 —— 不需要额外约定。
+    private static func resolveGroupID() -> String {
+        for candidate in candidates() where container(for: candidate) != nil {
+            return candidate
+        }
+        // 一个都用不了：返回首选那个，让上层照常报「容器不可用」
+        return preferredAppGroup
+    }
+
+    /// 候选列表：自己写的排最前，然后是权限里那些「看起来像 Aevis 的」，
+    /// 最后才是剩下的。顺序稳定，所以两个进程会选到同一个。
+    private static func candidates() -> [String] {
+        var ordered: [String] = [preferredAppGroup]
+        for group in ownEntitlementGroups() where !ordered.contains(group) {
+            ordered.append(group)
+        }
+        let ranked = ordered.enumerated().sorted { left, right in
+            let a = rank(left.element)
+            let b = rank(right.element)
+            if a != b { return a < b }
+            return left.offset < right.offset
+        }
+        return ranked.map { $0.element }
+    }
+
+    private static func rank(_ group: String) -> Int {
+        let lowered = group.lowercased()
+        if lowered == preferredAppGroup.lowercased() { return 0 }
+        if lowered.contains("aevis") { return 1 }
+        return 2
+    }
+
+    private static func container(for group: String) -> URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
+
+    /// 读**本进程自己**的权限清单里声明的应用组。
+    ///
+    /// ⚠️ 这里用的是私有 API（`SecTaskCopyValueForEntitlement`），
+    /// 所以整段做成「**找不到就当没有**」：
+    /// 用 `dlsym` 现查符号，查不到就返回空表，绝不崩。
+    /// 项目一贯的路子就是「私有 API 作兜底 + 运行时探测 + 失败静默降级」。
+    private static func ownEntitlementGroups() -> [String] {
+        guard let handle = dlopen(securityPath, RTLD_LAZY) else { return [] }
+        defer { dlclose(handle) }
+
+        let createSymbol: UnsafeMutableRawPointer? = dlsym(handle, "SecTaskCreateFromSelf")
+        let copySymbol: UnsafeMutableRawPointer? =
+            dlsym(handle, "SecTaskCopyValueForEntitlement")
+        // 显式重绑定，不写简写 —— 老一点的 Swift 版本也编得过
+        guard let createSymbol = createSymbol, let copySymbol = copySymbol else { return [] }
+
+        typealias CreateFn = @convention(c) (CFAllocator?) -> CFTypeRef?
+        // error 参数我们永远传 nil，用裸指针接，省得纠结它的具体类型
+        typealias CopyFn = @convention(c) (CFTypeRef?, CFString, UnsafeMutableRawPointer?) -> CFTypeRef?
+        let createTask = unsafeBitCast(createSymbol, to: CreateFn.self)
+        let copyValue = unsafeBitCast(copySymbol, to: CopyFn.self)
+
+        guard let task = createTask(kCFAllocatorDefault) else { return [] }
+        defer { CFRelease(task) }
+
+        let key = "com.apple.security.application-groups" as CFString
+        guard let value = copyValue(task, key, nil) else { return [] }
+        defer { CFRelease(value) }
+
+        if let list = value as? NSArray {
+            return list.compactMap { $0 as? String }
+        }
+        if let single = value as? String {
+            return [single]
+        }
+        return []
     }
 
     // MARK: - 写（扩展那边用）

@@ -13,6 +13,10 @@ struct PersonaEditorView: View {
     /// 首次引导（没有导航栏）还是编辑模式。
     var isFirstRun: Bool = true
 
+    /// 「新建一个联系人」（通讯录右上角的加号）。
+    /// 跟编辑的区别只有两处：进来时是空白、保存时是**新增**而不是覆盖。
+    var adding: Bool = false
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft = Persona()
@@ -67,14 +71,22 @@ struct PersonaEditorView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle(isFirstRun ? "" : "\(draft.pronoun)的设定")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 新建的时候得给一条退路 —— sheet 里没有系统的返回键
+            if adding {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            if personaStore.persona.isComplete {
-                draft = personaStore.persona
-            }
+            // 新建时留空白；编辑时才把人设读进来
+            guard !adding, personaStore.persona.isComplete else { return }
+            draft = personaStore.persona
         }
         .fileImporter(
             isPresented: $importingCard,
@@ -367,13 +379,20 @@ struct PersonaEditorView: View {
 
     private var actionButton: some View {
         Button {
-            personaStore.update(draft)
-            commitFirstMessage()
-            if !isFirstRun {
+            if adding {
+                // 新建：**新增**一个联系人，并自动切过去
+                personaStore.add(draft)
+                commitFirstMessage()
                 dismiss()
+            } else {
+                personaStore.update(draft)
+                commitFirstMessage()
+                if !isFirstRun {
+                    dismiss()
+                }
             }
         } label: {
-            Text(isFirstRun ? "就是 \(draft.pronoun)了" : "保存")
+            Text(actionTitle)
                 .font(.aevis(16, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -405,13 +424,28 @@ struct PersonaEditorView: View {
         chat.commit()
     }
 
+    private var navigationTitle: String {
+        if adding { return "新联系人" }
+        if isFirstRun { return "" }
+        return "\(draft.pronoun)的设定"
+    }
+
+    private var actionTitle: String {
+        if adding { return "加上 \(draft.pronoun)" }
+        return isFirstRun ? "就是 \(draft.pronoun)了" : "保存"
+    }
+
     private var footerHint: some View {
-        Text(isFirstRun
-             ? "这些设定都存在这台手机上，随时能改。"
-             : "改完记得点保存。\(draft.pronoun)的设定只存在这台手机上。")
+        Text(footerText)
             .font(.aevis(12))
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var footerText: String {
+        if adding { return "加上之后就在通讯录里了，随时能改。" }
+        if isFirstRun { return "这些设定都存在这台手机上，随时能改。" }
+        return "改完记得点保存。\(draft.pronoun)的设定只存在这台手机上。"
     }
 
     // MARK: - 动作

@@ -21,12 +21,17 @@ struct ChatView: View {
     @State private var isSending = false
     @State private var errorText: String?
     @State private var toolNote: String?
-    @State private var showSettings = false
-    @State private var showMoments = false
-    @State private var showTogether = false
-    @State private var showCall = false
+    /// 底下那个「更多」面板（微信的加号）开没开。
+    @State private var showMorePanel = false
     @State private var sendTask: Task<Void, Never>?
     @State private var didLaunchTest = false
+
+    /// 设置 / 朋友圈 / 一起听 / 通话这几个面板提到了**根视图**上 ——
+    /// 聊天页现在是二级页面，截图自检要在它还没出现时就打开那些面板。
+    @ObservedObject private var router = AppRouter.shared
+
+    /// 从会话列表点进来之后，靠它退回去。
+    @Environment(\.dismiss) private var dismiss
 
     // 附件：拍照 / 选图 / 选文件 → OCR → 塞进输入框
     @State private var pickedPhotos: [PhotosPickerItem] = []
@@ -54,39 +59,34 @@ struct ChatView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
+                // 微信那个加号下面的面板：点开才出来，收起就没了
+                if showMorePanel {
+                    morePanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 composer
-                bottomBar
             }
+            // 面板和输入栏**共用**这一层背景，而且一直铺到屏幕最下沿 ——
+            // 之前输入框下面留白，就是背景没铺到底。
+            .background(
+                Rectangle()
+                    .fill(.bar)
+                    .ignoresSafeArea(edges: .bottom)
+            )
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .environmentObject(personaStore)
-                .environmentObject(settings)
-                .environmentObject(chat)
-        }
-        .sheet(isPresented: $showMoments) {
-            MomentsView()
-        }
-        .sheet(isPresented: $showTogether) {
-            TogetherView()
-        }
-        .fullScreenCover(isPresented: $showCall) {
-            CallView()
-        }
+        // 顶栏是我们自己画的（微信那种：返回 + 头像 + 名字），
+        // 所以把系统的导航栏藏掉，不然会顶着两个头。
+        .toolbar(.hidden, for: .navigationBar)
         .onDisappear {
             sendTask?.cancel()
         }
         .onAppear {
-            // 只在 CI 截图自检时用：带这个参数启动就直接把设置面板打开。
+            // 截图自检：把「更多」面板直接打开，否则截不到它。
+            // （设置 / 朋友圈 / 一起听那几个开关搬到根视图了 ——
+            //   它们要在聊天页还没出现的时候就能打开。）
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-aevisOpenSettings") {
-                showSettings = true
-            }
-            if ProcessInfo.processInfo.arguments.contains("-aevisOpenMoments") {
-                showMoments = true
-            }
-            if ProcessInfo.processInfo.arguments.contains("-aevisOpenTogether") {
-                showTogether = true
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenMore") {
+                showMorePanel = true
             }
             #endif
             drainBridgeInbox()
@@ -94,6 +94,14 @@ struct ChatView: View {
             // 这样你刚看完抖音回来问她，她就已经知道了。
             ScreenCompanion.shared.refreshFromExtension()
             runLaunchTestIfNeeded()
+        }
+        // 一开始打字就把「更多」面板收掉 —— 微信也是这个行为
+        .onChange(of: composerFocused) { _, focused in
+            if focused, showMorePanel {
+                withAnimation(.snappy(duration: 0.22)) {
+                    showMorePanel = false
+                }
+            }
         }
         // 快捷指令可能是在 App 已经开着的时候发回来 —— 那就靠变化来触发。
         .onChange(of: bridge.ask) { _, _ in drainBridgeInbox() }
@@ -195,6 +203,18 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 11) {
+            // 微信那样：最左边一个返回箭头（聊天页现在是二级页面了）
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.aevis(17, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 32, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -210,7 +230,7 @@ struct ChatView: View {
 
             Button {
                 composerFocused = false
-                showSettings = true
+                router.showSettings = true
             } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.aevis(15, weight: .medium))
@@ -343,55 +363,23 @@ struct ChatView: View {
     // 2. 底下垫一条实底，消息不会从输入栏周围透上来
     // 3. 「收起」放在输入栏同一排，不再飘在键盘上方
 
+    /// 输入栏 —— 按微信那样：一个输入框，右边一个「更多」或发送。
+    ///
+    /// 用户要求：「聊天界面就跟微信一样，你别的东西就堆在那个"更多"里。」
+    /// 所以相册、拍照、文件、朋友圈、一起听、通话、设置**全收进下面那个面板**，
+    /// 输入栏这一排只留最必要的控件，不再铺一排按钮。
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 6) {
-            // 附件：选图（走相册）和拍照/选文件（走菜单）
-            PhotosPicker(selection: $pickedPhotos, maxSelectionCount: 3, matching: .images) {
-                Image(systemName: attaching ? "hourglass" : "photo.on.rectangle")
-                    .font(.aevis(15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .disabled(attaching)
-            .padding(.bottom, 5)
-            .padding(.leading, 3)
-
-            Menu {
-                #if canImport(UIKit)
-                if AttachmentService.cameraAvailable {
-                    Button {
-                        showCamera = true
-                    } label: {
-                        Label("拍张照", systemImage: "camera")
-                    }
-                }
-                #endif
-                Button {
-                    showFileImporter = true
-                } label: {
-                    Label("选一个文件", systemImage: "doc.text")
-                }
-            } label: {
-                Image(systemName: "paperclip")
-                    .font(.aevis(15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 26, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .disabled(attaching)
-            .padding(.bottom, 5)
-
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.aevis(settings.simpleMode ? 17 : 15))
                 .focused($composerFocused)
                 .disabled(isSending)
                 .padding(.vertical, settings.simpleMode ? 10 : 8)
-                .padding(.leading, 12)
-                .padding(.trailing, 2)
+                .padding(.horizontal, 12)
 
             if composerFocused {
+                // 收键盘。微信里是点空白处，这里给个明确的按钮更省事。
                 Button {
                     composerFocused = false
                 } label: {
@@ -405,20 +393,38 @@ struct ChatView: View {
                 .padding(.bottom, 4)
             }
 
-            Button(action: send) {
-                Image(systemName: isSending ? "stop.fill" : "arrow.up")
-                    .font(.aevis(settings.simpleMode ? 16 : 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: settings.simpleMode ? 38 : 34, height: settings.simpleMode ? 38 : 34)
-                    .background(
-                        Circle().fill(
-                            isSending ? Color.gray.opacity(0.55)
-                            : (canSend ? settings.accentColor : Color.gray.opacity(0.35))
+            // 有字才出现发送 —— 微信也是这个规矩
+            if canSend || isSending {
+                Button(action: send) {
+                    Image(systemName: isSending ? "stop.fill" : "arrow.up")
+                        .font(.aevis(settings.simpleMode ? 16 : 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: settings.simpleMode ? 38 : 34,
+                               height: settings.simpleMode ? 38 : 34)
+                        .background(
+                            Circle().fill(isSending ? Color.gray.opacity(0.55) : settings.accentColor)
                         )
-                    )
+                        .contentShape(Circle())
+                }
+                .padding(.bottom, 1)
+            }
+
+            // 「更多」—— 微信里那个加号
+            Button {
+                composerFocused = false
+                withAnimation(.snappy(duration: 0.22)) {
+                    showMorePanel.toggle()
+                }
+            } label: {
+                Image(systemName: showMorePanel ? "xmark" : "plus")
+                    .font(.aevis(16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: settings.simpleMode ? 38 : 34,
+                           height: settings.simpleMode ? 38 : 34)
+                    .aevisGlass(cornerRadius: settings.simpleMode ? 19 : 17)
                     .contentShape(Circle())
             }
-            .disabled(!canSend && !isSending)
+            .buttonStyle(.plain)
             .padding(.bottom, 1)
         }
         .padding(6)
@@ -426,60 +432,99 @@ struct ChatView: View {
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 6)
-        // 和顶栏、底部功能栏同一种材质，颜色统一
-        .background(Rectangle().fill(.bar))
     }
 
-    // MARK: - 底部功能栏（微信那样的一排）
+    // MARK: - 「更多」面板（微信那个加号下面的东西）
     //
-    // 用户要求：朋友圈这些入口别藏在右上角三个点里，要像微信那样摆在底下一排。
+    // 用户要求：「聊天界面就跟微信一样，你别的东西就堆在那个'更多'里。」
+    // 所以原来铺在底下的那排按钮全撤了，改成点加号才展开的面板。
     //
-    // 顺便修掉那个「输入框下面有一条白」：那条是**背景没铺到屏幕最下沿**导致的 ——
-    // 这里给功能栏的背景加 `ignoresSafeArea(edges: .bottom)`，
-    // 一直铺到屏幕底边，就不再留白了。
+    // 顺便保留那条修正：面板和输入栏**共用一个铺到屏幕最下沿的背景**
+    // （在 body 里统一加），不然输入框下面会留一条白。
 
-    private var bottomBar: some View {
-        HStack(spacing: 0) {
-            barItem("朋友圈", "photo.on.rectangle.angled") {
-                composerFocused = false
-                showMoments = true
+    private let moreColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
+
+    private var morePanel: some View {
+        LazyVGrid(columns: moreColumns, spacing: 16) {
+            PhotosPicker(selection: $pickedPhotos, maxSelectionCount: 3, matching: .images) {
+                moreTile("相册", attaching ? "hourglass" : "photo.on.rectangle")
             }
-            barItem("一起听", "music.note.list") {
-                composerFocused = false
-                showTogether = true
+            .disabled(attaching)
+
+            #if canImport(UIKit)
+            Button {
+                showCamera = true
+            } label: {
+                moreTile("拍照", "camera")
             }
-            barItem("通话", "phone.arrow.up.right") {
-                composerFocused = false
-                showCall = true
+            .disabled(!AttachmentService.cameraAvailable)
+            .opacity(AttachmentService.cameraAvailable ? 1 : 0.4)
+            #endif
+
+            Button {
+                showFileImporter = true
+            } label: {
+                moreTile("文件", "doc.text")
             }
-            barItem("设置", "slider.horizontal.3") {
-                composerFocused = false
-                showSettings = true
+
+            Button {
+                closeMorePanel()
+                router.showMoments = true
+            } label: {
+                moreTile("朋友圈", "photo.on.rectangle.angled")
+            }
+
+            Button {
+                closeMorePanel()
+                router.showTogether = true
+            } label: {
+                moreTile("一起听", "music.note.list")
+            }
+
+            Button {
+                closeMorePanel()
+                router.showCall = true
+            } label: {
+                moreTile("通话", "phone.arrow.up.right")
+            }
+
+            Button {
+                closeMorePanel()
+                router.showSettings = true
+            } label: {
+                moreTile("设置", "slider.horizontal.3")
             }
         }
-        .padding(.top, 7)
-        .padding(.bottom, 4)
-        .background(
-            Rectangle()
-                .fill(.bar)
-                .ignoresSafeArea(edges: .bottom)
-        )
+        .padding(.horizontal, 18)
+        .padding(.top, 16)
+        .padding(.bottom, 20)
     }
 
-    private func barItem(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: symbol)
-                    .font(.aevis(17, weight: .medium))
-                    .foregroundStyle(.primary)
-                Text(title)
-                    .font(.aevis(10.5))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+    private func closeMorePanel() {
+        withAnimation(.snappy(duration: 0.22)) {
+            showMorePanel = false
         }
-        .buttonStyle(.plain)
+    }
+
+    /// 面板里的一格：一个玻璃方块 + 一行小字。
+    private func moreTile(_ title: String, _ symbol: String) -> some View {
+        VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.aevis(20, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: 52, height: 52)
+                .aevisGlass(cornerRadius: 16)
+            Text(title)
+                .font(.aevis(11))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 
     private var placeholder: String {
@@ -499,11 +544,11 @@ struct ChatView: View {
         }
         if bridge.openCall {
             bridge.openCall = false
-            showCall = true
+            router.showCall = true
         }
         if bridge.openListen {
             bridge.openListen = false
-            showTogether = true
+            router.showTogether = true
         }
     }
 

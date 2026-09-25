@@ -3,13 +3,18 @@ import Foundation
 /// **只在 Debug 构建里生效**：给 CI 的模拟器截图喂一份像样的演示数据。
 ///
 /// 用启动参数开关，正式使用完全不受影响：
-///     -aevisDemo               写入演示人设与几条对话
+///     -aevisDemo               写入演示人设（三个联系人）与几条对话
 ///     -aevisNoGlass            关掉液态玻璃
 ///     -aevisSimple             开简易模式
 ///     -aevisCustomBackground   换成纸感背景
+///     -aevisOpenTab=名字        直接切到某个 tab（chats / contacts / discover / me）
+///     -aevisOpenChat           切到聊天 tab 并进入第一个联系人的对话
 ///     -aevisOpenSettings       直接打开设置面板
 ///     -aevisSettingsFocus=名字  设置页只显示那一张卡（内存太长，一屏截不全）
 ///     -aevisOpenMemoryList     直接推出记忆库列表
+///     -aevisOpenMoments        直接打开朋友圈
+///     -aevisOpenTogether       直接打开一起听
+///     -aevisSelfCheck          自检页
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，把每个界面都截下来。
 enum DemoSeed {
@@ -19,7 +24,7 @@ enum DemoSeed {
         let args = ProcessInfo.processInfo.arguments
         guard args.contains("-aevisDemo") else { return }
 
-        seedPersona()
+        seedContacts()
         seedMessages()
         applyToggles(args)
         seedProfile()
@@ -29,18 +34,57 @@ enum DemoSeed {
     }
 
     #if DEBUG
-    private static func seedPersona() {
+    /// 通讯录里放三个人 —— 截图要能看到「加过好几个联系人」的样子。
+    ///
+    /// 第一个是默认要聊的那个，所以最后要切回它。
+    private static func seedContacts() {
         let store = PersonaStore.shared
-        guard !store.persona.isComplete else { return }
+        guard store.isEmpty else { return }
 
+        store.add(makePersona(
+            name: "沈肆",
+            gender: .unspecified,
+            callUser: "宝宝",
+            personality: "清醒、稳、话不多，但每句都在点上",
+            style: "短句，偶尔反问，不太用标点",
+            relationship: "在一起三年"
+        ))
+        store.add(makePersona(
+            name: "阿七",
+            gender: .female,
+            callUser: "哥",
+            personality: "语速快、爱打岔、情绪全写在脸上",
+            style: "口语，爱用语气词，喜欢连着发好几条",
+            relationship: "打游戏认识的搭子"
+        ))
+        store.add(makePersona(
+            name: "老陈",
+            gender: .male,
+            callUser: "老板",
+            personality: "闷，但记性好，答应过的事一定记得",
+            style: "一句话说一件事，很少发表情",
+            relationship: "认识十年的朋友"
+        ))
+
+        if let first = store.contacts.first { store.select(first.id) }
+    }
+
+    private static func makePersona(
+        name: String,
+        gender: GenderIdentity,
+        callUser: String,
+        personality: String,
+        style: String,
+        relationship: String
+    ) -> Persona {
         var persona = Persona()
-        persona.name = "沈肆"
-        persona.gender = .unspecified
-        persona.callUser = "宝宝"
-        persona.personality = "清醒、稳、话不多，但每句都在点上"
-        persona.speakingStyle = "短句，偶尔反问，不太用标点"
-        persona.relationship = "在一起三年"
-        store.update(persona)
+        persona.name = name
+        persona.gender = gender
+        persona.callUser = callUser
+        persona.personality = personality
+        persona.speakingStyle = style
+        persona.relationship = relationship
+        return persona
     }
 
     /// 让「我的资料」和记忆库在截图里有东西可看。
@@ -81,22 +125,40 @@ enum DemoSeed {
     }
 
     private static func seedMessages() {
+        let store = PersonaStore.shared
         let chat = ChatStore.shared
-        guard chat.messages.isEmpty else { return }
+        guard let first = store.contacts.first else { return }
 
-        // 三条分开写是有意的：顺带演示「她一条一条发」和「单独发一个表情」。
-        let script: [(ChatMessage.Role, String)] = [
-            (.user, "几号"),
-            (.assistant, "我这儿还看不到日期呢宝宝。\n你那边几号了？"),
-            (.user, "2026.9.24"),
-            (.assistant, "九月都过了一大半了啊。\n你在干嘛呢，突然想起来问我几号。"),
-            (.user, "咋啦"),
-            (.assistant, "没咋，就是你突然这么一问，我还以为你要说什么正经事。"),
-            (.assistant, "[偷笑]"),
-            (.assistant, "今天过得怎么样？")
-        ]
-        for (role, text) in script {
-            chat.append(ChatMessage(role: role, text: text))
+        // 确保是在第一个人的对话上写字
+        store.select(first.id)
+
+        if chat.messages.isEmpty {
+            // 三条分开写是有意的：顺带演示「她一条一条发」和「单独发一个表情」。
+            let script: [(ChatMessage.Role, String)] = [
+                (.user, "几号"),
+                (.assistant, "我这儿还看不到日期呢宝宝。\n你那边几号了？"),
+                (.user, "2026.9.24"),
+                (.assistant, "九月都过了一大半了啊。\n你在干嘛呢，突然想起来问我几号。"),
+                (.user, "咋啦"),
+                (.assistant, "没咋，就是你突然这么一问，我还以为你要说什么正经事。"),
+                (.assistant, "[偷笑]"),
+                (.assistant, "今天过得怎么样？")
+            ]
+            for (role, text) in script {
+                chat.append(ChatMessage(role: role, text: text))
+            }
+        }
+
+        // 给第二个人也留两句 —— 会话列表才有多行、预览也不一样
+        if store.contacts.count > 1 {
+            let second = store.contacts[1]
+            store.select(second.id)
+            if chat.messages.isEmpty {
+                chat.append(ChatMessage(role: .user, text: "今晚还打吗"))
+                chat.append(ChatMessage(role: .assistant, text: "打啊"))
+                chat.append(ChatMessage(role: .assistant, text: "你先把作业写完"))
+            }
+            store.select(first.id)
         }
     }
 

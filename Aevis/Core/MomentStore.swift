@@ -45,19 +45,29 @@ struct Moment: Codable, Identifiable, Equatable {
 final class MomentStore: ObservableObject {
     static let shared = MomentStore()
 
+    /// 当前联系人的朋友圈（老入口，保持不变）。
     @Published private(set) var moments: [Moment] = []
     @Published private(set) var working = false
     @Published var statusLine: String?
 
+    /// 每个人的朋友圈分开放 —— 不然 A 发的动态会出现在 B 的朋友圈里。
+    private var byOwner: [UUID: [Moment]] = [:]
+    private var owner: UUID?
+
     private let fileURL: URL
+    private let legacyFileURL: URL
     private let imageDirectory: URL
+    /// 新格式的存档读到了没有 —— 没读到才有必要去认老的那一份。
+    private var loadedArchive = false
+    private var adoptedLegacy = false
 
     private init() {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        fileURL = base.appendingPathComponent("aevis-moments.json")
+        fileURL = base.appendingPathComponent("aevis-moments-by-contact.json")
+        legacyFileURL = base.appendingPathComponent("aevis-moments.json")
 
         imageDirectory = base.appendingPathComponent("AevisMoments", isDirectory: true)
         try? FileManager.default.createDirectory(at: imageDirectory, withIntermediateDirectories: true)
@@ -65,19 +75,74 @@ final class MomentStore: ObservableObject {
         load()
     }
 
+    // MARK: - 切人
+
+    /// 切到某个联系人。`PersonaStore` 切人的时候会来调它。
+    func setOwner(_ id: UUID?) {
+        stash()
+        owner = id
+
+        guard let id else {
+            moments = []
+            return
+        }
+
+        // 老版本只有一份朋友圈、没分人 —— 认给第一个进来的人。
+        if !loadedArchive, !adoptedLegacy {
+            adoptedLegacy = true
+            if let legacy = readLegacy(), !legacy.isEmpty {
+                byOwner[id] = legacy
+            }
+        }
+
+        moments = byOwner[id] ?? []
+    }
+
+    /// 把某个联系人的朋友圈整个删掉（删联系人时用）。
+    func forget(_ id: UUID) {
+        byOwner[id] = nil
+        if owner == id { moments = [] }
+        save()
+    }
+
     // MARK: - 持久化
 
     private func load() {
         guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([Moment].self, from: data) else {
+              let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
             return
         }
-        moments = decoded
+        byOwner = archived.byOwner.reduce(into: [:]) { result, item in
+            guard let id = UUID(uuidString: item.key) else { return }
+            result[id] = item.value
+        }
+        loadedArchive = true
+    }
+
+    private func readLegacy() -> [Moment]? {
+        guard let data = try? Data(contentsOf: legacyFileURL) else { return nil }
+        return try? JSONDecoder().decode([Moment].self, from: data)
+    }
+
+    /// 把当前这份写回字典。任何落盘之前都要先做一次。
+    private func stash() {
+        if let owner { byOwner[owner] = moments }
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(moments) else { return }
+        stash()
+        // 空字典不落盘 —— 否则第一次启动还没认人就会写一份空存档，
+        // 下次就再也认不到老的那份动态了。
+        guard !byOwner.isEmpty else { return }
+        let flat = byOwner.reduce(into: [String: [Moment]]()) { result, item in
+            result[item.key.uuidString] = item.value
+        }
+        guard let data = try? JSONEncoder().encode(Archive(byOwner: flat)) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    private struct Archive: Codable {
+        var byOwner: [String: [Moment]] = [:]
     }
 
     // MARK: - 图片
