@@ -1144,10 +1144,17 @@ final class AppSettings: ObservableObject {
     // 用户说「到时候会拿新的服务器跟你对接」。所以现在**只做接口层**：
     // 地址他自己填、留空就是未连接，本地功能一样都不少。
 
-    /// 服务器地址，形如 `https://api.example.com`。**留空 = 未连接**。
+    /// 账号服务器地址。**出厂就内嵌**，用户不用自己填。
+    ///
+    /// 2026-09-25 用户明确：「账号直接就内嵌了嘛，不用自己去调，因为我就是卖这个」——
+    /// 这个 App 是他卖出去的成品，让买家去填一个服务器地址属于把内部决定推给用户。
+    /// 地址变了也只改 `Self.builtInAccountServer` 这一处。
     @Published var accountServerURL: String {
         didSet { UserDefaults.standard.set(accountServerURL, forKey: Key.accountServerURL) }
     }
+
+    /// 内嵌的账号服务器。改这里就够了。
+    static let builtInAccountServer = "https://account.lingyan.cyou"
 
     /// 登录后的 token。**只进钥匙串**，和 API Key 一个待遇。
     @Published var accountToken: String {
@@ -1334,7 +1341,10 @@ final class AppSettings: ObservableObject {
         } else {
             qqBotCodeGroups = []
         }
-        accountServerURL = defaults.string(forKey: Key.accountServerURL) ?? ""
+        // 内嵌地址：老用户存过的值优先（万一以后要临时指向别处），
+        // 没存过就用出厂那个 —— 用户不需要知道也不需要填。
+        let storedAccountServer = defaults.string(forKey: Key.accountServerURL) ?? ""
+        accountServerURL = storedAccountServer.isEmpty ? Self.builtInAccountServer : storedAccountServer
         accountToken = Keychain.get(Key.accountTokenKeychain) ?? ""
         accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)
         neteaseChannel = defaults.string(forKey: Key.neteaseChannel) ?? "plain"

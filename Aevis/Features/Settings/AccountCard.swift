@@ -12,8 +12,6 @@ struct AccountCard: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var account = AccountService.shared
 
-    @State private var showServer = false
-    @State private var serverDraft = ""
     @State private var showForm = false
     @State private var username = ""
     @State private var password = ""
@@ -52,7 +50,7 @@ struct AccountCard: View {
             }
 
             rule
-            Text("这个功能是可选的：不填服务器地址，App 一切照常 —— "
+            Text("服务器地址已经内嵌在 App 里，不用你填。这个账号是可选的："
                  + "人设、聊天记录、记忆本来都只存在这台手机上。\n"
                  + "密码只在你点「登录 / 注册」的那一下用，不会被存下来。")
                 .font(.aevis(11.5))
@@ -62,18 +60,6 @@ struct AccountCard: View {
                 .padding(.vertical, 12)
         }
         .aevisGlass(cornerRadius: 20)
-        .alert("服务器地址", isPresented: $showServer) {
-            TextField("https://api.example.com", text: $serverDraft)
-            Button("保存") {
-                settings.accountServerURL = serverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                note = settings.accountServerURL.isEmpty
-                    ? "地址清空了，账号这块就回到「未连接」。"
-                    : "记下了。"
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("你自己那个服务器的地址。要带 http:// 或 https://。")
-        }
         .sheet(isPresented: $showForm) {
             formSheet
         }
@@ -86,18 +72,15 @@ struct AccountCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("服务器")
                     .font(.aevis(15))
-                Text(settings.accountServerURL.isEmpty ? "还没填（不填也能用）" : settings.accountServerURL)
+                Text(settings.accountServerURL.isEmpty ? "没配" : settings.accountServerURL)
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Button(settings.accountServerURL.isEmpty ? "去填" : "修改") {
-                serverDraft = settings.accountServerURL
-                showServer = true
-            }
-            .font(.aevis(14))
-            .buttonStyle(.borderless)
+            Text("已内嵌")
+                .font(.aevis(12.5))
+                .foregroundStyle(.tertiary)
         }
     }
 

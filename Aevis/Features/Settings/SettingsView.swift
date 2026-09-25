@@ -21,6 +21,8 @@ struct SettingsView: View {
     @State private var modelMessage: String?
     @State private var newSourceName = ""
     @State private var newSourceTemplate = ""
+    /// 折起来的组。默认空 = **全部展开**（理由见下面 sections 的注释）。
+    @State private var folded: Set<String> = []
     // —— API 预设 ——
     @State private var showNewProfile = false
     @State private var newProfileName = ""
@@ -33,34 +35,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    if shows("persona") { personaCard }
-                    if shows("myprofile") { MyProfileCard() }
-                    if shows("bubbles") { BubbleSettingsCard() }
-                    if shows("emoji") { EmojiCard() }
-                    if shows("appearance") { AppearanceSettingsCard() }
-                    if shows("memory") { MemoryCard() }
-                    if shows("moments") { MomentsCard() }
-                    if shows("companion") { CompanionCard() }
-                    if shows("proactive") { ProactiveSettingsCard() }
-                    if shows("voice") { VoiceSettingsCard() }
-                    if shows("music") { musicCard }
-                    if shows("douyin") { DouyinCard() }
-                    if shows("console") { consoleCard }
-                    if shows("model") { modelCard }
-                    if shows("search") { searchCard }
-                    if shows("qq") { QQCard() }
-                    if shows("qqbot") { QQBotCard() }
-                    if shows("account") { AccountCard() }
-                    if shows("share") { ShareCard() }
-                    if shows("baidupan") { BaiduPanCard() }
-                    if shows("system") { SystemBridgeCard() }
-                    if shows("mcp") { MCPCard() }
-                    if shows("chat") { chatCard }
-                    if shows("about") { aboutCard }
+                if let activeFocus {
+                    // 「我」那一页点进来的**直达模式**：只显示那一张卡。
+                    // 否则用户为了改一项，还要在 20 多张卡里再找一遍。
+                    card(activeFocus)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                } else {
+                    VStack(alignment: .leading, spacing: 22) {
+                        ForEach(sections) { section in
+                            sectionView(section)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -103,9 +92,112 @@ struct SettingsView: View {
         return nil
     }
 
-    private func shows(_ name: String) -> Bool {
-        guard let activeFocus else { return true }
-        return activeFocus == name
+    // MARK: - 分组
+    //
+    // 以前是 20 多张卡**平铺**成一条很长的页，用户同一件事要在「我」和这里各找一遍。
+    // 现在收成 6 组，组头能折起来。
+    //
+    // ⚠️ **默认全部展开**。折叠是为了让人一眼看清结构，**不是为了把东西藏起来** ——
+    // 藏起来的功能在用户眼里等于没做（这一条栽过两次了）。
+
+    private struct CardSection: Identifiable {
+        let id: String
+        let title: String
+        let keys: [String]
+    }
+
+    private var sections: [CardSection] {
+        [
+            CardSection(id: "her", title: "她",
+                        keys: ["persona", "voice", "memory", "moments", "proactive"]),
+            CardSection(id: "chat", title: "聊天",
+                        keys: ["myprofile", "bubbles", "emoji", "chat"]),
+            CardSection(id: "look", title: "外观",
+                        keys: ["appearance"]),
+            CardSection(id: "brain", title: "模型与联网",
+                        keys: ["model", "search"]),
+            CardSection(id: "power", title: "能力",
+                        keys: ["companion", "baidupan", "music", "douyin",
+                               "qqbot", "qq", "system", "mcp", "console"]),
+            CardSection(id: "data", title: "账号与数据",
+                        keys: ["account", "device", "share", "about"])
+        ]
+    }
+
+    /// 键 → 卡片。**一处定义，两处用**（分组页 / 直达模式），
+    /// 免得以后加卡片时只改了一边（那种漏很难发现）。
+    @ViewBuilder
+    private func card(_ key: String) -> some View {
+        switch key {
+        case "persona": personaCard
+        case "myprofile": MyProfileCard()
+        case "bubbles": BubbleSettingsCard()
+        case "emoji": EmojiCard()
+        case "appearance": AppearanceSettingsCard()
+        case "memory": MemoryCard()
+        case "moments": MomentsCard()
+        case "companion": CompanionCard()
+        case "proactive": ProactiveSettingsCard()
+        case "voice": VoiceSettingsCard()
+        case "music": musicCard
+        case "douyin": DouyinCard()
+        case "console": consoleCard
+        case "model": modelCard
+        case "search": searchCard
+        case "qq": QQCard()
+        case "qqbot": QQBotCard()
+        case "account": AccountCard()
+        case "device": DeviceCard()
+        case "share": ShareCard()
+        case "baidupan": BaiduPanCard()
+        case "system": SystemBridgeCard()
+        case "mcp": MCPCard()
+        case "chat": chatCard
+        case "about": aboutCard
+        default: EmptyView()
+        }
+    }
+
+    private func sectionView(_ section: CardSection) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { toggle(section.id) }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(section.title)
+                        .font(.aevis(13.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+
+                    Image(systemName: "chevron.down")
+                        .font(.aevis(11, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isFolded(section.id) ? -90 : 0))
+
+                    Spacer(minLength: 0)
+
+                    Text("\(section.keys.count) 项")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 4)
+
+            if !isFolded(section.id) {
+                VStack(spacing: 16) {
+                    ForEach(section.keys, id: \.self) { key in
+                        card(key)
+                    }
+                }
+            }
+        }
+    }
+
+    private func isFolded(_ id: String) -> Bool { folded.contains(id) }
+
+    private func toggle(_ id: String) {
+        if folded.contains(id) { folded.remove(id) } else { folded.insert(id) }
     }
 
     // MARK: - TA

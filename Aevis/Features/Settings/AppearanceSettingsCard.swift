@@ -349,6 +349,17 @@ struct AppearanceSettingsCard: View {
                 Spacer(minLength: 0)
             }
 
+            // ⚠️ 这一段是**冲着真实反馈写的**：「导入 TTF 时点「打开」点不动」。
+            // 原因多半不在 App 里 —— iOS 的「文件」里，**别的 App 文件夹下的文件
+            // 系统会直接灰掉**（那是别的 App 的沙盒，我们读不到），点了当然没反应。
+            Text("支持 .ttf / .otf / .ttc。\n"
+                 + "如果点「打开」没反应，多半是文件放错地方了：iOS 只允许选"
+                 + "「我的 iPhone」或 iCloud Drive 里的文件。如果你那个 TTF 在某个 App 的文件夹里"
+                 + "（微信、QQ、下载器那种），先长按它 → 拷贝/移动到「我的 iPhone」，再来导入。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
             if !fonts.installed.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(fonts.installed) { item in

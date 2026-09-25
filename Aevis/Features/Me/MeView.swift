@@ -19,30 +19,21 @@ struct MeView: View {
                 VStack(spacing: 14) {
                     profileCard
 
+                    // 这里只留**平时真的会点的**那些。其余 11 项没删，
+                    // 全都在「全部设置」里按组分好了 ——
+                    // 以前这一页和设置页是一一对应的两份，用户同一件事要找两遍。
                     card {
-                        entry("记忆库", "brain.head.profile", memoryLine) {
-                            route = SettingsRoute(focus: "memory")
-                        }
-                        entry("聊天记录", "bubble.left.and.bubble.right", chatLine) {
-                            route = SettingsRoute(focus: "chat")
-                        }
                         entry("模型接入", "bolt.horizontal", modelLine) {
                             route = SettingsRoute(focus: "model")
                         }
-                    }
-
-                    card {
-                        entry("声音", "waveform", "音色、语速、朗读开关") {
-                            route = SettingsRoute(focus: "voice")
+                        entry("记忆库", "brain.head.profile", memoryLine) {
+                            route = SettingsRoute(focus: "memory")
                         }
-                        entry("气泡与字体", "textformat.size", "我发的 / TA 发的分开调") {
-                            route = SettingsRoute(focus: "bubbles")
+                        entry("这台设备", "iphone.gen3", deviceLine) {
+                            route = SettingsRoute(focus: "device")
                         }
-                        entry("表情", "face.smiling", "内置表情名，也能导入自己的图") {
-                            route = SettingsRoute(focus: "emoji")
-                        }
-                        entry("外观", "paintpalette", "玻璃、背景、主题色、字体") {
-                            route = SettingsRoute(focus: "appearance")
+                        entry("账号", "person.badge.key", accountLine) {
+                            route = SettingsRoute(focus: "account")
                         }
                     }
 
@@ -50,41 +41,17 @@ struct MeView: View {
                         entry("陪伴", "heart", "录屏、一起听、通话") {
                             route = SettingsRoute(focus: "companion")
                         }
-                        entry("主动找我说", "bell", "定时 / 不定时，还有 Bark 推送") {
-                            route = SettingsRoute(focus: "proactive")
+                        entry("外观", "paintpalette", "玻璃、背景、主题色、字体") {
+                            route = SettingsRoute(focus: "appearance")
                         }
-                        entry("朋友圈", "photo.on.rectangle.angled", "她发动态的节奏") {
+                        entry("朋友圈", "photo.on.rectangle.angled", "她发动态的节奏、配图、样式") {
                             route = SettingsRoute(focus: "moments")
-                        }
-                    }
-
-                    card {
-                        entry("快捷指令与系统", "command", "锁屏、屏幕使用时间都走它") {
-                            route = SettingsRoute(focus: "system")
-                        }
-                        entry("外接能力（MCP）", "puzzlepiece.extension", "接外面的工具给她用") {
-                            route = SettingsRoute(focus: "mcp")
-                        }
-                        entry("抖音", "play.rectangle", "解析链接、网页版点赞评论") {
-                            route = SettingsRoute(focus: "douyin")
-                        }
-                        entry("音乐", "music.note", "网易云登录与搜索") {
-                            route = SettingsRoute(focus: "music")
                         }
                         entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
                             route = SettingsRoute(focus: "baidupan")
                         }
                         entry("QQ 机器人", "bubble.left.and.bubble.right", qqBotLine) {
                             route = SettingsRoute(focus: "qqbot")
-                        }
-                        entry("QQ 桥接", "bubble.left.and.text.bubble.right", qqLine) {
-                            route = SettingsRoute(focus: "qq")
-                        }
-                        entry("账号", "person.badge.key", accountLine) {
-                            route = SettingsRoute(focus: "account")
-                        }
-                        entry("分享与搬家", "qrcode", "二维码传配置、备份成文件") {
-                            route = SettingsRoute(focus: "share")
                         }
                     }
 
@@ -101,9 +68,6 @@ struct MeView: View {
                               "风险、数据存放、第三方服务") {
                             showDisclaimer = true
                         }
-                        entry("全部设置", "gearshape", "所有卡片都在这一页") {
-                            route = SettingsRoute(focus: nil)
-                        }
                         entry("关于", "info.circle", "版本号") {
                             route = SettingsRoute(focus: "about")
                         }
@@ -114,6 +78,18 @@ struct MeView: View {
             }
             .navigationTitle("我")
             .navigationBarTitleDisplayMode(.inline)
+            // 「全部设置」这一行**去掉了** —— 上面每一条点进去就是那一张卡，
+            // 再留一行"看全部"是同一件事的第二遍。想一页看完的走右上角那个齿轮。
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        route = SettingsRoute(focus: nil)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("全部设置")
+                }
+            }
             .sheet(item: $route) { item in
                 SettingsView(focus: item.focus)
                     .environmentObject(personaStore)
@@ -195,8 +171,10 @@ struct MeView: View {
         return count == 0 ? "还没有记忆" : "\(count) 条"
     }
 
-    private var chatLine: String {
-        "当前这个人 \(ChatStore.shared.messages.count) 条"
+    /// 设备码那一行 **直接把码写在行上** —— 用户要的就是这串东西拿去网页上填，
+    /// 让他点进去才能看到属于白走一步。
+    private var deviceLine: String {
+        DeviceIdentity.pretty
     }
 
     private var modelLine: String {
@@ -218,12 +196,6 @@ struct MeView: View {
         return BaiduPanClient.shared.isAuthorized ? "已授权，可以备份和搬家" : "凭据填好了，还差一步授权"
     }
 
-    /// QQ 那一行同理：状态写在行上，别让人点进去才发现没配。
-    private var qqLine: String {
-        if !QQBridge.shared.isConfigured { return "看和发你的 QQ 消息（要填一个 OneBot 服务的地址）" }
-        return settings.qqBridgeEnabled ? "已开启" : "地址填好了，但开关还关着"
-    }
-
     /// QQ 官方机器人那一行 —— **这条路才是在手机上跑、不用电脑的**。
     private var qqBotLine: String {
         if !QQBotClient.shared.isConfigured { return "在手机上跑，不用电脑（要填 AppID 和 AppSecret）" }
@@ -234,7 +206,7 @@ struct MeView: View {
     /// 账号那一行。**不填也能用**这件事必须写在行上，
     /// 否则会让人以为"没登录就不能用"。
     private var accountLine: String {
-        if !AccountService.shared.isConfigured { return "可选：以后接你自己的服务器（不填也能用）" }
+        if !AccountService.shared.isConfigured { return "服务器连不上" }
         return AccountService.shared.statusLine
     }
 

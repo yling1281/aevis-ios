@@ -61,10 +61,14 @@ final class FontStore: ObservableObject {
     /// 除了字体扩展名，还放开了 `.data` 和 `.item` ——
     /// 有些字体文件在系统里没有对应的类型标识，会被文件选择器灰掉选不了
     /// （用户反馈「点了没反应」很可能就是这个）。
+    ///
+    /// ⚠️ 还有一半原因**不在我们这边**：iOS 的「文件」里，
+    /// **别的 App 文件夹下的文件系统会直接灰掉**（读不到别人的沙盒），
+    /// 那时候点「打开」也是毫无反应。所以界面上的说明文字同样重要。
     static var allowedTypes: [UTType] {
-        var types: [UTType] = []
+        var types: [UTType] = [.font]
         for ext in ["ttf", "otf", "ttc", "woff", "woff2"] {
-            if let type = UTType(filenameExtension: ext) {
+            if let type = UTType(filenameExtension: ext), !types.contains(type) {
                 types.append(type)
             }
         }

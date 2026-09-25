@@ -86,6 +86,9 @@ MUST_HAVE = [
     "Aevis/Core/QQBotTools.swift",
     # 后台静音保活 —— Info.plist 里的 UIBackgroundModes 靠它才有意义
     "Aevis/Core/SilentKeeper.swift",
+    # 设备码（App 显示 → 网页绑定）
+    "Aevis/Core/DeviceIdentity.swift",
+    "Aevis/Features/Settings/DeviceCard.swift",
     "Aevis/Features/Settings/QQBotCard.swift",
     "Aevis/Features/Settings/DisclaimerView.swift",
     # 主 App 的 Info.plist 必须带上（UIBackgroundModes 在里面）

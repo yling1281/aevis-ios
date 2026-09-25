@@ -144,7 +144,20 @@ final class NeteaseClient {
               let songs = result["songs"] as? [[String: Any]] else {
             throw NeteaseError.badResponse("搜索结果里没有 songs（\(Self.brief(json))）")
         }
-        return await attachCovers(to: songs.compactMap(Self.track(from:)))
+        return await attachCovers(to: Self.dedupe(songs.compactMap(Self.track(from:))))
+    }
+
+    /// 同一个 id 只留第一条。
+    ///
+    /// 网易云的搜索结果里偶尔会出现重复 id（同一首歌的不同版本/不同音质条目）——
+    /// 界面上会看到两行长得一样，而且 SwiftUI 拿它当唯一标识时会出问题。
+    private static func dedupe(_ tracks: [MusicTrack]) -> [MusicTrack] {
+        var seen = Set<String>()
+        var out: [MusicTrack] = []
+        for track in tracks where seen.insert(track.id).inserted {
+            out.append(track)
+        }
+        return out
     }
 
     // MARK: - 封面

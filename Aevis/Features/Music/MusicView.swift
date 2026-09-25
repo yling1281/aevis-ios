@@ -200,7 +200,10 @@ struct MusicView: View {
             .padding(.top, 14)
             .padding(.bottom, 6)
 
-            ForEach(Array(results.prefix(30).enumerated()), id: \.element.id) { index, track in
+            // ⚠️ 唯一标识用**序号**，不用曲目 id。
+            // 网易云的搜索结果偶尔会出现同一个 id 出现两次（不同版本/不同音质条目），
+            // 而 SwiftUI 遇到重复 id 是未定义行为 —— 轻则错行，重则直接崩。
+            ForEach(Array(results.prefix(30).enumerated()), id: \.offset) { index, track in
                 Button {
                     // 点了直接进全屏播放器（网易云也是这个行为）——
                     // 先在后台把播放地址取回来，取到再弹，这样画面一出来就是对的封面和歌词。
