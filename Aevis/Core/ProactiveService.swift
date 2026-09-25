@@ -40,11 +40,24 @@ final class ProactiveService {
 
     // MARK: - 授权
 
+    /// 请求通知权限。**只在用户主动去打开「主动消息」的时候调** ——
+    /// 一进 App 就弹系统框太打扰，截图自检时还会盖住大半个界面。
     func ensureAuthorization() async -> Bool {
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
             return granted
         } catch {
+            return false
+        }
+    }
+
+    /// 现在到底能不能发通知 —— **只问，不弹框**。
+    func isAuthorized() async -> Bool {
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
             return false
         }
     }
@@ -62,13 +75,19 @@ final class ProactiveService {
 
         guard settings.proactiveEnabled else { return }
 
-        // 截图自检时不弹系统权限框 —— 它会盖住大半个界面，
-        // 让截图看不出真正的问题（这个是看截图时发现的）。
+        // ⚠️ 这里**不再请求权限**，只检查有没有。
+        //
+        // 原来是在这儿调 ensureAuthorization() —— 结果每次启动都弹一次系统框：
+        // 一进 App 就被问「要不要通知」很打扰；截图自检时那个框还会一直挂在
+        // 屏幕上，把后面几张截图全盖住（真的是看截图才发现的）。
+        //
+        // 授权这件事应该由用户**主动**触发 —— 见「主动消息」卡片里那个按钮。
         #if DEBUG
+        // 截图自检时不排程，省得启动路径上多出别的系统框
         if ProcessInfo.processInfo.arguments.contains("-aevisDemo") { return }
         #endif
 
-        _ = await ensureAuthorization()
+        guard await isAuthorized() else { return }
 
         let lines = await linePool(persona: persona, settings: settings)
         guard !lines.isEmpty else { return }
