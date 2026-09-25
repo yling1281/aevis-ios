@@ -181,10 +181,6 @@ enum DemoSeed {
             "今天累不累"
         ]
 
-        // 「发注册码」那一整块**只有开着才展开**（关着的时候是噪音）。
-        // 不开的话自检截图里根本看不到它 —— 那截图就白截了。
-        settings.qqBotCodeEnabled = true
-
         // 播放界面空的没法看 —— 塞一首假歌进去（模拟器里放不出声、也没有封面）
         if args.contains("-aevisOpenPlayer") {
             MusicPlayer.shared.seedDemo()

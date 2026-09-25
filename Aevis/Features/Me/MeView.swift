@@ -10,6 +10,8 @@ struct MeView: View {
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var route: SettingsRoute?
+    @State private var showDisclaimer = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -89,6 +91,16 @@ struct MeView: View {
                     defaultTabCard
 
                     card {
+                        // 规则和免责声明放在**最上面两条**：它们是要给人看的，
+                        // 不该埋在设置里（这次的教训：功能藏进设置页 = 用户以为没做）。
+                        entry("使用规则 / 常见问题", "questionmark.circle",
+                              "怎么领注册码、群规则、常见问题") {
+                            openRules()
+                        }
+                        entry("免责声明", "doc.text",
+                              "风险、数据存放、第三方服务") {
+                            showDisclaimer = true
+                        }
                         entry("全部设置", "gearshape", "所有卡片都在这一页") {
                             route = SettingsRoute(focus: nil)
                         }
@@ -108,7 +120,16 @@ struct MeView: View {
                     .environmentObject(settings)
                     .environmentObject(ChatStore.shared)
             }
+            .fullScreenCover(isPresented: $showDisclaimer) {
+                DisclaimerView()
+            }
         }
+    }
+
+    /// 规则页在网站上单独一页 —— 群里发的、App 里点的，都是同一个地址。
+    private func openRules() {
+        guard let url = URL(string: "https://lingyan.cyou/rules.html") else { return }
+        openURL(url)
     }
 
     // MARK: - 我的资料

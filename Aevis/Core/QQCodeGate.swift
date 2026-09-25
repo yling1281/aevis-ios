@@ -2,7 +2,20 @@ import Foundation
 
 /// QQ 机器人发注册码：**关键词触发 → 群里拿口令 → 私聊换码**。
 ///
-/// ## 用户定的口径
+/// ## ⚠️ 这条路**现在没在用**（2026-09-25 起）
+/// 用户后来把发码整个搬到了**服务器**上：群里的机器人（`server/qqbot/bot.py`）
+/// 收到「注册」就当场回一张码，不再需要口令、也不需要 App 参与。
+/// 这个文件**目前没有任何界面能打开它**（`qqBotCodeEnabled` 出厂 false，
+/// 设置里那一节已经删掉了），留着是因为逻辑本身是对的 ——
+/// 万一以后要让"用户自己手机上的机器人"也能发码，改一个入口就能复活。
+///
+/// 清理的时候记得一起看：`AppSettings.qqBotCode*`、`BuiltInSecrets.accountBotKey`、
+/// `scripts/inject_secrets.py` 里的 `AEVIS_ACCOUNT_BOT_KEY`、
+/// 服务端 `POST /api/bot/ticket|claim` 和 `bot_tickets`/`bot_claims` 两张表。
+///
+/// ---
+///
+/// ## 用户当初的口径
 /// 指定关键词、**私聊发码**、必须是群成员、一个 QQ 只给一张。
 ///
 /// ## ⚠️ 为什么绕成两步（这不是我图省事，是官方限制）
