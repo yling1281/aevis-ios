@@ -32,8 +32,17 @@ enum ShortcutBridge {
     static func runShortcut(named name: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        // ⚠️ 这里原来用的是 `CharacterSet.alphanumerics` —— 那个是 **Unicode** 的，
+        // **中文也算「字母数字」**，所以中文名的快捷指令一个字符都不会被编码，
+        // 拼出来的 URL 非法，快捷指令直接跑不起来。
+        // （用户把快捷指令起成中文名太常见了，这等于这个功能对他是坏的。）
         guard let encoded = trimmed.addingPercentEncoding(
-            withAllowedCharacters: CharacterSet.alphanumerics
+            withAllowedCharacters: CharacterSet(
+                charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                    + "abcdefghijklmnopqrstuvwxyz"
+                    + "0123456789"
+                    + "-._~"
+            )
         ) else { return false }
         return open("shortcuts://run-shortcut?name=\(encoded)")
     }

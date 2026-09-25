@@ -326,22 +326,35 @@ final class NeteaseClient {
 
     // MARK: - 拼串与编码
 
-    /// 拼 query 时**故意不编码方括号** —— 网易的 `ids=[123]` 就是这么写的，
-    /// 探针里用原始方括号能过，编码成 %5B 反倒不确定，所以自己拼。
+    /// 拼 URL 参数时"不该编码"的字符：字母、数字、`-._~`，外加**方括号** ——
+    /// 网易的 `ids=[123]` 就是这么写的，探针里用原始方括号能过。
+    ///
+    /// ⚠️ **绝对不能用 `CharacterSet.alphanumerics`** —— 那个是 **Unicode** 的，
+    /// **中文也算「字母数字」**，所以中文关键词一个字符都不会被编码，
+    /// 拼出来的 URL 直接非法。网易回的就是那句「格式错误」。
+    ///
+    /// 这个坑特别阴：本机探针是 Python 写的（`urllib.parse.quote` 老老实实编码中文），
+    /// 所以**本地怎么测都是通的**，问题只出在 App 里 ——
+    /// 白烧了一轮编译才定位到。
+    private static let urlSafe = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            + "abcdefghijklmnopqrstuvwxyz"
+            + "0123456789"
+            + "-._~[]"
+    )
+
     private static func queryString(_ query: [String: String]) -> String {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~[]")
-        return query.sorted { $0.key < $1.key }.map { key, value in
-            let k = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
-            let v = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+        query.sorted { $0.key < $1.key }.map { key, value in
+            let k = key.addingPercentEncoding(withAllowedCharacters: urlSafe) ?? key
+            let v = value.addingPercentEncoding(withAllowedCharacters: urlSafe) ?? value
             return "\(k)=\(v)"
         }.joined(separator: "&")
     }
 
+    /// weapi 的 form 编码。base64 里只有 ASCII，碰不到中文，
+    /// 但为了一致（不多留一个"看起来能用"的隐患），这里用同一份白名单。
     private static func formEncode(_ text: String) -> String {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        return text.addingPercentEncoding(withAllowedCharacters: allowed) ?? text
+        text.addingPercentEncoding(withAllowedCharacters: urlSafe) ?? text
     }
 
     private static func brief(_ json: [String: Any]) -> String {

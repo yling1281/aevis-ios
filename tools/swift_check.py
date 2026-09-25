@@ -986,6 +986,103 @@ def check_shared_references(sources, types, shared):
                     report("R8", path, number, "%s 被取了 .shared，但里面没找到 static let shared" % name)
 
 
+def class_bodies(source):
+    """粗提每个类型的类体：从声明后面第一个 `{` 到括号配平的那个 `}`。
+
+    不追求精确（字符串里的花括号会干扰），因为后面只拿它取**成员名**，
+    而成员名的判据本身是保守的 —— 宁可漏报也不误报。
+    """
+    out = []
+    for match in re.finditer(r"\b(?:class|struct|enum|actor)\s+([A-Z][A-Za-z0-9_]*)", source):
+        start = source.find("{", match.end())
+        if start < 0:
+            continue
+        depth = 0
+        for index in range(start, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    out.append((match.group(1), source[start:index + 1]))
+                    break
+    return out
+
+
+def check_instance_member_on_type(sources, shared):
+    r"""把**实例成员当类型成员用** —— 说白了就是漏了个 `.shared`。
+
+    真踩过（2026-09-25，白烧一轮 CI）：
+        detail: ScreenShareStore.isUsable        ← isUsable 是实例属性
+    编译器到那一步才炸：
+        error: instance member 'isUsable' cannot be used on type 'ScreenShareStore'
+    而这一行在本地看起来一点都不扎眼 —— 所以必须自动挑出来。
+
+    做法：只看**有 `.shared` 的那些类型**（范围一下就小了），
+    把它们内部 `static` 修饰过的成员名收一份、非 static 的收一份；
+    然后扫全项目 `TypeName.小写成员名` 的写法，落在"实例成员"里就报。
+    首字母大写的跳过（那是嵌套类型，比如 `ScreenShareStore.Entry`）。
+    """
+    statics, instances = {}, {}
+    for _, source in sources.items():
+        for name, body in class_bodies(source):
+            statics.setdefault(name, set())
+            instances.setdefault(name, set())
+            for line in body.splitlines():
+                hit = re.search(r"\bstatic\s+(?:let|var|func)\s+([A-Za-z_][A-Za-z0-9_]*)", line)
+                if hit:
+                    statics[name].add(hit.group(1))
+                hit = re.search(r"\b(?:let|var|func)\s+([A-Za-z_][A-Za-z0-9_]*)", line)
+                if hit:
+                    instances[name].add(hit.group(1))
+
+    for path, source in sources.items():
+        code = strip_code(source)
+        for number, line in enumerate(code.splitlines(), 1):
+            for name in shared:
+                if name in SYSTEM_TYPES:
+                    continue
+                pattern = r"\b%s\.([a-z][A-Za-z0-9_]*)" % re.escape(name)
+                for member in re.findall(pattern, line):
+                    if member in statics.get(name, set()):
+                        continue
+                    if member in instances.get(name, set()):
+                        report(
+                            "R21", path, number,
+                            "%s.%s 少写了 .shared —— %s 是实例成员（编译期才会报错）"
+                            % (name, member, member)
+                        )
+
+
+def check_unicode_charset_in_url(path, code):
+    r"""拼 URL 参数时用了 `CharacterSet.alphanumerics`。
+
+    **它是 Unicode 的，中文也算「字母数字」** —— 于是中文一个字符都不会被
+    percent-encode，拼出来的 URL 直接非法。
+
+    真踩过（2026-09-25）：网易云搜索带中文关键词，网易回一句「格式错误」。
+    这个坑特别阴，因为本机探针是 Python 写的（`urllib.parse.quote` 会老实编码中文），
+    **本地怎么测都是通的**，坏只坏在 App 里 —— 白烧一轮编译才定位到。
+
+    正确写法是**手写 ASCII 白名单**：
+        CharacterSet(charactersIn: "ABC...xyz0123456789-._~")
+    （项目里 `AppSettings.SearchSource.url(for:)` 一直是这么写的，
+    所以这条规则不会误报它。）
+    """
+    lines = code.splitlines()
+    for index, line in enumerate(lines):
+        if "alphanumerics" not in line:
+            continue
+        # 允许分几行写，所以看上下两行的窗口
+        window = "\n".join(lines[max(0, index - 2): index + 3])
+        if "addingPercentEncoding" in window or "withAllowedCharacters" in window:
+            report(
+                "R22", path, index + 1,
+                "拼 URL 用了 CharacterSet.alphanumerics —— 它是 Unicode 的，中文不会被编码：%s"
+                % line.strip()[:40]
+            )
+
+
 def check_card_usage(sources, types):
     """设置页里列出来的 XxxCard() 必须真的定义过。"""
     for path, source in sources.items():
@@ -1018,6 +1115,7 @@ def main():
         check_conditional_balance(path, code)
         check_string_quote_leak(path, source)
         check_quote_parity(path, source)
+        check_unicode_charset_in_url(path, code)
 
     localized = collect_localized_names(sources)
     for path, source in sources.items():
@@ -1026,6 +1124,7 @@ def main():
     types, shared = collect_definitions(sources)
     declared = collect_declared_names(sources)
     check_shared_references(sources, types, shared)
+    check_instance_member_on_type(sources, shared)
     check_card_usage(sources, types)
     check_member_references(sources, types, declared)
     check_property_scope(sources)
