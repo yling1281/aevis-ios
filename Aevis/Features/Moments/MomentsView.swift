@@ -419,7 +419,7 @@ struct MomentsView: View {
         let memory = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
 
         if await moments.generateAndPost(persona: persona, config: config, memory: memory) == nil {
-            note = "她这次没写出来（检查一下模型接入）。"
+            note = "\(Pronoun.current)这次没写出来（检查一下模型接入）。"
         }
     }
 

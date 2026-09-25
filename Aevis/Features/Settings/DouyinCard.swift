@@ -73,8 +73,8 @@ struct DouyinCard: View {
                     .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
 
-                bullet("解析分享链接", ok: true, detail: "把「复制打开抖音…」那段粘给她，她能说出里面是什么")
-                bullet("打开抖音", ok: true, detail: "她说一句就跳过去")
+                bullet("解析分享链接", ok: true, detail: "把「复制打开抖音…」那段粘给\(Pronoun.current)，\(Pronoun.current)能说出里面是什么")
+                bullet("打开抖音", ok: true, detail: "\(Pronoun.current)说一句就跳过去")
                 bullet("点赞 / 评论", ok: true, detail: "走网页版：在 App 内的浏览器里驱动抖音自己的页面，签名由它自己算")
 
                 HStack(spacing: 10) {

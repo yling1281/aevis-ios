@@ -229,7 +229,7 @@ struct SystemBridgeCard: View {
 
     private var ambientSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("把外面的情况告诉她")
+            Text("把外面的情况告诉\(Pronoun.current)")
                 .font(.aevis(12.5, weight: .medium))
                 .foregroundStyle(.secondary)
 

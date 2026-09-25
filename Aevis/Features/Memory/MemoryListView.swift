@@ -117,7 +117,7 @@ struct MemoryListView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("她会一直记得这条。")
+            Text("\(Pronoun.current)会一直记得这条。")
         }
         .alert("改这条记忆", isPresented: Binding(
             get: { editing != nil },
@@ -141,7 +141,7 @@ struct MemoryListView: View {
             Button("清空", role: .destructive) { memory.clear() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("她会忘掉这些事。建议先导出一份备份。")
+            Text("\(Pronoun.current)会忘掉这些事。建议先导出一份备份。")
         }
         .confirmationDialog(
             "用这份快照覆盖现在的记忆？",

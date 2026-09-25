@@ -13,7 +13,7 @@ enum LLMError: LocalizedError {
         case .badURL:
             return "接口地址不对，检查一下 Base URL。"
         case .emptyReply:
-            return "她这次没说话，再试一次。"
+            return "\(Pronoun.current)这次没说话，再试一次。"
         case let .http(status, body):
             switch status {
             case 401, 403:

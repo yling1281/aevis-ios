@@ -32,7 +32,7 @@ struct DiscoverView: View {
                         entry("抖音", "play.rectangle", "打开抖音、点赞、评论、解析分享链接") {
                             showDouyin = true
                         }
-                        entry("实时通话", "phone.arrow.up.right", "你说话，她听；她回话，用语音念出来") {
+                        entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
                             router.showCall = true
                         }
                     }

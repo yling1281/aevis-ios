@@ -269,7 +269,7 @@ struct QQBotCard: View {
 
             ForEach(bot.log.prefix(10)) { line in
                 HStack(alignment: .top, spacing: 8) {
-                    Text(line.mine ? "她" : line.from)
+                    Text(line.mine ? "\(Pronoun.current)" : line.from)
                         .font(.aevis(11.5, weight: .medium))
                         .foregroundStyle(line.mine ? settings.accentColor : Color.secondary)
                         .frame(width: 52, alignment: .leading)
@@ -304,7 +304,7 @@ struct QQBotCard: View {
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("说清楚两件事：她在 QQ 上是一个独立的号，不是你本人的 QQ；"
+            Text("说清楚两件事：\(Pronoun.current)在 QQ 上是一个独立的号，不是你本人的 QQ；"
                  + "而且平台的规矩是只能被动回复 —— 你（或者群里 @ 它）先说话，它才能回。"
                  + "想要「她替我收发我自己的 QQ」，那得是外面跑 OneBot 那条路。")
                 .font(.aevis(11.5))

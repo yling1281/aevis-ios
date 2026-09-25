@@ -24,7 +24,7 @@ struct EmojiCard: View {
 
             toggleRow(
                 "让她发表情",
-                subtitle: "她写 [微笑] 这样的名字，聊天里会显示成真表情",
+                subtitle: "\(Pronoun.current)写 [微笑] 这样的名字，聊天里会显示成真表情",
                 isOn: $emoji.enabled
             )
 

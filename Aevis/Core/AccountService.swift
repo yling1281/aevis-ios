@@ -94,14 +94,50 @@ final class AccountService: ObservableObject {
         busy = true
         defer { busy = false }
         do {
-            let json = try await get("/api/me")
-            if let user = json["user"] as? [String: Any] {
-                profile = Self.profile(from: user)
-            }
+            profile = Self.profile(from: try await get("/api/me"))
             lastError = nil
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    // MARK: - 网页登录（唯一的路）
+    //
+    // 账号后端是**邮箱验证码**（没有密码），所以 App 里不该有密码框。
+    // 做法：打开官网登录页 → 用户收码登录（以后要注册就在同一页用注册码注册）
+    //      → 页面跳 `aevis://login?token=...` → 我们把 token 收下。
+    // 输验证码的是系统浏览器，**凭据不经过我们的代码**。
+
+    /// 拿去给系统浏览器打开的登录页。
+    func webLoginURL() -> URL? {
+        URL(string: base + "/")
+    }
+
+    /// 收下登录页带回来的 token。拉一次资料确认它真的能用。
+    func adoptWebToken(_ raw: String) async throws {
+        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            throw AccountError.badResponse("登录页没把凭证带回来。")
+        }
+        let previous = settings.accountToken
+        settings.accountToken = token
+        do {
+            profile = Self.profile(from: try await get("/api/me"))
+            lastError = nil
+        } catch {
+            // 拉不到就回滚 —— 别留一个"看起来登录了、其实用不了"的状态
+            settings.accountToken = previous
+            throw error
+        }
+    }
+
+    /// 给别的模块用：带着账号 token 调服务器（百度网盘连接就用这个）。
+    func authedGet(_ path: String) async throws -> [String: Any] {
+        try await get(path)
+    }
+
+    func authedPost(_ path: String, _ body: [String: Any]) async throws -> [String: Any] {
+        try await post(path, body)
     }
 
     // MARK: - 底层
@@ -183,10 +219,14 @@ final class AccountService: ObservableObject {
 
     // MARK: - 零件
 
-    private static func profile(from user: [String: Any]) -> Profile {
-        Profile(
-            id: Self.text(user["id"]),
-            username: (user["username"] as? String) ?? "",
+    private static func profile(from json: [String: Any]) -> Profile {
+        // 服务器两种形状都认：`{"user": {...}}` 和把用户字段直接平铺在顶层。
+        // 我们自己的后端是**平铺**那种（`/api/me` 直接回 email / created_at / login_count）。
+        let user = (json["user"] as? [String: Any]) ?? json
+        let email = Self.text(user["email"])
+        return Profile(
+            id: Self.text(user["id"]).isEmpty ? email : Self.text(user["id"]),
+            username: email.isEmpty ? ((user["username"] as? String) ?? "") : email,
             nickname: (user["nickname"] as? String) ?? "",
             expiresAt: nil
         )

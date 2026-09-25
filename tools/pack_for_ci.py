@@ -87,6 +87,10 @@ MUST_HAVE = [
     # 后台静音保活 —— Info.plist 里的 UIBackgroundModes 靠它才有意义
     "Aevis/Core/SilentKeeper.swift",
     # 设备码（App 显示 → 网页绑定）
+    # 系统浏览器登录（账号 + 百度网盘都用它）
+    # 界面里指代 TA 的那个词（不许再写死「她」）
+    "Aevis/Core/Pronoun.swift",
+    "Aevis/Core/WebAuth.swift",
     "Aevis/Core/DeviceIdentity.swift",
     "Aevis/Features/Settings/DeviceCard.swift",
     "Aevis/Features/Settings/QQBotCard.swift",

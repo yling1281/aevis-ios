@@ -113,7 +113,7 @@ struct AccountCard: View {
                     .font(.aevis(15))
                 Text(account.isSignedIn
                      ? "只清掉本机的登录状态，别的都不动"
-                     : "有账号就登录，没有就顺手注册一个")
+                     : "在系统浏览器里收个验证码就行，不用记密码")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -128,17 +128,57 @@ struct AccountCard: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
             } else {
-                Button("进去填") {
-                    username = ""
-                    password = ""
-                    nickname = ""
-                    showForm = true
+                Button(busy ? "打开中…" : "用邮箱登录") {
+                    startWebLogin()
                 }
                 .font(.aevis(14))
                 .buttonStyle(.borderless)
-                .disabled(!account.isConfigured)
+                .disabled(busy)
             }
         }
+    }
+
+    // MARK: - 网页登录
+    //
+    // 账号后端是**邮箱验证码**（没有密码），所以这里不再自己画用户名/密码框 ——
+    // 把官网登录页交给**系统浏览器**：用户在那个页面收码登录（第一次用就在同一页
+    // 拿注册码注册），完事页面跳 `aevis://login?token=...`，我们收下。
+    //
+    // ⚠️ 回调是 `aevis://login`，这是服务端 `api_verify` 里拼的
+    //（`app_url = aevis://login?token=<token>`）。改服务端要同步这里。
+    private func startWebLogin() {
+        guard let url = account.webLoginURL() else {
+            note = "登录页地址拼不出来，检查一下服务器地址。"
+            return
+        }
+        busy = true
+        note = nil
+        Task { @MainActor in
+            let callback = await WebAuth.shared.run(url: url, scheme: "aevis")
+            busy = false
+            guard let callback else {
+                note = "登录取消了。"
+                return
+            }
+            guard let token = Self.token(from: callback) else {
+                note = "登录回来了，但没带凭证。回调是：\(callback.absoluteString.prefix(70))"
+                return
+            }
+            do {
+                try await account.adoptWebToken(token)
+                note = "登录好了。"
+            } catch {
+                note = "没登成：" + error.localizedDescription
+            }
+        }
+    }
+
+    /// 从 `aevis://login?token=xxxx` 里把 token 抠出来。
+    private static func token(from url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "token" })?
+            .value
     }
 
     // MARK: - 注册 / 登录表单

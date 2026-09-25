@@ -17,7 +17,7 @@ struct MemoryCard: View {
 
             toggleRow(
                 "自动记住",
-                subtitle: "聊够一段就让她把值得记住的挑出来存下",
+                subtitle: "聊够一段就让\(Pronoun.current)把值得记住的挑出来存下",
                 isOn: $settings.memoryEnabled
             )
 
@@ -42,7 +42,7 @@ struct MemoryCard: View {
                         in: 6...60,
                         step: 2
                     )
-                    Text("调小她记性好但费 token，调大省钱但记性慢。")
+                    Text("调小\(Pronoun.current)记性好但费 token，调大省钱但记性慢。")
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
                 }

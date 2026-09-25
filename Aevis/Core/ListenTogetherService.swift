@@ -13,7 +13,7 @@ enum ListenTogetherMode: String, Codable, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .sync: return "同步听"
-        case .herControl: return "她控制"
+        case .herControl: return "\(Pronoun.current)控制"
         case .neteaseRoom: return "一起听房间"
         }
     }
@@ -21,9 +21,9 @@ enum ListenTogetherMode: String, Codable, CaseIterable, Identifiable {
     var explanation: String {
         switch self {
         case .sync:
-            return "歌在这台手机上放，她跟着一起听，隔几句说一句自己在听什么。"
+            return "歌在这台手机上放，\(Pronoun.current)跟着一起听，隔几句说一句自己在听什么。"
         case .herControl:
-            return "播放器交给她 —— 你说「换首安静的」，她自己去找、自己切。"
+            return "播放器交给\(Pronoun.current) —— 你说「换首安静的」，\(Pronoun.current)自己去找、自己切。"
         case .neteaseRoom:
             return "进网易云自己的「一起听」房间。需要逆向它的房间接口，现在还没接。"
         }

@@ -340,7 +340,7 @@ struct ChatView: View {
         VStack(spacing: 12) {
             AevisOrb()
                 .scaleEffect(0.72)
-            Text("\(persona.pronoun)在这儿。")
+            Text("\(Pronoun.spaced(persona.pronoun))在这儿。")
                 .font(.aevis(settings.simpleMode ? 19 : 17, weight: .medium))
                 .foregroundStyle(.primary)
             if settings.isConfigured {

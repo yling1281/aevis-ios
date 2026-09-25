@@ -39,15 +39,10 @@ struct BaiduPanCard: View {
         VStack(alignment: .leading, spacing: 0) {
             title("百度网盘")
 
-            credentialsRow
-
-            rule
-
+            // 「填 AppKey / SecretKey」和「回调地址」两行**从界面上撤掉了**：
+            // 现在走服务端换 token（密钥只在服务器上），App 里一把密钥都不需要。
+            // 用户要做的只有一件事：点「连接百度网盘」，在系统浏览器里登录一次。
             authorizeRow
-
-            rule
-
-            redirectRow
 
             rule
 
@@ -173,19 +168,12 @@ struct BaiduPanCard: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
             } else {
-                // 两个按钮分开摆：授权要跳到浏览器，回来再粘贴 ——
-                // 合成一个按钮的话，用户切回来就不知道该点哪儿了。
-                VStack(alignment: .trailing, spacing: 7) {
-                    Button("去授权") { startAuthorize() }
-                        .font(.aevis(14))
-                        .buttonStyle(.borderless)
-                        .disabled(!BaiduPanClient.shared.isConfigured || busy)
-
-                    Button("粘贴授权码") { showCode = true }
-                        .font(.aevis(14))
-                        .buttonStyle(.borderless)
-                        .disabled(!BaiduPanClient.shared.isConfigured || busy)
-                }
+                // **一个按钮就够**：点它 → 系统浏览器里登录百度 → 自动跳回来。
+                // 以前是"去授权 + 粘贴授权码"两步，用户切回来就不知道点哪儿了。
+                Button(busy ? "连接中…" : "连接百度网盘") { startAuthorize() }
+                    .font(.aevis(14))
+                    .buttonStyle(.borderless)
+                    .disabled(busy)
             }
         }
     }
@@ -211,22 +199,21 @@ struct BaiduPanCard: View {
     }
 
     private var statusTitle: String {
-        if !BaiduPanClient.shared.isConfigured { return "还没配置" }
-        return BaiduPanClient.shared.isAuthorized ? "已授权" : "还没授权"
+        BaiduPanClient.shared.isAuthorized ? "已连接" : "还没连接"
     }
 
     private var statusDetail: String {
-        if !BaiduPanClient.shared.isConfigured {
-            return "填了 AppKey 和 SecretKey 才能授权"
+        if BaiduPanClient.shared.isAuthorized {
+            if let expires = BaiduPanClient.shared.expiresAt {
+                return "通行证有效到 " + expires.formatted(date: .abbreviated, time: .shortened)
+                    + "。到期后回来点一次「连接百度网盘」就行。"
+            }
+            return "通行证已存好"
         }
-        guard BaiduPanClient.shared.isAuthorized else {
-            return "点「去授权」→ 浏览器里登录并同意 → 回来说授权码"
+        if !BaiduPanClient.shared.canConnect {
+            return "要先在「账号」里登录一次（收验证码那个），服务器才认得你"
         }
-        if let expires = BaiduPanClient.shared.expiresAt {
-            return "通行证有效到 " + expires.formatted(date: .abbreviated, time: .shortened)
-                + "，到期会自动续，不用重新授权"
-        }
-        return "通行证已存好"
+        return "点「连接百度网盘」→ 系统浏览器里登录百度 → 自动跳回来，不用复制任何东西"
     }
 
     // MARK: - 搬家（备份 / 恢复）
@@ -356,19 +343,46 @@ struct BaiduPanCard: View {
 
     // MARK: - 授权动作
 
+    /// 一键连接：**服务器给授权网址 → 系统浏览器登录 → 自动跳回来 → 服务器换好通行证**。
+    ///
+    /// App 这边一把百度密钥都没有，用户也**不用复制粘贴任何东西** ——
+    /// 换 token 那一步（要用 SecretKey）发生在服务器上（`/api/baidu/callback`）。
     private func startAuthorize() {
-        guard let url = BaiduPanClient.shared.authorizeURL() else {
-            note = "先填 AppKey 和 SecretKey。"
+        guard BaiduPanClient.shared.canConnect else {
+            note = "先在「账号」里登录一次（邮箱收验证码那个），服务器才认得出你是谁。"
             return
         }
-        note = "浏览器里登录并点同意之后，切回这里点「粘贴授权码」。"
-        codeDraft = ""
-        #if canImport(UIKit)
-        UIApplication.shared.open(url) { ok in
-            guard !ok else { return }
-            self.note = "没能打开浏览器。检查一下网络，或者手动去百度网盘开放平台的授权页。"
+        busy = true
+        note = "正在打开百度登录页…"
+        Task { @MainActor in
+            defer { busy = false }
+            do {
+                // 1) 让服务器给一个授权网址（里面只有 AppKey）
+                let start = try await AccountService.shared.authedPost("/api/baidu/start", [:])
+                guard let text = start["url"] as? String, let url = URL(string: text) else {
+                    note = "服务器没给授权网址。"
+                    return
+                }
+                // 2) 系统浏览器里登录。服务器收到百度的回调、把 token 换好之后，
+                //    会跳到 `aevis://baidu?...`，这里就自动接住了。
+                guard let callback = await WebAuth.shared.run(url: url, scheme: "aevis") else {
+                    note = "连接取消了。"
+                    return
+                }
+                let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                if let problem = items.first(where: { $0.name == "error" })?.value, !problem.isEmpty {
+                    note = "百度那边没成：" + problem
+                    return
+                }
+                // 3) 把服务器存好的通行证取回来
+                let token = try await AccountService.shared.authedGet("/api/baidu/token")
+                try BaiduPanClient.shared.adoptServerToken(token)
+                note = "连上了，可以备份和搬家了。"
+                loadBackups()
+            } catch {
+                note = "连接失败：" + error.localizedDescription
+            }
         }
-        #endif
     }
 
     private func finishAuthorize() {

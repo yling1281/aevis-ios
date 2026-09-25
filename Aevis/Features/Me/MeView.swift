@@ -44,7 +44,7 @@ struct MeView: View {
                         entry("外观", "paintpalette", "玻璃、背景、主题色、字体") {
                             route = SettingsRoute(focus: "appearance")
                         }
-                        entry("朋友圈", "photo.on.rectangle.angled", "她发动态的节奏、配图、样式") {
+                        entry("朋友圈", "photo.on.rectangle.angled", "\(Pronoun.current)发动态的节奏、配图、样式") {
                             route = SettingsRoute(focus: "moments")
                         }
                         entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
@@ -178,7 +178,7 @@ struct MeView: View {
     }
 
     private var modelLine: String {
-        guard settings.isConfigured else { return "还没填 API Key，她不会说话" }
+        guard settings.isConfigured else { return "还没填 API Key，\(Pronoun.current)不会说话" }
         let count = settings.apiProfiles.count
         if let profile = settings.activeProfile {
             return count > 1 ? "在用「\(profile.name)」，共 \(count) 套预设"
@@ -189,11 +189,10 @@ struct MeView: View {
 
     /// 百度网盘那一行。**必须能一眼看出卡在哪一步** ——
     /// 用户之前压根找不到这个入口，以为功能没做（其实一直在设置页里）。
+    /// 现在凭据内嵌在服务器上，所以只剩两种状态：连上了 / 还没连。
     private var baiduLine: String {
-        if !BaiduPanClient.shared.isConfigured {
-            return "备份、搬家、让我读你的网盘（要填 AppKey）"
-        }
-        return BaiduPanClient.shared.isAuthorized ? "已授权，可以备份和搬家" : "凭据填好了，还差一步授权"
+        if BaiduPanClient.shared.isAuthorized { return "已连接，可以备份和搬家" }
+        return "备份、搬家、让我读你的网盘（点一下就连上）"
     }
 
     /// QQ 官方机器人那一行 —— **这条路才是在手机上跑、不用电脑的**。

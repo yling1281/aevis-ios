@@ -153,7 +153,7 @@ struct AppearanceSettingsCard: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text("聊天页里她的话会跟着变。第一个是跟随系统。")
+                Text("聊天页里\(Pronoun.current)的话会跟着变。第一个是跟随系统。")
                     .font(.aevis(11))
                     .foregroundStyle(.tertiary)
             }

@@ -24,7 +24,7 @@ struct MomentsCard: View {
 
             toggleRow(
                 "让她自己发",
-                subtitle: "打开之后她会时不时发一条，你打开 App 时补上",
+                subtitle: "打开之后\(Pronoun.current)会时不时发一条，你打开 App 时补上",
                 isOn: $settings.momentsEnabled
             )
 
@@ -97,7 +97,7 @@ struct MomentsCard: View {
 
             toggleRow(
                 "我评论她，她回我",
-                subtitle: "你在她动态下留言，她立刻回一句",
+                subtitle: "你在\(Pronoun.current)动态下留言，\(Pronoun.current)立刻回一句",
                 isOn: $settings.momentAutoReply
             )
 
@@ -112,7 +112,7 @@ struct MomentsCard: View {
                     ),
                     range: 1...3,
                     suffix: "条",
-                    note: "按「你上一次留言之后」算 —— 你每留一条言她都会回，但不会自己跟自己说个不停。"
+                    note: "按「你上一次留言之后」算 —— 你每留一条言\(Pronoun.current)都会回，但不会自己跟自己说个不停。"
                 )
             }
 
@@ -136,7 +136,7 @@ struct MomentsCard: View {
                     range: 0.1...1.0,
                     suffix: "%",
                     isPercent: true,
-                    note: "不是每次都私信 —— 真人也常常只是点个赞就走了。开了 Bark 的话，她私信你时会一起推一条。"
+                    note: "不是每次都私信 —— 真人也常常只是点个赞就走了。开了 Bark 的话，\(Pronoun.current)私信你时会一起推一条。"
                 )
             }
 
@@ -194,7 +194,7 @@ struct MomentsCard: View {
 
     private var personalization: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionLabel("她发什么")
+            sectionLabel("\(Pronoun.current)发什么")
 
             Button {
                 styleDraft = settings.momentStylePrompt
@@ -202,7 +202,7 @@ struct MomentsCard: View {
             } label: {
                 rowShell(
                     icon: "text.quote",
-                    title: "她的朋友圈风格",
+                    title: "\(Pronoun.current)的朋友圈风格",
                     subtitle: settings.momentStylePrompt.isEmpty
                         ? "还没写 —— 她会自由发挥"
                         : settings.momentStylePrompt
@@ -212,12 +212,12 @@ struct MomentsCard: View {
             .sheet(isPresented: $showStyleEditor) { styleEditor }
 
             rule
-            sectionLabel("她的配图")
+            sectionLabel("\(Pronoun.current)的配图")
 
             VStack(alignment: .leading, spacing: 10) {
                 Picker("", selection: $settings.momentImageMode) {
                     Text("不发图").tag("none")
-                    Text("从她的图库挑").tag("library")
+                    Text("从\(Pronoun.current)的图库挑").tag("library")
                 }
                 .pickerStyle(.segmented)
 
@@ -250,7 +250,7 @@ struct MomentsCard: View {
                         }
                     }
 
-                    Text("我们没法凭空给她生成照片（那要接图像模型、要花钱）。与其假装能，"
+                    Text("我们没法凭空给\(Pronoun.current)生成照片（那要接图像模型、要花钱）。与其假装能，"
                          + "不如让她从你给的图里挑。")
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
@@ -265,7 +265,7 @@ struct MomentsCard: View {
             }
 
             rule
-            sectionLabel("她什么时候发")
+            sectionLabel("\(Pronoun.current)什么时候发")
 
             VStack(alignment: .leading, spacing: 12) {
                 weightRow("早 5–11", value: $settings.momentMorningWeight)
@@ -273,7 +273,7 @@ struct MomentsCard: View {
                 weightRow("晚 17–22", value: $settings.momentEveningWeight)
                 weightRow("深夜 22–5", value: $settings.momentNightWeight)
 
-                Text("拉高 = 这个时段她更勤快；拉到 0 = 这个时段不发。四个都一样就等于不限制。")
+                Text("拉高 = 这个时段\(Pronoun.current)更勤快；拉到 0 = 这个时段不发。四个都一样就等于不限制。")
                     .font(.aevis(11))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -390,7 +390,7 @@ struct MomentsCard: View {
     private var styleEditor: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Text("写一段她平时发朋友圈的样子。比如：\n"
+                Text("写一段\(Pronoun.current)平时发朋友圈的样子。比如：\n"
                      + "「爱发吃的和猫，语气懒懒的，偶尔抱怨加班，很少发长句。」")
                     .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
@@ -405,7 +405,7 @@ struct MomentsCard: View {
                         in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                     )
 
-                Text("留空 = 不干预，她自己发挥。")
+                Text("留空 = 不干预，\(Pronoun.current)自己发挥。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
 
@@ -423,7 +423,7 @@ struct MomentsCard: View {
                         settings.momentStylePrompt = styleDraft
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         showStyleEditor = false
-                        note = settings.momentStylePrompt.isEmpty ? "清空了，她会自由发挥。" : "记下了。"
+                        note = settings.momentStylePrompt.isEmpty ? "清空了，\(Pronoun.current)会自由发挥。" : "记下了。"
                     }
                     .fontWeight(.semibold)
                 }

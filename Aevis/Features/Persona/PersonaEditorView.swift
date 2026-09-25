@@ -39,18 +39,18 @@ struct PersonaEditorView: View {
                 colorSection
                 voiceSection
                 field(
-                    title: "\(draft.pronoun)怎么叫你",
+                    title: "\(Pronoun.spaced(draft.pronoun))怎么叫你",
                     hint: "比如：宝宝 / 主人 / 你的名字",
                     text: $draft.callUser
                 )
                 field(
-                    title: "\(draft.pronoun)的性格",
+                    title: "\(Pronoun.spaced(draft.pronoun))的性格",
                     hint: "越具体越好。比如：温柔，但有点傲娇，会撒娇，偶尔毒舌",
                     text: $draft.personality,
                     minLines: 3
                 )
                 field(
-                    title: "\(draft.pronoun)怎么说话",
+                    title: "\(Pronoun.spaced(draft.pronoun))怎么说话",
                     hint: "比如：句子很短，爱用语气词，偶尔发颜文字，不太用标点",
                     text: $draft.speakingStyle,
                     minLines: 3
@@ -206,7 +206,7 @@ struct PersonaEditorView: View {
 
     private var avatarSection: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("\(draft.pronoun)的头像")
+            Text("\(Pronoun.spaced(draft.pronoun))的头像")
                 .font(.aevis(13, weight: .medium))
                 .foregroundStyle(.primary)
 
@@ -261,10 +261,10 @@ struct PersonaEditorView: View {
 
     private var nameSection: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("\(draft.pronoun)叫什么")
+            Text("\(Pronoun.spaced(draft.pronoun))叫什么")
                 .font(.aevis(13, weight: .medium))
                 .foregroundStyle(.primary)
-            TextField("给 \(draft.pronoun)起个名字", text: $draft.name)
+            TextField("给 \(Pronoun.spaced(draft.pronoun))起个名字", text: $draft.name)
                 .font(.aevis(17, weight: .medium))
                 .padding(.horizontal, 15)
                 .padding(.vertical, 13)
@@ -274,7 +274,7 @@ struct PersonaEditorView: View {
 
     private var genderSection: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("\(draft.pronoun)的性别")
+            Text("\(Pronoun.spaced(draft.pronoun))的性别")
                 .font(.aevis(13, weight: .medium))
                 .foregroundStyle(.primary)
 
@@ -321,7 +321,7 @@ struct PersonaEditorView: View {
 
     private var voiceSection: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("\(draft.pronoun)的声音（系统音色）")
+            Text("\(Pronoun.spaced(draft.pronoun))的声音（系统音色）")
                 .font(.aevis(13, weight: .medium))
                 .foregroundStyle(.primary)
 
@@ -427,12 +427,12 @@ struct PersonaEditorView: View {
     private var navigationTitle: String {
         if adding { return "新联系人" }
         if isFirstRun { return "" }
-        return "\(draft.pronoun)的设定"
+        return "\(Pronoun.spaced(draft.pronoun))的设定"
     }
 
     private var actionTitle: String {
-        if adding { return "加上 \(draft.pronoun)" }
-        return isFirstRun ? "就是 \(draft.pronoun)了" : "保存"
+        if adding { return "加上 \(Pronoun.spaced(draft.pronoun))" }
+        return isFirstRun ? "就是 \(Pronoun.spaced(draft.pronoun))了" : "保存"
     }
 
     private var footerHint: some View {
@@ -445,7 +445,7 @@ struct PersonaEditorView: View {
     private var footerText: String {
         if adding { return "加上之后就在通讯录里了，随时能改。" }
         if isFirstRun { return "这些设定都存在这台手机上，随时能改。" }
-        return "改完记得点保存。\(draft.pronoun)的设定只存在这台手机上。"
+        return "改完记得点保存。\(Pronoun.spaced(draft.pronoun))的设定只存在这台手机上。"
     }
 
     // MARK: - 动作

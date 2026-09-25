@@ -100,17 +100,17 @@ enum AevisBridge {
             let text = command.first.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return "没带内容，没发出消息。" }
             ChatStore.shared.appendProactive(text)
-            return "她发了一条：「\(text.prefix(20))」"
+            return "\(Pronoun.current)发了一条：「\(text.prefix(20))」"
 
         case "ask":
             let text = command.first.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return "没带内容，没问她。" }
+            guard !text.isEmpty else { return "没带内容，没问\(Pronoun.current)。" }
             BridgeInbox.shared.ask = text
-            return "替你问她：「\(text.prefix(20))」"
+            return "替你问\(Pronoun.current)：「\(text.prefix(20))」"
 
         case "daily":
             BridgeInbox.shared.ask = "帮我看看今天过得怎么样"
-            return "让她说说今天…"
+            return "让\(Pronoun.current)说说今天…"
 
         case "note":
             let text = command.first.trimmingCharacters(in: .whitespacesAndNewlines)

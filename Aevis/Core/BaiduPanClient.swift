@@ -11,9 +11,11 @@ enum BaiduPanError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "还没填百度网盘的 AppKey / SecretKey。去「我 → 设置 → 百度网盘」填一下。"
+            return "App 里没有百度密钥 —— 这是有意的（密钥只在服务器上）。"
+                + "去「我 → 设置 → 百度网盘」点「连接百度网盘」。"
         case .notAuthorized:
-            return "还没授权百度网盘。去「我 → 设置 → 百度网盘」点「去授权」，登录后把页面上那串授权码贴回来。"
+            return "还没连接百度网盘。去「我 → 设置 → 百度网盘」点「连接百度网盘」，"
+                + "登录一次就行，不用复制任何东西。"
         case let .api(errno):
             return "百度网盘返回错误码 \(errno)\(Self.hint(errno))"
         case let .http(status, body):
@@ -120,8 +122,22 @@ final class BaiduPanClient {
 
     // MARK: - 状态
 
-    var isConfigured: Bool {
-        !appKey.isEmpty && !secretKey.isEmpty
+    /// App 这边**一把百度密钥都没有** —— AppKey / SecretKey 只在服务器上
+    /// （见 `server/account/app.py` 的 `/api/baidu/callback`，换 token 那一步在服务端做）。
+    /// 所以这里恒为 true：真正要判断的是「有没有账号登录态」和「有没有授权」。
+    var isConfigured: Bool { true }
+
+    /// 能不能开始连接：**要先登录 Aevis 账号** —— 服务端要认人，才肯给授权网址。
+    var canConnect: Bool { AccountService.shared.isSignedIn }
+
+    /// 服务端换好 token 之后交给 App。
+    /// ⚠️ 用的是服务器上的 SecretKey 换的，App 全程没有密钥。
+    func adoptServerToken(_ json: [String: Any]) throws {
+        Self.adopt(json)
+        guard isAuthorized else {
+            let why = AppSettings.shared.baiduPanLastError
+            throw BaiduPanError.badResponse(why.isEmpty ? "服务器没给 access_token" : why)
+        }
     }
 
     var isAuthorized: Bool {
@@ -226,7 +242,10 @@ final class BaiduPanClient {
         guard stamp > 0, Date().timeIntervalSince1970 >= stamp else { return }
 
         let refresh = AppSettings.shared.baiduPanRefreshToken
-        guard !refresh.isEmpty else {
+        // 新做法（2026-09-25 起）：**App 里没有密钥**，所以续期只能在服务器上做。
+        // 真到过期那天，让用户回设置点一次「连接百度网盘」——
+        // 一次性跳转，比让他在 App 里留一份 SecretKey 安全得多。
+        if refresh.isEmpty || secretKey.isEmpty {
             signOut()
             throw BaiduPanError.notAuthorized
         }

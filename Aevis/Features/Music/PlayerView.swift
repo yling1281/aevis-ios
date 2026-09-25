@@ -257,7 +257,7 @@ struct PlayerView: View {
                     .font(.aevis(17, weight: .medium))
                     .foregroundStyle(.white.opacity(0.55))
             } else {
-                Text("在「音乐」里搜一首，或者直接跟 \(persona.pronoun) 说「放首歌」")
+                Text("在「音乐」里搜一首，或者直接跟 \(Pronoun.spaced(persona.pronoun)) 说「放首歌」")
                     .font(.aevis(14))
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
@@ -400,7 +400,7 @@ struct PlayerView: View {
                     Button {
                         Task { await together.pokeHer() }
                     } label: {
-                        Text(together.thinking ? "她在想…" : "让她说一句")
+                        Text(together.thinking ? "\(Pronoun.current)在想…" : "让\(Pronoun.current)说一句")
                             .font(.aevis(13, weight: .medium))
                             .foregroundStyle(.white.opacity(0.9))
                             .padding(.horizontal, 15)
@@ -433,7 +433,7 @@ struct PlayerView: View {
                 Button {
                     startTogether()
                 } label: {
-                    Text(settings.isConfigured ? "现在就开始一起听" : "要填了 API Key 她才会说话")
+                    Text(settings.isConfigured ? "现在就开始一起听" : "要填了 API Key \(Pronoun.current)才会说话")
                         .font(.aevis(13, weight: .medium))
                         .foregroundStyle(.white.opacity(settings.isConfigured ? 0.9 : 0.45))
                         .padding(.horizontal, 16)

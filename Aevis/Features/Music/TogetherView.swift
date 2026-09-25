@@ -208,7 +208,7 @@ struct TogetherView: View {
                 }
                 .padding(.top, 2)
             } else {
-                Text("还没放歌。先去「音乐」里搜一首，或者直接跟她说「放首歌」。")
+                Text("还没放歌。先去「音乐」里搜一首，或者直接跟\(Pronoun.current)说「放首歌」。")
                     .font(.aevis(13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -224,7 +224,7 @@ struct TogetherView: View {
     private var herLines: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text("她跟着听到的")
+                Text("\(Pronoun.current)跟着听到的")
                     .font(.aevis(14.5, weight: .medium))
                     .foregroundStyle(.primary)
                 if together.thinking {
@@ -234,7 +234,7 @@ struct TogetherView: View {
             }
 
             if together.herLines.isEmpty {
-                Text("她还没开口。放一会儿，或者点右上角「让她说一句」。")
+                Text("\(Pronoun.current)还没开口。放一会儿，或者点右上角「让\(Pronoun.current)说一句」。")
                     .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -265,7 +265,7 @@ struct TogetherView: View {
                 }
             }
 
-            Text("她不会自动念出来 —— 歌在放，再叠一层人声会听不清。想听哪句就点旁边的小喇叭。")
+            Text("\(Pronoun.current)不会自动念出来 —— 歌在放，再叠一层人声会听不清。想听哪句就点旁边的小喇叭。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -280,7 +280,7 @@ struct TogetherView: View {
             Text("开始之后会发生什么")
                 .font(.aevis(14.5, weight: .medium))
                 .foregroundStyle(.primary)
-            Text("她会跟着歌词走：每唱几句，就接着那一句说一句自己的感觉。说完落在上面那块里，不会打断歌曲。")
+            Text("\(Pronoun.current)会跟着歌词走：每唱几句，就接着那一句说一句自己的感觉。说完落在上面那块里，不会打断歌曲。")
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

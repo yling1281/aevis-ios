@@ -108,7 +108,7 @@ struct SettingsView: View {
 
     private var sections: [CardSection] {
         [
-            CardSection(id: "her", title: "她",
+            CardSection(id: "her", title: "\(Pronoun.current)",
                         keys: ["persona", "voice", "memory", "moments", "proactive"]),
             CardSection(id: "chat", title: "聊天",
                         keys: ["myprofile", "bubbles", "emoji", "chat"]),
@@ -306,7 +306,7 @@ struct SettingsView: View {
                         Text(Shell.provider.displayName)
                             .font(.aevis(15.5, weight: .medium))
                             .foregroundStyle(.primary)
-                        Text("她也能用命令行帮你干活")
+                        Text("\(Pronoun.current)也能用命令行帮你干活")
                             .font(.aevis(12))
                             .foregroundStyle(.secondary)
                     }
@@ -610,7 +610,7 @@ struct SettingsView: View {
                         in: 6...200,
                         step: 2
                     )
-                    Text("带太多她会又慢又贵，太少她会失忆。40 左右是个平衡点。")
+                    Text("带太多\(Pronoun.current)会又慢又贵，太少\(Pronoun.current)会失忆。40 左右是个平衡点。")
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -804,7 +804,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("必应是默认。加了别的源之后，如果那个页面抓不出结果列表，她会直接把正文读给你 —— 不会白跑一趟。")
+                Text("必应是默认。加了别的源之后，如果那个页面抓不出结果列表，\(Pronoun.current)会直接把正文读给你 —— 不会白跑一趟。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

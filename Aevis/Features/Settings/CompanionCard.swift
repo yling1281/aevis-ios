@@ -37,7 +37,7 @@ struct CompanionCard: View {
             entry(
                 symbol: "phone.arrow.up.right",
                 title: "实时通话",
-                detail: "你说话，她听；她回话，用语音念出来"
+                detail: "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来"
             ) {
                 showCall = true
             }
@@ -59,7 +59,7 @@ struct CompanionCard: View {
                         .foregroundStyle(companion.systemRunning ? Color.green : Color.secondary)
                 }
 
-                Text("开始之后，你切到微信、抖音，她照样看得到 —— 这是录整个屏幕的那条路。")
+                Text("开始之后，你切到微信、抖音，\(Pronoun.current)照样看得到 —— 这是录整个屏幕的那条路。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -90,7 +90,7 @@ struct CompanionCard: View {
 
             toggleRow(
                 "只看 Aevis 自己",
-                subtitle: "不用装扩展的兜底办法，但切到别的 App 她就看不到了。",
+                subtitle: "不用装扩展的兜底办法，但切到别的 App \(Pronoun.current)就看不到了。",
                 isOn: Binding(
                     get: { companion.inAppActive || settings.companionEnabled },
                     set: { value in
@@ -158,7 +158,7 @@ struct CompanionCard: View {
             if !companion.lastSeen.isEmpty {
                 rule
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("她最近看到的")
+                    Text("\(Pronoun.current)最近看到的")
                         .font(.aevis(12))
                         .foregroundStyle(.secondary)
                     Text(companion.lastSeen)

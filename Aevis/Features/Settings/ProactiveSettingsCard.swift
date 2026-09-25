@@ -124,7 +124,7 @@ struct ProactiveSettingsCard: View {
             label("她会说什么")
 
             if settings.proactiveLines.isEmpty {
-                Text("还没有准备话术。点下面按钮让她写一批。")
+                Text("还没有准备话术。点下面按钮让\(Pronoun.current)写一批。")
                     .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
             } else {
@@ -151,7 +151,7 @@ struct ProactiveSettingsCard: View {
                         if working {
                             ProgressView().controlSize(.small)
                         }
-                        Text(working ? "正在写…" : "让她重新写一批")
+                        Text(working ? "正在写…" : "让\(Pronoun.current)重新写一批")
                             .font(.aevis(14, weight: .medium))
                     }
                     .foregroundStyle(.primary)
@@ -186,7 +186,7 @@ struct ProactiveSettingsCard: View {
 
     private var barkSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            toggleRow("推到 Bark", subtitle: "她说话时同时推一条到 Bark，通知会留在 Bark 的历史里", isOn: $settings.barkEnabled)
+            toggleRow("推到 Bark", subtitle: "\(Pronoun.current)说话时同时推一条到 Bark，通知会留在 Bark 的历史里", isOn: $settings.barkEnabled)
                 .padding(.horizontal, -16)
 
             if settings.barkEnabled {

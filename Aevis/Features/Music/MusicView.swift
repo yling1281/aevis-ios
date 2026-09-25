@@ -332,7 +332,7 @@ struct MusicView: View {
     }
 
     private var hintCard: some View {
-        Text("锁屏和通知中心里也能控制播放。她也能用这些 —— 你说「放首歌」，她真的会去放，不是只回你一句「好的」。")
+        Text("锁屏和通知中心里也能控制播放。\(Pronoun.current)也能用这些 —— 你说「放首歌」，\(Pronoun.current)真的会去放，不是只回你一句「好的」。")
             .font(.aevis(11.5))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

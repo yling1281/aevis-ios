@@ -132,7 +132,7 @@ struct CallView: View {
             if call.thinking {
                 HStack(spacing: 7) {
                     ProgressView().controlSize(.small)
-                    Text("她正在想…")
+                    Text("\(Pronoun.current)正在想…")
                         .font(.aevis(13))
                         .foregroundStyle(.secondary)
                 }
