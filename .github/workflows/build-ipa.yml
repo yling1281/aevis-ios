@@ -200,26 +200,19 @@ jobs:
             sleep 2
           }
 
-          capture 01-onboarding
-          capture 02-chat        -aevisDemo
-          capture 03-noglass     -aevisDemo -aevisNoGlass
-          capture 04-simple      -aevisDemo -aevisSimple
-          capture 05-paper       -aevisDemo -aevisCustomBackground
-          # 设置页太长一屏截不全 —— -aevisSettingsFocus 每次只显示一张卡
-          capture 06-bubbles     -aevisDemo -aevisOpenSettings -aevisSettingsFocus=bubbles
-          capture 07-memory      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory
-          capture 08-myprofile   -aevisDemo -aevisOpenSettings -aevisSettingsFocus=myprofile
-          capture 09-model       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=model
-          capture 10-memory-list -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory -aevisOpenMemoryList
-          capture 11-moments     -aevisDemo -aevisOpenMoments
-          capture 12-moments-set -aevisDemo -aevisOpenSettings -aevisSettingsFocus=moments
-          capture 13-together    -aevisDemo -aevisOpenTogether
-          capture 14-companion   -aevisDemo -aevisOpenSettings -aevisSettingsFocus=companion
-          capture 15-douyin      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=douyin
-          capture 16-system      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=system
-          capture 17-music       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=music
-          capture 18-emoji       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=emoji
-          capture 19-selfcheck   -aevisSelfCheck
+          # 截图清单放在 .github/shots.txt 里，不写死在这 ——
+          # 以后加界面只要推那个几百字节的小文件，不用动 workflow。
+          # （动 workflow 会牵扯到 GITHUB_TOKEN 的 workflows 权限，麻烦。）
+          if [ -f .github/shots.txt ]; then
+            while IFS= read -r line; do
+              case "$line" in
+                ''|'#'*) continue ;;
+              esac
+              capture $line
+            done < .github/shots.txt
+          else
+            echo "没有 .github/shots.txt，这次不截图"
+          fi
 
           ls -lh shots/ || true
 
