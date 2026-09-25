@@ -38,6 +38,7 @@ struct SettingsView: View {
                     if shows("model") { modelCard }
                     if shows("search") { searchCard }
                     if shows("system") { SystemBridgeCard() }
+                    if shows("mcp") { MCPCard() }
                     if shows("chat") { chatCard }
                     if shows("about") { aboutCard }
                 }

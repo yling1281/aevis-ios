@@ -27,7 +27,19 @@ enum DeviceTools {
 
     // MARK: - 登记
 
+    /// 她全部的手 = App 自带的 + 外接的。
+    ///
+    /// **所有链路都走这里**（打字聊天、语音通话、一起听、主动消息、朋友圈），
+    /// 所以外接的 MCP 工具接一次就处处可用 —— 包括你直接对她说话的时候。
     static func all() -> [DeviceTool] {
+        builtinTools + MCPStore.shared.bridgedTools
+    }
+
+    /// App 自带的那些，不含 MCP。
+    ///
+    /// 单独拆出来是有原因的：`MCPStore.bridgedTools` 判重时要看这些名字，
+    /// 如果它去调 `all()`，就绕回来变成无限递归了（真会崩栈）。
+    static var builtinTools: [DeviceTool] {
         [timeTool, clipboardReadTool, clipboardWriteTool, calculatorTool,
          calendarListTool, calendarCreateTool, reminderCreateTool]
         + senseTools
