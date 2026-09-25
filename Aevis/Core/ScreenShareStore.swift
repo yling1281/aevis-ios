@@ -152,12 +152,14 @@ final class ScreenShareStore {
         let createTask = unsafeBitCast(createSymbol, to: CreateFn.self)
         let copyValue = unsafeBitCast(copySymbol, to: CopyFn.self)
 
+        // ⚠️ 这里**不能** CFRelease —— 在 Swift 里那两个函数标着
+        // 「unavailable: Core Foundation objects are automatically memory managed」，
+        // 写了就是**编译错误**（我在这里栽过一次，本地没拦住、CI 才报出来）。
+        // 这段每次启动最多跑一次，就算真漏掉一个小对象也无所谓。
         guard let task = createTask(kCFAllocatorDefault) else { return [] }
-        defer { CFRelease(task) }
 
         let key = "com.apple.security.application-groups" as CFString
         guard let value = copyValue(task, key, nil) else { return [] }
-        defer { CFRelease(value) }
 
         if let list = value as? NSArray {
             return list.compactMap { $0 as? String }

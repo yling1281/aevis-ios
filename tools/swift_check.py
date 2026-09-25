@@ -878,6 +878,23 @@ def check_property_scope(sources):
                     )
 
 
+def check_cf_memory(path, code):
+    """`CFRelease` / `CFRetain` 在 Swift 里是**编译错误**。
+
+    编译器原话：「unavailable: Core Foundation objects are automatically
+    memory managed」—— CF 对象由 ARC 管，不许手动释放。
+
+    真踩过：手写 `dlsym` + `unsafeBitCast` 去调私有 API（读自己的
+    entitlements）时，习惯性按 C 的写法加了 CFRelease。**本地静态检查
+    放过去了、CI 编译才报出来**，白等一轮。写这条就是为了按在本地。
+    """
+    for number, line in enumerate(code.splitlines(), 1):
+        for name in ("CFRelease", "CFRetain"):
+            if name + "(" in line:
+                report("R19", path, number,
+                       "%s 在 Swift 里不可用（CF 对象由 ARC 自动管理），直接删掉" % name)
+
+
 def collect_definitions(sources):
     """收集项目里定义的类型名，以及哪些类型有 .shared。"""
     types = set()
@@ -928,6 +945,7 @@ def main():
         check_scaled_to_fill(path, code)
         check_double_spacer(path, source, code)
         check_nsexpression(path, code)
+        check_cf_memory(path, code)
         check_eventkit_permissions(path, code)
         check_font_leftovers(path, code)
         check_photos_picker_tint(path, code)
