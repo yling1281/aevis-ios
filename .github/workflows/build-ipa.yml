@@ -128,6 +128,19 @@ jobs:
       - name: Generate app icon
         run: python3 scripts/make_icon.py Aevis/Resources
 
+      # 一键摘除录屏扩展的应急口子。
+      #
+      # 扩展是**嵌进主 App 的独立 target**，比主 App 多一套签名要求。
+      # 我们的 IPA 是在手机上用第三方工具重签的 —— 万一那个工具处理不了
+      # 嵌套的 .appex，**整个 App 会装不上**（iOS 的行为：嵌套 bundle
+      # 签名不合格就不允许安装，不是"扩展不可用"）。
+      #
+      # 那种情况只要在仓库根放一个 `.release/no-extension`、重推一次，
+      # 这里就会生成一份不含扩展的工程 —— 一条推送就能退回去，
+      # 不用改代码、不用再排查一轮。没有那个标记时这一步什么都不做。
+      - name: Maybe strip the screen-recording extension
+        run: python3 scripts/strip_extension.py
+
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -282,6 +295,24 @@ jobs:
 
           codesign -f -s - --deep Payload/Aevis.app || true
           /usr/bin/zip -qry -X Aevis-adhoc.ipa Payload
+
+          # 录屏扩展是不是真的被嵌进去了。
+          #
+          # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**，
+          # 而界面不会报任何错 —— 用户只会觉得"点了没反应"。
+          # 所以这里明确打出来，出问题时一眼就能定位。
+          if [ -d Payload/Aevis.app/PlugIns ]; then
+            echo "内嵌扩展："
+            ls -1 Payload/Aevis.app/PlugIns/
+            APPEX=$(ls -d Payload/Aevis.app/PlugIns/*.appex 2>/dev/null | head -1)
+            if [ -n "$APPEX" ]; then
+              echo "扩展注册点："
+              /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" \
+                "$APPEX/Info.plist" 2>/dev/null || echo "  （读不到，Info.plist 可能有问题）"
+            fi
+          else
+            echo "没有 PlugIns 目录 —— 这次没有嵌录屏扩展"
+          fi
 
           ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
 
