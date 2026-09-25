@@ -187,7 +187,15 @@ final class MusicPlayer: NSObject, ObservableObject {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
-            self.progress = time.seconds
+
+            // ⚠️ 必须挡一下 NaN。AVPlayer 在"还没就绪 / 流有问题 / 刚 seek"这些时刻
+            // 会给一个 NaN 的时间，而 NaN 会顺着 progress 一路传到界面的 Slider 上 ——
+            // **NaN 进 SwiftUI 就是崩溃**。这里拦一道，比在界面里到处防要省事。
+            let seconds = time.seconds
+            if seconds.isFinite, seconds >= 0 {
+                self.progress = seconds
+            }
+
             let total = player.currentItem?.duration.seconds ?? 0
             if total.isFinite, total > 0 {
                 self.duration = total
@@ -222,6 +230,15 @@ final class MusicPlayer: NSObject, ObservableObject {
         let lines = lyric.split(separator: "\n").compactMap { raw -> (Double, String)? in
             // 形如：[01:23.45] 歌词内容
             guard let closing = raw.firstIndex(of: "]") else { return nil }
+
+            // ⚠️ 这一行挡的是**闪退**，不是格式问题。
+            // 如果 `]` 正好在行首，下面那个 `index(after: startIndex)` 会**越过** closing，
+            // 切片的起点比终点还靠后 → 范围非法 → 直接崩。
+            //
+            // 踩过：修好歌词接口之后，「点歌就闪退」。因为以前歌词根本拿不到，
+            // 这段代码从来没有真正执行过 —— 一个潜伏了很久的崩溃被"修好"给暴露了。
+            guard closing > raw.startIndex else { return nil }
+
             let stamp = raw[raw.index(after: raw.startIndex)..<closing]
             let parts = stamp.split(separator: ":")
             guard parts.count == 2,
