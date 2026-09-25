@@ -65,6 +65,20 @@ MUST_HAVE = [
     "Aevis/Features/Music/PlayerView.swift",
     "Aevis/Features/Music/MusicView.swift",
     "Aevis/Core/MusicPlayer.swift",
+    # ——— 第二批新功能（2026-09-25 下午）———
+    # 多模态：PDF / Word / RTF
+    "Aevis/Core/AttachmentService.swift",
+    # QQ 桥接（OneBot 兼容）
+    "Aevis/Core/QQBridge.swift",
+    "Aevis/Core/QQTools.swift",
+    "Aevis/Features/Settings/QQCard.swift",
+    # 账号（给以后那个服务器留的接口层）
+    "Aevis/Core/AccountService.swift",
+    "Aevis/Features/Settings/AccountCard.swift",
+    # 配置二维码 + 备份到文件
+    "Aevis/Core/ConfigShare.swift",
+    "Aevis/Features/Settings/ShareCard.swift",
+    "Aevis/Features/Settings/QRScannerView.swift",
     ".github/shots.txt",
 ]
 

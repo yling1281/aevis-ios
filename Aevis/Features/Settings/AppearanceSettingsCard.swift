@@ -195,6 +195,47 @@ struct AppearanceSettingsCard: View {
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // 主题色跟头像走。取不到颜色（没设头像）就自动回到上面那一个 ——
+            // 所以这个开关永远不会把界面变成没有颜色。
+            Toggle(isOn: Binding(
+                get: { settings.dynamicAccent },
+                set: { on in
+                    settings.dynamicAccent = on
+                    if on { settings.refreshAvatarTint(from: PersonaStore.shared.avatarImage) }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("主题色跟着 TA 的头像走")
+                        .font(.aevis(14))
+                        .foregroundStyle(.primary)
+                    Text(settings.dynamicAccent && settings.avatarTint == nil && PersonaStore.shared.avatarImage != nil
+                         ? "开着，但这张头像取不出颜色，先用你挑的那个"
+                         : "从头像里取一个主色当主题色；没设头像就用你挑的那个")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(settings.accentColor)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("界面密度")
+                    .font(.aevis(13))
+                    .foregroundStyle(.primary)
+
+                Picker("界面密度", selection: $settings.densityIndex) {
+                    ForEach(Array(AppSettings.densityNames.enumerated()), id: \.offset) { index, name in
+                        Text(name).tag(index)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("只改间距和留白，字号另有开关（上面那排）—— 这两件事分开，谁也不用迁就谁。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)

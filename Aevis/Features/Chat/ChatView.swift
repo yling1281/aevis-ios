@@ -188,7 +188,8 @@ struct ChatView: View {
                 draft = AttachmentService.composerBlock(text, source: url.lastPathComponent) + draft
                 errorText = nil
             } else {
-                errorText = "这个文件我读不了文字。现在只支持纯文本类：txt / md / csv / json / log 这些。"
+                errorText = "这个文件我读不了文字。能读的是：PDF、Word（docx）、RTF，"
+                    + "以及纯文本类（txt / md / csv / json / 代码）。"
             }
         case .failure(let error):
             errorText = "选文件失败：\(error.localizedDescription)"
@@ -277,14 +278,16 @@ struct ChatView: View {
             cornerScale: settings.cornerScale,
             fontColor: settings.fontColor,
             showMyAvatar: settings.showMyAvatar,
-            showAiAvatar: settings.showAiAvatar
+            showAiAvatar: settings.showAiAvatar,
+            // 界面密度：只改留白，不改字号（字号是另一组开关）
+            density: settings.densityScale
         )
     }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: settings.simpleMode ? 16 : 12) {
+                LazyVStack(spacing: (settings.simpleMode ? 16 : 12) * CGFloat(settings.densityScale)) {
                     if chat.messages.isEmpty {
                         emptyState
                     }
@@ -771,6 +774,8 @@ struct BubbleTheme {
     var fontColor: Color
     var showMyAvatar: Bool
     var showAiAvatar: Bool
+    /// 界面密度（0.82 紧凑 / 1.0 标准 / 1.22 宽松）。只乘在留白上。
+    var density: Double = 1.0
 }
 
 private struct MessageBubble: View {
@@ -796,8 +801,8 @@ private struct MessageBubble: View {
     private var color: Color { isUser ? theme.myColor : theme.aiColor }
 
     private var bubbleFontSize: CGFloat { simpleMode ? 17.5 : 15.5 }
-    private var horizontalPadding: CGFloat { simpleMode ? 16 : 14 }
-    private var verticalPadding: CGFloat { simpleMode ? 13 : 10 }
+    private var horizontalPadding: CGFloat { (simpleMode ? 16 : 14) * CGFloat(theme.density) }
+    private var verticalPadding: CGFloat { (simpleMode ? 13 : 10) * CGFloat(theme.density) }
     private var avatarSize: CGFloat { simpleMode ? 30 : 26 }
 
     /// 基础圆角再乘两层系数：全局的 + 这一侧自己的。

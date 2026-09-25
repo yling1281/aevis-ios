@@ -72,6 +72,15 @@ struct MeView: View {
                         entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
                             route = SettingsRoute(focus: "baidupan")
                         }
+                        entry("QQ 桥接", "bubble.left.and.text.bubble.right", qqLine) {
+                            route = SettingsRoute(focus: "qq")
+                        }
+                        entry("账号", "person.badge.key", accountLine) {
+                            route = SettingsRoute(focus: "account")
+                        }
+                        entry("分享与搬家", "qrcode", "二维码传配置、备份成文件") {
+                            route = SettingsRoute(focus: "share")
+                        }
                     }
 
                     defaultTabCard
@@ -177,6 +186,19 @@ struct MeView: View {
             return "备份、搬家、让我读你的网盘（要填 AppKey）"
         }
         return BaiduPanClient.shared.isAuthorized ? "已授权，可以备份和搬家" : "凭据填好了，还差一步授权"
+    }
+
+    /// QQ 那一行同理：状态写在行上，别让人点进去才发现没配。
+    private var qqLine: String {
+        if !QQBridge.shared.isConfigured { return "看和发你的 QQ 消息（要填一个 OneBot 服务的地址）" }
+        return settings.qqBridgeEnabled ? "已开启" : "地址填好了，但开关还关着"
+    }
+
+    /// 账号那一行。**不填也能用**这件事必须写在行上，
+    /// 否则会让人以为"没登录就不能用"。
+    private var accountLine: String {
+        if !AccountService.shared.isConfigured { return "可选：以后接你自己的服务器（不填也能用）" }
+        return AccountService.shared.statusLine
     }
 
     // MARK: - 零件

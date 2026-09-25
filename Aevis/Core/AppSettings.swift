@@ -1,5 +1,10 @@
+import CoreImage
 import Foundation
 import SwiftUI
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// 一次模型调用的完整参数快照。传值而不是传对象，避免跨线程访问设置。
 struct LLMConfig {
@@ -280,6 +285,9 @@ final class AppSettings: ObservableObject {
         static let backgroundStyle = "aevis.backgroundStyle"
         static let backgroundDim = "aevis.backgroundDim"
         static let accentIndex = "aevis.accentIndex"
+        /// 界面密度（0/1/2）与「主题色跟着头像走」
+        static let densityIndex = "aevis.densityIndex"
+        static let dynamicAccent = "aevis.dynamicAccent"
         static let proactiveEnabled = "aevis.proactiveEnabled"
         static let fixedTimesEnabled = "aevis.fixedTimesEnabled"
         static let fixedTimes = "aevis.fixedTimes"
@@ -311,10 +319,20 @@ final class AppSettings: ObservableObject {
         static let listenTogetherMode = "aevis.listenTogetherMode"
         /// 放歌就自动一起听（出厂开）
         static let listenTogetherAutoStart = "aevis.listenTogetherAutoStart"
+        /// QQ 桥接：总开关 / 那个 OneBot 服务的地址 / 允不允许替用户发消息
+        static let qqBridgeEnabled = "aevis.qqBridge.enabled"
+        static let qqBridgeURL = "aevis.qqBridge.url"
+        static let qqBridgeCanSend = "aevis.qqBridge.canSend"
         /// 网易云走哪条通道：`plain`（明文，默认）/ `weapi`（加密）。
         static let neteaseChannel = "aevis.netease.channel"
         static let neteaseCookieKeychain = "netease.cookie"
         static let douyinCookieKeychain = "douyin.cookie"
+        /// QQ 桥接（OneBot）的 Access Token
+        static let qqBridgeTokenKeychain = "qq.bridge.token"
+        /// 账号登录后的 token
+        static let accountTokenKeychain = "aevis.account.token"
+        static let accountServerURL = "aevis.account.serverURL"
+        static let accountExpiresAt = "aevis.account.expiresAt"
         static let llmKeychain = "openai.apiKey"
         static let ttsKeychain = "tts.apiKey"
         static let baiduPanAppKey = "baidu.pan.appKey"
@@ -519,6 +537,23 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(accentIndex, forKey: Key.accentIndex) }
     }
 
+    /// 界面密度（0 紧凑 / 1 标准 / 2 宽松）。只改间距，不改字号。
+    @Published var densityIndex: Int {
+        didSet { UserDefaults.standard.set(densityIndex, forKey: Key.densityIndex) }
+    }
+
+    /// 主题色跟着当前联系人的头像走。
+    /// 开关一开，`avatarTint` 里那份从图里取出来的颜色就接管 `accentColor`。
+    @Published var dynamicAccent: Bool {
+        didSet {
+            UserDefaults.standard.set(dynamicAccent, forKey: Key.dynamicAccent)
+            if !dynamicAccent { avatarTint = nil }
+        }
+    }
+
+    /// 从头像上取出来的主色。**只在头像变化时算一次**（见 `refreshAvatarTint`）。
+    @Published private(set) var avatarTint: Color?
+
     /// 自定义背景图上压的那层遮罩有多重。0 = 不压。压太重会把图糊掉，所以默认很轻。
     @Published var backgroundDim: Double {
         didSet { UserDefaults.standard.set(backgroundDim, forKey: Key.backgroundDim) }
@@ -695,6 +730,63 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(neteaseChannel, forKey: Key.neteaseChannel) }
     }
 
+    // MARK: - QQ 桥接（OneBot 兼容）
+    //
+    // QQ 没有给第三方的 IM 接口，**App 也没法在手机上自己登 QQ**（详见 QQBridge
+    // 的注释）。所以通行做法是**在外面跑一个 OneBot 实现**（NapCat / LLOneBot /
+    // go-cqhttp），由它登录，对外开一个 HTTP 端口，手机连过去。
+    //
+    // ⚠️「外面」不等于「电脑」：放服务器上更好 —— 手机在任何网络下都能用，
+    // 也不用一直开着电脑。用户明确说过不想依赖电脑。
+    // 不管跑在哪，账号密码都不经过这个 App。
+
+    /// 整块功能的总开关。关着就等于没这回事。
+    @Published var qqBridgeEnabled: Bool {
+        didSet { UserDefaults.standard.set(qqBridgeEnabled, forKey: Key.qqBridgeEnabled) }
+    }
+
+    /// 那个 OneBot 服务的地址，形如 `https://qq.example.com` 或 `http://192.168.1.5:3000`。
+    /// **留空就整块不生效**，不会报错 —— 没配的东西就该安静地不存在。
+    ///
+    /// 填公网地址最好（手机在哪都能用、不用开着电脑）；填局域网地址就只有
+    /// 同一个 WiFi 下能用。
+    @Published var qqBridgeURL: String {
+        didSet { UserDefaults.standard.set(qqBridgeURL, forKey: Key.qqBridgeURL) }
+    }
+
+    /// OneBot 的 Access Token。**只进钥匙串**，和 API Key 一个待遇。
+    @Published var qqBridgeToken: String {
+        didSet { Keychain.set(qqBridgeToken, for: Key.qqBridgeTokenKeychain) }
+    }
+
+    /// 允不允许她**以用户本人的身份发 QQ 消息**。
+    ///
+    /// 出厂开着（不然这个功能没意义），但它是个开关：
+    /// 不想让人替自己说话的时候关掉，读消息不受影响。
+    @Published var qqBridgeCanSend: Bool {
+        didSet { UserDefaults.standard.set(qqBridgeCanSend, forKey: Key.qqBridgeCanSend) }
+    }
+
+    // MARK: - 账号（给「以后那个服务器」留的）
+    //
+    // 用户说「到时候会拿新的服务器跟你对接」。所以现在**只做接口层**：
+    // 地址他自己填、留空就是未连接，本地功能一样都不少。
+
+    /// 服务器地址，形如 `https://api.example.com`。**留空 = 未连接**。
+    @Published var accountServerURL: String {
+        didSet { UserDefaults.standard.set(accountServerURL, forKey: Key.accountServerURL) }
+    }
+
+    /// 登录后的 token。**只进钥匙串**，和 API Key 一个待遇。
+    @Published var accountToken: String {
+        didSet { Keychain.set(accountToken, for: Key.accountTokenKeychain) }
+    }
+
+    /// token 的到期时刻（Unix 秒）。0 表示没记录。
+    @Published var accountExpiresAt: Double {
+        didSet { UserDefaults.standard.set(accountExpiresAt, forKey: Key.accountExpiresAt) }
+    }
+
     // MARK: - 第三方登录凭据
 
     /// 网易云的 Cookie。**只进钥匙串**，和 API Key 一个待遇。
@@ -800,6 +892,8 @@ final class AppSettings: ObservableObject {
         backgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .aurora
         backgroundDim = defaults.object(forKey: Key.backgroundDim) as? Double ?? 0.12
         accentIndex = defaults.object(forKey: Key.accentIndex) as? Int ?? 0
+        densityIndex = defaults.object(forKey: Key.densityIndex) as? Int ?? 1
+        dynamicAccent = defaults.object(forKey: Key.dynamicAccent) as? Bool ?? false
         proactiveEnabled = defaults.object(forKey: Key.proactiveEnabled) as? Bool ?? false
         fixedTimesEnabled = defaults.object(forKey: Key.fixedTimesEnabled) as? Bool ?? false
         fixedTimes = defaults.stringArray(forKey: Key.fixedTimes) ?? ["09:00", "13:30", "22:30"]
@@ -834,6 +928,14 @@ final class AppSettings: ObservableObject {
         listenTogetherAutoStart = defaults.object(forKey: Key.listenTogetherAutoStart) as? Bool ?? true
         neteaseCookie = Keychain.get(Key.neteaseCookieKeychain) ?? ""
         douyinCookie = Keychain.get(Key.douyinCookieKeychain) ?? ""
+        qqBridgeToken = Keychain.get(Key.qqBridgeTokenKeychain) ?? ""
+        qqBridgeEnabled = defaults.object(forKey: Key.qqBridgeEnabled) as? Bool ?? false
+        qqBridgeURL = defaults.string(forKey: Key.qqBridgeURL) ?? ""
+        // 出厂允许她替你发 —— 这是这个功能的意义所在；不想让人替自己说话的可以关掉
+        qqBridgeCanSend = defaults.object(forKey: Key.qqBridgeCanSend) as? Bool ?? true
+        accountServerURL = defaults.string(forKey: Key.accountServerURL) ?? ""
+        accountToken = Keychain.get(Key.accountTokenKeychain) ?? ""
+        accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)
         neteaseChannel = defaults.string(forKey: Key.neteaseChannel) ?? "plain"
         // 百度网盘凭据：**用户自己填的优先，没填就用编译时注入的那份**
         // （见 BuiltInSecrets 的说明：仓库里那份是空值，真值只在 CI 注入）。
@@ -857,8 +959,89 @@ final class AppSettings: ObservableObject {
     }
 
     var accentColor: Color {
+        // 用户勾了「主题色跟着 TA 的头像走」而且真取到了颜色，就用它；
+        // 取不到（没设头像 / 取色失败）就老老实实回到他挑的那一个 —— 不能变透明。
+        if dynamicAccent, let avatarTint { return avatarTint }
         let index = min(max(accentIndex, 0), Self.accentPalette.count - 1)
         return Self.accentPalette[index]
+    }
+
+    /// 界面密度：紧凑 / 标准 / 宽松。
+    /// 只作用在**间距和留白**上 —— 字号另有开关，这两件事别混在一起。
+    var densityScale: Double {
+        switch min(max(densityIndex, 0), 2) {
+        case 0: return 0.82
+        case 2: return 1.22
+        default: return 1.0
+        }
+    }
+
+    static let densityNames = ["紧凑", "标准", "宽松"]
+
+    /// 从一张图里取主色。
+    ///
+    /// 做法很省：把整张图**平均成一个像素**（`CIAreaAverage`），再把这个
+    /// 平均色往「能当主题色用」的方向调一下 —— 平均色往往发灰，
+    /// 直接拿来做主题色会显得脏。
+    ///
+    /// 只在头像变化时调一次，不在渲染路径上。
+    static func dominantColor(of image: UIImage) -> Color? {
+        #if canImport(UIKit)
+        guard let ciImage = CIImage(image: image), !ciImage.extent.isEmpty else { return nil }
+
+        guard let filter = CIFilter(name: "CIAreaAverage") else { return nil }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: ciImage.extent), forKey: kCIInputExtentKey)
+        guard let output = filter.outputImage else { return nil }
+
+        var pixel = [UInt8](repeating: 0, count: 4)
+        CIContext().render(
+            output,
+            toBitmap: &pixel,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+
+        let base = UIColor(
+            red: CGFloat(pixel[0]) / 255,
+            green: CGFloat(pixel[1]) / 255,
+            blue: CGFloat(pixel[2]) / 255,
+            alpha: 1
+        )
+
+        // 提饱和度、把亮度夹到「能用」的区间 —— 太暗会看不清，太亮会发白
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        base.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+
+        return Color(
+            hue: Double(hue),
+            saturation: Double(min(0.85, max(0.45, saturation))),
+            brightness: Double(min(0.95, max(0.55, brightness)))
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    // MARK: - 从头像取主题色
+
+    /// 从头像图里取一个主色当主题色。
+    ///
+    /// ⚠️ **不能在 `accentColor` 里现算** —— 那个属性被几十处界面读，
+    /// 每次都跑一遍 CoreImage 会把界面拖死。所以只在头像变化时算一次，
+    /// 结果放在 `avatarTint` 里。
+    func refreshAvatarTint(from image: UIImage?) {
+        guard dynamicAccent else { return }
+        guard let image else {
+            avatarTint = nil
+            return
+        }
+        avatarTint = Self.dominantColor(of: image)
     }
 
     /// 正文文字的颜色。用户挑的那个。

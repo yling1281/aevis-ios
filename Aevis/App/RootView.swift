@@ -44,6 +44,17 @@ struct RootView: View {
                 bridgeNote = nil
             }
         }
+        // 主题色跟着头像走：头像换了就重算一次主色。
+        // **只在这里算** —— 放到 accentColor 那个属性里现算会把界面拖死。
+        .onAppear {
+            settings.refreshAvatarTint(from: personaStore.avatarImage)
+        }
+        .onChange(of: personaStore.avatarImage) { _, image in
+            settings.refreshAvatarTint(from: image)
+        }
+        .onChange(of: personaStore.activeID) { _, _ in
+            settings.refreshAvatarTint(from: personaStore.avatarImage)
+        }
         .onChange(of: scenePhase) { _, phase in
             // 每次回到前台，为接下来 24 小时重排一次「不定时」消息 ——
             // 本地通知只能在排程时定下时间，这是能做到的最接近随机的办法。

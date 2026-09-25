@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(PDFKit)
+import PDFKit
+#endif
+
 #if canImport(Vision)
 import Vision
 #endif
@@ -54,34 +58,83 @@ enum AttachmentService {
     // MARK: - 读文件
 
     /// 读一个文件里的文字。
-    /// 只处理纯文本类的；PDF/Word 这类要额外解析库，先如实说读不了。
+    ///
+    /// 支持三类：
+    /// - **纯文本**（txt / md / csv / json / 代码…）→ 直接读，带 GB18030 兜底
+    /// - **PDF** → 系统 PDFKit，本来就自带的
+    /// - **Word（docx）和 RTF** → 系统的富文本解析（`NSAttributedString`）
+    ///
+    /// ⚠️ 早先这里只认纯文本，但 `allowedFileTypes` 里却写着 pdf ——
+    /// 也就是**能给用户选、选了却读不出来**。这种「菜单里有、点了没反应」最坑。
     static func readTextFile(at url: URL) -> String? {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 
-        let supported = ["txt", "md", "markdown", "json", "csv", "tsv", "log", "xml", "yml", "yaml", "swift", "js", "py", "html", "htm"]
         let ext = url.pathExtension.lowercased()
-        guard supported.contains(ext) else {
-            return nil
-        }
+        guard allowedFileTypes.contains(ext) else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
 
-        if let text = try? String(contentsOf: url, encoding: .utf8) {
-            return text
+        switch ext {
+        case "pdf":
+            return pdfText(data)
+        case "docx":
+            return richText(data, type: .officeOpenXML)
+        case "rtf":
+            return richText(data, type: .rtf)
+        case "doc":
+            // 老的 .doc 是二进制格式，系统读不了 —— 不假装能读
+            return nil
+        default:
+            return plainText(data)
         }
-        // 有些中文文本是 GB18030，再试一次
+    }
+
+    /// PDF 抽文字。PDFKit 是系统自带的，不用额外库。
+    private static func pdfText(_ data: Data) -> String? {
+        #if canImport(PDFKit)
+        guard let document = PDFDocument(data: data) else { return nil }
+        let text = document.string ?? ""
+        return text.isEmpty ? nil : text
+        #else
+        return nil
+        #endif
+    }
+
+    /// docx / rtf 抽文字 —— 走系统自带的富文本解析。
+    ///
+    /// 为什么不自己解 zip：docx 本质是个 zip 包，正文在 `word/document.xml` 里，
+    /// 自己解要写一个 ZIP 读取器 + inflate。系统本来就会，没必要重造。
+    private static func richText(_ data: Data, type: NSAttributedString.DocumentType) -> String? {
+        #if canImport(UIKit)
+        guard let attributed = try? NSAttributedString(
+            data: data,
+            options: [.documentType: type],
+            documentAttributes: nil
+        ) else { return nil }
+        let text = attributed.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+        #else
+        return nil
+        #endif
+    }
+
+    /// 纯文本。UTF-8 读不出来就按 GB18030 再试一次 ——
+    /// 中文 txt 十有八九是 GBK 存的，只按 UTF-8 读会整篇乱码。
+    private static func plainText(_ data: Data) -> String? {
+        if let text = String(data: data, encoding: .utf8) { return text }
         let gb = CFStringConvertEncodingToNSStringEncoding(
             CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
         )
-        if let data = try? Data(contentsOf: url),
-           let text = String(data: data, encoding: String.Encoding(rawValue: gb)) {
-            return text
-        }
-        return nil
+        return String(data: data, encoding: String.Encoding(rawValue: gb))
     }
 
     /// 能被读取的文件类型（给 fileImporter 用）。
+    ///
+    /// ⚠️ 这里加什么，`readTextFile` 就必须真能读 —— 两边必须同步，
+    /// 否则就是「菜单里有、点了没反应」。
     static var allowedFileTypes: [String] {
-        ["txt", "md", "markdown", "json", "csv", "tsv", "log", "xml", "yml", "yaml", "swift", "js", "py", "html", "htm", "pdf"]
+        ["txt", "md", "markdown", "json", "csv", "tsv", "log", "xml", "yml", "yaml",
+         "swift", "js", "py", "html", "htm", "pdf", "docx", "rtf"]
     }
 
     // MARK: - 组装

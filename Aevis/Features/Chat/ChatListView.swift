@@ -7,6 +7,8 @@ import SwiftUI
 struct ChatListView: View {
     @EnvironmentObject private var personaStore: PersonaStore
     @ObservedObject private var chat = ChatStore.shared
+    /// 界面密度要生效，所以得订阅设置（改完回来立刻就能看到变化）
+    @ObservedObject private var settings = AppSettings.shared
 
     @State private var path: [UUID] = []
     @State private var adding = false
@@ -100,7 +102,8 @@ struct ChatListView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        // 行高跟着界面密度走（紧凑 / 标准 / 宽松）
+        .padding(.vertical, 11 * CGFloat(settings.densityScale))
         .aevisGlass(cornerRadius: 18)
         .contentShape(Rectangle())
     }
