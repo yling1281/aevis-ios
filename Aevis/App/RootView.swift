@@ -4,6 +4,8 @@ struct RootView: View {
     @EnvironmentObject private var personaStore: PersonaStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.scenePhase) private var scenePhase
+    /// 授权门禁。**没授权的时候，它挡住整个 App**（2026-09-25 用户明确要求）。
+    @StateObject private var gate = DeviceGate.shared
     /// 快捷指令回传来的那一句话，在顶上飘一下就消失。
     @State private var bridgeNote: String?
 
@@ -31,6 +33,10 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.22), value: bridgeNote)
+        // 授权通过的那一刻：门禁页淡出、主界面淡入。
+        // ⚠️ 盯的是 `gate.authorized` 而不是 `isBlocking` —— 后者是计算属性，
+        // 不是 `@Published`，在这里不会触发刷新。
+        .animation(.easeInOut(duration: 0.3), value: gate.authorized)
         // 快捷指令最后一步「打开 URL」打开的就是这里 ——
         // 这是我们唯一能把数据收回来的通道（run-shortcut 没有返回值）。
         .onOpenURL { url in
@@ -106,11 +112,30 @@ struct RootView: View {
             // CI 用：把自检结果画出来，截图里就能看到过没过
             SelfCheckView()
         } else {
-            normal
+            gated
         }
         #else
-        normal
+        gated
         #endif
+    }
+
+    /// 授权门禁。
+    ///
+    /// 用户 2026-09-25 的口径：「打开 APP 就提示没有授权，然后就展示设备码
+    /// 和没有授权的那个界面」「填设备码之后就自动通过，就是一个账号一个设备码」。
+    ///
+    /// **只拦"从没授权过的设备"**：一旦授权过（存在本机），
+    /// 以后断网、服务器挂了都照样进 —— 聊天记录都在这台手机里，
+    /// 拿网络去锁它等于把用户自己的东西扣住了。
+    @ViewBuilder
+    private var gated: some View {
+        if gate.isBlocking {
+            DeviceGateView()
+                .transition(.opacity)
+        } else {
+            normal
+                .transition(.opacity)
+        }
     }
 
     @ViewBuilder

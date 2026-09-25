@@ -15,6 +15,8 @@
   R9  调用自定义类型/方法但项目里没有定义
   R20 一行里的双引号是奇数个              → 字符串被拦腰截断，后半截变成代码
   R24 对**可选**属性直接接 `.isEmpty` 之类  → 编译错误（build-44 就挂在它上）
+  R25 `Keychain.set(x, forKey:)` 标签写错     → 编译错误（build-50）
+  R26 UIKit 的 `UIImage` 直接 `.resizable()`  → 编译错误（build-53 挂在两句上）
 
 （R10–R19 的由来写在各自函数的 docstring 里，这里只列最先立起来的那批。）
 
@@ -976,6 +978,38 @@ def check_keychain_labels(sources):
                     break
 
 
+def check_uiimage_resizable(sources):
+    """`UIImage` 变量后面直接接 `.resizable()` —— 编译不过。
+
+    真踩过（**build-53 整轮 CI 就是这么炸的**）：
+        if let image = UIImage(data: data) {
+            Color.clear
+                .frame(height: 170)
+                .overlay(image.resizable().scaledToFill())   // ← 这里
+    → `error: value of type 'UIImage' has no member 'resizable'`。
+
+    SwiftUI 里能 `.resizable()` 的是 `Image`；UIKit 的 `UIImage` 必须先包一层
+    `Image(uiImage:)`。之所以容易写错：这两样在代码里**都叫 image**。
+
+    只盯**同一个文件里明确由 `UIImage(` 造出来的变量名** ——
+    这样 `Image` 类型的 `image`（项目里到处都是）不会被误报。
+    规则一旦有误报就等于没有，所以宁可窄，不可宽。
+    """
+    for path, source in sorted(sources.items()):
+        code = strip_code(source)
+        names = set(re.findall(r"\b(?:let|var)\s+([A-Za-z_]\w*)\s*(?::[^=\n]+)?=\s*UIImage\(",
+                               code))
+        if not names:
+            continue
+        for number, line in enumerate(code.splitlines(), 1):
+            for name in sorted(names):
+                if name + ".resizable()" in line:
+                    report("R26", path, number,
+                           "`%s` 是 UIImage，没有 .resizable() —— 要先包成 Image(uiImage: %s)"
+                           % (name, name))
+                    break
+
+
 def check_property_scope(sources):
     """某个类型里用了 `名字.`，而这个名字是**同一个文件里另一个类型**的属性。
 
@@ -1222,6 +1256,7 @@ def main():
     check_property_scope(sources)
     check_optional_suffix_use(sources)
     check_keychain_labels(sources)
+    check_uiimage_resizable(sources)
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()

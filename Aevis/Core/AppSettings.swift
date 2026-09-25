@@ -401,6 +401,12 @@ final class AppSettings: ObservableObject {
         static let qqBotCodeGroups = "aevis.qqBotCode.groups"
         static let accountServerURL = "aevis.account.serverURL"
         static let accountExpiresAt = "aevis.account.expiresAt"
+        /// 这台设备通过了授权（设备码绑到某个账号上了）。
+        /// **授权一次就永久记住** —— 服务器抖一下、地铁里没信号，
+        /// 都不该让用户打不开自己手机里的聊天记录。
+        static let deviceAuthorized = "aevis.device.authorized"
+        /// 授权时绑的那个账号（服务器给的就是打码邮箱），只用来显示。
+        static let deviceAuthorizedAccount = "aevis.device.authorizedAccount"
         static let llmKeychain = "openai.apiKey"
         static let ttsKeychain = "tts.apiKey"
         static let baiduPanAppKey = "baidu.pan.appKey"
@@ -1190,6 +1196,19 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(accountExpiresAt, forKey: Key.accountExpiresAt) }
     }
 
+    /// 这台设备通过授权了没有。**一旦为真就一直为真** ——
+    /// 这是「一个账号一个设备码」那条规矩的本地凭据，不是每次都联网问。
+    @Published var deviceAuthorized: Bool {
+        didSet { UserDefaults.standard.set(deviceAuthorized, forKey: Key.deviceAuthorized) }
+    }
+
+    /// 授权时绑的账号（打码后的邮箱），只用来在界面上说清楚"绑在谁那儿"。
+    @Published var deviceAuthorizedAccount: String {
+        didSet {
+            UserDefaults.standard.set(deviceAuthorizedAccount, forKey: Key.deviceAuthorizedAccount)
+        }
+    }
+
     // MARK: - 第三方登录凭据
 
     /// 网易云的 Cookie。**只进钥匙串**，和 API Key 一个待遇。
@@ -1386,6 +1405,8 @@ final class AppSettings: ObservableObject {
         accountServerURL = storedAccountServer.isEmpty ? Self.builtInAccountServer : storedAccountServer
         accountToken = Keychain.get(Key.accountTokenKeychain) ?? ""
         accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)
+        deviceAuthorized = defaults.object(forKey: Key.deviceAuthorized) as? Bool ?? false
+        deviceAuthorizedAccount = defaults.string(forKey: Key.deviceAuthorizedAccount) ?? ""
         neteaseChannel = defaults.string(forKey: Key.neteaseChannel) ?? "plain"
         // 百度网盘凭据：**用户自己填的优先，没填就用编译时注入的那份**
         // （见 BuiltInSecrets 的说明：仓库里那份是空值，真值只在 CI 注入）。

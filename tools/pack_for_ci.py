@@ -102,6 +102,11 @@ MUST_HAVE = [
     "Aevis/Resources/Info.plist",
     "Aevis/App/RootView.swift",
     ".github/shots.txt",
+    # ——— 授权门禁（没授权就进不去 App）———
+    "Aevis/Core/DeviceGate.swift",
+    "Aevis/Features/Gate/DeviceGateView.swift",
+    # 抓 CI 编译日志 —— 一次性读经常只拿到一千多字节的残片，必须分块
+    "tools/grab_log.py",
 ]
 
 

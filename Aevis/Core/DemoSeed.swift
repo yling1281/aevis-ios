@@ -15,6 +15,8 @@ import Foundation
 ///     -aevisOpenMoments        直接打开朋友圈
 ///     -aevisOpenTogether       直接打开一起听
 ///     -aevisSelfCheck          自检页
+///     -aevisShowGate           强制显示「未授权」门禁页（实现在 DeviceGate 里）
+///     -aevisSkipGate           跳过授权门禁（-aevisDemo 已隐含跳过）
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，把每个界面都截下来。
 enum DemoSeed {

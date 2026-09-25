@@ -114,7 +114,9 @@ struct MomentsDecorSheet: View {
         if let data = settings.momentCoverData, let image = UIImage(data: data) {
             Color.clear
                 .frame(height: 150)
-                .overlay(image.resizable().scaledToFill())
+                // ⚠️ `image` 是 UIImage，**没有 `.resizable()`** ——
+                // 必须先包成 `Image(uiImage:)`（build-53 就挂在这一句上）。
+                .overlay(Image(uiImage: image).resizable().scaledToFill())
                 // ⚠️ overlay **不裁剪**，不补这句图片会溢出整块卡片
                 .clipped()
                 .overlay(alignment: .bottomLeading) {

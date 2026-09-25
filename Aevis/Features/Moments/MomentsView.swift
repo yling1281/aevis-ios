@@ -178,7 +178,8 @@ struct MomentsView: View {
         if let data = settings.momentCoverData, let image = UIImage(data: data) {
             Color.clear
                 .frame(height: 170)
-                .overlay(image.resizable().scaledToFill())
+                // ⚠️ 同上：`image` 是 UIImage，要先包成 `Image(uiImage:)` 才能 .resizable()
+                .overlay(Image(uiImage: image).resizable().scaledToFill())
                 // ⚠️ overlay **不裁剪** → 不补这句，图会撑大整棵布局（踩过）
                 .clipped()
                 .overlay(
