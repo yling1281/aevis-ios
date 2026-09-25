@@ -62,6 +62,10 @@ final class QQBotService: ObservableObject {
     @Published private(set) var log: [Line] = []
     @Published var lastError: String?
 
+    /// 机器人被 @ 过的群。**只存 id**，不存任何群内容。
+    /// 设置里用它让用户勾选「哪些群能领注册码」（空 = 不限）。
+    @Published private(set) var knownGroups: [String] = []
+
     /// 只收「群聊 + 私聊」这一类 intent。
     ///
     /// ⚠️ **不能贪多**：多要了平台没给的权限，握手会直接被拒
@@ -84,7 +88,11 @@ final class QQBotService: ObservableObject {
     /// 对同一条消息回过几次。**平台限制最多 5 次**，所以得自己数着。
     private var seqByMessage: [String: Int] = [:]
 
-    private init() {}
+    private init() {
+        knownGroups = UserDefaults.standard.stringArray(forKey: Self.knownGroupsKey) ?? []
+    }
+
+    private static let knownGroupsKey = "aevis.qqBot.knownGroups"
 
     // MARK: - 只在主线程改状态
     //
@@ -370,9 +378,13 @@ final class QQBotService: ObservableObject {
         let text = (d["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let scope = isPrivate ? "c2c" : "group"
+        // ⚠️ 私聊和群里**用的是两个不同的 openid**（官方设计如此）：
+        //    私聊 → author.user_openid；群聊 → author.member_openid（发送者）+ group_openid（群）
+        let groupOpenID = (d["group_openid"] as? String) ?? ""
+        let memberOpenID = (author?["member_openid"] as? String) ?? ""
         let target: String? = isPrivate
             ? (author?["user_openid"] as? String)
-            : (d["group_openid"] as? String)
+            : (groupOpenID.isEmpty ? nil : groupOpenID)
         guard let target, !target.isEmpty else { return }
 
         received += 1
@@ -384,11 +396,36 @@ final class QQBotService: ObservableObject {
         }
         append(Line(from: name, text: text, at: Date()))
 
+        let msgID = d["id"] as? String
+
+        if isPrivate {
+            // ★ 注册码的分流必须**排在模型前面** ——
+            // 否则她会用"聊天"的方式答一句，用户拿不到码还以为功能坏了。
+            if let handled = await QQCodeGate.shared.handlePrivate(text: text,
+                                                                   c2cOpenID: target) {
+                await deliver(handled, scope: scope, target: target, msgID: msgID)
+                return
+            }
+        } else {
+            noteGroup(groupOpenID)
+            if let handled = await QQCodeGate.shared.handleGroup(text: text,
+                                                                 group: groupOpenID,
+                                                                 member: memberOpenID) {
+                await deliver(handled, scope: scope, target: target, msgID: msgID)
+                return
+            }
+        }
+
         guard let reply = await replyText(to: text, scope: scope, target: target, from: name) else {
             return
         }
+        await deliver(reply, scope: scope, target: target, msgID: msgID)
+    }
 
-        let msgID = d["id"] as? String
+    /// 把一条回复发出去并记账。
+    /// 抽出来是因为现在有**两条**回复路径（注册码分流 / 让她回），
+    /// 各写一份的话 `msg_seq` 的计数迟早会跑偏。
+    private func deliver(_ reply: String, scope: String, target: String, msgID: String?) async {
         do {
             try await QQBotClient.shared.send(
                 scope: scope,
@@ -403,6 +440,14 @@ final class QQBotService: ObservableObject {
             setError(error.localizedDescription)
             append(Line(from: "系统", text: "回复没发出去：" + error.localizedDescription, at: Date()))
         }
+    }
+
+    /// 记下机器人被 @ 过的群，供设置里限定"哪些群能领注册码"。
+    private func noteGroup(_ id: String) {
+        guard !id.isEmpty, !knownGroups.contains(id) else { return }
+        knownGroups.append(id)
+        if knownGroups.count > 30 { knownGroups.removeFirst(knownGroups.count - 30) }
+        UserDefaults.standard.set(knownGroups, forKey: Self.knownGroupsKey)
     }
 
     private func nextSeq(for msgID: String?) -> Int {

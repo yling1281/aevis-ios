@@ -72,10 +72,11 @@ struct MainTabView: View {
                 .environmentObject(settings)
                 .environmentObject(chat)
         }
-        .sheet(isPresented: $router.showMoments) {
-            MomentsView()
-                .environmentObject(personaStore)
-        }
+        // ⚠️ 朋友圈**特意不用 fullScreenCover**。
+        // 用户要的是微信那种「从右边滑进来的一整页」，而 fullScreenCover 的转场
+        // 是固定的"从下往上弹"，SwiftUI 改不了方向。所以这里自己做一层 overlay
+        // 配 `.move(edge: .trailing)`，关闭由 MomentsView 的 onClose 回调触发
+        // （自定义呈现下 `@Environment(\.dismiss)` 是失效的）。
         .sheet(isPresented: $router.showTogether) {
             TogetherView()
                 .environmentObject(personaStore)
@@ -88,6 +89,17 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: $router.showPlayer) {
             PlayerView()
         }
+        // 朋友圈：右滑进、右滑出（微信的手感）。放在 overlay 里，
+        // 所以它盖在 tab 栏之上，是一整页。
+        .overlay {
+            if router.showMoments {
+                MomentsView(onClose: { router.showMoments = false })
+                    .environmentObject(personaStore)
+                    .transition(.move(edge: .trailing))
+                    .zIndex(30)
+            }
+        }
+        .animation(.easeInOut(duration: 0.28), value: router.showMoments)
         .onAppear(perform: applyLaunchOptions)
         .onAppear {
             // 录屏的进度要**全程**刷新，不能只在设置页里刷。

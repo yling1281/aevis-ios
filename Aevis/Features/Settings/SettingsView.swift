@@ -630,11 +630,17 @@ struct SettingsView: View {
         // 让人困惑（用户直接问过「为什么还是有液态玻璃可用之类的」），
         // 所以它们只在 Debug 构建里出现。
         var rows: [(String, String)] = [
+            // 用户 2026-09-25 要求：**正式版只写版本号，"构建"那行不要**。
+            // 他原话「构建的话你就不用写了，你就写个版本号就 OK 了」。
+            // 之所以敢去掉：版本号（MARKETING_VERSION）每次都跟着 build 号走
+            // （build-46 → 0.0.46），所以"版本号"本身就能分辨新旧。
             ("版本", Diagnostics.appVersion),
-            ("构建", Diagnostics.commit),
             ("运行环境", "iOS \(Diagnostics.osVersion) · \(Diagnostics.machine)")
         ]
         #if DEBUG
+        // 自检截图跑的是 Debug 构建，所以那批图里仍然看得到构建号 ——
+        // 排查"你手机上装的是哪一版"时，commit 才是最可靠的依据。
+        rows.append(("构建", Diagnostics.commit))
         rows.append(("液态玻璃", Diagnostics.supportsLiquidGlass ? "可用" : "不可用"))
         rows.append(("签名", Diagnostics.isSigned ? "已签名" : "未签名"))
         rows.append(("内置 Linux", Diagnostics.hasLinuxSandbox ? "已就绪" : "未接入"))

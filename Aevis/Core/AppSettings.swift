@@ -308,6 +308,17 @@ final class AppSettings: ObservableObject {
         static let momentMaxReplies = "aevis.momentMaxReplies"
         static let momentDMEnabled = "aevis.momentDMEnabled"
         static let momentDMChance = "aevis.momentDMChance"
+        // ——— 朋友圈个性化 ———
+        static let momentStylePrompt = "aevis.momentStylePrompt"
+        static let momentImageMode = "aevis.momentImageMode"
+        static let momentMorningWeight = "aevis.momentMorningWeight"
+        static let momentNoonWeight = "aevis.momentNoonWeight"
+        static let momentEveningWeight = "aevis.momentEveningWeight"
+        static let momentNightWeight = "aevis.momentNightWeight"
+        static let momentFontScale = "aevis.momentFontScale"
+        static let momentDensityIndex = "aevis.momentDensityIndex"
+        static let momentTimeStyle = "aevis.momentTimeStyle"
+        static let momentCorner = "aevis.momentCorner"
         static let douyinConfirmRisky = "aevis.douyinConfirmRisky"
         static let companionEnabled = "aevis.companionEnabled"
         static let companionInterval = "aevis.companionInterval"
@@ -338,6 +349,10 @@ final class AppSettings: ObservableObject {
         static let accountTokenKeychain = "aevis.account.token"
         /// QQ 官方机器人的 AppSecret
         static let qqBotSecretKeychain = "aevis.qqBot.secret"
+        static let qqBotCodeEnabled = "aevis.qqBotCode.enabled"
+        static let qqBotCodeKeyword = "aevis.qqBotCode.keyword"
+        static let qqBotCodeKeyKeychain = "aevis.qqBotCode.key"
+        static let qqBotCodeGroups = "aevis.qqBotCode.groups"
         static let accountServerURL = "aevis.account.serverURL"
         static let accountExpiresAt = "aevis.account.expiresAt"
         static let llmKeychain = "openai.apiKey"
@@ -670,6 +685,89 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(momentDMChance, forKey: Key.momentDMChance) }
     }
 
+    // MARK: - 朋友圈个性化（2026-09-25 用户要求「能自定义的都自定义」）
+
+    /// 她的朋友圈风格。用户写一段（例如「爱发吃的和猫，语气懒懒的，偶尔发牢骚」），
+    /// 会拼进生成动态的指令里。**留空就不干预**，模型自由发挥。
+    @Published var momentStylePrompt: String {
+        didSet { UserDefaults.standard.set(momentStylePrompt, forKey: Key.momentStylePrompt) }
+    }
+
+    /// 她发动态带不带图：
+    ///   `none`    —— 只发文字
+    ///   `library` —— 从「她的图库」里挑一张（图库是**用户自己往里放的**）
+    /// ⚠️ 我们没法凭空给她生成照片。与其假装能，不如让她从你给的图里挑。
+    @Published var momentImageMode: String {
+        didSet { UserDefaults.standard.set(momentImageMode, forKey: Key.momentImageMode) }
+    }
+
+    /// 一天四个时段的偏好（0–100，早/午/晚/深夜）。
+    /// 不是百分比 —— 只按**相对比例**算，所以四个都填 50 和都填 100 效果一样。
+    /// 全填 0 = 不按时段干预，回到原来的「平均间隔」。
+    @Published var momentMorningWeight: Int {
+        didSet { UserDefaults.standard.set(momentMorningWeight, forKey: Key.momentMorningWeight) }
+    }
+
+    @Published var momentNoonWeight: Int {
+        didSet { UserDefaults.standard.set(momentNoonWeight, forKey: Key.momentNoonWeight) }
+    }
+
+    @Published var momentEveningWeight: Int {
+        didSet { UserDefaults.standard.set(momentEveningWeight, forKey: Key.momentEveningWeight) }
+    }
+
+    @Published var momentNightWeight: Int {
+        didSet { UserDefaults.standard.set(momentNightWeight, forKey: Key.momentNightWeight) }
+    }
+
+    // ——— 朋友圈界面 ———
+
+    /// 字号缩放。0.9 小 / 1.0 标准 / 1.15 大。
+    @Published var momentFontScale: Double {
+        didSet { UserDefaults.standard.set(momentFontScale, forKey: Key.momentFontScale) }
+    }
+
+    /// 卡片疏密：0 紧凑 / 1 标准 / 2 宽松。
+    @Published var momentDensityIndex: Int {
+        didSet { UserDefaults.standard.set(momentDensityIndex, forKey: Key.momentDensityIndex) }
+    }
+
+    /// 时间怎么显示：`relative` 三分钟前 / `clock` 21:04。
+    @Published var momentTimeStyle: String {
+        didSet { UserDefaults.standard.set(momentTimeStyle, forKey: Key.momentTimeStyle) }
+    }
+
+    /// 卡片圆角。
+    @Published var momentCorner: Double {
+        didSet { UserDefaults.standard.set(momentCorner, forKey: Key.momentCorner) }
+    }
+
+    static let momentWeightNames = ["早上 5–11", "中午 11–17", "晚上 17–22", "深夜 22–5"]
+
+    /// 某个钟点落在哪个时段。
+    static func momentBucket(ofHour hour: Int) -> Int {
+        switch hour {
+        case 5..<11: return 0
+        case 11..<17: return 1
+        case 17..<22: return 2
+        default: return 3
+        }
+    }
+
+    /// 当前时段的相对权重。1.0 = 刚好平均；2.0 = 这个时段她勤快一倍；
+    /// 0 = 这个点她不发（调用方据此直接跳过）。
+    var momentCurrentWeight: Double {
+        let weights = [momentMorningWeight, momentNoonWeight,
+                       momentEveningWeight, momentNightWeight]
+        let total = weights.reduce(0, +)
+        // 全填 0 → 不干预
+        guard total > 0 else { return 1 }
+        let hour = Calendar.current.component(.hour, from: Date())
+        let weight = weights[Self.momentBucket(ofHour: hour)]
+        guard weight > 0 else { return 0 }
+        return Double(weight) / (Double(total) / 4.0)
+    }
+
     // MARK: - 抖音（写操作还没接，但这个开关先备好）
 
     /// 高危写操作（评论、发布、取关这类）要不要二次确认。默认开。
@@ -805,6 +903,44 @@ final class AppSettings: ObservableObject {
     /// 但它费电，所以给开关（用户的原则：能自定义的都自定义）。
     @Published var qqBotKeepAlive: Bool {
         didSet { UserDefaults.standard.set(qqBotKeepAlive, forKey: Key.qqBotKeepAlive) }
+    }
+
+    // MARK: - QQ 机器人：发注册码
+    //
+    // 用户在 QQ 里发「注册」就能领一张注册码，**一个 QQ 一张**。
+    //
+    // ⚠️ 为什么要"群里拿口令、私聊换码"两步（见 QQCodeGate 里的详解）：
+    // 官方**没有**可用的「查群成员」接口（群成员列表还在内邀），而且
+    // 私聊用的是 user_openid、群聊用的是 member_openid，**是两个不同的值** ——
+    // 所以在私聊里没法反查对方是不是群成员。
+    // 于是把"证明他在群里"搬回群里做：他能在群里 @ 到机器人，这件事本身就是证据。
+
+    /// 总开关。**出厂关** —— 这是一条"往外发东西"的功能，
+    /// 钥匙没填就打开，只会让他每次发「注册」都收到一句报错。
+    @Published var qqBotCodeEnabled: Bool {
+        didSet { UserDefaults.standard.set(qqBotCodeEnabled, forKey: Key.qqBotCodeEnabled) }
+    }
+
+    /// 触发词。默认「注册」，用户想换成什么都行。
+    @Published var qqBotCodeKeyword: String {
+        didSet { UserDefaults.standard.set(qqBotCodeKeyword, forKey: Key.qqBotCodeKeyword) }
+    }
+
+    /// 服务器发码钥匙。**只进钥匙串**。
+    ///
+    /// 它不在公开仓库里，也不走 GitHub Secrets —— 用户从自己的管理后台
+    /// （account.lingyan.cyou/admin）复制过来填一次。少一个要他配置的地方。
+    @Published var qqBotCodeKey: String {
+        didSet { Keychain.set(qqBotCodeKey, for: Key.qqBotCodeKeyKeychain) }
+    }
+
+    /// 哪些群能领注册码。**空 = 不限**（机器人所在的群都行）。
+    /// 存 JSON 数组 —— UserDefaults 不认 [String] 这种自定义类型。
+    @Published var qqBotCodeGroups: [String] {
+        didSet {
+            let data = try? JSONEncoder().encode(qqBotCodeGroups)
+            UserDefaults.standard.set(data, forKey: Key.qqBotCodeGroups)
+        }
     }
 
     // MARK: - 账号（给「以后那个服务器」留的）
@@ -954,6 +1090,18 @@ final class AppSettings: ObservableObject {
         momentMaxReplies = defaults.object(forKey: Key.momentMaxReplies) as? Int ?? 1
         momentDMEnabled = defaults.object(forKey: Key.momentDMEnabled) as? Bool ?? true
         momentDMChance = defaults.object(forKey: Key.momentDMChance) as? Double ?? 0.4
+        // ——— 朋友圈个性化（默认值刻意「不改变现状」：风格留空 = 自由发挥；
+        //      四个时段都填 50 = 相对比例全是 1，等价于原来的平均间隔）———
+        momentStylePrompt = defaults.string(forKey: Key.momentStylePrompt) ?? ""
+        momentImageMode = defaults.string(forKey: Key.momentImageMode) ?? "none"
+        momentMorningWeight = defaults.object(forKey: Key.momentMorningWeight) as? Int ?? 50
+        momentNoonWeight = defaults.object(forKey: Key.momentNoonWeight) as? Int ?? 50
+        momentEveningWeight = defaults.object(forKey: Key.momentEveningWeight) as? Int ?? 50
+        momentNightWeight = defaults.object(forKey: Key.momentNightWeight) as? Int ?? 50
+        momentFontScale = defaults.object(forKey: Key.momentFontScale) as? Double ?? 1.0
+        momentDensityIndex = defaults.object(forKey: Key.momentDensityIndex) as? Int ?? 1
+        momentTimeStyle = defaults.string(forKey: Key.momentTimeStyle) ?? "relative"
+        momentCorner = defaults.object(forKey: Key.momentCorner) as? Double ?? 16
         douyinConfirmRisky = defaults.object(forKey: Key.douyinConfirmRisky) as? Bool ?? true
         companionEnabled = defaults.object(forKey: Key.companionEnabled) as? Bool ?? false
         companionInterval = defaults.object(forKey: Key.companionInterval) as? Double ?? 20
@@ -980,6 +1128,16 @@ final class AppSettings: ObservableObject {
         qqBotSandbox = defaults.object(forKey: Key.qqBotSandbox) as? Bool ?? true
         // 出厂开：不开的话他在 QQ 里聊、App 进后台被挂起，她就不回了
         qqBotKeepAlive = defaults.object(forKey: Key.qqBotKeepAlive) as? Bool ?? true
+        qqBotCodeEnabled = defaults.object(forKey: Key.qqBotCodeEnabled) as? Bool ?? false
+        qqBotCodeKeyword = defaults.string(forKey: Key.qqBotCodeKeyword) ?? "注册"
+        qqBotCodeKey = Keychain.get(Key.qqBotCodeKeyKeychain) ?? ""
+        // JSON 存 [String]：UserDefaults 只认 plist 里那几种类型，数组要自己编码
+        if let data = defaults.data(forKey: Key.qqBotCodeGroups),
+           let list = try? JSONDecoder().decode([String].self, from: data) {
+            qqBotCodeGroups = list
+        } else {
+            qqBotCodeGroups = []
+        }
         accountServerURL = defaults.string(forKey: Key.accountServerURL) ?? ""
         accountToken = Keychain.get(Key.accountTokenKeychain) ?? ""
         accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)

@@ -16,6 +16,21 @@ struct MomentsView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// 从「发现」进来时，是 MainTabView 用**自定义转场**呈现的
+    /// （为了做成微信那种「从右边滑进来」）—— 那种方式不走 fullScreenCover，
+    /// 所以 `dismiss()` 在里面是失效的，得由外面把关闭动作传进来。
+    /// 从设置里的「朋友圈」卡进来时是 fullScreenCover，那时它保持 nil。
+    var onClose: (() -> Void)?
+
+    /// 关掉自己。两种呈现方式都要能用。
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
+    }
+
     @State private var draft = ""
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var pendingImage: UIImage?
@@ -29,10 +44,37 @@ struct MomentsView: View {
 
     private var persona: Persona { personaStore.persona }
 
+    // MARK: - 界面个性化（用户要求：朋友圈的外观也要能自己调）
+
+    /// 字号缩放。
+    private var fontScale: CGFloat { CGFloat(settings.momentFontScale) }
+
+    /// 朋友圈里的字一律走这个 —— 这样"字号"那个开关一调，整页都跟着变，
+    /// 不会出现"标题变了、时间没变"这种半拉子效果。
+    private func mfont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .aevis(size * fontScale, weight: weight)
+    }
+
+    /// 卡片疏密：0 紧凑 / 1 标准 / 2 宽松。
+    private var density: Int { min(max(settings.momentDensityIndex, 0), 2) }
+    private var cardSpacing: CGFloat { [10, 14, 20][density] }
+    private var cardCorner: CGFloat { CGFloat(settings.momentCorner) }
+
+    /// 时间文字。两种口径由用户选：
+    ///   relative → 刚刚 / 3 分钟前 / 2 小时前
+    ///   clock    → 今天的写 21:04，更早的写 9-23 21:04
+    private func timeText(_ date: Date) -> String {
+        guard settings.momentTimeStyle == "clock" else { return Self.relative(date) }
+        let calendar = Calendar.current
+        let formatter = Self.clockFormatter
+        formatter.dateFormat = calendar.isDateInToday(date) ? "HH:mm" : "M-d HH:mm"
+        return formatter.string(from: date)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 14) {
+                LazyVStack(spacing: cardSpacing) {
                     composer
 
                     if moments.moments.isEmpty {
@@ -51,7 +93,20 @@ struct MomentsView: View {
             .navigationTitle("朋友圈")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // 返回键放**左边**，跟微信一样。
+                // ⚠️ 以前这里是「关闭」放右边 —— 那是弹窗的习惯；
+                // 现在朋友圈是"从右边滑进来的一整页"，返回键必须在左上。
                 ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        close()
+                    } label: {
+                        Image(systemName: "chevron.backward")
+                            .fontWeight(.semibold)
+                    }
+                    .accessibilityLabel("返回")
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
                             Task { await askHerToPost() }
@@ -69,10 +124,6 @@ struct MomentsView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }
                 }
             }
             .confirmationDialog(
@@ -98,6 +149,11 @@ struct MomentsView: View {
                 loadPhoto(item)
             }
         }
+        // ⚠️ 朋友圈现在**是自绘的一整页**（不再走 fullScreenCover 的"从下往上弹"），
+        // 所以必须自己铺一层不透明背景 —— 否则下面那四个 tab 会从缝里透出来，
+        // 看着像"页面没铺满"。
+        // 用 AevisBackground 而不是写死颜色：用户换过自定义背景的话，这里跟着变。
+        .background(AevisBackground().ignoresSafeArea())
     }
 
     // MARK: - 我发一条
@@ -109,7 +165,7 @@ struct MomentsView: View {
 
                 TextField("说点什么…", text: $draft, axis: .vertical)
                     .lineLimit(1...4)
-                    .font(.aevis(15))
+                    .font(mfont(15))
                     .padding(.vertical, 6)
             }
 
@@ -125,7 +181,7 @@ struct MomentsView: View {
                         pendingImage = nil
                     } label: {
                         Text("不要这张")
-                            .font(.aevis(13))
+                            .font(mfont(13))
                             .foregroundStyle(.red)
                     }
 
@@ -136,7 +192,7 @@ struct MomentsView: View {
             HStack(spacing: 10) {
                 PhotosPicker(selection: $pickedPhoto, matching: .images) {
                     Label("图", systemImage: "photo")
-                        .font(.aevis(14))
+                        .font(mfont(14))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
@@ -148,7 +204,7 @@ struct MomentsView: View {
 
                 Button(action: postMine) {
                     Text("发表")
-                        .font(.aevis(14, weight: .semibold))
+                        .font(mfont(14, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 8)
@@ -161,7 +217,7 @@ struct MomentsView: View {
             }
         }
         .padding(14)
-        .aevisGlass(cornerRadius: 18)
+        .aevisGlass(cornerRadius: cardCorner)
     }
 
     private var canPost: Bool {
@@ -195,15 +251,15 @@ struct MomentsView: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "photo.on.rectangle.angled")
-                .font(.aevis(30))
+                .font(mfont(30))
                 .foregroundStyle(.tertiary)
             Text("这里还空着")
-                .font(.aevis(16, weight: .medium))
+                .font(mfont(16, weight: .medium))
                 .foregroundStyle(.primary)
             Text(settings.momentsEnabled
                  ? "她过一会儿就会发一条。你也可以先发。"
                  : "在设置里打开「让她自己发」，她就会时不时发一条。")
-                .font(.aevis(13))
+                .font(mfont(13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
@@ -224,10 +280,10 @@ struct MomentsView: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(displayName(for: moment.author))
-                        .font(.aevis(14.5, weight: .medium))
+                        .font(mfont(14.5, weight: .medium))
                         .foregroundStyle(.primary)
-                    Text(Self.relative(moment.createdAt))
-                        .font(.aevis(11.5))
+                    Text(timeText(moment.createdAt))
+                        .font(mfont(11.5))
                         .foregroundStyle(.tertiary)
                 }
 
@@ -237,7 +293,7 @@ struct MomentsView: View {
                     moments.toggleLike(moment)
                 } label: {
                     Image(systemName: moment.likes.contains(.me) ? "heart.fill" : "heart")
-                        .font(.aevis(14))
+                        .font(mfont(14))
                         .foregroundStyle(moment.likes.contains(.me) ? .red : .secondary)
                 }
                 .buttonStyle(.plain)
@@ -246,7 +302,7 @@ struct MomentsView: View {
 
             if !moment.text.isEmpty {
                 Text(moment.text)
-                    .font(.aevis(15))
+                    .font(mfont(15))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -264,10 +320,10 @@ struct MomentsView: View {
                     if !moment.likes.isEmpty {
                         HStack(spacing: 5) {
                             Image(systemName: "heart.fill")
-                                .font(.aevis(10))
+                                .font(mfont(10))
                                 .foregroundStyle(.red)
                             Text(moment.likes.map { displayName(for: $0) }.joined(separator: "、"))
-                                .font(.aevis(12))
+                                .font(mfont(12))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -275,12 +331,12 @@ struct MomentsView: View {
                     ForEach(moment.comments) { comment in
                         HStack(alignment: .top, spacing: 5) {
                             Text(displayName(for: comment.author) + "：")
-                                .font(.aevis(12.5, weight: .medium))
+                                .font(mfont(12.5, weight: .medium))
                                 .foregroundStyle(comment.author.isMe
                                                  ? settings.accentColor
                                                  : .primary)
                             Text(comment.text)
-                                .font(.aevis(12.5))
+                                .font(mfont(12.5))
                                 .foregroundStyle(.primary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -301,7 +357,7 @@ struct MomentsView: View {
                     commentingOn = moment
                 } label: {
                     Label("评论", systemImage: "bubble.right")
-                        .font(.aevis(12.5))
+                        .font(mfont(12.5))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -310,7 +366,7 @@ struct MomentsView: View {
             }
         }
         .padding(14)
-        .aevisGlass(cornerRadius: 18)
+        .aevisGlass(cornerRadius: cardCorner)
         // ScrollView 里没有 List，所以删除走长按菜单，不用 swipeActions
         .contextMenu {
             Button(role: .destructive) {
@@ -385,6 +441,15 @@ struct MomentsView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.unitsStyle = .short
+        return formatter
+    }()
+
+    /// 「时钟口径」用的格式化器。⚠️ 做成 static 是为了别每条动态都新建一个 ——
+    /// DateFormatter 的构造很贵，列表里几十条就是几十次。
+    private static let clockFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
         return formatter
     }()
 

@@ -92,7 +92,7 @@ struct MeView: View {
                         entry("全部设置", "gearshape", "所有卡片都在这一页") {
                             route = SettingsRoute(focus: nil)
                         }
-                        entry("关于", "info.circle", "版本、构建号") {
+                        entry("关于", "info.circle", "版本号") {
                             route = SettingsRoute(focus: "about")
                         }
                     }

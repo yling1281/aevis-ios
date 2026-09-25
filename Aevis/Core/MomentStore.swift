@@ -181,6 +181,69 @@ final class MomentStore: ObservableObject {
         return name
     }
 
+    // MARK: - 她的图库
+    //
+    // 用户自己往这儿放图，她发动态时从里面挑一张带上。
+    // ⚠️ 我们**没法凭空给她生成照片**（那要接图像模型、要花钱）。
+    //    与其假装能，不如让她从你给的图里挑 —— 这也是「能自定义的都交给用户」。
+
+    private var libraryDirectory: URL {
+        imageDirectory.appendingPathComponent("library", isDirectory: true)
+    }
+
+    /// 图库里现有的图（按文件名排序 → 顺序稳定，不会每次刷新都跳）。
+    func libraryImages() -> [URL] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: libraryDirectory.path) else {
+            return []
+        }
+        return names
+            .filter { $0.lowercased().hasSuffix(".jpg") }
+            .sorted()
+            .map { libraryDirectory.appendingPathComponent($0) }
+    }
+
+    var libraryCount: Int { libraryImages().count }
+
+    /// 往图库里加一张。压到最长边 1400 —— 和动态配图用**同一套标准**，
+    /// 免得图库里的图和实际发出去的图清晰度不一样。
+    @discardableResult
+    func addLibraryImage(_ image: UIImage) -> Bool {
+        let longest = max(image.size.width, image.size.height)
+        guard longest > 0 else { return false }
+        let scale = longest > 1400 ? 1400 / longest : 1
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let scaled = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let data = scaled.jpegData(compressionQuality: 0.82) else { return false }
+
+        try? FileManager.default.createDirectory(at: libraryDirectory, withIntermediateDirectories: true)
+        let url = libraryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func removeLibraryImage(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func clearLibrary() {
+        for url in libraryImages() { removeLibraryImage(url) }
+    }
+
+    /// 从图库里随机挑一张读出来。图库是空的就返回 nil，
+    /// 调用方当成「这次没图」处理 —— 不该因为图库空就发不出动态。
+    private func randomLibraryImage() -> UIImage? {
+        guard let url = libraryImages().randomElement(),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
+
     // MARK: - 增删
 
     @discardableResult
@@ -298,7 +361,13 @@ final class MomentStore: ObservableObject {
     func generateAndPost(persona: Persona, config: LLMConfig, memory: [String], image: UIImage? = nil) async -> Moment? {
         let text = await compose(persona: persona, config: config, memory: memory)
         guard !text.isEmpty else { return nil }
-        return post(text: text, author: .ta, image: image)
+        // 调用方明确给了图就用它；否则看设置 —— 让她从「她的图库」里自己挑一张。
+        // 图库是空的就当她这次不想配图，照样发文字。
+        var picture = image
+        if picture == nil, AppSettings.shared.momentImageMode == "library" {
+            picture = randomLibraryImage()
+        }
+        return post(text: text, author: .ta, image: picture)
     }
 
     /// 让她按人设写一条。写不出来返回空串（调用方决定要不要退回兜底句）。
@@ -316,6 +385,14 @@ final class MomentStore: ObservableObject {
         let recent = digest(limit: 3)
         if !recent.isEmpty {
             instruction += "\n\n你最近发过的（别重复）：\n\(recent)"
+        }
+
+        // 用户写的「她的朋友圈风格」拼进去。
+        // ⚠️ **留空就不加这一段** —— 空着还硬塞一句"按这个风格发"只会让模型困惑。
+        let style = AppSettings.shared.momentStylePrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !style.isEmpty {
+            instruction += "\n\n这个人平时发朋友圈的样子（照这个来）：\n\(style)"
         }
 
         var collected = ""
@@ -577,7 +654,16 @@ final class MomentStore: ObservableObject {
         guard settings.momentsEnabled, !working else { return }
 
         let perDay = max(1, min(settings.momentsPerDay, 6))
-        let interval = 24.0 * 3600.0 / Double(perDay)
+        var interval = 24.0 * 3600.0 / Double(perDay)
+
+        // 时段偏好（2026-09-25 加）：把「该等多久」按当前时段缩放。
+        // 权重高 → 等得短（这个钟点她勤快）；权重低 → 等得长；
+        // 用户把当前时段填成 0 → 就是"这个点别发"，直接跳过。
+        // 四个时段全填 0 时 momentCurrentWeight 返回 1 —— 等于不干预，保持原行为。
+        let weight = settings.momentCurrentWeight
+        if weight <= 0 { return }
+        // 夹一下，免得某个时段权重特别高时她连着刷屏
+        interval = interval / min(max(weight, 0.25), 4.0)
 
         if let elapsed = timeSinceLastPost(), elapsed < interval { return }
 

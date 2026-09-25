@@ -37,6 +37,10 @@ TARGET = os.path.join("Aevis", "Core", "BuiltInSecrets.swift")
 FIELDS = [
     ("baiduPanAppKey", "AEVIS_BAIDU_APP_KEY"),
     ("baiduPanSecretKey", "AEVIS_BAIDU_SECRET_KEY"),
+    # QQ 机器人发注册码用的钥匙。**没配也没关系** ——
+    # 用户可以从自己的管理后台复制出来、填进 App 的设置里；
+    # 配了的话他一次都不用填。
+    ("accountBotKey", "AEVIS_ACCOUNT_BOT_KEY"),
 ]
 
 
