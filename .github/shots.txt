@@ -1,0 +1,39 @@
+# 模拟器自检的截图清单。
+#
+# 一行一张：「名字 启动参数…」。名字用 01-xx 这样的前缀，发布里就按这个顺序排。
+#
+# 为什么单独放一个文件：以前这份清单写死在 workflow 里，
+# 每加一个界面就要改 workflow，而改 workflow 会牵扯到 GITHUB_TOKEN 的
+# workflows 权限（CI 里那个「回提交源码」的步骤因此挂过一次）。
+# 挪出来之后，加界面只要推这个几百字节的小文件。
+#
+# 可用的启动开关（DemoSeed 里实现，只在 Debug 生效）：
+#   -aevisDemo              写入演示数据
+#   -aevisOpenSettings      直接打开设置面板
+#   -aevisSettingsFocus=xx  只显示某一张设置卡（设置页太长，一屏截不全）
+#   -aevisNoGlass / -aevisSimple / -aevisCustomBackground
+#   -aevisOpenMoments / -aevisOpenTogether / -aevisOpenMemoryList
+#   -aevisSelfCheck         自检页
+
+01-onboarding
+02-chat        -aevisDemo
+03-noglass     -aevisDemo -aevisNoGlass
+04-simple      -aevisDemo -aevisSimple
+05-paper       -aevisDemo -aevisCustomBackground
+
+# 设置页太长一屏截不全 —— -aevisSettingsFocus 每次只显示一张卡
+06-bubbles     -aevisDemo -aevisOpenSettings -aevisSettingsFocus=bubbles
+07-memory      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory
+08-myprofile   -aevisDemo -aevisOpenSettings -aevisSettingsFocus=myprofile
+09-model       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=model
+10-memory-list -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory -aevisOpenMemoryList
+11-moments     -aevisDemo -aevisOpenMoments
+12-moments-set -aevisDemo -aevisOpenSettings -aevisSettingsFocus=moments
+13-together    -aevisDemo -aevisOpenTogether
+14-companion   -aevisDemo -aevisOpenSettings -aevisSettingsFocus=companion
+15-douyin      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=douyin
+16-system      -aevisDemo -aevisOpenSettings -aevisSettingsFocus=system
+17-music       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=music
+18-emoji       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=emoji
+19-mcp         -aevisDemo -aevisOpenSettings -aevisSettingsFocus=mcp
+20-selfcheck   -aevisSelfCheck
