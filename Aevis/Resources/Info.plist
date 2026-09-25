@@ -90,6 +90,15 @@
 	<string>Aevis 需要保存图片到相册，这样你可以把 TA 生成或收到的图片存下来。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- 后台放音频。
+	     ⚠️ 这**不是**"我们要放音乐"，是**让 App 能一直活着**：
+	     QQ 机器人的长连接必须在后台维持，而 iOS 只给"正在放音频"的 App 这个待遇。
+	     后台跑的那段是**完全静音**的（见 SilentKeeper）—— 听不见，也不影响别人放歌。
+	     设置里可以关掉（它费电）；关掉之后切到后台她就会掉线，这是用户自己的取舍。 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

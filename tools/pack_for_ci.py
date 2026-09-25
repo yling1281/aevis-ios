@@ -79,6 +79,16 @@ MUST_HAVE = [
     "Aevis/Core/ConfigShare.swift",
     "Aevis/Features/Settings/ShareCard.swift",
     "Aevis/Features/Settings/QRScannerView.swift",
+    # ——— QQ 官方机器人（唯一能在手机上跑、不用电脑的那条路）———
+    "Aevis/Core/QQBotClient.swift",
+    "Aevis/Core/QQBotService.swift",
+    "Aevis/Core/QQBotTools.swift",
+    # 后台静音保活 —— Info.plist 里的 UIBackgroundModes 靠它才有意义
+    "Aevis/Core/SilentKeeper.swift",
+    "Aevis/Features/Settings/QQBotCard.swift",
+    # 主 App 的 Info.plist 必须带上（UIBackgroundModes 在里面）
+    "Aevis/Resources/Info.plist",
+    "Aevis/App/RootView.swift",
     ".github/shots.txt",
 ]
 

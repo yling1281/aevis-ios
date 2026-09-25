@@ -323,6 +323,11 @@ final class AppSettings: ObservableObject {
         static let qqBridgeEnabled = "aevis.qqBridge.enabled"
         static let qqBridgeURL = "aevis.qqBridge.url"
         static let qqBridgeCanSend = "aevis.qqBridge.canSend"
+        /// QQ 官方机器人
+        static let qqBotEnabled = "aevis.qqBot.enabled"
+        static let qqBotAppID = "aevis.qqBot.appID"
+        static let qqBotSandbox = "aevis.qqBot.sandbox"
+        static let qqBotKeepAlive = "aevis.qqBot.keepAlive"
         /// 网易云走哪条通道：`plain`（明文，默认）/ `weapi`（加密）。
         static let neteaseChannel = "aevis.netease.channel"
         static let neteaseCookieKeychain = "netease.cookie"
@@ -331,6 +336,8 @@ final class AppSettings: ObservableObject {
         static let qqBridgeTokenKeychain = "qq.bridge.token"
         /// 账号登录后的 token
         static let accountTokenKeychain = "aevis.account.token"
+        /// QQ 官方机器人的 AppSecret
+        static let qqBotSecretKeychain = "aevis.qqBot.secret"
         static let accountServerURL = "aevis.account.serverURL"
         static let accountExpiresAt = "aevis.account.expiresAt"
         static let llmKeychain = "openai.apiKey"
@@ -767,6 +774,39 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(qqBridgeCanSend, forKey: Key.qqBridgeCanSend) }
     }
 
+    // MARK: - QQ 官方机器人
+    //
+    // ⭐ **这条是唯一能「在手机上、不用电脑、不用服务器」跑 QQ 的路**：
+    // 官方机器人由平台替你登录，我们只是一个 HTTPS + WebSocket 客户端。
+    // 详见 QQBotClient / QQBotService 的注释。走这条就不需要上面那个 OneBot 桥接了。
+
+    /// 总开关。
+    @Published var qqBotEnabled: Bool {
+        didSet { UserDefaults.standard.set(qqBotEnabled, forKey: Key.qqBotEnabled) }
+    }
+
+    /// QQ 开放平台给的 AppID。**它不是密钥**，可以明文放这儿。
+    @Published var qqBotAppID: String {
+        didSet { UserDefaults.standard.set(qqBotAppID, forKey: Key.qqBotAppID) }
+    }
+
+    /// AppSecret。**只进钥匙串**。
+    /// ⚠️ 平台那边不支持二次查看 —— 再点一次会强制重置，所以填进来之后自己留好一份。
+    @Published var qqBotSecret: String {
+        didSet { Keychain.set(qqBotSecret, for: Key.qqBotSecretKeychain) }
+    }
+
+    /// 用沙箱环境（只有加进去的测试成员能用）。先做通再关掉。
+    @Published var qqBotSandbox: Bool {
+        didSet { UserDefaults.standard.set(qqBotSandbox, forKey: Key.qqBotSandbox) }
+    }
+
+    /// 后台静音保活。**出厂开** —— 不开的话他在 QQ 里聊、App 一进后台被挂起，她就不回了。
+    /// 但它费电，所以给开关（用户的原则：能自定义的都自定义）。
+    @Published var qqBotKeepAlive: Bool {
+        didSet { UserDefaults.standard.set(qqBotKeepAlive, forKey: Key.qqBotKeepAlive) }
+    }
+
     // MARK: - 账号（给「以后那个服务器」留的）
     //
     // 用户说「到时候会拿新的服务器跟你对接」。所以现在**只做接口层**：
@@ -933,6 +973,13 @@ final class AppSettings: ObservableObject {
         qqBridgeURL = defaults.string(forKey: Key.qqBridgeURL) ?? ""
         // 出厂允许她替你发 —— 这是这个功能的意义所在；不想让人替自己说话的可以关掉
         qqBridgeCanSend = defaults.object(forKey: Key.qqBridgeCanSend) as? Bool ?? true
+        // QQ 官方机器人
+        qqBotEnabled = defaults.object(forKey: Key.qqBotEnabled) as? Bool ?? false
+        qqBotAppID = defaults.string(forKey: Key.qqBotAppID) ?? ""
+        qqBotSecret = Keychain.get(Key.qqBotSecretKeychain) ?? ""
+        qqBotSandbox = defaults.object(forKey: Key.qqBotSandbox) as? Bool ?? true
+        // 出厂开：不开的话他在 QQ 里聊、App 进后台被挂起，她就不回了
+        qqBotKeepAlive = defaults.object(forKey: Key.qqBotKeepAlive) as? Bool ?? true
         accountServerURL = defaults.string(forKey: Key.accountServerURL) ?? ""
         accountToken = Keychain.get(Key.accountTokenKeychain) ?? ""
         accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)

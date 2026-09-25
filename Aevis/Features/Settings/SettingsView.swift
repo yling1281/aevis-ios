@@ -42,6 +42,7 @@ struct SettingsView: View {
                     if shows("model") { modelCard }
                     if shows("search") { searchCard }
                     if shows("qq") { QQCard() }
+                    if shows("qqbot") { QQBotCard() }
                     if shows("account") { AccountCard() }
                     if shows("share") { ShareCard() }
                     if shows("baidupan") { BaiduPanCard() }

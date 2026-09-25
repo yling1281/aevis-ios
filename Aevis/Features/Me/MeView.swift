@@ -72,6 +72,9 @@ struct MeView: View {
                         entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
                             route = SettingsRoute(focus: "baidupan")
                         }
+                        entry("QQ 机器人", "bubble.left.and.bubble.right", qqBotLine) {
+                            route = SettingsRoute(focus: "qqbot")
+                        }
                         entry("QQ 桥接", "bubble.left.and.text.bubble.right", qqLine) {
                             route = SettingsRoute(focus: "qq")
                         }
@@ -192,6 +195,13 @@ struct MeView: View {
     private var qqLine: String {
         if !QQBridge.shared.isConfigured { return "看和发你的 QQ 消息（要填一个 OneBot 服务的地址）" }
         return settings.qqBridgeEnabled ? "已开启" : "地址填好了，但开关还关着"
+    }
+
+    /// QQ 官方机器人那一行 —— **这条路才是在手机上跑、不用电脑的**。
+    private var qqBotLine: String {
+        if !QQBotClient.shared.isConfigured { return "在手机上跑，不用电脑（要填 AppID 和 AppSecret）" }
+        guard settings.qqBotEnabled else { return "填好了，但开关还关着" }
+        return QQBotService.shared.state.isOnline ? "在线" : QQBotService.shared.state.label
     }
 
     /// 账号那一行。**不填也能用**这件事必须写在行上，

@@ -48,6 +48,7 @@ enum DeviceTools {
         + momentTools
         + panTools
         + qqTools
+        + qqBotTools
         + systemTools
         + [shellTool]
     }

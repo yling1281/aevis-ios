@@ -4,7 +4,6 @@ struct RootView: View {
     @EnvironmentObject private var personaStore: PersonaStore
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.scenePhase) private var scenePhase
-
     /// 快捷指令回传来的那一句话，在顶上飘一下就消失。
     @State private var bridgeNote: String?
 
@@ -48,6 +47,10 @@ struct RootView: View {
         // **只在这里算** —— 放到 accentColor 那个属性里现算会把界面拖死。
         .onAppear {
             settings.refreshAvatarTint(from: personaStore.avatarImage)
+            // 冷启动不会走 scenePhase 的 active 变化，所以这里也补一次
+            if settings.qqBotEnabled {
+                QQBotService.shared.reconnectIfNeeded()
+            }
         }
         .onChange(of: personaStore.avatarImage) { _, image in
             settings.refreshAvatarTint(from: image)
@@ -60,6 +63,12 @@ struct RootView: View {
             // 本地通知只能在排程时定下时间，这是能做到的最接近随机的办法。
             guard phase == .active else { return }
             Task { await ProactiveService.shared.reschedule() }
+
+            // QQ 机器人：后台被系统掐掉的连接，回到前台要自己接上。
+            // （它靠 SilentKeeper 的静音音频尽量活着，但系统真要掐也没辙。）
+            if settings.qqBotEnabled {
+                QQBotService.shared.reconnectIfNeeded()
+            }
 
             // 顺手看看她该不该发朋友圈了（后台跑不了模型，只能回到前台补）
             let persona = personaStore.persona
