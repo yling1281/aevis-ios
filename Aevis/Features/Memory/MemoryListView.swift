@@ -84,17 +84,21 @@ struct MemoryListView: View {
                 }
             }
 
-            Section("云端") {
-                HStack {
-                    Label("百度网盘", systemImage: "cloud")
-                    Spacer(minLength: 8)
-                    Text("未接入")
-                        .font(.aevis(12.5))
+            // 百度网盘那条通道默认不显示（见 `Experimental`）——
+            // 功能砍掉之后还挂着"未接入"的说明，只会让人以为哪里没配好。
+            if Experimental.enabled {
+                Section("云端") {
+                    HStack {
+                        Label("百度网盘", systemImage: "cloud")
+                        Spacer(minLength: 8)
+                        Text("未接入")
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text("这条通道留好了接口，等接上之后备份能直接传网盘。现在先用「导出」存到「文件」里。")
+                        .font(.aevis(11.5))
                         .foregroundStyle(.tertiary)
                 }
-                Text("这条通道留好了接口，等接上之后备份能直接传网盘。现在先用「导出」存到「文件」里。")
-                    .font(.aevis(11.5))
-                    .foregroundStyle(.tertiary)
             }
         }
         .navigationTitle("记忆库")

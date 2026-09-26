@@ -40,7 +40,10 @@ struct MeView: View {
                     }
 
                     card {
-                        entry("陪伴", "heart", "录屏、一起听、通话") {
+                        // 「陪伴」本身留着（录屏陪伴是好的），只把说明改成不再提一起听/通话 ——
+                        // 那两块默认藏起来了（见 Experimental），说明里还写着就是骗人。
+                        entry("陪伴", "heart",
+                              Experimental.enabled ? "录屏、一起听、通话" : "录音、录屏陪伴") {
                             route = SettingsRoute(focus: "companion")
                         }
                         entry("外观", "paintpalette", "玻璃、背景、主题色、字体") {
@@ -49,8 +52,10 @@ struct MeView: View {
                         entry("朋友圈", "photo.on.rectangle.angled", "\(Pronoun.current)发动态的节奏、配图、样式") {
                             route = SettingsRoute(focus: "moments")
                         }
-                        entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
-                            route = SettingsRoute(focus: "baidupan")
+                        if Experimental.enabled {
+                            entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
+                                route = SettingsRoute(focus: "baidupan")
+                            }
                         }
                         entry("QQ 机器人", "bubble.left.and.bubble.right", qqBotLine) {
                             route = SettingsRoute(focus: "qqbot")
@@ -334,9 +339,11 @@ struct MeView: View {
                 entry("联网搜索", "magnifyingglass", "让她自己上网查") {
                     route = SettingsRoute(focus: "search")
                 }
-                divider
-                entry("音乐", "music.note", "网易云登录、搜歌") {
-                    route = SettingsRoute(focus: "music")
+                if Experimental.enabled {
+                    divider
+                    entry("音乐", "music.note", "网易云登录、搜歌") {
+                        route = SettingsRoute(focus: "music")
+                    }
                 }
                 divider
                 entry("抖音", "play.rectangle", "刷视频、点赞") {

@@ -21,19 +21,25 @@ struct DiscoverView: View {
                         entry("朋友圈", "photo.on.rectangle.angled", momentsLine) {
                             router.showMoments = true
                         }
-                        entry("一起听", "music.note.list", togetherLine) {
-                            router.showTogether = true
-                        }
-                        entry("音乐", "music.note", musicLine) {
-                            showMusic = true
+                        // 一起听 / 音乐 默认藏起来（见 Experimental）：买家装上去
+                        // 只会看到"要登录网易云、要订阅 Apple Music"，属于劝退项。
+                        if Experimental.enabled {
+                            entry("一起听", "music.note.list", togetherLine) {
+                                router.showTogether = true
+                            }
+                            entry("音乐", "music.note", musicLine) {
+                                showMusic = true
+                            }
                         }
                     }
                     card {
                         entry("抖音", "play.rectangle", "打开抖音、点赞、评论、解析分享链接") {
                             showDouyin = true
                         }
-                        entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
-                            router.showCall = true
+                        if Experimental.enabled {
+                            entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
+                                router.showCall = true
+                            }
                         }
                     }
                 }

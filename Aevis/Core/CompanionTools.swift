@@ -14,7 +14,12 @@ import Foundation
 /// （原话：「绝对不接受假装完成」）。
 enum CompanionTools {
 
-    static var tools: [DeviceTool] { [callTool, screenTool, listenTool] }
+    /// ⚠️ 「打电话」和「一起听」默认**不给她**（见 `Experimental`）。
+    /// 只藏界面是不够的 —— 她要是还在工具表里，会主动发"想给你打个电话"的申请，
+    /// 而用户那边找不到入口，只会觉得这 App 有毛病。所以工具表也跟着关。
+    static var tools: [DeviceTool] {
+        Experimental.enabled ? [callTool, screenTool, listenTool] : [screenTool]
+    }
 
     /// 三个工具共用同一套参数：只有一个可选的 `reason`。
     ///

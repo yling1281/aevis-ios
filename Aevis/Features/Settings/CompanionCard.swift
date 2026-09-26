@@ -18,31 +18,37 @@ struct CompanionCard: View {
         VStack(alignment: .leading, spacing: 0) {
             title("陪伴")
 
-            // ——— 一起听 ———
+            // ⚠️ 一起听 / 实时通话 默认不显示（见 `Experimental`）——
+            //    用户 2026-09-26：「一起听也是，电话也是 bug」。
+            //    录屏陪伴（下面那两块）留着，它不依赖订阅和 OAuth，是稳定的。
+            if Experimental.enabled {
 
-            entry(
-                symbol: "music.note.list",
-                title: "一起听",
-                detail: together.active
-                    ? "进行中 · \(together.currentTrackTitle)"
-                    : (player.current?.display ?? "歌在这台手机上放，她跟着一起听")
-            ) {
-                showTogether = true
+                // ——— 一起听 ———
+
+                entry(
+                    symbol: "music.note.list",
+                    title: "一起听",
+                    detail: together.active
+                        ? "进行中 · \(together.currentTrackTitle)"
+                        : (player.current?.display ?? "歌在这台手机上放，她跟着一起听")
+                ) {
+                    showTogether = true
+                }
+
+                rule
+
+                // ——— 实时通话 ———
+
+                entry(
+                    symbol: "phone.arrow.up.right",
+                    title: "实时通话",
+                    detail: "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来"
+                ) {
+                    showCall = true
+                }
+
+                rule
             }
-
-            rule
-
-            // ——— 实时通话 ———
-
-            entry(
-                symbol: "phone.arrow.up.right",
-                title: "实时通话",
-                detail: "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来"
-            ) {
-                showCall = true
-            }
-
-            rule
 
             // ——— 通话：多久算「你说完了」———
             //

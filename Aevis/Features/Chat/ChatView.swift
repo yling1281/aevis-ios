@@ -516,18 +516,22 @@ struct ChatView: View {
                 moreTile("朋友圈", "photo.on.rectangle.angled")
             }
 
-            Button {
-                closeMorePanel()
-                router.showTogether = true
-            } label: {
-                moreTile("一起听", "music.note.list")
-            }
+            // 一起听 / 通话 默认不显示（见 `Experimental`）：这两个入口以前藏在
+            // 「更多」面板里，买家点进去只会遇到"要订阅 / 要授权 / 连不上"。
+            if Experimental.enabled {
+                Button {
+                    closeMorePanel()
+                    router.showTogether = true
+                } label: {
+                    moreTile("一起听", "music.note.list")
+                }
 
-            Button {
-                closeMorePanel()
-                router.showCall = true
-            } label: {
-                moreTile("通话", "phone.arrow.up.right")
+                Button {
+                    closeMorePanel()
+                    router.showCall = true
+                } label: {
+                    moreTile("通话", "phone.arrow.up.right")
+                }
             }
 
             Button {

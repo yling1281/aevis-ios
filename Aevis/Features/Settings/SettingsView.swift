@@ -20,6 +20,8 @@ struct SettingsView: View {
 
     @State private var testing = false
     @State private var testResult: String?
+    /// 「试验功能」开关的状态（默认 = 买家版：那四块藏着，见 `Experimental`）。
+    @State private var experimentalOn = Experimental.enabled
     /// 「运行记录」（黑匣子）那块复制完的小提示。
     @State private var diagnosticsNote: String?
     @State private var showClearConfirm = false
@@ -900,6 +902,33 @@ struct SettingsView: View {
             }
 
             diagnosticsBlock
+
+            // ——— 试验功能开关 ———
+            //
+            // 位置和名字都刻意低调：**这一行是给开发者自己用的**。
+            // 买家版默认关掉那四块（苹果音乐 / 百度网盘 / 一起听 / 实时通话），
+            // 打开这里就能把它们放回界面 —— 就是"测试版 / 正式版"的区别，
+            // 一份代码一个包，不用为它多编一个 target（多签一次嵌套扩展太容易翻车）。
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("试验功能")
+                        .font(.aevis(15))
+                    Text(experimentalOn
+                         ? "已打开：\(Experimental.hiddenSummary) 会出现在界面上"
+                         : "默认关闭（\(Experimental.hiddenSummary) 不显示）")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Toggle("", isOn: $experimentalOn)
+                    .labelsHidden()
+                    .onChange(of: experimentalOn) { _, value in
+                        Experimental.enabled = value
+                    }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
         }
         .padding(.bottom, 4)
         .aevisGlass(cornerRadius: 20)

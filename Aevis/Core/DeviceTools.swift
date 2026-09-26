@@ -50,6 +50,11 @@ enum DeviceTools {
         + qqTools
         + qqBotTools
         + systemTools
+        // ⚠️ 音乐 / 百度网盘 默认不给她（见 `Experimental`）——
+        //    光藏界面不够：她要是还拿着这些工具，会对买家说"我给你放首歌"、
+        //    或者去读人家的网盘，而买家根本没开那个功能。
+        + (Experimental.enabled ? musicTools : [])
+        + (Experimental.enabled ? panTools : [])
         // 她**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
         // 和别的工具不一样的地方：这几个只是"提出来"，真正开始要用户点头。
         + CompanionTools.tools
