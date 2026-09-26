@@ -88,9 +88,14 @@ struct RootView: View {
             settings.refreshAvatarTint(from: personaStore.avatarImage)
         }
         .onChange(of: scenePhase) { _, phase in
-            // 进后台就算「这一轮正常结束了」—— 黑匣子靠这一行区分
-            //「正常退出」和「崩了 / 被上滑划掉」（后者根本走不到这里）。
-            if phase == .background {
+            // 进后台 / 失去活跃就算「这一轮正常结束了」—— 黑匣子靠这一行区分
+            //「正常退出」和「真的崩了」。
+            //
+            // ⚠️ **`.inactive` 也要算**（2026-09-26 加的）：用户**上滑划掉** App 之前
+            // 一定会先经过 inactive，而以前只有 `.background` 才打标记 ——
+            // 于是每次手动划掉都被记成"崩溃"，后台被假报告灌满。
+            // 代价是"在非活跃状态下崩"会漏掉，那种极少，比天天误报值。
+            if phase == .background || phase == .inactive {
                 BlackBox.markCleanExit()
                 return
             }

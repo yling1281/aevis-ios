@@ -20,6 +20,16 @@ enum DiagUploader {
     /// 传这次崩溃现场。**fire-and-forget**。
     static func uploadCrashIfNeeded() async {
         guard BlackBox.crashedLastRun else { return }
+
+        // ⚠️ **模拟器不传**。CI 截图那一步会反复起 App、又直接 kill 掉，
+        // 而"没走到 `markCleanExit`"在那种情况下全被记成崩溃 ——
+        // 2026-09-26 后台一晚上被刷了三十多条假报告，把真现场全淹了。
+        // 用 `targetEnvironment(simulator)` 而不是启动参数：截图脚本的参数在
+        // workflow 里，而 workflow 我推不上去（连接器没有 workflows 权限）。
+        #if targetEnvironment(simulator)
+        return
+        #endif
+
         let code = BlackBox.crashCode
 
         // 同一台设备、同一个码，一天只传一次 ——
