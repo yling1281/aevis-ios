@@ -1,0 +1,207 @@
+name: Admin
+
+# 管理端（AevisAdmin）单独一条流水线。
+#
+# 为什么不塞进 build-ipa.yml：那是**买家那个包**的流水线。
+# 管理端是给我们自己用的，分开之后：
+#   ① 一边挂了不拖另一边（管理端编不过，买家的包照样出得来）
+#   ② 看管理端的日志不用在主 App 那一大坨里翻
+#   ③ 以后管理端想跑得快一点、加模拟器截图，互不牽连
+#
+# ⚠️ 它**不做**「把源码落回仓库」那一步 —— 那件事由主 App 的流水线负责。
+#    两条流水线都在 push 时跑，谁去 push 都会撞车，所以这里只管编自己。
+#
+# 要出 IPA：把 `.release/admin` 改成 1 再推，出完自动重置回 0。
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  admin:
+    name: Build admin app
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ——— 临时通道：源码在本地写好 → 打包放到公网 → CI 自己去取 ———
+      #
+      # 理由跟主 App 那条流水线一样（连接器传不完整套源码）。
+      # ⚠️ 这一步必须在下面那个判断**之前** ——
+      #    新加的源码（比如 AevisAdmin 这一整套）第一次是跟着这个包进来的，
+      #    先判断「仓库里有没有」会永远判成没有。
+      - name: Bootstrap source (temporary)
+        if: hashFiles('.bootstrap-url') != ''
+        run: |
+          set -e
+          SRC_URL=$(tr -d ' \n\r' < .bootstrap-url)
+          echo "从 $SRC_URL 取源码"
+
+          curl -fsSL --retry 4 --retry-all-errors --retry-delay 3 \
+            --max-time 300 -o "$RUNNER_TEMP/src.zip" "$SRC_URL"
+
+          SIZE=$(wc -c < "$RUNNER_TEMP/src.zip")
+          echo "拿到 $SIZE 字节"
+          test "$SIZE" -gt 200000 || { echo "源码包不完整"; exit 1; }
+
+          rm -rf "$RUNNER_TEMP/src"
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q "$RUNNER_TEMP/src.zip" -d "$RUNNER_TEMP/src"
+          rsync -a "$RUNNER_TEMP/src/aevis-ios/" ./
+
+          echo "管理端 Swift 文件: $(find AevisAdmin -name '*.swift' 2>/dev/null | wc -l)"
+
+      # 源码到位了才往下走。仓库里还没有 AevisAdmin 时整轮跳过 ——
+      # 免得在「流水线先到、源码还没到」的空档里白挂一次红。
+      - name: Check whether the admin sources are here
+        id: gate
+        run: |
+          if [ -f AevisAdmin/AevisAdminApp.swift ]; then
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+            echo "管理端源码在，继续。"
+          else
+            echo "go=no" >> "$GITHUB_OUTPUT"
+            echo "仓库里还没有 AevisAdmin 的源码，这一轮跳过。"
+          fi
+
+      - name: Decide whether to package an IPA
+        id: decide
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          REQ=$(tr -d ' \n\r' < .release/admin 2>/dev/null || echo "0")
+          if [ "$REQ" = "1" ]; then
+            echo "should=yes" >> "$GITHUB_OUTPUT"
+            echo "本次会出管理端 IPA"
+          else
+            echo "should=no" >> "$GITHUB_OUTPUT"
+            echo "本次只验证能编过，不出 IPA"
+          fi
+
+      - name: Show toolchain
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          xcodebuild -version
+          echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install XcodeGen
+        if: steps.gate.outputs.go == 'yes'
+        run: brew install xcodegen
+
+      # 管理端的图标（PNG 不进仓库 —— 见 tools/push_all.py 的 should_skip）
+      - name: Generate app icon
+        if: steps.gate.outputs.go == 'yes'
+        run: python3 scripts/make_icon.py AevisAdmin/Resources
+
+      - name: Generate Xcode project
+        if: steps.gate.outputs.go == 'yes'
+        run: xcodegen generate
+
+      # ——— 真机编译 ———
+      #
+      # ⚠️ 用 `-target AevisAdmin`（不是 scheme）——
+      #    主 App 那条也是这么编的，保持一致。
+      - name: Compile (device, unsigned)
+        if: steps.gate.outputs.go == 'yes'
+        env:
+          AEVIS_COMMIT: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Aevis.xcodeproj \
+            -target AevisAdmin \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            AEVIS_COMMIT="$AEVIS_COMMIT" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > admin-build.log 2>&1 || { echo "===== ADMIN BUILD FAILED ====="; tail -n 200 admin-build.log; exit 1; }
+          echo "===== ADMIN BUILD OK ====="
+          tail -n 6 admin-build.log
+
+      # 编译错误也以 workflow 命令的形式发一遍（Annotations 区免鉴权就能读）
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          grep -E "error:" admin-build.log 2>/dev/null | head -15 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+
+      # ——— 打包（只在被要求时）———
+      #
+      # 和主 App 一样：unsigned + adhoc 两个。手机上用「全能签」再签一次。
+      - name: Package IPA
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        run: |
+          set -e
+          APP="build/Release-iphoneos/AevisAdmin.app"
+          test -d "$APP" || { echo "找不到 AevisAdmin.app"; exit 1; }
+
+          rm -rf Payload AevisAdmin-unsigned.ipa AevisAdmin-adhoc.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/AevisAdmin.app
+          rm -rf Payload/AevisAdmin.app/_CodeSignature
+          rm -f Payload/AevisAdmin.app/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X AevisAdmin-unsigned.ipa Payload
+
+          codesign -f -s - --deep Payload/AevisAdmin.app || true
+          /usr/bin/zip -qry -X AevisAdmin-adhoc.ipa Payload
+
+          echo "包里的版本："
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+            Payload/AevisAdmin.app/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \
+            Payload/AevisAdmin.app/Info.plist || true
+          ls -lh AevisAdmin-unsigned.ipa AevisAdmin-adhoc.ipa
+
+      - name: Publish release
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: admin-${{ github.run_number }}
+          name: Aevis 管理端 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            **管理端**安装包 —— 不是给买家用的（买家装的是 `build-` 那个）。
+
+            - 提交：`${{ github.sha }}`
+            - 安装：下载 `AevisAdmin-unsigned.ipa`，用「全能签」签名后安装
+            - 登录：用**后台账号密码**（在 `account.lingyan.cyou/admin` 里设一个）
+            - 手机用底栏、iPad 自动切侧栏
+          files: |
+            AevisAdmin-unsigned.ipa
+            AevisAdmin-adhoc.ipa
+            admin-build.log
+
+      - name: Publish failure log
+        if: failure() && hashFiles('admin-build.log') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: admin-log-${{ github.run_number }}
+          name: 管理端失败日志 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            管理端编译失败 —— 错误见 `admin-build.log`。
+
+            - 提交：`${{ github.sha }}`
+          files: |
+            admin-build.log
+
+      - name: Reset request flag
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        run: |
+          printf '0\n' > .release/admin
+          git config user.name "aevis-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add .release/admin
+          git commit -m "chore: 重置管理端 IPA 请求标记 [skip ci]" || true
+          git push || true
