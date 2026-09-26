@@ -121,6 +121,13 @@ MUST_HAVE = [
     "Aevis/Core/QQBotCommands.swift",
     # 抓 CI 编译日志 —— 一次性读经常只拿到一千多字节的残片，必须分块
     "tools/grab_log.py",
+    # ——— 管理端 App（**独立 target**，另一个包 —— 最容易漏的就是它）———
+    "AevisAdmin/AevisAdminApp.swift",
+    "AevisAdmin/AdminStore.swift",
+    "AevisAdmin/AdminRootView.swift",
+    "AevisAdmin/AdminStyle.swift",
+    "AevisAdmin/DiagSection.swift",
+    "AevisAdmin/Resources/Info.plist",
 ]
 
 

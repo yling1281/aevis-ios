@@ -111,6 +111,44 @@ targets:
           SWIFT_COMPILATION_MODE: "wholemodule"
   # <<< extension:end
 
+  # ——— 管理端 App（**独立的包**，不塞进主 App）———
+  #
+  # 给管理员用的：看崩溃现场、发注册码、封设备/账号、批换机。
+  # 和主 App 是两个包，各自装、各自更新 —— 管理端不必跟着买家版本走。
+  # 手机用底栏、iPad 用侧栏（`AdminRootView` 里按 idiom 分）。
+  #
+  # ⚠️ 它在 `extension` 标记块**外面**：`strip_extension.py` 摘录屏扩展时
+  #    只动标记之间的内容，管理端不会跟着被摘掉。
+  AevisAdmin:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AevisAdmin
+        excludes:
+          - "Resources/Info.plist"
+      # 钥匙串封装两个 App 共用**同一份** —— 它只依赖 Security，自包含。
+      # （跟 AevisBroadcast 复用 ScreenShareStore 是一个套路：契约只此一份。）
+      - path: Aevis/Core/Keychain.swift
+    settings:
+      base:
+        PRODUCT_NAME: AevisAdmin
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.admin
+        INFOPLIST_FILE: AevisAdmin/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # 管理端是**另一个 App**，版本号自己一套 —— 别跟主 App 的 0.0.x 混
+        # （它给管理员用，更新节奏跟买家版本完全无关）
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+
 schemes:
   Aevis:
     build:
