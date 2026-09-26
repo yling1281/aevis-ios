@@ -6,12 +6,13 @@ name: Admin
 # 管理端是给我们自己用的，分开之后：
 #   ① 一边挂了不拖另一边（管理端编不过，买家的包照样出得来）
 #   ② 看管理端的日志不用在主 App 那一大坨里翻
-#   ③ 以后管理端想跑得快一点、加模拟器截图，互不牽连
+#   ③ 以后管理端想跑快一点、加模拟器截图，互不牵连
 #
 # ⚠️ 它**不做**「把源码落回仓库」那一步 —— 那件事由主 App 的流水线负责。
 #    两条流水线都在 push 时跑，谁去 push 都会撞车，所以这里只管编自己。
 #
-# 要出 IPA：把 `.release/admin` 改成 1 再推，出完自动重置回 0。
+# 要出 IPA：把 `.release/admin` 改成 1 再推。
+# ⚠️ 出完**人工**改回 0 —— 这条流水线自己不改了（原因见文件末尾那一步的注释）。
 
 on:
   push:
@@ -196,12 +197,17 @@ jobs:
           files: |
             admin-build.log
 
-      - name: Reset request flag
+      # ⚠️ 这一步**故意不 push**。
+      #
+      # 原来它会 `git push` 把 `.release/admin` 重置回 0，但两条流水线都会
+      # 被同一次 push 触发，**两边都推就必然撞车**：
+      # 2026-09-26 真发生了 —— Admin 先推成功，几秒后主 App 那条推源码被
+      # non-fast-forward 拒掉 → **整个构建失败、包没出来**，
+      # 而失败挂在「提交回仓库」那步，看着像编译挂了，白查半天。
+      #
+      # 包出来的优先级：主 App 的包 > 管理端的标记重置。
+      # 所以这里只提醒，重置改成人工做（出管理端包不频繁）。
+      - name: Remind to reset the flag
         if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
         run: |
-          printf '0\n' > .release/admin
-          git config user.name "aevis-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add .release/admin
-          git commit -m "chore: 重置管理端 IPA 请求标记 [skip ci]" || true
-          git push || true
+          echo "::warning::管理端包已出。把 .release/admin 改回 0 再推一次，否则下次还会出包。"
