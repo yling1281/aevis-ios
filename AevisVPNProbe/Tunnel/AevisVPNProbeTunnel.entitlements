@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  扩展和主 App 申请的是**同一条**权限 ——
+	  网络扩展的权限挂在"容器 App"和"扩展"两边，缺任何一边都起不来。
+	  （这也是为什么侧载重签时它比普通 App 更容易翻车：要同时签两个 bundle。）
+	-->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider</string>
+	</array>
+</dict>
+</plist>

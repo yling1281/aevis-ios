@@ -34,12 +34,19 @@ ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 INFO_PLIST = os.path.join(ROOT, "Resources", "Info.plist")
 PROJECT = os.path.dirname(ROOT)
 
-# 除了主 App，还要扫「系统录屏扩展」那个 target 的源码。
-# 它虽然是个独立 target，但一样是 Swift、一样会编不过 ——
-# 漏掉它等于漏一半，而它恰恰是更难在真机上调试的那一半。
+# 除了主 App，还要扫别的 target 的源码。
+# 它们虽然各自是独立 target，但一样是 Swift、一样会编不过 ——
+# 漏掉等于漏一半，而且往往是更难在真机上调试的那一半。
+#
+# ⚠️ 2026-09-26 扩到全部：原来只有主 App + 录屏扩展，
+#    管理端（AevisAdmin）和 VPN 探针（AevisVPNProbe）**一个文件都没被扫到** ——
+#    它们恰恰是"改完没被检查过就推上去"的那种代码。
 SWIFT_ROOTS = [
     ROOT,
     os.path.join(PROJECT, "Broadcast"),
+    os.path.join(PROJECT, "AevisAdmin"),
+    os.path.join(PROJECT, "AevisVPNProbe", "App"),
+    os.path.join(PROJECT, "AevisVPNProbe", "Tunnel"),
 ]
 
 # 每个 target 的 Info.plist 都要验。
@@ -272,13 +279,24 @@ def check_eventkit_permissions(path, source):
 
 def check_font_leftovers(path, code):
     """不该再有给「文字」用的 .font(.system(size:)。
+    —— **这条只对买家那个 App 成立。**
 
-    这条规则原来有个盲点：开头写着 `if source.count(".aevis(") < 3: return` ——
+    理由：它是产品要求 —— 用户在设置里换了自己导入的字体，界面必须跟着变。
+    但**管理端（AevisAdmin）和 VPN 探针（AevisVPNProbe）是内部工具**，
+    它们压根没有"换字体"这件事，用系统字号是**对的**。
+    （2026-09-26 把 SWIFT_ROOTS 扩到全仓库后，这条规则一次报了 54 处，
+      全在管理端和探针 —— 全是误报。**检查器一旦有误报就等于没有**，
+      所以在这里按目标范围把它收住，而不是去改那些本来就没问题的文件。）
+
+    这条规则原来还有个别盲点：开头写着 `if source.count(".aevis(") < 3: return` ——
     于是**一处都没接字体系统的文件反而被整个跳过**（真的漏掉了 VoiceSettingsCard，
     用户换字体时那一页的字不会跟着变）。正好漏掉最该查的那些，所以去掉了这个阈值。
 
     但 SF Symbol 图标用系统字号是**故意**的 —— 图标不该跟着正文字体变，要放过。
     """
+    if not os.path.abspath(path).startswith(os.path.abspath(ROOT) + os.sep):
+        return
+
     lines = code.splitlines()
     for number, line in enumerate(lines, 1):
         if ".font(.system(size:" not in line:

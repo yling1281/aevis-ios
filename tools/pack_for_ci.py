@@ -128,6 +128,18 @@ MUST_HAVE = [
     "AevisAdmin/AdminStyle.swift",
     "AevisAdmin/DiagSection.swift",
     "AevisAdmin/Resources/Info.plist",
+    # ——— VPN 探针（**独立 target + 嵌套扩展**，第 3 个包）———
+    # ⚠️ 这几个**必须**在包里：`project.yml` 里已经有它的 target，
+    #    源码要是没跟上，CI 会报"找不到 target"，而那报错看着
+    #    跟"探针代码写错了"一模一样，很难想到是打包漏了。
+    "AevisVPNProbe/App/VPNProbeApp.swift",
+    "AevisVPNProbe/App/ProbeModel.swift",
+    "AevisVPNProbe/App/ProbeView.swift",
+    "AevisVPNProbe/App/Info.plist",
+    "AevisVPNProbe/App/AevisVPNProbe.entitlements",
+    "AevisVPNProbe/Tunnel/PacketTunnelProvider.swift",
+    "AevisVPNProbe/Tunnel/Info.plist",
+    "AevisVPNProbe/Tunnel/AevisVPNProbeTunnel.entitlements",
 ]
 
 

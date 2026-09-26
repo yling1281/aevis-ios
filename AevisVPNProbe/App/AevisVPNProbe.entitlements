@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  ⭐ 整个探针就是为了验这一条。
+
+	  `com.apple.developer.networking.networkextension` 是**受限权限** ——
+	  它必须在签名用的那份描述文件里，而那份东西由签名工具（全能签之类）给，
+	  我们看不到也改不了。
+
+	  这里**只申请 packet-tunnel-provider 一个值**：
+	  探针只回答"能不能起隧道"这一个问题，别混进别的权限把水搅浑。
+	-->
+	<key>com.apple.developer.networking.networkextension</key>
+	<array>
+		<string>packet-tunnel-provider</string>
+	</array>
+</dict>
+</plist>

@@ -60,7 +60,7 @@ struct BotSection: View {
                         }
                     }
                 }
-                AdminNote(text: "这是**官方机器人**那条路（群里 @ 它换口令）。"
+                AdminNote(text: "这是「官方机器人」那条路（群里 @ 它换口令）。"
                          + "协议号「自助注册」发出去的码在「账号」那边的注册码列表里也能看到。")
             } else {
                 AdminCard { AdminEmpty(text: "还没有人领过。") }
