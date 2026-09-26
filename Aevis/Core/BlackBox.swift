@@ -38,6 +38,11 @@ enum BlackBox {
     private static var buffer: [String] = []
     private static var loaded = false
 
+    /// 落盘节流用（见 `scheduleFlush`）。2 秒。
+    private static let flushInterval: TimeInterval = 2
+    private static var flushScheduled = false
+    private static var lastFlush = Date.distantPast
+
     // MARK: - 生命周期
 
     /// App 启动时调一次（`AevisApp.init`）。
@@ -71,8 +76,28 @@ enum BlackBox {
         if buffer.count > limit {
             buffer.removeFirst(buffer.count - limit)
         }
-        // 每次都落盘。**故意不攒批** —— 崩在攒批中间丢掉的恰好是最关键的那几行。
-        persist()
+        scheduleFlush()
+    }
+
+    /// 攒批落盘（最多延迟 2 秒，最多丢最后两秒的记录）。
+    ///
+    /// ⚠️ **初版是「每记一行就写一次 UserDefaults」** —— 那是同步写十来 KB，
+    /// 而放歌、通话、每句听写都会记一笔 → 界面直接被拖卡
+    /// （用户 2026-09-26 说「还是很卡」，这一条是最可疑的自家嫌疑）。
+    ///
+    /// 攒批的代价：崩的那一瞬间，最后不到 2 秒的记录可能没落盘。
+    /// 可以接受 —— 崩溃前那几十步都在缓冲区里，一直在落盘。
+    private static func scheduleFlush() {
+        if Date().timeIntervalSince(lastFlush) >= flushInterval {
+            persist()
+            return
+        }
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + flushInterval) {
+            flushScheduled = false
+            persist()
+        }
     }
 
     /// 记一次网络失败。
@@ -158,6 +183,7 @@ enum BlackBox {
 
     private static func persist() {
         guard loaded else { return }
+        lastFlush = Date()
         UserDefaults.standard.set(buffer, forKey: linesKey)
     }
 }

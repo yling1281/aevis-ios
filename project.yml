@@ -9,11 +9,12 @@ options:
 
 settings:
   base:
-    # 版本号要**跟着构建号走** —— 否则每一版都是同一个号，
-    # 装到手机上根本分不出新旧（用户真的因此以为我给了旧包）。
-    # 出包前把这两个数改成即将产生的 build 号（40–57 已经用掉，所以这次是 58）。
-    MARKETING_VERSION: "0.0.58"
-    CURRENT_PROJECT_VERSION: "58"
+    # ⚠️ 版本号要**单调递增**（用户靠它分辨新旧），但**不一定等于 CI 的 run_number** ——
+    # 上次就是按"上一次成功的是 56、下一个该是 57"去推算，可那次推送因为
+    # 连接器断线根本没触发构建 → 写成了 58、实际 tag 是 build-57。
+    # 推之前先查一次 `GET /repos/.../actions/runs?per_page=1` 看真实的 N。
+    MARKETING_VERSION: "0.0.59"
+    CURRENT_PROJECT_VERSION: "59"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

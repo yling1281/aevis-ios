@@ -11,6 +11,8 @@ struct MeView: View {
 
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
+    /// 「更多设置」折起来了没有。默认收起 —— 这一页的主角是上面那些常点的。
+    @State private var showMore = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -72,24 +74,19 @@ struct MeView: View {
                             route = SettingsRoute(focus: "about")
                         }
                     }
+
+                    moreSettings
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
             .navigationTitle("我")
             .navigationBarTitleDisplayMode(.inline)
-            // 「全部设置」这一行**去掉了** —— 上面每一条点进去就是那一张卡，
-            // 再留一行"看全部"是同一件事的第二遍。想一页看完的走右上角那个齿轮。
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        route = SettingsRoute(focus: nil)
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("全部设置")
-                }
-            }
+            // ⚠️ 右上角那个齿轮**已经去掉了**（用户 2026-09-26 原话：
+            // 「我右上角那个设置没必要啊，你就不是有这些设置」）。
+            // 但十几项设置的入口不能跟着消失 —— 它们现在**折在这一页最下面**
+            // （`moreSettings`），不占地方又随时点得到。
+            // **别再往这里加"全部设置"按钮** —— 他嫌多余，这已经是第二次提了。
             .sheet(item: $route) { item in
                 SettingsView(focus: item.focus)
                     .environmentObject(personaStore)
@@ -253,6 +250,122 @@ struct MeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// 其余那些不常点、但**绝对不能没有入口**的设置。
+    ///
+    /// ## 为什么要折起来
+    /// 用户 2026-09-26 说「我」右上角那个齿轮没必要。可那个齿轮一点进去
+    /// **是整个设置页** —— 直接删掉，下面这十几项就真没入口了，
+    /// 而"功能不见了"是他最烦的一类问题（已经栽过两次）。
+    /// 所以折在这一页最下面：平时不占地方，真要找的一定找得到。
+    ///
+    /// ⚠️ **别再改回"右上角放个齿轮"** —— 他嫌那个多余，而且提过一次了。
+    private var moreSettings: some View {
+        card {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showMore.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.aevis(16, weight: .medium))
+                        .foregroundStyle(AppSettings.shared.accentColor)
+                        .frame(width: 34, height: 34)
+                        .aevisGlass(cornerRadius: 12)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("更多设置")
+                            .font(.aevis(15.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                        Text(showMore ? "点一下收起来" : "人设、音色、气泡、表情、音乐、抖音…")
+                            .font(.aevis(12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: showMore ? "chevron.up" : "chevron.down")
+                        .font(.aevis(13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showMore {
+                divider
+                entry("TA 的人设", "person.text.rectangle", "名字、性别、性格、说话方式") {
+                    route = SettingsRoute(focus: "persona")
+                }
+                divider
+                entry("音色", "waveform", "用哪个声音念出来") {
+                    route = SettingsRoute(focus: "voice")
+                }
+                divider
+                entry("主动消息", "bell.badge", "她什么时候主动找你") {
+                    route = SettingsRoute(focus: "proactive")
+                }
+                divider
+                entry("我的资料", "person.crop.square", "你自己的名字和头像") {
+                    route = SettingsRoute(focus: "myprofile")
+                }
+                divider
+                entry("气泡样式", "bubble.left", "圆角、颜色、小尾巴") {
+                    route = SettingsRoute(focus: "bubbles")
+                }
+                divider
+                entry("表情", "face.smiling", "她发消息时带的表情") {
+                    route = SettingsRoute(focus: "emoji")
+                }
+                divider
+                entry("聊天", "text.bubble", "默认进哪个页面") {
+                    route = SettingsRoute(focus: "chat")
+                }
+                divider
+                entry("联网搜索", "magnifyingglass", "让她自己上网查") {
+                    route = SettingsRoute(focus: "search")
+                }
+                divider
+                entry("音乐", "music.note", "网易云登录、搜歌") {
+                    route = SettingsRoute(focus: "music")
+                }
+                divider
+                entry("抖音", "play.rectangle", "刷视频、点赞") {
+                    route = SettingsRoute(focus: "douyin")
+                }
+                divider
+                entry("QQ 桥接", "message", "接上你自己的 QQ") {
+                    route = SettingsRoute(focus: "qq")
+                }
+                divider
+                entry("系统桥接", "link", "快捷指令、剪贴板") {
+                    route = SettingsRoute(focus: "system")
+                }
+                divider
+                entry("MCP 外接工具", "puzzlepiece.extension", "接外面的工具给她用") {
+                    route = SettingsRoute(focus: "mcp")
+                }
+                divider
+                entry("控制台", "terminal", "她刚才做了什么") {
+                    route = SettingsRoute(focus: "console")
+                }
+                divider
+                entry("分享与搬家", "square.and.arrow.up", "备份成文件、二维码") {
+                    route = SettingsRoute(focus: "share")
+                }
+            }
+        }
+    }
+
+    /// 列表项之间的细线（`entry` 自己不带）。
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.07))
+            .frame(height: 0.5)
+            .padding(.leading, 62)
     }
 }
 
