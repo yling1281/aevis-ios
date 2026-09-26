@@ -198,6 +198,11 @@ enum QQBotCommands {
         return nil
     }
 
-    /// 最新版本的下载页。写成常量是为了只有一处要改。
-    static let updateSource = "https://lingyan.cyou/"
+    /// 最新版本的下载页。
+    ///
+    /// ⚠️ **故意不带 `https://`** —— QQ 官方机器人**不允许往消息里放链接**，
+    /// 带协议的 URL 会被平台静默过滤（整条消息发不出去，或者被截断），
+    /// 而失败的时候**一点提示都没有**，最难查。
+    /// 写成光秃秃的域名，用户看得懂，平台也不拦。
+    static let updateSource = "lingyan.cyou"
 }

@@ -128,7 +128,10 @@ final class QQCodeGate {
             let json = try await post("/api/bot/claim",
                                       ["ticket": ticket, "c2c_openid": c2cOpenID])
             if let code = json["code"] as? String, !code.isEmpty {
-                let base = (json["register_base"] as? String) ?? server
+                // ⚠️ QQ 不让发链接：服务器给的 `register_base` 带 `https://`，
+                // 直接塞进消息会被平台**静默过滤**（整条发不出去，还不报错），
+                // 所以只留域名。
+                let base = Self.bareHost((json["register_base"] as? String) ?? server)
                 if json["already"] as? Bool == true {
                     return "你之前领过了，就是这张：\n\n\(code)\n\n去 \(base) 点「注册」就行。"
                 }
@@ -194,6 +197,20 @@ final class QQCodeGate {
     /// 服务器回的是 `{"error": "...", "message": "..."}`。
     /// 这里按错误码给一句**用户看了知道下一步干什么**的话 ——
     /// 直接甩"400 bad_ticket"他只会以为坏了。
+    /// 把 `https://lingyan.cyou/` 削成 `lingyan.cyou`。
+    ///
+    /// **QQ 机器人不允许往消息里放链接** —— 带 `http(s)://` 的内容会被平台
+    /// 静默过滤（整条消息发不出去，而且是**无声无息**的，最难查）。
+    /// 服务器给的 `register_base` 是带协议的完整地址，所以在这里削一下再用。
+    private static func bareHost(_ raw: String) -> String {
+        var text = raw
+        for prefix in ["https://", "http://"] where text.hasPrefix(prefix) {
+            text.removeFirst(prefix.count)
+        }
+        while text.hasSuffix("/") { text.removeLast() }
+        return text.isEmpty ? raw : text
+    }
+
     private static func explain(_ json: [String: Any]) -> String {
         let code = (json["error"] as? String) ?? ""
         switch code {
