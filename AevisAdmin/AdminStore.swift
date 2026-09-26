@@ -55,17 +55,20 @@ final class AdminStore: ObservableObject {
     private let tokenAccount = "admin.token"
     private let emailKey = "aevis.admin.email"
 
-    private init() {}
-
-    // MARK: - 登录
-
-    /// App 启动时调一次：钥匙串里有令牌就直接进去（不用每次重登）。
-    func restore() {
+    private init() {
+        // 钥匙串里要是已经有令牌，就直接进去 —— 不用每次重登。
+        //
+        // ⚠️ 这件事**必须放在这里**，不要写成 App 里的 `.task { store.restore() }`：
+        // `.task` 的闭包**不是主 actor 隔离的**，而 `restore()` 是这个
+        // `@MainActor` 类的方法 —— 从那儿调要么编译不过（得补 await），
+        // 要么得绕一层 `MainActor.run`。放在 init 里成本是零。
         if let saved = Keychain.get(tokenAccount), !saved.isEmpty {
             token = saved
             signedInEmail = UserDefaults.standard.string(forKey: emailKey) ?? ""
         }
     }
+
+    // MARK: - 登录
 
     func signIn(username: String, password: String) async {
         errorText = nil

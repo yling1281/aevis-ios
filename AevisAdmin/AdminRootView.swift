@@ -140,11 +140,21 @@ struct AdminStackedSections: View {
 
 struct AdminSplitView: View {
     @EnvironmentObject private var store: AdminStore
-    @State private var section: AdminSection = .overview
+
+    /// ⚠️ 必须是**可选**的 `Binding<AdminSection?>`。
+    ///
+    /// `List(selection:)` 接非可选值的那个重载**只有 macOS 有** ——
+    /// 写 `@State var section: AdminSection` + `List(selection: $section)`
+    /// 在 iOS 上直接编译不过：
+    /// `error: 'init(selection:content:)' is unavailable in iOS`（第一轮就栽在这）。
+    @State private var picked: AdminSection? = .overview
+
+    /// 界面上用的那个 —— 永远不会是 nil（没选就当作总览）。
+    private var section: AdminSection { picked ?? .overview }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $section) {
+            List(selection: $picked) {
                 Section("管理") {
                     ForEach([AdminSection.overview, .diag, .users]) { item in
                         Label(item.title, systemImage: item.symbol).tag(item)
