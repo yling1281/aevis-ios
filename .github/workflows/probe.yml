@@ -1,0 +1,232 @@
+name: Probe
+
+# VPN 探针的流水线 —— **一次性工具**，跟买家那个包、跟管理端都无关。
+#
+# 它回答的问题只有一个：
+#   **这套签名能不能跑网络扩展（VPN 隧道）** —— 也就是"拦掉抖音域名、不用快捷指令"
+#   那条路到底通不通。
+#
+# 为什么单开一条：探针编不过绝不能拖累买家的包和管理端。
+#
+# ⚠️ 它**自己做 bootstrap（源码引导）** —— 一开始没有，后来加上，原因是**竞态**：
+#    探针源码第一次是跟着源码引导进来的，而"落回仓库"那一步归**主流水线**管；
+#    两条流水线同时被同一次 push 触发，谁先谁后没保证。
+#    不自己取一次，就可能"探针先跑 → 仓库里还没有源码 → 整轮跳过（而且是绿的）"。
+#
+#    ⚠️ 但 bootstrap 会 **rsync 覆盖**：`.bootstrap-url` 指向的包里要是没有探针
+#    （比如那是个买家版的源码包），它会把 `project.yml` 盖回旧版、target 就没了。
+#    所以下面的门禁**三样都查**（两个源文件 + project.yml 里有没有这个 target），
+#    缺任何一样就整轮跳过 —— 而不是编到一半报"找不到 target"（那报错会误导人）。
+#
+# ⚠️ 它**不 push 仓库**（跟 admin.yml 一个教训：两条流水线都写仓库必然撞车）。
+#    `contents: write` 留着是给 action-gh-release 建 release 用的。
+#
+# 要出探针 IPA：把 `.release/probe` 改成 1 再推。出完**人工**改回 0。
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    name: Build VPN probe
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ——— 临时通道：源码在本地写好 → 打包放到公网 → CI 自己去取 ———
+      #
+      # 探针这条**也要** bootstrap，理由是一个很实在的竞态：
+      # 探针的源码第一次是跟着「源码引导」进来的，而那是**主流水线**负责落回仓库的 ——
+      # 两条流水线同时被同一次 push 触发，各跑各的，谁先谁后没有保证。
+      # 不自己取一次的话，很可能出现"探针先跑 → 仓库里还没有源码 → 整轮跳过"，
+      # 而且**跳过是绿的**，看着像成功了。
+      - name: Bootstrap source (temporary)
+        if: hashFiles('.bootstrap-url') != ''
+        run: |
+          set -e
+          SRC_URL=$(tr -d ' \n\r' < .bootstrap-url)
+          echo "从 $SRC_URL 取源码"
+          curl -fsSL --retry 4 --retry-all-errors --retry-delay 3 \
+            --max-time 300 -o "$RUNNER_TEMP/src.zip" "$SRC_URL"
+          SIZE=$(wc -c < "$RUNNER_TEMP/src.zip")
+          echo "拿到 $SIZE 字节"
+          test "$SIZE" -gt 200000 || { echo "源码包不完整"; exit 1; }
+          rm -rf "$RUNNER_TEMP/src"
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q "$RUNNER_TEMP/src.zip" -d "$RUNNER_TEMP/src"
+          rsync -a "$RUNNER_TEMP/src/aevis-ios/" ./
+          echo "探针 Swift 文件: $(find AevisVPNProbe -name '*.swift' 2>/dev/null | wc -l)"
+
+      # ⚠️ 门禁要**三样都查**，缺一不可：
+      #    两个源文件 + **project.yml 里那个 target**。
+      #    只查源文件是不够的 —— 实测过的坑：`.bootstrap-url` 指向的包里要是没有探针
+      #    （比如那是个买家版的源码包），rsync 会把 project.yml **盖回旧版**，
+      #    target 就没了。那种情况要**整轮跳过**，而不是编到一半报"找不到 target"
+      #    （那个报错看着跟"探针代码写错了"一模一样）。
+      - name: Check whether the probe sources are here
+        id: gate
+        run: |
+          if [ -f AevisVPNProbe/App/VPNProbeApp.swift ] \
+             && [ -f AevisVPNProbe/Tunnel/PacketTunnelProvider.swift ] \
+             && grep -q '^  AevisVPNProbe:' project.yml; then
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+            echo "探针源码和 target 都在，继续。"
+          else
+            echo "go=no" >> "$GITHUB_OUTPUT"
+            echo "缺少探针源码或 project.yml 里没有这个 target，这一轮跳过。"
+          fi
+
+      - name: Decide whether to package an IPA
+        id: decide
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          REQ=$(tr -d ' \n\r' < .release/probe 2>/dev/null || echo "0")
+          if [ "$REQ" = "1" ]; then
+            echo "should=yes" >> "$GITHUB_OUTPUT"
+            echo "本次会出探针 IPA"
+          else
+            echo "should=no" >> "$GITHUB_OUTPUT"
+            echo "本次只验证能编过，不出 IPA"
+          fi
+
+      - name: Show toolchain
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          xcodebuild -version
+          echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install XcodeGen
+        if: steps.gate.outputs.go == 'yes'
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        if: steps.gate.outputs.go == 'yes'
+        run: xcodegen generate
+
+      # ——— 真机编译 ———
+      #
+      # 编的是 App，扩展会作为依赖一起编出来（project.yml 里 embed: true）。
+      - name: Compile (device, unsigned)
+        if: steps.gate.outputs.go == 'yes'
+        env:
+          AEVIS_COMMIT: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Aevis.xcodeproj \
+            -target AevisVPNProbe \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            AEVIS_COMMIT="$AEVIS_COMMIT" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > probe-build.log 2>&1 || { echo "===== PROBE BUILD FAILED ====="; tail -n 200 probe-build.log; exit 1; }
+
+          echo "===== PROBE BUILD OK ====="
+          tail -n 6 probe-build.log
+
+          # ⭐ 扩展到底编出来没有 —— 这一条要当场看见，
+          #    不然"扩展没进包"会伪装成"权限不够"，白折腾一轮
+          echo "--- 产物 ---"
+          ls -la build/Release-iphoneos/ 2>/dev/null || true
+          ls -la build/Release-iphoneos/AevisVPNProbe.app/PlugIns/ 2>/dev/null || echo "⚠️ 没有 PlugIns 目录"
+
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          grep -E "error:" probe-build.log 2>/dev/null | head -15 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+
+      # ——— 打包（只在被要求时）———
+      - name: Package IPA
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        run: |
+          set -e
+          APP="build/Release-iphoneos/AevisVPNProbe.app"
+          APPEX="$APP/PlugIns/AevisVPNProbeTunnel.appex"
+          test -d "$APP" || { echo "找不到 AevisVPNProbe.app"; exit 1; }
+          test -d "$APPEX" || { echo "❌ 扩展没编出来（App 里没有 PlugIns/AevisVPNProbeTunnel.appex）"; exit 1; }
+
+          rm -rf Payload AevisVPNProbe-unsigned.ipa AevisVPNProbe-adhoc.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/AevisVPNProbe.app
+
+          # 两个 bundle 都要清掉签名痕迹 —— 手机上「全能签」会重新签它们。
+          # ⚠️ 扩展是**嵌套 bundle**，只清外层不够（重签工具遇到混合签名会直接失败）。
+          rm -rf Payload/AevisVPNProbe.app/_CodeSignature
+          rm -rf Payload/AevisVPNProbe.app/PlugIns/AevisVPNProbeTunnel.appex/_CodeSignature
+          rm -f Payload/AevisVPNProbe.app/embedded.mobileprovision
+          rm -f Payload/AevisVPNProbe.app/PlugIns/AevisVPNProbeTunnel.appex/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X AevisVPNProbe-unsigned.ipa Payload
+
+          codesign -f -s - --deep Payload/AevisVPNProbe.app || true
+          /usr/bin/zip -qry -X AevisVPNProbe-adhoc.ipa Payload
+
+          echo "包里的版本："
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+            Payload/AevisVPNProbe.app/Info.plist || true
+          echo "扩展的 bundle id："
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+            Payload/AevisVPNProbe.app/PlugIns/AevisVPNProbeTunnel.appex/Info.plist || true
+          echo "扩展的扩展点："
+          /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" \
+            Payload/AevisVPNProbe.app/PlugIns/AevisVPNProbeTunnel.appex/Info.plist || true
+          ls -lh AevisVPNProbe-unsigned.ipa AevisVPNProbe-adhoc.ipa
+
+      - name: Publish release
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: probe-${{ github.run_number }}
+          name: Aevis VPN 探针 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            **VPN 探针** —— 一次性体检包，不是给买家用的。
+
+            它只回答一个问题：**这套签名能不能跑网络扩展（VPN 隧道）**。
+
+            怎么用：
+            1. 下载 `AevisVPNProbe-unsigned.ipa`，用「全能签」签名后安装
+               （⚠️ 先确认签名设置里**同时签嵌套扩展** —— 扩展签不上会直接装不上）
+            2. 打开 App，它一进去就会打出一份体检报告
+            3. 点「启动隧道」，等最多 20 秒
+            4. 点「复制全部」，把整份日志发回来
+
+            - 提交：`${{ github.sha }}`
+            - 这个测试**不接管任何流量**，不影响正常上网
+          files: |
+            AevisVPNProbe-unsigned.ipa
+            AevisVPNProbe-adhoc.ipa
+            probe-build.log
+
+      - name: Publish failure log
+        if: failure() && hashFiles('probe-build.log') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: probe-log-${{ github.run_number }}
+          name: 探针失败日志 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            探针编译失败 —— 错误见 `probe-build.log`。
+
+            - 提交：`${{ github.sha }}`
+          files: |
+            probe-build.log
+
+      # ⚠️ 这一步**故意不 push**（原因见 admin.yml 里那段血泪）。
+      - name: Remind to reset the flag
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        run: |
+          echo "::warning::探针包已出。把 .release/probe 改回 0 再推一次，否则下次还会出包。"
