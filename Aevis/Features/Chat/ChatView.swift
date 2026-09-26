@@ -304,13 +304,20 @@ struct ChatView: View {
                     }
 
                     ForEach(chat.messages) { message in
-                        MessageBubble(
-                            message: message,
-                            persona: persona,
-                            theme: bubbleTheme,
-                            simpleMode: settings.simpleMode
-                        )
-                        .id(message.id)
+                        if message.kind == .call {
+                            // 通话记录 —— 微信那种居中的一行小字，**不是气泡**。
+                            // 做成气泡会让人以为她真发过这么一句话。
+                            CallRecordBubble(text: message.text)
+                                .id(message.id)
+                        } else {
+                            MessageBubble(
+                                message: message,
+                                persona: persona,
+                                theme: bubbleTheme,
+                                simpleMode: settings.simpleMode
+                            )
+                            .id(message.id)
+                        }
                     }
 
                     if let errorText {
@@ -674,7 +681,10 @@ struct ChatView: View {
 
         let config = settings.llm
         let prompt = persona.systemPrompt
-        let history = chat.messages.filter { !($0.role == .assistant && $0.text.isEmpty) }
+        // `goesToModel` 比原来那句「排除空文本的助手消息」更准：
+        // 顺带把**通话记录**这类只给人看的系统消息挡在外面（她不该对着
+        // 「通话时长 03:21」学说话）。
+        let history = chat.messages.filter { $0.goesToModel }
         // 背景资料 = 长期记忆 +（快捷指令发过数据的话）屏幕使用时间 + 外面来的信息
         var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
         let screenTime = ScreenTimeInsight.shared.digest()
@@ -787,6 +797,33 @@ struct BubbleTheme {
     var showAiAvatar: Bool
     /// 界面密度（0.82 紧凑 / 1.0 标准 / 1.22 宽松）。只乘在留白上。
     var density: Double = 1.0
+}
+
+/// 一通电话留下的记录 —— 微信那种**居中、淡淡的一行小字**。
+///
+/// 用户 2026-09-26：「挂断电话的时候……像微信一样留下记录」。
+///
+/// **故意不做成聊天气泡**：那不是谁说的话，做成气泡会让人误以为
+/// 她真的发过「通话时长 03:21」这么一条消息。
+private struct CallRecordBubble: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "phone.down.fill")
+                .font(.system(size: 10.5, weight: .medium))
+            Text(text)
+                .font(.aevis(12))
+        }
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(Color.primary.opacity(0.06))
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
 }
 
 private struct MessageBubble: View {

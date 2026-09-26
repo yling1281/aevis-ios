@@ -41,6 +41,8 @@ final class DeviceGate: ObservableObject {
 
     /// 防止两个调用点同时发起查询（视图的定时循环 + 回到前台各一次）。
     private var inFlight = false
+    /// 同上，给「账号还在不在」那次查询用。
+    private var verifying = false
 
     private init() {
         // ⚠️ 截图专用开关：`-aevisShowGate` 时**必须当成"从没授权过的新设备"**。
@@ -144,6 +146,65 @@ final class DeviceGate: ObservableObject {
         reachedServer = true
         settings.deviceAuthorized = true
         settings.deviceAuthorizedAccount = masked ?? ""
+    }
+
+    // MARK: - 账号还在不在
+
+    /// 问一句「我这个账号还在不在」。
+    ///
+    /// ## 用户要的（2026-09-26）
+    /// 「如果我这边后台把这个用户删掉了之后，手机那边也是过期了，**但是数据还在**」。
+    ///
+    /// 所以：账号被删 → **退回未授权那一屏**（要用新账号重新绑一次），
+    /// 但**本地数据一条都不删** —— 人设、聊天记录、记忆、图片全留着。
+    /// 删账号是"不给用了"，不是"把你的东西抹掉"。
+    ///
+    /// ⚠️ 四种情况必须分清，**只有第一种才吊销**：
+    /// - 401 / 403 → 账号真没了（或登录态失效）→ 吊销
+    /// - 网络错误 / 超时 → **什么都不做**。断个网就把人踢出去，那是灾难
+    /// - 没登录过账号 → 不管（那种是"绑过码但没在 App 里登录"，没法查）
+    /// - 服务器返回 5xx → 什么都不做（服务器自己出问题不算用户的错）
+    func verifyAccountStillThere() async {
+        let token = AppSettings.shared.accountToken
+        guard !token.isEmpty else { return }
+        guard !verifying else { return }
+        verifying = true
+        defer { verifying = false }
+
+        var base = AppSettings.shared.accountServerURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.hasSuffix("/") { base.removeLast() }
+        guard !base.isEmpty, let url = URL(string: base + "/api/me") else { return }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        // 必须是新的 —— 缓存里那个 200 会让"已经删了"永远查不出来
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return }
+            if http.statusCode == 401 || http.statusCode == 403 {
+                revokeBecauseAccountGone()
+            }
+        } catch {
+            // 断网/超时 —— **绝不吊销**。这一条比什么都重要。
+            return
+        }
+    }
+
+    /// 账号已经在后台被删掉了：退回未授权，但**只动授权标记**。
+    private func revokeBecauseAccountGone() {
+        guard authorized else { return }
+        let settings = AppSettings.shared
+        authorized = false
+        account = nil
+        settings.deviceAuthorized = false
+        settings.deviceAuthorizedAccount = ""
+        // ⚠️ 下面这些**一个都不许碰**：PersonaStore / ChatStore / MemoryStore /
+        // MomentStore / 头像和背景图文件。用户说得清清楚楚：「过期了，但是数据还在」。
+        BlackBox.log("⚠️ 账号已不存在 → 退回未授权（本地数据原样保留）")
     }
 
     // MARK: - 零件

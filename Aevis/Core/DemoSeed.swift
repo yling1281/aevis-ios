@@ -17,6 +17,8 @@ import Foundation
 ///     -aevisSelfCheck          自检页
 ///     -aevisShowGate           强制显示「未授权」门禁页（实现在 DeviceGate 里）
 ///     -aevisSkipGate           跳过授权门禁（-aevisDemo 已隐含跳过）
+///     -aevisCallHistory        往聊天里塞一条通话记录
+///     -aevisCompanionAsk       显示一条「TA 想…」的申请条
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，把每个界面都截下来。
 enum DemoSeed {
@@ -191,6 +193,19 @@ enum DemoSeed {
         // 所以截图时假装她已经开着、已经说过话。
         if args.contains("-aevisTogetherDemo") {
             ListenTogetherService.shared.seedDemo()
+        }
+
+        // 通话记录那一条（微信那种居中的小字）—— 新加的界面，不塞就截不到。
+        if args.contains("-aevisCallHistory"), let contact = PersonaStore.shared.activeID {
+            ChatStore.shared.append(
+                ChatMessage(role: .system, text: "通话时长 03:21",
+                            kind: .call, callSeconds: 201),
+                for: contact
+            )
+        }
+        // 她主动提的申请那一条（浮在屏幕最上面）
+        if args.contains("-aevisCompanionAsk") {
+            CompanionRequest.shared.ask(.call, reason: "突然想听听你的声音")
         }
     }
     #endif

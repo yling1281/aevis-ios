@@ -18,5 +18,11 @@ final class AppRouter: ObservableObject {
     /// 全屏播放器（仿网易云那个封面转盘）。**在列表里点一首歌就弹它。**
     @Published var showPlayer = false
 
+    /// 打开设置时**直接落到哪一张卡**（nil 就是完整的设置页）。
+    ///
+    /// 「她申请看屏幕」点同意之后要用这条：iOS 不允许 App 自己开录屏，
+    /// 只有陪伴卡里那个系统按钮点得动，所以得把人送到那一张卡前面。
+    @Published var settingsFocus: String?
+
     private init() {}
 }

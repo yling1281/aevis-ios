@@ -65,10 +65,22 @@ struct RootView: View {
             settings.refreshAvatarTint(from: personaStore.avatarImage)
         }
         .onChange(of: scenePhase) { _, phase in
+            // 进后台就算「这一轮正常结束了」—— 黑匣子靠这一行区分
+            //「正常退出」和「崩了 / 被上滑划掉」（后者根本走不到这里）。
+            if phase == .background {
+                BlackBox.markCleanExit()
+                return
+            }
+
             // 每次回到前台，为接下来 24 小时重排一次「不定时」消息 ——
             // 本地通知只能在排程时定下时间，这是能做到的最接近随机的办法。
             guard phase == .active else { return }
             Task { await ProactiveService.shared.reschedule() }
+
+            // 回到前台顺手问一句「我这个账号还在不在」——
+            // 卖家在后台把账号删掉之后，这台设备就该**立刻退回未授权**，
+            // 但**本地数据一条都不动**（人设、聊天、记忆全留着）。
+            Task { await DeviceGate.shared.verifyAccountStillThere() }
 
             // QQ 机器人：后台被系统掐掉的连接，回到前台要自己接上。
             // （它靠 SilentKeeper 的静音音频尽量活着，但系统真要掐也没辙。）

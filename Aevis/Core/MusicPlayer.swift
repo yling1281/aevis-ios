@@ -162,6 +162,10 @@ final class MusicPlayer: NSObject, ObservableObject {
     private func loadCurrent() async {
         guard let track = current else { return }
 
+        // 黑匣子：点歌这条链最容易崩，每一步都留一行 ——
+        // 下次再闪退，看最后停在哪一行就知道死在哪了。
+        BlackBox.log("放歌《\(track.title)》id=\(track.id)")
+
         loadingTask?.cancel()
         errorText = nil
         progress = 0
@@ -181,6 +185,7 @@ final class MusicPlayer: NSObject, ObservableObject {
 
         do {
             let url = try await NeteaseClient.shared.playableURL(for: track.id)
+            BlackBox.log("拿到播放地址，开始建播放器")
             let item = AVPlayerItem(url: url)
             let newPlayer = AVPlayer(playerItem: item)
             player = newPlayer
@@ -188,7 +193,9 @@ final class MusicPlayer: NSObject, ObservableObject {
             newPlayer.play()
             isPlaying = true
             updateNowPlaying()
+            BlackBox.log("已经在放了")
         } catch {
+            BlackBox.failure("放歌失败", detail: error.localizedDescription)
             errorText = error.localizedDescription
             isPlaying = false
         }
@@ -202,6 +209,9 @@ final class MusicPlayer: NSObject, ObservableObject {
         // 于是一路活着继续回调 —— 上一首的状态盖到下一首上、还会反复触发 next()，
         // 表现就是「歌自己乱跳」。
         if let timeObserver, let old = observedPlayer {
+            // 这里就是上次「点歌闪退」的案发现场，留一行日志 ——
+            // 万一还有别的路径会崩，黑匣子里能看见它到底走到没走到这一句。
+            BlackBox.log("摘掉上一首的进度观察者")
             old.removeTimeObserver(timeObserver)
         }
         timeObserver = nil

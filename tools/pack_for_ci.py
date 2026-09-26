@@ -105,6 +105,12 @@ MUST_HAVE = [
     # ——— 授权门禁（没授权就进不去 App）———
     "Aevis/Core/DeviceGate.swift",
     "Aevis/Features/Gate/DeviceGateView.swift",
+    # ——— 她主动申请（打电话 / 看屏幕 / 一起听）———
+    "Aevis/Core/CompanionRequest.swift",
+    "Aevis/Core/CompanionTools.swift",
+    "Aevis/Features/Companion/CompanionRequestBar.swift",
+    # ——— 黑匣子（崩溃/网络失败留现场，不然只能瞎猜）———
+    "Aevis/Core/BlackBox.swift",
     # 抓 CI 编译日志 —— 一次性读经常只拿到一千多字节的残片，必须分块
     "tools/grab_log.py",
 ]

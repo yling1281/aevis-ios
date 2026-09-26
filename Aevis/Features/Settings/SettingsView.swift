@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var personaStore: PersonaStore
@@ -16,6 +20,8 @@ struct SettingsView: View {
 
     @State private var testing = false
     @State private var testResult: String?
+    /// 「运行记录」（黑匣子）那块复制完的小提示。
+    @State private var diagnosticsNote: String?
     @State private var showClearConfirm = false
     @State private var pullingModels = false
     @State private var modelMessage: String?
@@ -889,9 +895,103 @@ struct SettingsView: View {
                         .padding(.leading, 16)
                 }
             }
+
+            diagnosticsBlock
         }
         .padding(.bottom, 4)
         .aevisGlass(cornerRadius: 20)
+    }
+
+    /// 「运行记录」—— 黑匣子的出口。
+    ///
+    /// ## 为什么必须有一块这个
+    /// 用户连着报闪退（点歌、通话、网易云搜索），而**我拿不到任何现场**：
+    /// 他不会去翻系统日志，我也没法在他手机上复现（本机没有 Xcode）。
+    /// 前两轮只能靠读代码猜，猜错过。
+    ///
+    /// 所以给他一个**点得动**的按钮：出问题的时候复制一段文本发过来，
+    /// 我就能看见死在哪一步、是哪个接口的什么错误。
+    ///
+    /// 放在「关于」里而不是主界面：它是排查用的，不该摆在明面上让人困惑。
+    private var diagnosticsBlock: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
+                .padding(.leading, 16)
+
+            HStack(spacing: 8) {
+                Text("运行记录")
+                    .font(.aevis(13.5))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if BlackBox.crashedLastRun {
+                    Text("上次异常退出")
+                        .font(.aevis(12, weight: .medium))
+                        .foregroundStyle(Color.orange)
+                } else {
+                    Text("\(BlackBox.recent.count) 行")
+                        .font(.aevis(12))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            Text(BlackBox.crashedLastRun
+                 ? "上次 App 是异常结束的（崩了，或者被上滑关掉）。点「复制诊断信息」把现场发出来 —— 里面记着最后那几十步是什么。"
+                 : "闪退和接口报错都会记在这儿。App 出问题的时候，点「复制诊断信息」发给卖你的人就行。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
+
+            HStack(spacing: 10) {
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    Text("复制诊断信息")
+                        .font(.aevis(13.5, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .aevisGlass(cornerRadius: 12)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    BlackBox.clear()
+                    diagnosticsNote = "记录清空了。"
+                } label: {
+                    Text("清空")
+                        .font(.aevis(13))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+
+            if let diagnosticsNote {
+                Text(diagnosticsNote)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(Color.green)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+            }
+        }
+        .padding(.top, 12)
+        .padding(.bottom, 13)
+    }
+
+    private func copyDiagnostics() {
+        #if canImport(UIKit)
+        UIPasteboard.general.string = BlackBox.report()
+        diagnosticsNote = "复制好了 —— 粘给卖你的人就行。"
+        BlackBox.log("（导出了一份诊断信息）")
+        #endif
     }
 
     private var aboutRows: [(String, String)] {

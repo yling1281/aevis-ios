@@ -50,6 +50,9 @@ enum DeviceTools {
         + qqTools
         + qqBotTools
         + systemTools
+        // 她**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
+        // 和别的工具不一样的地方：这几个只是"提出来"，真正开始要用户点头。
+        + CompanionTools.tools
         + [shellTool]
     }
 

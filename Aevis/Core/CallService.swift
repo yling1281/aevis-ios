@@ -68,6 +68,7 @@ final class CallService: ObservableObject {
 
     func start(persona: Persona, config: LLMConfig, memory: [String]) async {
         guard state == .idle else { return }
+        BlackBox.log("☎️ 拨号 → \(persona.name.isEmpty ? "TA" : persona.name)")
         self.persona = persona
         self.config = config
         self.memory = memory
@@ -113,6 +114,7 @@ final class CallService: ObservableObject {
         do {
             try listen.start()
         } catch {
+            BlackBox.failure("通话：麦克风起不来", detail: error.localizedDescription)
             errorText = error.localizedDescription
             listen.onUtterance = nil
             transcriptWatch = nil
@@ -122,9 +124,15 @@ final class CallService: ObservableObject {
 
         startedAt = Date()
         state = .active
+        BlackBox.log("☎️ 接通了")
     }
 
     func hangUp() {
+        // ⚠️ 时长必须在重置 `startedAt` **之前**算出来 —— 放到后面就是 0 了。
+        let seconds = elapsed
+        let wasActive = state == .active
+        BlackBox.log(String(format: "☎️ 挂断（%.0f 秒）", seconds))
+
         // 先换掉通话编号：在途的那一轮立刻能认出「电话已经挂了」——
         // 她的话照样进聊天记录（用户挂断后回到聊天能看到），
         // 但不会再念出声、也不会再把麦克风打开。
@@ -141,6 +149,22 @@ final class CallService: ObservableObject {
         listeningText = ""
         thinking = false
         muted = false
+
+        // 留下一条通话记录 —— 微信那样，聊天里多一条「通话时长 03:21」。
+        // 用户 2026-09-26 要的：「挂断电话的时候……像微信一样留下记录」。
+        //
+        // ⚠️ 3 秒以下不留：误触拨出去又马上挂的情况太多，
+        // 那种记录只会把聊天记录刷满。
+        guard wasActive, seconds >= 3, let contactID else { return }
+        ChatStore.shared.append(
+            ChatMessage(
+                role: .system,
+                text: "通话时长 " + Self.clock(seconds),
+                kind: .call,
+                callSeconds: seconds
+            ),
+            for: contactID
+        )
     }
 
     /// 静音（她说话的时候你自己不想被听到）。
@@ -167,7 +191,9 @@ final class CallService: ObservableObject {
         ChatStore.shared.append(ChatMessage(role: .user, text: utterance), for: contactID)
         thinking = true
 
-        let history = ChatStore.shared.messages.filter { !$0.text.isEmpty }
+        // ⚠️ 用 `goesToModel` 而不是「文本非空」—— 它会把**通话记录**那种
+        // 只给人看的系统消息挡在外面（否则她会学着回「通话时长 03:21」）。
+        let history = ChatStore.shared.messages.filter { $0.goesToModel }
         var collected = ""
         do {
             for try await piece in LLMService.streamReply(

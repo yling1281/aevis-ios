@@ -44,6 +44,8 @@ struct MainTabView: View {
     @EnvironmentObject private var chat: ChatStore
 
     @ObservedObject private var router = AppRouter.shared
+    /// 她主动提的申请（打电话 / 看屏幕 / 一起听）—— 你要点一下才会真的开始。
+    @ObservedObject private var companionRequest = CompanionRequest.shared
 
     @State private var tab: MainTab = .contacts
 
@@ -66,8 +68,10 @@ struct MainTabView: View {
                 .tag(MainTab.me)
         }
         // 这几个面板提到根上，二级页面和根视图都能触发（截图自检也靠它）
-        .sheet(isPresented: $router.showSettings) {
-            SettingsView()
+        .sheet(isPresented: $router.showSettings, onDismiss: { router.settingsFocus = nil }) {
+            // `focus` 只为一件事存在：她申请看屏幕、你点了同意之后，
+            // 要直接落到「陪伴」那张卡（系统的录屏按钮只在那儿）。
+            SettingsView(focus: router.settingsFocus)
                 .environmentObject(personaStore)
                 .environmentObject(settings)
                 .environmentObject(chat)
@@ -100,6 +104,22 @@ struct MainTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: router.showMoments)
+        // 她主动提的申请 —— 从顶上滑进来一条，但**不挡你手上的事**
+        //（不点它照样能继续打字、翻朋友圈）。
+        .overlay(alignment: .top) {
+            if let request = companionRequest.pending {
+                CompanionRequestBar(
+                    item: request,
+                    onAccept: { accept(request.kind) },
+                    onDecline: { companionRequest.decline() }
+                )
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(40)
+            }
+        }
+        .animation(.easeOut(duration: 0.26), value: companionRequest.pending)
         .onAppear(perform: applyLaunchOptions)
         .onAppear {
             // 录屏的进度要**全程**刷新，不能只在设置页里刷。
@@ -107,6 +127,23 @@ struct MainTabView: View {
             // 「看到屏幕」，界面却永远停在进设置那一刻的样子，
             // 于是反馈就变成了「录屏还是不行」。
             ScreenCompanion.shared.startPolling()
+        }
+    }
+
+    /// 她申请的事你点了同意 —— 到这里才真的去执行。
+    ///
+    /// ⚠️ 「看屏幕」只能把你**送到陪伴卡前面**，不能替你开始录屏 ——
+    /// iOS 规定录屏必须用户本人点系统那个按钮（状态栏要亮红点，得让你知情）。
+    /// 这是能做到的极限，申请条上也照实写了。
+    private func accept(_ kind: CompanionRequest.Kind) {
+        switch kind {
+        case .call:
+            router.showCall = true
+        case .listenTogether:
+            router.showTogether = true
+        case .screenShare:
+            router.settingsFocus = "companion"
+            router.showSettings = true
         }
     }
 

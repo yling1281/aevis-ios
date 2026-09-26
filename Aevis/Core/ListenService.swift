@@ -49,6 +49,8 @@ final class ListenService: ObservableObject {
     private var task: SFSpeechRecognitionTask?
     private var silenceTimer: Timer?
     private var lastChangeAt = Date()
+    /// 连着几次判定"安静"了。要连续两次才算说完（见 `startSilenceWatch`）。
+    private var quietTicks = 0
     private var tapInstalled = false
     private var startedAt = Date()
 
@@ -83,6 +85,7 @@ final class ListenService: ObservableObject {
         guard !isListening else { return }
         guard let recognizer else { throw ListenError.unavailable }
         guard recognizer.isAvailable else { throw ListenError.unavailable }
+        BlackBox.log("👂 开始听写（停顿阈值 \(AppSettings.shared.callSilenceSeconds) 秒）")
 
         let session = AVAudioSession.sharedInstance()
         // 和音乐共存：一起听的时候她还要能听见你说话
@@ -126,6 +129,7 @@ final class ListenService: ObservableObject {
         transcript = ""
         startedAt = Date()
         lastChangeAt = Date()
+        quietTicks = 0
         isListening = true
         errorText = nil
 
@@ -189,7 +193,11 @@ final class ListenService: ObservableObject {
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         transcript = ""
         lastChangeAt = Date()
+        quietTicks = 0
         guard text.count >= 1 else { return }
+        // 通话时「听到的最后一句话」是最有价值的线索 ——
+        // 如果是你刚说完某句之后崩的，这一行就是现场。
+        BlackBox.log("👂 听到「\(text.prefix(24))」")
         onUtterance?(text)
     }
 
@@ -210,10 +218,25 @@ final class ListenService: ObservableObject {
             // 的时候识别结果常常一动不动。所以再加一道音量判断：
             // 麦克风里明显还有声音，就一律不算停。
             if self.level > Self.speakingLevel {
+                self.quietTicks = 0
                 self.lastChangeAt = Date()
                 return
             }
-            if Date().timeIntervalSince(self.lastChangeAt) > AppSettings.shared.callSilenceSeconds {
+
+            let quietFor = Date().timeIntervalSince(self.lastChangeAt)
+            guard quietFor > AppSettings.shared.callSilenceSeconds else {
+                self.quietTicks = 0
+                return
+            }
+
+            // ⚠️ 还要**连着两次**都判定安静，才真的把这句话交出去。
+            // 只判一次的话，说话中间一个换气的停顿就够触发 —— 那正是用户
+            // 抱怨的「抢话」（他 2026-09-26 又强调了一遍：「我说话，然后我说完话了，
+            // 如果系统有一秒之内没有检测到有说话声，对面 AI 就开始思考并发出声音」）。
+            // 计时器 0.4 秒一跳，多这一次 = 再多等 0.8 秒，但不会被半个停顿骗到。
+            self.quietTicks += 1
+            if self.quietTicks >= 2 {
+                self.quietTicks = 0
                 self.flushUtterance()
             }
         }

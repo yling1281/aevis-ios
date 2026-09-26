@@ -355,6 +355,9 @@ final class NeteaseClient {
     }
 
     /// 发出去，并把**能诊断的东西**都带进错误里。
+    ///
+    /// 这里同时往黑匣子记一笔 —— 「网易云一闪退就没了」这种情况，
+    /// 黑匣子里那行就是唯一的现场（哪个接口、什么码、服务器说了什么）。
     private func send(_ request: URLRequest, label: String) async throws -> [String: Any] {
         let data: Data
         let response: URLResponse
@@ -362,6 +365,8 @@ final class NeteaseClient {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             // 网络层的原话比「获取失败」有用得多：超时、DNS、被 ATS 拦各有各的说法
+            BlackBox.failure("网易云·\(label)", url: request.url?.absoluteString,
+                             detail: error.localizedDescription)
             throw NeteaseError.badResponse("\(label) 连不上：\(error.localizedDescription)")
         }
 
@@ -369,12 +374,18 @@ final class NeteaseClient {
         let text = String(decoding: data.prefix(600), as: UTF8.self)
 
         guard (200..<300).contains(status) else {
+            BlackBox.failure("网易云·\(label)", url: request.url?.absoluteString,
+                             status: status, detail: text)
             throw NeteaseError.http(status: status, body: text)
         }
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            BlackBox.failure("网易云·\(label) 不是 JSON", url: request.url?.absoluteString,
+                             status: status, detail: text)
             throw NeteaseError.badResponse("\(label) 返回的不是 JSON：\(text.prefix(120))")
         }
         if let code = json["code"] as? Int, code != 200 {
+            BlackBox.failure("网易云·\(label) 业务码 \(code)", url: request.url?.absoluteString,
+                             status: status, detail: (json["message"] as? String) ?? "")
             throw NeteaseError.api(code: code, message: (json["message"] as? String) ?? "")
         }
         return json

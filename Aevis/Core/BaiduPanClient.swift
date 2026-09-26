@@ -483,11 +483,17 @@ final class BaiduPanClient {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
+            BlackBox.failure("百度网盘连不上", url: request.url?.absoluteString,
+                             detail: error.localizedDescription)
             throw BaiduPanError.badResponse("连不上百度网盘：\(error.localizedDescription)")
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200..<300).contains(status) else {
+            // 「百度网盘莫名 404」这种就得靠这一行 —— 哪个接口、什么码、
+            // 百度回了什么，全在里面（用户 2026-09-26 报过一次）。
+            BlackBox.failure("百度网盘", url: request.url?.absoluteString,
+                             status: status, detail: String(decoding: data.prefix(240), as: UTF8.self))
             throw BaiduPanError.http(status: status, body: String(decoding: data.prefix(200), as: UTF8.self))
         }
         return data
