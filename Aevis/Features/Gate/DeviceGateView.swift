@@ -26,19 +26,31 @@ struct DeviceGateView: View {
 
     @State private var copied = false
 
+    /// 还没绑过时那句话。
+    private static let normalHelp =
+        "登录你的账号，把这台设备的设备码填进去。\n绑上就算授权，这个页面会自己进去。"
+
+    /// 被封时那句话。
+    /// ⚠️ 不要写"再绑一次就好了"——服务器那边是直接拒的（`api_device_bind`），
+    /// 照着做只会白折腾。也不要给解封的时限承诺，那是人工处理的。
+    private static let blockedHelp =
+        "管理员停用了这台设备。\n解封之后这个页面会自己进去，不用重装。"
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 badge
                     .padding(.top, 54)
 
-                Text("这台设备还没有授权")
+                // ⚠️ 被封和"还没授权"要说的话**完全不同** ——
+                // 说错了会让人按着错的提示白折腾一轮。
+                Text(gate.blocked ? "这台设备已被停用" : "这台设备还没有授权")
                     .font(.aevis(21, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(gate.blocked ? Color.red : Color.primary)
                     .multilineTextAlignment(.center)
                     .padding(.top, 20)
 
-                Text("登录你的账号，把这台设备的设备码填进去。\n绑上就算授权，这个页面会自己进去。")
+                Text(gate.blocked ? Self.blockedHelp : Self.normalHelp)
                     .font(.aevis(13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -50,11 +62,18 @@ struct DeviceGateView: View {
                 codeCard
                     .padding(.top, 24)
 
-                primaryButton
-                    .padding(.top, 18)
+                // 被封时**不给「去绑定」按钮** —— 那会误导他以为再绑一次就行。
+                // 留着「再查一次」，解封之后点一下（或者等下一轮自动查）就恢复了。
+                if gate.blocked {
+                    checkButton
+                        .padding(.top, 18)
+                } else {
+                    primaryButton
+                        .padding(.top, 18)
 
-                checkButton
-                    .padding(.top, 6)
+                    checkButton
+                        .padding(.top, 6)
+                }
 
                 statusBlock
                     .padding(.top, 16)
@@ -86,9 +105,9 @@ struct DeviceGateView: View {
                 .frame(width: 86, height: 86)
             // ⚠️ 图标用系统字号是**故意**的（R7 那条规则专门放过了 SF Symbol）：
             // 图标不该跟着用户选的字体变。
-            Image(systemName: "lock.shield")
+            Image(systemName: gate.blocked ? "xmark.shield" : "lock.shield")
                 .font(.system(size: 34, weight: .light))
-                .foregroundStyle(settings.accentColor)
+                .foregroundStyle(gate.blocked ? Color.red : settings.accentColor)
         }
     }
 

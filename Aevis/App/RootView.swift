@@ -110,6 +110,10 @@ struct RootView: View {
             // 但**本地数据一条都不动**（人设、聊天、记忆全留着）。
             Task { await DeviceGate.shared.verifyAccountStillThere() }
 
+            // 封禁：回到前台也立刻问一次，不等下面那轮 30 秒的。
+            // 用户切回 App 的那一下，正是最该知道"我还能不能用"的时刻。
+            Task { await DeviceGate.shared.refresh() }
+
             // QQ 机器人：后台被系统掐掉的连接，回到前台要自己接上。
             // （它靠 SilentKeeper 的静音音频尽量活着，但系统真要掐也没辙。）
             if settings.qqBotEnabled {
@@ -127,6 +131,21 @@ struct RootView: View {
                     config: config,
                     memory: memory
                 )
+            }
+        }
+        // ⚠️ **封禁轮询挂在根视图上，不是挂在门禁页上。**
+        //
+        // 挂门禁页看着更"就近"，但**一授权那页就消失了**，之后没人再查 ——
+        // 这就是「后台封了设备、App 照用」的两个原因之一
+        // （另一个是 `refresh()` 以前压根没读 `blocked` 字段）。
+        // 两个叠一起，封禁等于没生效。
+        //
+        // 30 秒一次：封禁不需要秒级实时，但也不能拖到"下次启动才生效"。
+        // 只在前台跑（`.task` 随视图消失自动取消），后台不耗电。
+        .task {
+            while !Task.isCancelled {
+                await DeviceGate.shared.refresh()
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
             }
         }
         .onAppear {

@@ -39,6 +39,15 @@ final class DeviceGate: ObservableObject {
     /// 至少查成功过一次 —— 界面据此把"没连上"和"确实还没绑"分开说。
     @Published private(set) var reachedServer: Bool = false
 
+    /// 这台设备**被后台停用了**。
+    ///
+    /// 跟「没授权」是两回事：「没授权」是"还没绑过"，「被封」是"被停用"——
+    /// 界面上要说的话完全不同，所以单独一个状态。
+    ///
+    /// ⚠️ 每次查询都会重新问，所以**后台点"解封"是自动生效的**，
+    /// 不用用户做任何事。
+    @Published private(set) var blocked: Bool = false
+
     /// 防止两个调用点同时发起查询（视图的定时循环 + 回到前台各一次）。
     private var inFlight = false
     /// 同上，给「账号还在不在」那次查询用。
@@ -79,6 +88,10 @@ final class DeviceGate: ObservableObject {
         // 模拟器截图不该被门禁挡着，否则三十多张图全是同一屏
         if args.contains("-aevisSkipGate") || args.contains("-aevisDemo") { return false }
         #endif
+        // 被封 → 一样拦住。放在 `!authorized` 前面 ——
+        // 被封的设备，`authorized` 也已经被清成 false 了，两条路结论一样，
+        // 但先说"被封"能让界面知道该显示哪一屏。
+        if blocked { return true }
         return !authorized
     }
 
@@ -123,8 +136,25 @@ final class DeviceGate: ObservableObject {
                 return
             }
 
+            // ⚠️ **先看被封**。服务器说这台被停用了，就别再管 bound 是什么。
+            if (json["blocked"] as? Bool) ?? false {
+                blocked = true
+                authorized = false
+                // ⚠️ 本地那个"已授权"标记也要清掉。
+                // 不清的话，下次启动 `init()` 又按它免检放行 ——
+                // 断网时能钻出去用（被封的设备不该有这条路）。
+                // 代价是被封的人必须联网才能恢复，但**解封后第一次查询会自动放行**。
+                AppSettings.shared.deviceAuthorized = false
+                problem = nil
+                return
+            }
+            // 没封（或者刚被解封）→ 清掉标记，让下面的正常流程接管
+            blocked = false
+
             if (json["bound"] as? Bool) ?? false {
-                grant(account: json["account"] as? String)
+                // 已经授权过就别再 grant 一遍了：那个方法会往 UserDefaults 写东西，
+                // 而现在是**隔一会儿就查一次**，没必要每次都写。
+                if !authorized { grant(account: json["account"] as? String) }
             } else {
                 // 还没绑 —— 这是最正常的状态，不是错误
                 problem = nil

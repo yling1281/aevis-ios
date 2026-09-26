@@ -18,8 +18,8 @@ settings:
     #   我却 `deploy_server.py 61 …` 去部署 → source.json 标成 0.0.61，
     #   而用户装到手机上看到的是 0.0.60。**部署脚本的第一个参数是"包里的版本号"，
     #   不是 run_number**（两者相等是靠每次都对上，不是自动的）。
-    MARKETING_VERSION: "0.0.65"
-    CURRENT_PROJECT_VERSION: "65"
+    MARKETING_VERSION: "0.0.70"
+    CURRENT_PROJECT_VERSION: "70"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
