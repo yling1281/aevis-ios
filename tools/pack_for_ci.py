@@ -113,6 +113,8 @@ MUST_HAVE = [
     "Aevis/Core/BlackBox.swift",
     # ——— 闪退整屏报错误码（用户明确要求：崩了就把码发出去）———
     "Aevis/Features/Crash/CrashReportView.swift",
+    # 崩溃现场自动上报（后台按错误码能查到，智能客服才查得动）
+    "Aevis/Core/DiagUploader.swift",
     # ——— 机器人的客服指令表（售后 / 怎么买 / 备份 / 掉签…）———
     "Aevis/Core/QQBotCommands.swift",
     # 抓 CI 编译日志 —— 一次性读经常只拿到一千多字节的残片，必须分块

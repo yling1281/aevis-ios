@@ -91,7 +91,8 @@ extension DeviceTools {
             // 给它一点时间把播放地址取回来，这样「放不出来」能当场说清楚。
             await MainActor.run { _ = Task { await MusicPlayer.shared.play([picked]) } }
             try? await Task.sleep(nanoseconds: 900_000_000)
-            if let message = MusicPlayer.shared.errorText {
+            // ⚠️ `errorText` 是 `@MainActor` 的 `@Published` —— 读它也得跳回去。
+            if let message = await MainActor.run(body: { MusicPlayer.shared.errorText }) {
                 return "找到了《\(picked.title)》，但放不出来：\(message)"
             }
             return "开始放了：《\(picked.display)》"
@@ -119,27 +120,33 @@ extension DeviceTools {
             }
             // ⚠️ 每个动作都必须**跳回主线程**再动播放器。
             // 这些工具是在 `LLMService` 的 `Task.detached` 里跑的（**不在主线程**），
-            // 而 `MusicPlayer` 一边改 `@Published`、一边动 AVFoundation 和 MediaPlayer ——
-            // 这几样都只能在主线程碰。以前直接在后台线程调，是「她说放首歌就崩」的隐患。
-            let player = MusicPlayer.shared
+            // 而 `MusicPlayer` 现在是 `@MainActor` 的 —— 碰它一点都得跳回去。
+            // ⚠️ 连 `MusicPlayer.shared` 这句本身也要放在 `MainActor.run` 里面，
+            //    在外面先取一个 `let player` 的话，Swift 会警告
+            //    「main actor-isolated static property 'shared' cannot be accessed
+            //    from outside of the actor」（build-61 的日志里就有这条）。
             switch action {
             case "pause":
-                await MainActor.run { player.pause() }
+                await MainActor.run { MusicPlayer.shared.pause() }
                 return "暂停了。"
             case "resume":
-                await MainActor.run { player.resume() }
+                await MainActor.run { MusicPlayer.shared.resume() }
                 return "继续放了。"
             case "next":
-                await MainActor.run { _ = Task { await player.next() } }
+                await MainActor.run { _ = Task { await MusicPlayer.shared.next() } }
                 // 换歌要现取播放地址，给它一点时间再读结果
                 try? await Task.sleep(nanoseconds: 350_000_000)
-                return player.current.map { "换成了《\($0.display)》" } ?? "队列是空的。"
+                return await MainActor.run {
+                    MusicPlayer.shared.current.map { "换成了《\($0.display)》" } ?? "队列是空的。"
+                }
             case "previous":
-                await MainActor.run { _ = Task { await player.previous() } }
+                await MainActor.run { _ = Task { await MusicPlayer.shared.previous() } }
                 try? await Task.sleep(nanoseconds: 350_000_000)
-                return player.current.map { "回到《\($0.display)》" } ?? "队列是空的。"
+                return await MainActor.run {
+                    MusicPlayer.shared.current.map { "回到《\($0.display)》" } ?? "队列是空的。"
+                }
             case "stop":
-                await MainActor.run { player.stop() }
+                await MainActor.run { MusicPlayer.shared.stop() }
                 return "停了。"
             default:
                 return "不认识这个动作：\(action)"
@@ -158,16 +165,21 @@ extension DeviceTools {
             """,
             parameters: emptyParameters()
         ) { _ in
-            let player = MusicPlayer.shared
-            guard let track = player.current else {
-                return "现在没有在放歌。"
+            // ⚠️ 整个读取都在 `MainActor.run` 里做 —— 这个闭包跑在 `Task.detached` 上，
+            // 而 `MusicPlayer` 是 `@MainActor` 的。拼好整段再拿出来，
+            // 免得一行一行读、一行一行跳（那样又慢又容易漏一处）。
+            let info = await MainActor.run { () -> String? in
+                let player = MusicPlayer.shared
+                guard let track = player.current else { return nil }
+                let line = player.currentLyricLine
+                    ?? "（还没到有歌词的地方，或者这首歌没有歌词）"
+                return """
+                正在放：\(track.display)
+                进度：\(Int(player.progress)) / \(Int(player.duration)) 秒
+                当前这一句：\(line)
+                """
             }
-            let line = player.currentLyricLine ?? "（还没到有歌词的地方，或者这首歌没有歌词）"
-            return """
-            正在放：\(track.display)
-            进度：\(Int(player.progress)) / \(Int(player.duration)) 秒
-            当前这一句：\(line)
-            """
+            return info ?? "现在没有在放歌。"
         }
     }
 }

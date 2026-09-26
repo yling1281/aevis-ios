@@ -180,8 +180,11 @@ struct CrashReportView: View {
     private var copyAllButton: some View {
         Button {
             copy(BlackBox.report(), into: $copiedAll)
+            // 顺手也传一份上去 —— 他既然主动要反馈，就该**当场**出现在后台，
+            // 而不是等到明天那个自动上报的去重窗口过去。
+            Task { await DiagUploader.uploadNow() }
         } label: {
-            Text(copiedAll ? "已复制，去发给客服" : "复制完整诊断信息")
+            Text(copiedAll ? "已复制，也报给客服了" : "复制完整诊断（并报给客服）")
                 .font(.aevis(15.5, weight: .medium))
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)

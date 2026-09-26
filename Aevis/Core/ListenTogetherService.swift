@@ -43,6 +43,13 @@ enum ListenTogetherMode: String, Codable, CaseIterable, Identifiable {
 ///
 /// 刻意不自动念出来：音乐正在放，她再说话会把人声盖掉。
 /// 所以她的反应先落在面板上，想听就点旁边的小喇叭。
+///
+/// ⚠️ `@MainActor`（2026-09-26 补的）：它读 `MusicPlayer.shared` 的 `@Published`
+/// 和 `current` / `currentLyricLine`，而 `MusicPlayer` 现在是 `@MainActor` 的 ——
+/// 不加这个，编译直接报「main actor-isolated property cannot be accessed
+/// from outside of the actor」。它的调用方全是视图（本来就在主线程），
+/// 加上没有任何副作用。
+@MainActor
 final class ListenTogetherService: ObservableObject {
     static let shared = ListenTogetherService()
 
@@ -112,25 +119,29 @@ final class ListenTogetherService: ObservableObject {
     private func observeLyrics() {
         cancellable?.cancel()
         cancellable = MusicPlayer.shared.$lyric
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] line in
-                guard let self, self.active else { return }
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard trimmed.count >= 2 else { return }
-
-                self.lyricCount += 1
-                // 她控制模式下不需要她念歌词 —— 那是她在操作播放器
-                guard self.mode == .sync else { return }
-                guard self.lyricCount % max(1, self.linesPerComment) == 0 else { return }
-                guard Date().timeIntervalSince(self.lastSpokeAt) >= self.minimumGap else { return }
-
-                // ⚠️ 必须是 `@MainActor` 的 Task。
-                // `.sink` 虽然 `receive(on: .main)`，但闭包本身**不是** MainActor 隔离的 ——
-                // 直接 `Task { await self.react(...) }` 会落到全局并发池上跑，
-                // 于是 `thinking` / `herLines` / `statusLine` 这些 `@Published`
-                // 全在后台线程被改（一起听时偶发闪退就是它）。
-                Task { @MainActor in await self.react(to: trimmed) }
+                // ⚠️ 必须跳一次。`receive(on: .main)` 只保证**运行时**在主线程，
+                // 编译器不认 —— `.sink` 的闭包不是 `@MainActor` 隔离的，
+                // 直接在这里读 `self.active` 这些属性，
+                // Swift 会报「main actor-isolated property cannot be accessed
+                // from outside of the actor」（build-61 就死在这上面）。
+                Task { @MainActor in self?.handleLyric(line) }
             }
+    }
+
+    /// 收到一句新歌词。**跑在主 actor 上**（上面那个 `Task` 负责跳进来）。
+    private func handleLyric(_ line: String) {
+        guard active else { return }
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return }
+
+        lyricCount += 1
+        // 她控制模式下不需要她念歌词 —— 那是她在操作播放器
+        guard mode == .sync else { return }
+        guard lyricCount % max(1, linesPerComment) == 0 else { return }
+        guard Date().timeIntervalSince(lastSpokeAt) >= minimumGap else { return }
+
+        Task { await react(to: trimmed) }
     }
 
     /// 她接着这一句歌词说一句。

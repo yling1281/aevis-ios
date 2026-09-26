@@ -21,6 +21,11 @@ import Foundation
 ///     -aevisCompanionAsk       显示一条「TA 想…」的申请条
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，把每个界面都截下来。
+///
+/// ⚠️ `@MainActor`：里面要碰 `MusicPlayer.shared` / `ListenTogetherService.shared`，
+/// 而这两个现在都是 `@MainActor` 的。它的唯一调用点是 `AevisApp.init()`（主线程），
+/// 所以加上没有任何副作用。
+@MainActor
 enum DemoSeed {
 
     static func applyIfRequested() {

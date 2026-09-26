@@ -249,26 +249,36 @@ final class MusicPlayer: NSObject, ObservableObject {
             forInterval: interval,
             queue: .main
         ) { [weak self, weak player] time in
-            guard let self, let player else { return }
-            // 换歌之后旧 player 的回调可能还在路上 —— 只认当前这首。
-            guard player === self.observedPlayer else { return }
+            // ⚠️ `assumeIsolated` 不是装饰。
+            // 这个回调**跑在 `.main` 队列上**（上面那行 `queue: .main`），
+            // 但回调类型本身不是 `@MainActor` 的 —— 编译器不认，
+            // 于是下面读 `self.progress` 这些会报
+            //「main actor-isolated property cannot be accessed from outside of the actor」。
+            // `assumeIsolated` 就是在告诉编译器"已经站在这儿了"：
+            // 队列既然是 .main 就不会 trap；万一哪天写错了，
+            // 它会当场崩（而不是偷偷在后台改状态）—— 这正是我们要的。
+            MainActor.assumeIsolated {
+                guard let self, let player else { return }
+                // 换歌之后旧 player 的回调可能还在路上 —— 只认当前这首。
+                guard player === self.observedPlayer else { return }
 
-            // ⚠️ 必须挡一下 NaN。AVPlayer 在"还没就绪 / 流有问题 / 刚 seek"这些时刻
-            // 会给一个 NaN 的时间，而 NaN 会顺着 progress 一路传到界面的 Slider 上 ——
-            // **NaN 进 SwiftUI 就是崩溃**。这里拦一道，比在界面里到处防要省事。
-            let seconds = time.seconds
-            if seconds.isFinite, seconds >= 0 {
-                self.progress = seconds
-            }
+                // ⚠️ 必须挡一下 NaN。AVPlayer 在"还没就绪 / 流有问题 / 刚 seek"这些时刻
+                // 会给一个 NaN 的时间，而 NaN 会顺着 progress 一路传到界面的 Slider 上 ——
+                // **NaN 进 SwiftUI 就是崩溃**。这里拦一道，比在界面里到处防要省事。
+                let seconds = time.seconds
+                if seconds.isFinite, seconds >= 0 {
+                    self.progress = seconds
+                }
 
-            let total = player.currentItem?.duration.seconds ?? 0
-            if total.isFinite, total > 0 {
-                self.duration = total
-            }
-            // 放完了自动下一首
-            if let item = player.currentItem, item.status == .readyToPlay,
-               self.duration > 0, self.progress >= self.duration - 0.4 {
-                Task { await self.next() }
+                let total = player.currentItem?.duration.seconds ?? 0
+                if total.isFinite, total > 0 {
+                    self.duration = total
+                }
+                // 放完了自动下一首
+                if let item = player.currentItem, item.status == .readyToPlay,
+                   self.duration > 0, self.progress >= self.duration - 0.4 {
+                    Task { await self.next() }
+                }
             }
         }
         observedPlayer = player

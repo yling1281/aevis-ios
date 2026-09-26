@@ -24,6 +24,10 @@ struct AevisApp: App {
         // 只在 Debug 构建、且带了 -aevisDemo 启动参数时才写入演示数据，
         // 供 CI 在模拟器里截图自检用。正式使用完全不受影响。
         DemoSeed.applyIfRequested()
+
+        // 崩过的话，把现场传给服务器一次（后台按错误码能查到）。
+        // 不 await —— 启动路径上不干等网络；传不上去也没关系，本机那份还在。
+        Task { await DiagUploader.uploadCrashIfNeeded() }
     }
 
     var body: some Scene {
