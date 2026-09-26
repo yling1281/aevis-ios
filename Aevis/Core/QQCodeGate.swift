@@ -109,6 +109,10 @@ final class QQCodeGate {
 
     /// 私聊里收到消息 → 要么给码，要么告诉他怎么拿。返回 nil = 不拦截，正常聊天。
     func handlePrivate(text: String, c2cOpenID: String) async -> String? {
+        // 先撞指令表（帮助 / 售后 / 购买 / 备份 / 设备码…）。
+        // 这些私聊里也会被问到 —— 答不上来他就只能跑去群里问。
+        if let answer = QQBotCommands.reply(to: text) { return answer }
+
         guard let ticket = keywordArgument(in: text) else { return nil }
         // 功能没开 = 不拦截，她照常聊天（免得没开的时候关键词变成一句固定回话）
         guard enabled else { return nil }
@@ -141,9 +145,26 @@ final class QQCodeGate {
 
     // MARK: - 群里：口令
 
-    /// 群里被 @ 到 → 发一个口令。返回 nil = 不拦截。
+    /// 群里被 @ 到 → 答指令，或者发一个口令。返回 nil = 不拦截。
+    ///
+    /// ## 关键行为（用户 2026-09-26 明确要的）
+    /// 「@ 机器人的话，如果没有对指令，**就把指令发出来**」
+    /// → 群里被 @ 到、但说的不是任何已知指令时，**兜底发指令列表**，
+    ///   而不是丢给她去闲聊。
+    ///
+    /// ⚠️ 这条兜底是**刻意的**：这个机器人现在是客服，不是群里的聊天搭子。
+    /// 以后想让它既能当客服、又能在群里聊天，得加个开关 ——
+    /// 用户说了再加，别自己加。
     func handleGroup(text: String, group: String, member: String) async -> String? {
-        guard keywordArgument(in: text) != nil else { return nil }
+        // 1) 说了明确的问题（售后 / 怎么买 / 备份 / 掉签…）→ 直接答
+        if let answer = QQBotCommands.reply(to: text) { return answer }
+
+        // 2) 不是任何已知指令 → 把指令列表甩出来（这就是他要的效果）
+        guard keywordArgument(in: text) != nil else {
+            return QQBotCommands.help
+        }
+
+        // 3) 是「口令」→ 走发码那条老路
         guard enabled else { return nil }
         guard !key.isEmpty else { return nil }
 
