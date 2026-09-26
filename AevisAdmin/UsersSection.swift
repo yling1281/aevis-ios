@@ -108,6 +108,13 @@ struct UsersSection: View {
                     AdminMiniButton(title: "封设备", tint: AdminSkin.danger) {
                         Task { await store.blockDevice(device, blocked: true) }
                     }
+                    // ⚠️ 「解绑」和「解封」是**两件事**，两个都要有，缺一个都会让人卡住：
+                    //    · 封设备 = 把他挡在门外（`blocked_devices`）
+                    //    · 解绑   = 删掉"这台机器归谁"的登记（`devices`）——
+                    //      他换手机 / 重装系统 / 刷机之后卡住，要用的就是这个
+                    AdminMiniButton(title: "解绑设备", tint: AdminSkin.brand) {
+                        Task { await store.unbindDevice(device) }
+                    }
                 }
                 AdminMiniButton(title: "删除", tint: AdminSkin.danger) {
                     pendingDelete = user

@@ -66,7 +66,7 @@ struct DeviceCard: View {
         .task { await check() }
     }
 
-    private static let bindHost = "account.lingyan.cyou/me"
+    private static let bindHost = AevisHosts.accountDomain + "/me"
 
     // MARK: - 行
 
@@ -169,7 +169,7 @@ struct DeviceCard: View {
         defer { checking = false }
 
         guard let url = URL(string:
-            "https://account.lingyan.cyou/api/device/lookup?device_id=\(DeviceIdentity.canonical)")
+            AevisHosts.account("/api/device/lookup?device_id=\(DeviceIdentity.canonical)"))
         else {
             problem = "内部错误：设备码拼不出查询地址。"
             return

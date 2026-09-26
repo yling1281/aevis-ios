@@ -28,6 +28,15 @@ struct AevisApp: App {
         // 崩过的话，把现场传给服务器一次（后台按错误码能查到）。
         // 不 await —— 启动路径上不干等网络；传不上去也没关系，本机那份还在。
         Task { await DiagUploader.uploadCrashIfNeeded() }
+
+        // 账号后端有主域名 + 备用域名（拦截是按线路抽样的，谁通走谁）。
+        // 结果写回 `AppSettings.accountServerURL` —— 各处读的都是它，改一处全跟着走。
+        // ⚠️ 必须回到主线程再写：`AppSettings` 不是 `@MainActor`，在后台改 `@Published`
+        //    会让 SwiftUI 在别的线程上收到变更通知（iOS 26 上直接崩，踩过）。
+        Task {
+            let base = await AccountEndpoint.refresh()
+            await MainActor.run { AppSettings.shared.accountServerURL = base }
+        }
     }
 
     var body: some Scene {

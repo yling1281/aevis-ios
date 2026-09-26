@@ -1158,7 +1158,7 @@ final class AppSettings: ObservableObject {
     /// 服务器发码钥匙。**只进钥匙串**。
     ///
     /// 它不在公开仓库里，也不走 GitHub Secrets —— 用户从自己的管理后台
-    /// （account.lingyan.cyou/admin）复制过来填一次。少一个要他配置的地方。
+    /// （`AevisHosts.account("/admin")`）复制过来填一次。少一个要他配置的地方。
     @Published var qqBotCodeKey: String {
         didSet { Keychain.set(qqBotCodeKey, for: Key.qqBotCodeKeyKeychain) }
     }
@@ -1181,13 +1181,14 @@ final class AppSettings: ObservableObject {
     ///
     /// 2026-09-25 用户明确：「账号直接就内嵌了嘛，不用自己去调，因为我就是卖这个」——
     /// 这个 App 是他卖出去的成品，让买家去填一个服务器地址属于把内部决定推给用户。
-    /// 地址变了也只改 `Self.builtInAccountServer` 这一处。
+    /// 地址只在 `AevisHosts` 里定义一处，这里引用它。
     @Published var accountServerURL: String {
         didSet { UserDefaults.standard.set(accountServerURL, forKey: Key.accountServerURL) }
     }
 
-    /// 内嵌的账号服务器。改这里就够了。
-    static let builtInAccountServer = "https://account.lingyan.cyou"
+    /// 内嵌的账号服务器。**域名在 `AevisHosts.swift` 里改**，别在这儿写字面量
+    /// （2026-09-26：换域名时发现 6 处都写死了旧域名，漏一处就是一批用户登不进去）。
+    static let builtInAccountServer = AevisHosts.accountBase
 
     /// 登录后的 token。**只进钥匙串**，和 API Key 一个待遇。
     @Published var accountToken: String {

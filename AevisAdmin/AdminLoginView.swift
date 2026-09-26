@@ -13,6 +13,7 @@ struct AdminLoginView: View {
     @State private var password = ""
     @State private var editingServer = false
     @State private var serverDraft = ""
+    @State private var lineNote: String?
     @FocusState private var focus: Field?
 
     private enum Field { case user, pass }
@@ -36,6 +37,18 @@ struct AdminLoginView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .scrollDismissesKeyboard(.interactively)
         .onAppear { serverDraft = store.base }
+        .task {
+            // 开屏自动挑一条通的线路（线路一 → 线路二），和主 App 同一套判断。
+            // 要是用户手动选过、且那条还通着，`autoPickLine` 会原样保留，不会乱改。
+            let picked = await AdminAPI.autoPickLine()
+            await MainActor.run {
+                store.updateBase(AdminAPI.base)
+                serverDraft = store.base
+                if let picked, picked != AevisHosts.lineName(for: store.base) {
+                    lineNote = "已自动切到\(picked)。"
+                }
+            }
+        }
     }
 
     // MARK: 标题
@@ -131,7 +144,8 @@ struct AdminLoginView: View {
                     serverDraft = store.base
                     withAnimation(.snappy(duration: 0.2)) { editingServer = true }
                 } label: {
-                    Text("服务器：\(store.base)")
+                    Text("服务器：" + (AevisHosts.lineName(for: store.base) ?? "自定义")
+                         + " · \(store.base)")
                         .font(.system(size: 11.5))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -143,7 +157,23 @@ struct AdminLoginView: View {
 
     private var serverEditor: some View {
         VStack(spacing: 8) {
-            TextField("https://account.lingyan.cyou", text: $serverDraft)
+            // 线路一 / 线路二：两条线互为备用（域名会被云厂商按线路抽样拦，谁通走谁）。
+            // 和主 App 用同一份 `AevisHosts.accountLines` / 同一套探测判断。
+            HStack(spacing: 8) {
+                ForEach(AevisHosts.accountLines) { line in
+                    let active = AevisHosts.lineName(for: store.base) == line.name
+                    AdminMiniButton(title: line.name,
+                                    tint: active ? AdminSkin.brand : .secondary,
+                                    filled: active) {
+                        store.updateBase(line.base)
+                        serverDraft = store.base
+                        lineNote = "已切到\(line.name)。换线要重新登录。"
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            TextField(AevisHosts.accountBase, text: $serverDraft)
                 .font(.system(size: 13.5))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -157,15 +187,31 @@ struct AdminLoginView: View {
                 AdminMiniButton(title: "取消", tint: .secondary) {
                     withAnimation(.snappy(duration: 0.2)) { editingServer = false }
                 }
+                AdminMiniButton(title: "自动选", tint: .secondary) {
+                    Task {
+                        let picked = await AdminAPI.autoPickLine()
+                        await MainActor.run {
+                            store.updateBase(AdminAPI.base)
+                            serverDraft = store.base
+                            lineNote = picked == nil ? "两条线路都连不上。" : "已切到\(picked!)。"
+                        }
+                    }
+                }
                 AdminMiniButton(title: "用它", tint: AdminSkin.brand, filled: true) {
                     store.updateBase(serverDraft)
                     serverDraft = store.base
                     withAnimation(.snappy(duration: 0.2)) { editingServer = false }
                 }
             }
-            Text("换了服务器要重新登录（旧的令牌在另一台上不认）。")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+            if let lineNote {
+                Text(lineNote)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AdminSkin.brand)
+            } else {
+                Text("换了服务器要重新登录（旧的令牌在另一台上不认）。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 

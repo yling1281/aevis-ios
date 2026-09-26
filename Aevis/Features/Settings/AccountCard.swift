@@ -18,6 +18,7 @@ struct AccountCard: View {
     @State private var nickname = ""
     @State private var note: String?
     @State private var busy = false
+    @State private var probing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,15 +73,44 @@ struct AccountCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("服务器")
                     .font(.aevis(15))
-                Text(settings.accountServerURL.isEmpty ? "没配" : settings.accountServerURL)
+                Text(lineText)
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Text("已内嵌")
-                .font(.aevis(12.5))
-                .foregroundStyle(.tertiary)
+            Button(probing ? "探测中…" : "换线") {
+                Task { await reprobe() }
+            }
+            .font(.aevis(14))
+            .buttonStyle(.borderless)
+            .disabled(probing)
+        }
+    }
+
+    /// 「线路一 · account.apekin.com」—— 让用户看得出现在走的是哪条线。
+    /// 域名会被云厂商按**线路抽样**拦，所以两条线互为备用，全自动切换。
+    private var lineText: String {
+        let pretty = settings.accountServerURL
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+        if pretty.isEmpty { return "没配" }
+        guard let line = AevisHosts.lineName(for: settings.accountServerURL) else {
+            return pretty
+        }
+        return line + " · " + pretty
+    }
+
+    /// 手动重新探测线路（启动时已经自动探过一次，这里给用户一个"我手动试一下"的入口）。
+    private func reprobe() async {
+        probing = true
+        defer { probing = false }
+        let base = await AccountEndpoint.refresh()
+        settings.accountServerURL = base
+        if let line = AevisHosts.lineName(for: base) {
+            note = "已切到\(line)。"
+        } else {
+            note = "两条线路都连不上，稍后再试。"
         }
     }
 

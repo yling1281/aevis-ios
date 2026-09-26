@@ -204,5 +204,7 @@ enum QQBotCommands {
     /// 带协议的 URL 会被平台静默过滤（整条消息发不出去，或者被截断），
     /// 而失败的时候**一点提示都没有**，最难查。
     /// 写成光秃秃的域名，用户看得懂，平台也不拦。
-    static let updateSource = "lingyan.cyou"
+    /// ⚠️ 域名只从 `AevisHosts` 拿 —— 换域名时这里最容易漏（QQ 消息里的地址
+    ///    用户会手抄，写错了没人报错，只会静默失败）。
+    static let updateSource = AevisHosts.siteDomain
 }

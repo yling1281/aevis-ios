@@ -200,6 +200,18 @@ final class AdminStore: ObservableObject {
                    done: blocked ? "设备已封" : "设备已解封")
     }
 
+    /// 解绑设备 —— **不是**解封设备。
+    ///
+    /// 解封 = 把封禁记录删掉（他被挡在门外了）；
+    /// 解绑 = 把"这台机器归谁"的登记删掉（他没被拦，只是换了台机器）。
+    /// 用户换手机 / 重装系统 / 刷机之后卡住，要用的就是后者；
+    /// 而且解绑会把「一机一号」的占用释放掉，否则那台机器会被一个
+    /// 已经不存在的绑定永远占着，新人绑不上。
+    func unbindDevice(_ deviceId: String) async {
+        await post("/api/admin/unbind_device", ["device_id": deviceId],
+                   done: "已解绑，他下次登录会重新绑定")
+    }
+
     // MARK: - 注册码
 
     func deleteCode(_ code: String) async {
@@ -283,10 +295,20 @@ final class AdminStore: ObservableObject {
 
     /// 出现 401 就直接把人送回登录页 —— 令牌没了，再刷新也是白刷。
     private func notice(_ error: Error) {
-        if let failure = error as? AdminAPI.Failure, case .http(401, _) = failure {
-            signOut()
-            errorText = "登录过期了，重新登录一次。"
-            return
+        if let failure = error as? AdminAPI.Failure {
+            switch failure {
+            case .cancelled:
+                // 用户切走页面而已。**静默** ——
+                // 以前它会弹成"连不上服务器（已取消）"，看着像后台断了，
+                // 害得人以为连不上、反复重试（服务端那串连点就是这么来的）。
+                return
+            case .http(401, _):
+                signOut()
+                errorText = "登录过期了，重新登录一次。"
+                return
+            default:
+                break
+            }
         }
         errorText = describe(error)
     }

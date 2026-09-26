@@ -7,8 +7,9 @@ import UIKit
 /// 所有 `/api/admin/*` 都要 `Authorization: Bearer <token>`（见那边的 `current_user`）。
 enum AdminAPI {
 
-    /// 服务器地址。**默认写死线上那台**，但登录页可以改（在本机对着测试服务器跑的时候用）。
-    static let defaultBase = "https://account.lingyan.cyou"
+    /// 服务器地址。**默认线路一**，但登录页可以在线路一/线路二之间切，也可以手填
+    /// （在本机对着测试服务器跑的时候用）。域名只在 `AevisHosts` 里定义一处。
+    static let defaultBase = AevisHosts.accountBase
     private static let baseKey = "aevis.admin.base"
 
     static var base: String {
@@ -19,10 +20,45 @@ enum AdminAPI {
         set { UserDefaults.standard.set(newValue, forKey: baseKey) }
     }
 
+    /// 现在走的是哪条线路（"线路一" / "线路二"）；手填了别的地址就是 nil。
+    static var activeLineName: String? { AevisHosts.lineName(for: base) }
+
+    /// 探测两条线路，选第一条能通的。
+    ///
+    /// 判断口径和主 App **共用**（`AccountEndpoint.reachable`）—— 两边各判一套的话，
+    /// 会出现"主 App 走线路二、管理端走线路一"，排查时对不上号。
+    /// 返回选中的线路名；两条都不通返回 nil，让上层照常报错。
+    @discardableResult
+    static func autoPickLine() async -> String? {
+        // 现在这条要是通着，就不动它 —— 免得用户手动选的线路每次开屏都被改回去
+        if activeLineName != nil, await AccountEndpoint.reachable(base) {
+            return activeLineName
+        }
+        for line in AevisHosts.accountLines where await AccountEndpoint.reachable(line.base) {
+            base = line.base
+            return line.name
+        }
+        return nil
+    }
+
+    /// 按名字切线路（登录页上点「线路二」）。
+    @discardableResult
+    static func useLine(named name: String) -> Bool {
+        guard let line = AevisHosts.accountLines.first(where: { $0.name == name }) else {
+            return false
+        }
+        base = line.base
+        return true
+    }
+
     enum Failure: LocalizedError {
         case http(Int, String)
         case network(String)
         case badReply
+        /// 任务被取消（用户切走页面了）。**这不是错误，别拿出来吓人** ——
+        /// 原来它会被塞进 `.network`，界面上写"连不上服务器（已取消）"，
+        /// 看着像后台断了，其实只是他自己翻到别的页去了。
+        case cancelled
 
         var errorDescription: String? {
             switch self {
@@ -32,6 +68,7 @@ enum AdminAPI {
                 return message.isEmpty ? "服务器返回 \(code)。" : message
             case .network(let detail): return detail
             case .badReply: return "服务器返回的东西看不懂（格式对不上）。"
+            case .cancelled: return ""
             }
         }
     }
@@ -98,6 +135,10 @@ enum AdminAPI {
             return data
         } catch let failure as Failure {
             throw failure
+        } catch is CancellationError {
+            throw Failure.cancelled
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            throw Failure.cancelled
         } catch {
             throw Failure.network("连不上服务器（\(error.localizedDescription)）")
         }

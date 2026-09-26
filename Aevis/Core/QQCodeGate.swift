@@ -46,8 +46,8 @@ final class QQCodeGate {
     private init() {}
 
     /// 账号后端的地址。**必须和服务器上部署的一致。**
-    /// 改域名的话改这一行（只有一处）。
-    private let server = "https://account.lingyan.cyou"
+    /// 域名在 `AevisHosts` 里定义一处，这里引用 —— 别再写死字面量。
+    private let server = AevisHosts.accountBase
 
     /// 关键词后面跟的那一串，必须长得像口令才认（字母数字、4–12 位）。
     /// 为什么要有这个限制：不然「注册码是多少」这种话会被当成
@@ -119,7 +119,7 @@ final class QQCodeGate {
 
         guard !key.isEmpty else {
             return "发注册码的功能还没配好：缺服务器的钥匙。\n"
-                + "（管理员去 account.lingyan.cyou/admin 复制「发码钥匙」，"
+                + "（管理员去 " + AevisHosts.account("/admin") + " 复制「发码钥匙」，"
                 + "填进 App 的「我 → 设置 → QQ 机器人 → 发注册码」。）"
         }
         guard !c2cOpenID.isEmpty else { return nil }
@@ -197,7 +197,8 @@ final class QQCodeGate {
     /// 服务器回的是 `{"error": "...", "message": "..."}`。
     /// 这里按错误码给一句**用户看了知道下一步干什么**的话 ——
     /// 直接甩"400 bad_ticket"他只会以为坏了。
-    /// 把 `https://lingyan.cyou/` 削成 `lingyan.cyou`。
+    /// 把 `https://example.com/` 削成 `example.com`（域名本身由服务器下发，
+    /// 这里只削协议和结尾斜杠，不认具体域名）。
     ///
     /// **QQ 机器人不允许往消息里放链接** —— 带 `http(s)://` 的内容会被平台
     /// 静默过滤（整条消息发不出去，而且是**无声无息**的，最难查）。

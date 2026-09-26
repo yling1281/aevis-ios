@@ -18,8 +18,8 @@ settings:
     #   我却 `deploy_server.py 61 …` 去部署 → source.json 标成 0.0.61，
     #   而用户装到手机上看到的是 0.0.60。**部署脚本的第一个参数是"包里的版本号"，
     #   不是 run_number**（两者相等是靠每次都对上，不是自动的）。
-    MARKETING_VERSION: "0.0.70"
-    CURRENT_PROJECT_VERSION: "70"
+    MARKETING_VERSION: "0.0.74"
+    CURRENT_PROJECT_VERSION: "74"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
@@ -130,6 +130,12 @@ targets:
       # 钥匙串封装两个 App 共用**同一份** —— 它只依赖 Security，自包含。
       # （跟 AevisBroadcast 复用 ScreenShareStore 是一个套路：契约只此一份。）
       - path: Aevis/Core/Keychain.swift
+      # 域名常量也共用同一份 —— 管理端和主 App 必须指向同一个后端，
+      # 两边各写一遍的话，换域名时一定会漏一个（2026-09-26 就是这么发现的）。
+      - path: Aevis/Core/AevisHosts.swift
+      # 线路探测（线路一/线路二）同样共用：两个 App 必须用同一套"谁通走谁"的判断，
+      # 否则会出现"主 App 走线路二、管理端走线路一"，排查时对不上号。
+      - path: Aevis/Core/AccountEndpoint.swift
     settings:
       base:
         PRODUCT_NAME: AevisAdmin
@@ -140,8 +146,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         # 管理端是**另一个 App**，版本号自己一套 —— 别跟主 App 的 0.0.x 混
         # （它给管理员用，更新节奏跟买家版本完全无关）
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.1"
+        CURRENT_PROJECT_VERSION: "2"
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"

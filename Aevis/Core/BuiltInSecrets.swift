@@ -39,7 +39,7 @@ enum BuiltInSecrets {
     /// 就能换到注册码，"只有群里的人能注册"这个门槛就白设了。
     ///
     /// ⚠️ 这里**默认留空**是有意的：正常路径是用户从自己的管理后台
-    /// （account.lingyan.cyou/admin）复制出来，填进 App 的设置里。
+    /// （`AevisHosts.account("/admin")`）复制出来，填进 App 的设置里。
     /// 那比让他去 GitHub 配一个 Secret 容易得多。
     /// 配了 CI Secret（`AEVIS_ACCOUNT_BOT_KEY`）的话，这里会被自动填上，
     /// 用户就一次都不用填。

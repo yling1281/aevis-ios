@@ -65,6 +65,9 @@ enum BlackBox {
     private static var loaded = false
     private static var handle: FileHandle?
     private static var writtenBytes = 0
+    /// 这个文件是**加密之前那一版**建的（没有格式标记）→ 需要一次性迁移。
+    /// ⚠️ 不迁移的后果见 `migrateLocked()` 上面那段 —— 0.0.64 的崩溃报告就是这么全废的。
+    private static var needsMigration = false
 
     private static var fileURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
@@ -205,7 +208,9 @@ enum BlackBox {
     /// 拿「版本 + 崩前最后一个真正的动作」算 —— 所以它同时是一把定位钥匙：
     /// 十个用户报同一个码 = 卡在同一处，不用挨个要日志。
     static var crashCode: String {
-        crashCode(for: lastCrashLines)
+        // ⚠️ 从**解密后**的行算 —— 否则同一个故障在迁移前/后算出来的码会不一样，
+        //    那"十个用户报同一个码"这件事就不成立了。
+        crashCode(for: display(lastCrashLines))
     }
 
     /// 给任意一段记录算码（测试和复用都走这儿，规则只写一份）。
@@ -240,13 +245,25 @@ enum BlackBox {
 
         if crashedLastRun {
             out += "\n—— 上一次可能异常退出前的那几十步 ——\n"
-            let crash = lastCrashLines
+            let crash = display(lastCrashLines)
             out += crash.isEmpty ? "(没记到)\n" : crash.joined(separator: "\n") + "\n"
         }
 
         out += "\n—— 最近的运行记录 ——\n"
-        out += recent.joined(separator: "\n")
+        out += display(recent).joined(separator: "\n")
         return out
+    }
+
+    /// ⭐ **报告里绝不允许出现 base64。**
+    ///
+    /// 出这个函数之前再过一道解密，纯兜底：只要那一行能解开，就换成明文。
+    /// 为什么值得兜：文件格式一旦判错（今天真出过 —— 0.0.64 的崩溃报告全废），
+    /// 用户辛苦发来的现场就变成一堆乱码，而且**他自己看不出来有问题**。
+    /// 一次 `open()` 的成本，比事后追查便宜太多。
+    ///
+    /// 明文行不受影响：`Data(base64Encoded:)` 直接失败 → 原样返回。
+    private static func display(_ lines: [String]) -> [String] {
+        lines.map { open($0) ?? $0 }
     }
 
     /// 清掉（用户自己点的小按钮）。
@@ -322,11 +339,39 @@ enum BlackBox {
         appendLocked(line)
     }
 
+    /// ⚠️ **一次性迁移**：这个文件是「加密之前那一版」建的（没有格式标记）。
+    ///
+    /// 真栽过 —— **0.0.64 那几份崩溃报告全废了**：
+    /// 文件里没有格式标记时，`loadLocked` 判成"这全是上一版留下的明文" → **不去解密**；
+    /// 可升级之后新写进去的行是**加密的** → 报告里一半明文一半 base64。
+    /// 用户辛苦发来的现场等于交了白卷，而看日志的人完全不知道为什么。
+    ///
+    /// 修法：补上标记，并把已有的行**按各自状态处理** ——
+    /// 已经能解开的（是密文）原样留着、别再封一层；是明文的封起来。只跑一遍。
+    private static func migrateLocked() {
+        guard needsMigration else { return }
+        needsMigration = false
+        let normalized = [header] + buffer.map { line in
+            // `open` 能成功 = 这一行本来就是密文（当前这个坏状态写下的）→ 原样留
+            if open(line) != nil { return line }
+            return seal(line) ?? line
+        }
+        let text = normalized.joined(separator: "\n") + "\n"
+        try? handle?.close()
+        handle = nil
+        try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+        writtenBytes = text.utf8.count
+    }
+
     /// 往文件末尾追加一行。**O(1)**，不是每次重写整个文件 —— 这是"不卡"的关键。
     ///
     /// 写出去的是 `base64(AES-GCM(明文行))`；封不出来就退回明文写
     /// （宁可日志没加密，也不能因为钥匙串抽风就把现场丢了）。
     private static func appendLocked(_ plain: String) {
+        // ⚠️ 迁移必须赶在**第一次写盘之前** ——
+        //    否则新写的加密行会追加到一个没有标记的文件后面，读的时候当明文，报告里全是 base64。
+        migrateLocked()
+
         if handle == nil {
             let url = fileURL
             let isNew = !FileManager.default.fileExists(atPath: url.path)
@@ -388,6 +433,12 @@ enum BlackBox {
             // 解不开的（钥匙串换过、或者被手改过）**原样留着** ——
             // 丢一行现场比留一行看不懂的 base64 更糟。
             lines = lines.map { open($0) ?? $0 }
+        } else if !lines.isEmpty {
+            // ⚠️ 文件存在、却没有格式标记 = **加密之前那一版**建的。
+            // 老写法在这里什么都不做（当成明文直接用）—— 而升级之后新写的行是密文，
+            // 于是那些密文永远没人解，报告里就是一堆 base64（0.0.64 真的这样废过）。
+            // 标一下，等第一次写盘前由 `migrateLocked()` 补标记。
+            needsMigration = true
         }
         // 没有标记 = 上一版写的明文日志，直接用
         buffer = Array(lines.suffix(limit))

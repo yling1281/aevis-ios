@@ -33,7 +33,8 @@ enum DeviceIdentity {
     static var pretty: String { format(canonical) }
 
     /// 网页上绑定的入口 —— 绑定**只在网页上做**，App 里不需要登录。
-    static let bindPage = URL(string: "https://account.lingyan.cyou/me")
+    /// 域名走 `AevisHosts`，别写死。
+    static let bindPage = AevisHosts.accountURL("/me")
 
     // MARK: - 内部
 

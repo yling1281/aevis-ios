@@ -253,21 +253,30 @@ struct AdminPage<Content: View>: View {
         } message: {
             Text(store.errorText ?? "")
         }
-        .overlay(alignment: .bottom) {
+        // ⚠️⚠️ 提示条放在**顶部**，不放底部 —— 这是真栽过的：
+        //    底部会被 TabView 的标签栏挡掉，用户点「封禁」之后**看不到任何反馈**，
+        //    以为没成功就反复点。服务端日志里那 13 次连点（封/解封来回切）就是这么来的。
+        //    顶部落在导航栏下面，标签栏够不着。
+        .overlay(alignment: .top) {
             if let toast = store.toast {
-                Text(toast)
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 11)
-                    .background(Color.black.opacity(0.85))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.bottom, 26)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .task(id: toast) {
-                        try? await Task.sleep(nanoseconds: 1_900_000_000)
-                        store.toast = nil
-                    }
+                HStack(spacing: 7) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(toast)
+                }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.88))
+                .clipShape(Capsule())
+                .padding(.top, 8)
+                .padding(.horizontal, 16)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .task(id: toast) {
+                    // 2.6 秒：1.9 秒时他往往还在看列表，容易以为"什么都没发生"
+                    try? await Task.sleep(nanoseconds: 2_600_000_000)
+                    store.toast = nil
+                }
             }
         }
         .animation(.easeOut(duration: 0.2), value: store.toast)

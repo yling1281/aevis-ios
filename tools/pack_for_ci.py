@@ -140,6 +140,11 @@ MUST_HAVE = [
     "AevisVPNProbe/Tunnel/PacketTunnelProvider.swift",
     "AevisVPNProbe/Tunnel/Info.plist",
     "AevisVPNProbe/Tunnel/AevisVPNProbeTunnel.entitlements",
+    # ——— 域名与线路（2026-09-26 换 apekin 那次加的）———
+    # ⚠️ 漏了这两个编译就直接失败：全项目的域名都从 AevisHosts 拿，
+    #    而且 `project.yml` 把这两个文件也写进了管理端 target 的 sources。
+    "Aevis/Core/AevisHosts.swift",
+    "Aevis/Core/AccountEndpoint.swift",
 ]
 
 
