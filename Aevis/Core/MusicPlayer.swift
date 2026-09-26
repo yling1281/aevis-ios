@@ -10,6 +10,26 @@ import MediaPlayer
 ///
 /// 锁屏和灵动岛要显示的东西都通过 `MPNowPlayingInfoCenter` 发布，
 /// 她之后要做灵动岛，直接用这里的数据就行。
+///
+/// ## ⚠️ 为什么整个类都是 `@MainActor`（2026-09-26 修的真凶）
+/// 在这之前它**没有任何线程归属**。而调用方是这么写的：
+///
+/// ```swift
+/// Task { @MainActor in
+///     await player.play(results)      // ← 这行看着像在主线程跑
+/// }
+/// ```
+///
+/// **不是的。** `play` 是个 nonisolated 的 `async` 函数，`await` 一个
+/// nonisolated async 函数会让它**跳回全局并发池执行** —— 那个 `@MainActor`
+/// 只管住了调用点，管不住函数体。
+/// 于是 `queue = …`、`isPlaying = …`、AVPlayer、`MPNowPlayingInfoCenter`
+/// 全都在后台线程上被碰。**在后台线程发布 `@Published` 在 iOS 26 上是硬崩**，
+/// 不是警告。
+///
+/// 加上 `@MainActor` 之后，`play` 的**函数体**也在主 actor 上跑，
+/// 中途 `await` 网络回来还会自动回到主线程 —— 这才是原本想要的效果。
+@MainActor
 final class MusicPlayer: NSObject, ObservableObject {
 
     static let shared = MusicPlayer()
@@ -67,20 +87,23 @@ final class MusicPlayer: NSObject, ObservableObject {
     private func configureRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
 
+        // ⚠️ 锁屏/耳机线控的回调**不在主线程**上 ——
+        // 直接 `self?.resume()` 就是从后台线程改 `@Published`（跟上面说的同一个坑）。
+        // 每个都得跳回主线程。
         center.playCommand.addTarget { [weak self] _ in
-            self?.resume()
+            Task { @MainActor in self?.resume() }
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            self?.pause()
+            Task { @MainActor in self?.pause() }
             return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in
-            Task { await self?.next() }
+            Task { @MainActor in await self?.next() }
             return .success
         }
         center.previousTrackCommand.addTarget { [weak self] _ in
-            Task { await self?.previous() }
+            Task { @MainActor in await self?.previous() }
             return .success
         }
     }
@@ -90,6 +113,7 @@ final class MusicPlayer: NSObject, ObservableObject {
     /// 换一批歌并从第一首开始。
     func play(_ tracks: [MusicTrack], startingAt start: Int = 0) async {
         guard !tracks.isEmpty else { return }
+        BlackBox.step("点了播放（\(tracks.count) 首，从第 \(start + 1) 首起）")
         queue = tracks
         index = min(max(start, 0), tracks.count - 1)
         await loadCurrent()
@@ -98,6 +122,7 @@ final class MusicPlayer: NSObject, ObservableObject {
     /// 接着当前队列放某一首。
     func play(queue tracks: [MusicTrack], index target: Int) async {
         guard tracks.indices.contains(target) else { return }
+        BlackBox.step("点了第 \(target + 1) 首（队列 \(tracks.count) 首）")
         queue = tracks
         index = target
         await loadCurrent()
@@ -164,7 +189,7 @@ final class MusicPlayer: NSObject, ObservableObject {
 
         // 黑匣子：点歌这条链最容易崩，每一步都留一行 ——
         // 下次再闪退，看最后停在哪一行就知道死在哪了。
-        BlackBox.log("放歌《\(track.title)》id=\(track.id)")
+        BlackBox.step("点歌《\(track.title)》")
 
         loadingTask?.cancel()
         errorText = nil
@@ -176,16 +201,18 @@ final class MusicPlayer: NSObject, ObservableObject {
 
         onTrackChanged?(track)
 
-        // 歌词是附属信息，拿不到不影响播放
+        // 歌词是附属信息，拿不到不影响播放。
+        // ⚠️ 这个 `Task` 在 `@MainActor` 的类里创建 → 它本身就在主 actor 上，
+        // 所以 `self.lyric = …` 不需要再 `MainActor.run`（以前那句是多余的）。
         let lyricTask = Task { [id = track.id] in
             if let text = try? await NeteaseClient.shared.lyric(for: id) {
-                await MainActor.run { self.lyric = text }
+                self.lyric = text
             }
         }
 
         do {
             let url = try await NeteaseClient.shared.playableURL(for: track.id)
-            BlackBox.log("拿到播放地址，开始建播放器")
+            BlackBox.step("拿到播放地址，建播放器")
             let item = AVPlayerItem(url: url)
             let newPlayer = AVPlayer(playerItem: item)
             player = newPlayer
@@ -193,7 +220,7 @@ final class MusicPlayer: NSObject, ObservableObject {
             newPlayer.play()
             isPlaying = true
             updateNowPlaying()
-            BlackBox.log("已经在放了")
+            BlackBox.step("已经在放了")
         } catch {
             BlackBox.failure("放歌失败", detail: error.localizedDescription)
             errorText = error.localizedDescription

@@ -88,6 +88,17 @@
 	<string>Aevis 需要读取相册，这样你可以挑一张图给 TA 看、或者拿来当聊天背景和头像。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Aevis 需要保存图片到相册，这样你可以把 TA 生成或收到的图片存下来。</string>
+	<!-- ⚠️ 这两个键是「字体导入」的命门（2026-09-26 补的）。
+	     没有它们，本 App 的 Documents **不会出现在「文件」App 里**，
+	     用户根本没地方把 ttf/otf 放进来 —— 他只会看到"点了没反应"。
+	     UIFileSharingEnabled          → 「文件」→ 我的 iPhone 里出现 Aevis
+	     LSSupportsOpeningDocumentsInPlace → 别人也能用"用 Aevis 打开"把文件送进来
+	     另外一个补不了的事实：**别的 App 文件夹下的文件在「文件」里是灰的**
+	     （读不到别人的沙盒），iOS 就是这么设计的，所以界面上的说明文字同样重要。 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<!-- 后台放音频。

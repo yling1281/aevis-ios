@@ -349,13 +349,21 @@ struct AppearanceSettingsCard: View {
                 Spacer(minLength: 0)
             }
 
-            // ⚠️ 这一段是**冲着真实反馈写的**：「导入 TTF 时点「打开」点不动」。
-            // 原因多半不在 App 里 —— iOS 的「文件」里，**别的 App 文件夹下的文件
-            // 系统会直接灰掉**（那是别的 App 的沙盒，我们读不到），点了当然没反应。
+            // ⚠️ 这两段是**冲着真实反馈写的**：「导入 TTF 时点「打开」点不动」。
+            // 一半原因是 iOS 的规矩 —— 「文件」里**别的 App 文件夹下的文件会被灰掉**
+            //（那是人家的沙盒，我们读不到），点了当然没反应。
+            // 另一半是我们自己缺了 Info.plist 的两个键（已补），
+            // 本 App 的文件夹以前**根本不在「文件」里露面**，用户没地方放字体。
             Text("支持 .ttf / .otf / .ttc。\n"
-                 + "如果点「打开」没反应，多半是文件放错地方了：iOS 只允许选"
-                 + "「我的 iPhone」或 iCloud Drive 里的文件。如果你那个 TTF 在某个 App 的文件夹里"
-                 + "（微信、QQ、下载器那种），先长按它 → 拷贝/移动到「我的 iPhone」，再来导入。")
+                 + "最好这样放：打开「文件」App → 我的 iPhone → Aevis，"
+                 + "把字体文件丢进去，再回来点「导入字体文件」。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("如果点「打开」没反应：iOS 只让选「我的 iPhone」和 iCloud Drive 里的文件，"
+                 + "别的 App 文件夹（微信、QQ、下载器）里的会被系统灰掉。"
+                 + "长按那个文件 → 拷贝/移动到「我的 iPhone」，再试一次。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -8,6 +8,24 @@ struct RootView: View {
     @StateObject private var gate = DeviceGate.shared
     /// 快捷指令回传来的那一句话，在顶上飘一下就消失。
     @State private var bridgeNote: String?
+    /// 上次崩了 → **整个屏幕报错误码**（用户 2026-09-26 明确要求）。
+    @State private var showCrash = RootView.shouldShowCrashReport
+
+    /// 崩了要不要弹那一屏。
+    ///
+    /// ⚠️ 演示/截图跑的时候**必须跳过** —— 否则 30 多张截图全是这一屏
+    ///（门禁页刚踩过同样的坑，见 `-aevisShowGate`）。
+    private static var shouldShowCrashReport: Bool {
+        guard BlackBox.crashedLastRun else { return false }
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-aevisDemo") || args.contains("-aevisSkipGate")
+            || args.contains("-aevisSelfCheck") {
+            return false
+        }
+        #endif
+        return true
+    }
 
     var body: some View {
         ZStack {
@@ -33,6 +51,11 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.22), value: bridgeNote)
+        // 上次崩了就先报码 —— **盖在门禁页上面**：
+        // 没授权的时候人本来就卡在门禁页，而崩溃码是当下更该看到的东西。
+        .fullScreenCover(isPresented: $showCrash) {
+            CrashReportView { showCrash = false }
+        }
         // 授权通过的那一刻：门禁页淡出、主界面淡入。
         // ⚠️ 盯的是 `gate.authorized` 而不是 `isBlocking` —— 后者是计算属性，
         // 不是 `@Published`，在这里不会触发刷新。

@@ -84,6 +84,7 @@ final class FontStore: ObservableObject {
     enum ImportFailure: LocalizedError {
         case unreadable(String)
         case noFontInside(String)
+        case rejected(String, String)
 
         var errorDescription: String? {
             switch self {
@@ -92,6 +93,10 @@ final class FontStore: ObservableObject {
             case .noFontInside(let name):
                 return "「\(name)」里面没找到可用的字体。iOS 只认 ttf / otf / ttc，"
                     + "woff / woff2 是网页字体，装不了。"
+            case .rejected(let name, let why):
+                // ⚠️ 以前这里**什么都不说**：注册失败了也照样往列表里加，
+                // 用户看到"导入成功"但字根本没变 —— 比报错还难查。
+                return "「\(name)」iOS 不收：\(why)"
             }
         }
     }
@@ -105,6 +110,8 @@ final class FontStore: ObservableObject {
 
         let fileName = url.lastPathComponent
         let target = directory.appendingPathComponent(fileName)
+        // 黑匣子：这段以前完全没有记录，用户说"点了没反应"时无从查起。
+        BlackBox.step("导入字体《\(fileName)》")
 
         do {
             if FileManager.default.fileExists(atPath: target.path) {
@@ -112,13 +119,19 @@ final class FontStore: ObservableObject {
             }
             try FileManager.default.copyItem(at: url, to: target)
         } catch {
+            BlackBox.failure("字体复制失败", detail: "\(fileName)：\(error.localizedDescription)")
             throw ImportFailure.unreadable(fileName)
         }
 
-        Self.register(url: target)
+        if let why = Self.register(url: target) {
+            BlackBox.failure("字体注册失败", detail: "\(fileName)：\(why)")
+            try? FileManager.default.removeItem(at: target)
+            throw ImportFailure.rejected(fileName, why)
+        }
 
         let found = Self.descriptors(of: target)
         guard !found.isEmpty else {
+            BlackBox.failure("字体文件里没有可用字体", detail: fileName)
             try? FileManager.default.removeItem(at: target)
             throw ImportFailure.noFontInside(fileName)
         }
@@ -131,12 +144,14 @@ final class FontStore: ObservableObject {
         if added.isEmpty {
             // 这个文件里的字体之前就导过，直接选中它
             selectedPostScriptName = found.first?.id ?? selectedPostScriptName
+            BlackBox.step("字体已装过，直接选中：\(found.first?.name ?? fileName)")
             return found.first?.name ?? fileName
         }
 
         installed.append(contentsOf: added)
         persistList()
         selectedPostScriptName = added[0].id
+        BlackBox.step("字体导入成功：\(added[0].displayName)")
         return added[0].displayName
     }
 
@@ -164,11 +179,25 @@ final class FontStore: ObservableObject {
 
     // MARK: - 私有
 
-    private static func register(url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+    /// 注册字体。返回 `nil` = 成功（或者"之前就注册过"），否则返回**人能看的原因**。
+    ///
+    /// ⚠️ 这个返回值以前是丢掉的。当时注释写的是"已经注册过会返回 false，
+    /// 这是正常情况，忽略即可" —— 可**别的失败也走同一条路**，
+    /// 于是"系统根本不收这个字体"被当成成功，界面上显示导入好了、字一点没变。
+    private static func register(url: URL) -> String? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return "复制过来的文件不见了"
+        }
         var error: Unmanaged<CFError>?
-        // 已经注册过会返回 false 并把错误塞进 error，这是正常情况，忽略即可
-        _ = CTFontManagerRegisterFontsForURL(url as CFURL, .persistent, &error)
+        let ok = CTFontManagerRegisterFontsForURL(url as CFURL, .persistent, &error)
+        if ok { return nil }
+
+        let failure = error?.takeRetainedValue()
+        let code = failure.map { CFErrorGetCode($0) } ?? -1
+        // 105 = kCTFontManagerErrorAlreadyRegistered。重复导入是正常的，不算错。
+        if code == 105 { return nil }
+        let text = failure.map { CFErrorCopyDescription($0) as String } ?? "系统没说为什么"
+        return "\(text)（错误 \(code)）"
     }
 
     private static func descriptors(of url: URL) -> [(id: String, name: String)] {
