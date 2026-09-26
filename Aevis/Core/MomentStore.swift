@@ -596,6 +596,7 @@ final class MomentStore: ObservableObject {
     ///
     /// 用户原话：「有些还会私信主动联系你」—— 重点是「有些」，
     /// 所以按概率来，不是每次都发。真发出去的时候还会走一趟 Bark（如果开了）。
+    @MainActor
     func maybeSendDirectMessage(reason: String, persona: Persona, config: LLMConfig, memory: [String]) async {
         let settings = AppSettings.shared
         guard settings.momentDMEnabled else { return }
@@ -649,6 +650,7 @@ final class MomentStore: ObservableObject {
     /// 打开 App 时补发。
     /// 真实定时做不到（后台跑不了模型），所以用「距上一条够久了就补一条」的办法，
     /// 效果上接近「她一直在发」。
+    @MainActor
     func catchUpIfNeeded(persona: Persona, config: LLMConfig, memory: [String]) async {
         let settings = AppSettings.shared
         guard settings.momentsEnabled, !working else { return }

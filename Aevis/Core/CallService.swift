@@ -66,6 +66,7 @@ final class CallService: ObservableObject {
 
     // MARK: - 开始 / 挂断
 
+    @MainActor
     func start(persona: Persona, config: LLMConfig, memory: [String]) async {
         guard state == .idle else { return }
         BlackBox.log("☎️ 拨号 → \(persona.name.isEmpty ? "TA" : persona.name)")
@@ -181,6 +182,7 @@ final class CallService: ObservableObject {
 
     // MARK: - 一轮对话
 
+    @MainActor
     private func handle(_ utterance: String) async {
         guard state == .active else { return }
         // 记下这一轮属于哪通电话。挂断会换掉 session，下面就能认出来。

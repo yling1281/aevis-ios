@@ -229,6 +229,7 @@ final class MemoryStore: ObservableObject {
 
     /// 聊得够多了就提炼一次。
     /// - Parameter messageCount: 当前对话总条数
+    @MainActor
     func extractIfNeeded(config: LLMConfig, messages: [ChatMessage], persona: Persona, force: Bool = false) async {
         guard !working else { return }
         guard config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).count > 0 else { return }

@@ -166,6 +166,7 @@ final class QQBotService: ObservableObject {
 
     /// 「测试连接」：换一次 token + 问一次机器人自己的信息 + 取一次网关。
     /// 三步都过了才算通 —— 只测 token 是测不出权限问题的。
+    @MainActor
     func test() async -> String {
         do {
             let token = try await QQBotClient.shared.accessToken(force: true)
@@ -369,6 +370,7 @@ final class QQBotService: ObservableObject {
         }
     }
 
+    @MainActor
     private func handleIncoming(_ type: String, _ d: [String: Any]) async {
         let isPrivate = type == "C2C_MESSAGE_CREATE"
         let author = d["author"] as? [String: Any]

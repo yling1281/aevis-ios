@@ -89,6 +89,7 @@ final class AccountService: ObservableObject {
     }
 
     /// 有 token 的时候拉一次资料，顺便验证 token 还有效。
+    @MainActor
     func refreshProfile() async {
         guard isConfigured, isSignedIn else { return }
         busy = true
@@ -114,6 +115,7 @@ final class AccountService: ObservableObject {
     }
 
     /// 收下登录页带回来的 token。拉一次资料确认它真的能用。
+    @MainActor
     func adoptWebToken(_ raw: String) async throws {
         let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {

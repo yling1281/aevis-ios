@@ -18,6 +18,9 @@
   R25 `Keychain.set(x, forKey:)` 标签写错     → 编译错误（build-50）
   R26 UIKit 的 `UIImage` 直接 `.resizable()`  → 编译错误（build-53 挂在两句上）
   R27 三元里 `? .secondary : .orange`        → 编译错误（build-54 挂在它上）
+  R29 ObservableObject 的 async 方法里改 @Published 却没 @MainActor
+                                              → 后台线程改 @Published，**iOS 26 硬崩**
+                                                （真机诊断 AE-155A-91FC；MusicPlayer 那次也是它）
 
 （R10–R19 的由来写在各自函数的 docstring 里，这里只列最先立起来的那批。）
 
@@ -1307,6 +1310,99 @@ def check_card_usage(sources, types):
                     report("R9", path, number, "%s() 在项目里找不到定义" % name)
 
 
+# ——— R29 用的三个正则 + 括号配对 ———
+
+OBSERVABLE_CLASS = re.compile(
+    r"(?m)^((?:@[A-Za-z]+\s+)*)(?:final\s+|public\s+|internal\s+)*class\s+"
+    r"([A-Za-z_]\w*)\s*:[^\n{]*ObservableObject"
+)
+PUBLISHED_PROP = re.compile(r"@Published[^\n]*?(?:var|let)\s+([A-Za-z_]\w*)")
+ASYNC_FUNC = re.compile(
+    r"(?m)^([ \t]*(?:(?:@[A-Za-z]+\s+)|(?:private\s+|internal\s+|public\s+|fileprivate\s+))*)"
+    r"func\s+([A-Za-z_]\w*)\s*\([^)]*\)[^\n{]*\basync"
+)
+
+
+def balanced_end(text, open_index, limit=400000):
+    """从 `{` 处往后找配对的 `}`，返回**闭合括号之后**的下标；找不到返回 -1。
+
+    只用来圈出类体 / 函数体，所以直接数括号就够 —— 传进来的文本已经过了
+    `strip_code()`，注释和字符串都被换成空格了，括号不会被字符串里的花括号带偏。
+    """
+    if open_index < 0 or open_index >= len(text) or text[open_index] != "{":
+        return -1
+    depth = 0
+    for index in range(open_index, min(len(text), open_index + limit)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return -1
+
+
+def check_mainactor_state(sources):
+    """`ObservableObject` 里，**async 方法体内**改了 `@Published`，但类没标 `@MainActor`。
+
+    ⚠️ 为什么会崩：Swift 5.5 起，**非隔离的 async 函数在 `await` 之后跳回全局并发池** ——
+    调用点写 `Task { await gate.refresh() }` 只管住调用点，管不住函数体。
+    于是那些 `@Published` 是在后台线程改的，**iOS 26 上直接硬崩**。
+
+    真踩过两次：
+      ① `MusicPlayer` —— 后台改 `@Published`，iOS 26 硬崩（build-61 那批）
+      ② `DeviceGate` —— 真机诊断 `AE-155A-91FC`（iPhone15,3 / 0.0.62）：
+         BlackBox 里最后一行正好是 `revokeBecauseAccountGone()` 里那句
+         「账号已不存在 → 退回未授权」，写完进程就没了。
+
+    ⚠️ 修的时候**别整个类盲标 `@MainActor`** —— build-61 那次盲改炸出 14 个编译错误，
+    因为**在非隔离上下文里读它的属性是错误、读 `.shared` 只是警告**。
+    要连同调用点一起改，改完再跑这一条确认。
+
+    只报「确实在 async 函数体里赋值/改属性」的，静态属性和注释不算 —— 误报接近零。
+    """
+    for path, source in sorted(sources.items()):
+        code = strip_code(source)
+        for match in OBSERVABLE_CLASS.finditer(code):
+            annotations, name = match.group(1), match.group(2)
+            if "@MainActor" in annotations:
+                continue
+            body_start = code.find("{", match.end())
+            if body_start < 0:
+                continue
+            body_end = balanced_end(code, body_start)
+            if body_end < 0:
+                continue
+            body = code[body_start:body_end]
+            published = PUBLISHED_PROP.findall(body)
+            if not published:
+                continue
+
+            for func in ASYNC_FUNC.finditer(body):
+                prefix, func_name = func.group(1), func.group(2)
+                # 方法自己带了 @MainActor 也算数（给整个类标会炸出「读属性」那类编译错误，
+                # 所以很多地方是只给方法标 —— 那种情况这里必须放过）
+                if "@MainActor" in prefix:
+                    continue
+                open_index = body.find("{", func.end())
+                if open_index < 0:
+                    continue
+                close_index = balanced_end(body, open_index)
+                func_body = body[open_index:close_index if close_index > 0 else len(body)]
+                touched = [p for p in published
+                           if re.search(r"(?<![\w.])%s\s*(?:=[^=]|\.\w+\s*=)" % re.escape(p), func_body)]
+                if not touched:
+                    continue
+                line = code[:body_start + open_index].count("\n") + 1
+                report(
+                    "R29", path, line,
+                    "%s.%s() 是 async，却在里面改 @Published（%s）—— await 之后线程是随机的，"
+                    "iOS 26 上会硬崩。整个类标 @MainActor，或把这次赋值挪到 MainActor 上"
+                    % (name, func_name, "、".join(touched))
+                )
+
+
 def main():
     sources = {}
     for path in swift_files():
@@ -1346,6 +1442,7 @@ def main():
     check_optional_suffix_use(sources)
     check_keychain_labels(sources)
     check_uiimage_resizable(sources)
+    check_mainactor_state(sources)
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()

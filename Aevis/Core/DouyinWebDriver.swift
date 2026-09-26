@@ -76,6 +76,7 @@ final class DouyinWebDriver: NSObject, ObservableObject {
     ///
     /// 选择器列了多个候选 —— 抖音的 DOM 在不同版本里叫法不一样，
     /// 挨个试，试到哪个就回报哪个；一个都没有就如实说"没找到"。
+    @MainActor
     func like() async -> String {
         guard isLoaded else { return "先打开一个抖音页面再说。" }
         busy = true
@@ -118,6 +119,7 @@ final class DouyinWebDriver: NSObject, ObservableObject {
     ///
     /// 两步：先点开评论框，再往输入框里写。写进 React 的受控输入框
     /// **不能直接赋值** —— 得用原生 setter 再派发 input 事件，否则框架不认。
+    @MainActor
     func comment(_ text: String) async -> String {
         guard isLoaded else { return "先打开一个抖音页面再说。" }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -187,6 +189,7 @@ final class DouyinWebDriver: NSObject, ObservableObject {
     ///
     /// **单独留一个动作给用户**：评论发出去撤不回来，
     /// 按设置里的「高危操作二次确认」，这一步要么用户自己点，要么明确按一次。
+    @MainActor
     func submitComment() async -> String {
         let script = """
         (function () {

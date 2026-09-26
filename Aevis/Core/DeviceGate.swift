@@ -24,6 +24,20 @@ import SwiftUI
 ///    认的办法很简单：**本地已经有联系人 = 他本来就在用**（新装的人不可能有）。
 /// 3. **查不到 ≠ 没授权**。网络失败只是"这次没查到"，
 ///    绝不能拿它去撤销一个已经生效的授权。
+///
+/// ## ⚠️ 为什么整个类必须是 `@MainActor`（2026-09-26 从后台真机报告里抓出来的真凶）
+/// 这个类里**两个 async 方法都会改 `@Published`**：`refresh()`（改 8 个）
+/// 和 `revokeBecauseAccountGone()`（改 `authorized` / `account` / 两个 `deviceAuthorized`）。
+/// 而 Swift 5.5 起，**非隔离的 async 函数在 `await` 之后会跳回全局并发池执行** ——
+/// 调用点写 `Task { await gate.refresh() }` 也管不住函数体。
+/// 于是那些 `@Published` 是在后台线程改的，**iOS 26 上直接硬崩**。
+///
+/// 真机现场对得上（后台诊断 `AE-155A-91FC`，iPhone15,3 / 0.0.62）：
+/// BlackBox 里最后一行正好是 `revokeBecauseAccountGone()` 里那句
+/// 「⚠️ 账号已不存在 → 退回未授权」，写完进程就没了。
+///
+/// 和 `MusicPlayer` 是同一个坑（那边已经这么修了），照着来。
+@MainActor
 final class DeviceGate: ObservableObject {
 
     static let shared = DeviceGate()
