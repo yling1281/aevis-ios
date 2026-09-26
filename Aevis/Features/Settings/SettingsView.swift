@@ -167,6 +167,9 @@ struct SettingsView: View {
     private func sectionView(_ section: CardSection) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Button {
+                // 折叠/展开是设置页上最常点的东西，记一笔 ——
+                // 查现场时能知道"他那会儿在翻哪一组设置"。
+                BlackBox.tap("设置分组 · \(isFolded(section.id) ? "展开" : "折叠")\(section.title)")
                 withAnimation(.snappy(duration: 0.18)) { toggle(section.id) }
             } label: {
                 HStack(spacing: 6) {

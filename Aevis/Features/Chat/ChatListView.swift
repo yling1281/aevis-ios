@@ -36,6 +36,7 @@ struct ChatListView: View {
             }
             .navigationDestination(for: UUID.self) { _ in
                 ChatView()
+                    .aevisScreen("聊天")
             }
         }
         .sheet(isPresented: $adding) {

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// 黑匣子 —— 「刚才到底发生了什么」留在本机上。
@@ -24,6 +25,19 @@ import Foundation
 /// `Library/Application Support/Aevis/blackbox.log`（不进 Documents ——
 /// 那儿以后要开文件共享给用户放字体，日志混进去会让人困惑）。
 /// 超过 `maxBytes` 就砍掉前面一半，不会无限长。
+///
+/// ## ⭐ 加密（2026-09-26 用户要求：「这个操作日志，你是要加密的」）
+/// 日志里现在**连聊天内容都记**（用户明确要求），那就不能明文躺在沙盒里 ——
+/// 手机一旦被人拿到、或用工具翻 App 容器，聊天记录就全暴露了。
+///
+/// 做法：
+/// - 每行**单独**用 `AES.GCM` 封一次（随机 nonce）。逐行封是为了保住"追加 O(1)"，
+///   整文件加密就得每写一行重写整个文件，又会把界面拖卡。
+/// - 密钥 32 字节存在**钥匙串**里（`kSecAttrAccessibleAfterFirstUnlock`），
+///   不落 UserDefaults、不进任何备份的明文里。删掉 App 才带走。
+/// - 文件第一行是**明文**格式标记（`#aevis-blackbox-v1`）——
+///   没有它就分不清"加密后的 base64"和"上一版的明文日志"。
+/// - 解不开的行**原样留着**：旧版本留下的明文日志还能看，不会因为升级就丢现场。
 enum BlackBox {
 
     /// 内存里留多少行给界面看。
@@ -131,6 +145,38 @@ enum BlackBox {
         log("▸ \(text)")
     }
 
+    // MARK: - 全量操作埋点（2026-09-26 用户要求：「不管点了哪个按键都要记起来」）
+
+    /// 进了一个页面。
+    ///
+    /// 挂在 `View` 上就走 `.aevisScreen(_:)`，别手写 `onAppear`
+    /// （手写会漏，而且加了新页面没人记得补）。
+    static func screen(_ name: String) {
+        log("⇢ 页面 \(name)")
+    }
+
+    /// 点了一个按钮 / 一行入口。
+    /// 挂在 `View` 上走 `.aevisTap(_:)`，或者在 `Button` 的 action 第一行调。
+    static func tap(_ name: String) {
+        log("⊙ 点击 \(name)")
+    }
+
+    /// 一条聊天内容。
+    ///
+    /// 用户明确要求"聊天记录也要进日志" —— 理由是排查问题时能看清"崩之前她在说什么"。
+    /// ⚠️ 两个必须守住的：
+    /// ① **换行压成空格**：一行一条，崩了才不会半条记录
+    /// ② **长度截断**：日志是环形缓冲，一条几万字的长文会把现场全挤掉
+    /// ③ 只记文本，**图片/语音这些都只记类型**（"［图片］"），不记内容
+    static func chat(_ direction: String, _ text: String) {
+        let flat = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard !flat.isEmpty else { return }
+        log("💬 \(direction) \(flat.prefix(200))")
+    }
+
     // MARK: - 读出来
 
     /// 最近这些行（给界面显示）。
@@ -223,6 +269,48 @@ enum BlackBox {
         UserDefaults.standard.set(false, forKey: crashFlagKey)
     }
 
+    // MARK: - 加密（每行一个 AES-GCM 封包）
+
+    /// 文件第一行。**明文**，用来区分"加密的行"和"上一版留下的明文日志"。
+    private static let header = "#aevis-blackbox-v1"
+    private static let keyAccount = "aevis.blackbox.key"
+
+    /// 内存里缓存一份，免得每行都去翻钥匙串。
+    private static var cachedKey: SymmetricKey?
+
+    private static func key() -> SymmetricKey? {
+        if let cachedKey { return cachedKey }
+        if let stored = Keychain.get(keyAccount), let data = Data(base64Encoded: stored),
+           data.count == 32 {
+            let key = SymmetricKey(data: data)
+            cachedKey = key
+            return key
+        }
+        // 第一次：生成 32 字节随机密钥，**只存在钥匙串里**。
+        // 它丢了 = 旧日志解不开（但日志本身是可再生的，不像人设那样要命）。
+        let fresh = SymmetricKey(size: .bits256)
+        let raw = fresh.withUnsafeBytes { Data($0) }
+        _ = Keychain.set(raw.base64EncodedString(), for: keyAccount)
+        cachedKey = fresh
+        return fresh
+    }
+
+    private static func seal(_ line: String) -> String? {
+        guard let key = key(), let data = line.data(using: .utf8),
+              let box = try? AES.GCM.seal(data, using: key),
+              let combined = box.combined
+        else { return nil }
+        return combined.base64EncodedString()
+    }
+
+    private static func open(_ line: String) -> String? {
+        guard let key = key(), let data = Data(base64Encoded: line),
+              let box = try? AES.GCM.SealedBox(combined: data),
+              let plain = try? AES.GCM.open(box, using: key)
+        else { return nil }
+        return String(data: plain, encoding: .utf8)
+    }
+
     // MARK: - 内部（**必须在锁里调**）
 
     private static func write(_ text: String) {
@@ -231,22 +319,28 @@ enum BlackBox {
         if buffer.count > limit {
             buffer.removeFirst(buffer.count - limit)
         }
-        appendLocked(line + "\n")
+        appendLocked(line)
     }
 
-    /// 往文件末尾追加。**O(1)**，不是每次重写整个文件 —— 这是"不卡"的关键。
-    private static func appendLocked(_ text: String) {
-        guard let data = text.data(using: .utf8) else { return }
+    /// 往文件末尾追加一行。**O(1)**，不是每次重写整个文件 —— 这是"不卡"的关键。
+    ///
+    /// 写出去的是 `base64(AES-GCM(明文行))`；封不出来就退回明文写
+    /// （宁可日志没加密，也不能因为钥匙串抽风就把现场丢了）。
+    private static func appendLocked(_ plain: String) {
         if handle == nil {
             let url = fileURL
-            if !FileManager.default.fileExists(atPath: url.path) {
-                FileManager.default.createFile(atPath: url.path, contents: nil)
+            let isNew = !FileManager.default.fileExists(atPath: url.path)
+            if isNew {
+                // 新文件先落一行明文标记，读的时候靠它认格式
+                FileManager.default.createFile(atPath: url.path,
+                                               contents: (header + "\n").data(using: .utf8))
             }
             handle = try? FileHandle(forWritingTo: url)
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             writtenBytes = (attrs?[.size] as? Int) ?? 0
             _ = try? handle?.seekToEnd()
         }
+        guard let data = ((seal(plain) ?? plain) + "\n").data(using: .utf8) else { return }
         do {
             try handle?.write(contentsOf: data)
             writtenBytes += data.count
@@ -261,7 +355,9 @@ enum BlackBox {
     /// 文件太大了就只留最后 `keepOnTrim` 行。**不常发生**，所以直接重写没关系。
     private static func trimLocked() {
         let kept = Array(buffer.suffix(keepOnTrim))
-        let text = kept.joined(separator: "\n") + "\n"
+        var lines = [header]
+        lines.append(contentsOf: kept.map { seal($0) ?? $0 })
+        let text = lines.joined(separator: "\n") + "\n"
         try? handle?.close()
         handle = nil
         try? text.write(to: fileURL, atomically: true, encoding: .utf8)
@@ -286,7 +382,14 @@ enum BlackBox {
         let url = fileURL
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
         writtenBytes = text.utf8.count
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        if lines.first == header {
+            lines.removeFirst()
+            // 解不开的（钥匙串换过、或者被手改过）**原样留着** ——
+            // 丢一行现场比留一行看不懂的 base64 更糟。
+            lines = lines.map { open($0) ?? $0 }
+        }
+        // 没有标记 = 上一版写的明文日志，直接用
         buffer = Array(lines.suffix(limit))
     }
 }

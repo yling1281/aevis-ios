@@ -72,7 +72,25 @@ final class ChatStore: ObservableObject {
     func append(_ message: ChatMessage) {
         guard !isRepeat(message) else { return }
         messages.append(message)
+        track(message)
         save()
+    }
+
+    /// 把这条聊天记进黑匣子（用户 2026-09-26 要求：「聊天记录也要进日志」）。
+    ///
+    /// ⚠️ 两块内容**刻意只记类型、不记内容**：
+    /// 图片记「［图片］」、其它附件记类型名 —— 日志是加密的，但也没必要多存一份图。
+    /// 文本按 200 字截断（见 `BlackBox.chat`），免得一条长文把现场挤掉。
+    ///
+    /// 放在 `append` 里而不是各个调用点：**调用点有十几处**，
+    /// 漏一个就永远查不到"她在说这句的时候崩了"。
+    private func track(_ message: ChatMessage) {
+        let who = message.role == .user ? "我" : "TA"
+        if message.imageData != nil {
+            BlackBox.chat(who, "［图片］")
+            return
+        }
+        BlackBox.chat(who, message.text)
     }
 
     /// 要不要把这条丢掉。
@@ -147,6 +165,7 @@ final class ChatStore: ObservableObject {
         } else {
             byContact[id, default: []].append(message)
         }
+        track(message)
         save()
     }
 

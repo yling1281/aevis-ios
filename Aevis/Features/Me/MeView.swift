@@ -221,7 +221,13 @@ struct MeView: View {
         _ detail: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        // ⚠️ 「我」页**所有**入口都走这一个函数 —— 在这里记一笔，
+        // 这一页点了什么一个都不会漏（用户要求「不管点了哪个按键都要记起来」）。
+        // 放在这里而不是每个调用点：调用点十几处，漏一个就永远查不到。
+        Button {
+            BlackBox.tap("我 · \(title)")
+            action()
+        } label: {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
                     .font(.aevis(16, weight: .medium))

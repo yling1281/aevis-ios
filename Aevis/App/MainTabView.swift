@@ -51,19 +51,26 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $tab) {
+            // ⚠️ 这四行 `.aevisScreen` 是**全量操作埋点**的一半，别删 ——
+            // 底栏四个页面 + 下面那几个弹层全是从这一处呈现的，
+            // 挂在这里 = 9 个页面一处改完（用户要求「不管点了哪个按键都要记起来」）。
             ChatListView()
+                .aevisScreen("聊天列表")
                 .tabItem { Label(MainTab.chats.title, systemImage: MainTab.chats.symbol) }
                 .tag(MainTab.chats)
 
             ContactsView()
+                .aevisScreen("通讯录")
                 .tabItem { Label(MainTab.contacts.title, systemImage: MainTab.contacts.symbol) }
                 .tag(MainTab.contacts)
 
             DiscoverView()
+                .aevisScreen("发现")
                 .tabItem { Label(MainTab.discover.title, systemImage: MainTab.discover.symbol) }
                 .tag(MainTab.discover)
 
             MeView()
+                .aevisScreen("我")
                 .tabItem { Label(MainTab.me.title, systemImage: MainTab.me.symbol) }
                 .tag(MainTab.me)
         }
@@ -72,6 +79,7 @@ struct MainTabView: View {
             // `focus` 只为一件事存在：她申请看屏幕、你点了同意之后，
             // 要直接落到「陪伴」那张卡（系统的录屏按钮只在那儿）。
             SettingsView(focus: router.settingsFocus)
+                .aevisScreen("设置")
                 .environmentObject(personaStore)
                 .environmentObject(settings)
                 .environmentObject(chat)
@@ -83,27 +91,35 @@ struct MainTabView: View {
         // （自定义呈现下 `@Environment(\.dismiss)` 是失效的）。
         .sheet(isPresented: $router.showTogether) {
             TogetherView()
+                .aevisScreen("一起听")
                 .environmentObject(personaStore)
         }
         .fullScreenCover(isPresented: $router.showCall) {
             CallView()
+                .aevisScreen("通话")
                 .environmentObject(personaStore)
         }
         // 全屏播放器（仿网易云那个）。点一首歌就弹它。
         .fullScreenCover(isPresented: $router.showPlayer) {
             PlayerView()
+                .aevisScreen("播放器")
         }
         // 朋友圈：右滑进、右滑出（微信的手感）。放在 overlay 里，
         // 所以它盖在 tab 栏之上，是一整页。
         .overlay {
             if router.showMoments {
                 MomentsView(onClose: { router.showMoments = false })
+                    .aevisScreen("朋友圈")
                     .environmentObject(personaStore)
                     .transition(.move(edge: .trailing))
                     .zIndex(30)
             }
         }
         .animation(.easeInOut(duration: 0.28), value: router.showMoments)
+        // 底栏切换也记一笔（用户点名要的：「我切换了聊天、切换了发现、切换了我的」）。
+        .onChange(of: tab) { _, now in
+            BlackBox.tap("底栏 · \(now.title)")
+        }
         // 她主动提的申请 —— 从顶上滑进来一条，但**不挡你手上的事**
         //（不点它照样能继续打字、翻朋友圈）。
         .overlay(alignment: .top) {
