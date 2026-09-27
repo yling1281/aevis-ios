@@ -45,25 +45,27 @@ struct BotSection: View {
             AdminNote(text: "机器人现在跑在服务器上（`aevis-qqbot` 服务），不用 App 配合。"
                      + "钥匙一旦泄漏，重新部署后端就会换一把新的 —— 旧的那把立刻失效。")
 
-            AdminSectionTitle(text: "最近领过码的人")
-            if let claims = store.bot?.claims, !claims.isEmpty {
-                AdminCard {
-                    ForEach(Array(claims.enumerated()), id: \.element.id) { index, claim in
-                        AdminCardRow(showsDivider: index > 0) {
-                            AdminLine(
-                                title: claim.code ?? "—",
-                                subtitle: "群成员 \(claim.member ?? "—")…　·　群 \(claim.group ?? "—")…",
-                                detail: AdminFormat.when(claim.at) + "（\(AdminFormat.ago(claim.at))）"
-                            )
-                        } trailing: {
-                            EmptyView()
+            AdminFold("最近领过码的人", key: "section.bot.claims",
+                      count: store.bot?.claims?.count ?? 0) {
+                if let claims = store.bot?.claims, !claims.isEmpty {
+                    AdminCard {
+                        ForEach(Array(claims.enumerated()), id: \.element.id) { index, claim in
+                            AdminCardRow(showsDivider: index > 0) {
+                                AdminLine(
+                                    title: claim.code ?? "—",
+                                    subtitle: "群成员 \(claim.member ?? "—")…　·　群 \(claim.group ?? "—")…",
+                                    detail: AdminFormat.when(claim.at) + "（\(AdminFormat.ago(claim.at))）"
+                                )
+                            } trailing: {
+                                EmptyView()
+                            }
                         }
                     }
+                    AdminNote(text: "这是「官方机器人」那条路（群里 @ 它换口令）。"
+                             + "协议号「自助注册」发出去的码在「账号」那边的注册码列表里也能看到。")
+                } else {
+                    AdminCard { AdminEmpty(text: "还没有人领过。") }
                 }
-                AdminNote(text: "这是「官方机器人」那条路（群里 @ 它换口令）。"
-                         + "协议号「自助注册」发出去的码在「账号」那边的注册码列表里也能看到。")
-            } else {
-                AdminCard { AdminEmpty(text: "还没有人领过。") }
             }
         }
     }

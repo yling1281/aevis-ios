@@ -17,16 +17,18 @@ struct PaymentsSection: View {
             if let stats = store.paymentStats, !store.payments.isEmpty {
                 summaryCard(stats)
             }
-            if store.payments.isEmpty {
-                AdminCard {
-                    AdminEmpty(text: store.loading
-                               ? "读取中…"
-                               : "还没抓到收款记录。监听每 150 秒看一次，刚开的话等一会儿。")
-                }
-            } else {
-                AdminCard {
-                    ForEach(Array(store.payments.enumerated()), id: \.offset) { index, pay in
-                        row(pay, divider: index > 0)
+            AdminFold("收款明细", key: "section.payments", count: store.payments.count) {
+                if store.payments.isEmpty {
+                    AdminCard {
+                        AdminEmpty(text: store.loading
+                                   ? "读取中…"
+                                   : "还没抓到收款记录。监听每 150 秒看一次，刚开的话等一会儿。")
+                    }
+                } else {
+                    AdminCard {
+                        ForEach(Array(store.payments.enumerated()), id: \.offset) { index, pay in
+                            row(pay, divider: index > 0)
+                        }
                     }
                 }
             }

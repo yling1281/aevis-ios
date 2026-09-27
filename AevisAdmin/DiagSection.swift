@@ -12,19 +12,19 @@ struct DiagSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            AdminSectionTitle(text: "崩溃现场（错误码）")
-
-            if store.diag.isEmpty {
-                AdminCard { AdminEmpty(text: "还没有崩过 —— 或者崩了但没传上来。") }
-            } else {
-                AdminCard {
-                    ForEach(Array(store.diag.enumerated()), id: \.element.id) { index, item in
-                        Button {
-                            open = item
-                        } label: {
-                            row(item, divider: index > 0)
+            AdminFold("崩溃现场（错误码）", key: "section.diag", count: store.diag.count) {
+                if store.diag.isEmpty {
+                    AdminCard { AdminEmpty(text: "还没有崩过 —— 或者崩了但没传上来。") }
+                } else {
+                    AdminCard {
+                        ForEach(Array(store.diag.enumerated()), id: \.element.id) { index, item in
+                            Button {
+                                open = item
+                            } label: {
+                                row(item, divider: index > 0)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }

@@ -24,18 +24,19 @@ struct UsersSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            searchField
+            // 搜索框放在折叠**外面** —— 收起来也要能搜
+            AdminSearchField(placeholder: "搜邮箱 / 设备码 / IP", text: $keyword)
 
-            AdminSectionTitle(text: "已注册的账号（\(store.users.count)）")
-
-            if store.users.isEmpty {
-                AdminCard { AdminEmpty(text: store.loading ? "读取中…" : "还没有人注册。") }
-            } else if shown.isEmpty {
-                AdminCard { AdminEmpty(text: "没有匹配「\(keyword)」的账号。") }
-            } else {
-                AdminCard {
-                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, user in
-                        row(user, divider: index > 0)
+            AdminFold("已注册的账号", key: "section.users", count: store.users.count) {
+                if store.users.isEmpty {
+                    AdminCard { AdminEmpty(text: store.loading ? "读取中…" : "还没有人注册。") }
+                } else if shown.isEmpty {
+                    AdminCard { AdminEmpty(text: "没有匹配「\(keyword)」的账号。") }
+                } else {
+                    AdminCard {
+                        ForEach(Array(shown.enumerated()), id: \.element.id) { index, user in
+                            row(user, divider: index > 0)
+                        }
                     }
                 }
             }
@@ -61,32 +62,9 @@ struct UsersSection: View {
         }
     }
 
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
-                .foregroundStyle(.tertiary)
-            TextField("搜邮箱 / 设备码 / IP", text: $keyword)
-                .font(.system(size: 14.5))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            if !keyword.isEmpty {
-                Button {
-                    keyword = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
+    // ⚠️ 这里原来有个本地写的 `searchField`。抽成共用的 `AdminSearchField` 之后
+    //    就没人用了 —— **当场删掉**（留着的话两处会慢慢长歪：清空按钮、
+    //    自动大写这类小处理总有一边会漏）。
     private func row(_ user: AdminUser, divider: Bool) -> some View {
         AdminCardRow(showsDivider: divider) {
             AdminLine(

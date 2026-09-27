@@ -17,6 +17,20 @@ struct OrdersSection: View {
     /// `.alert(item:)` 要 `Identifiable`，而订单号的 `id` 是 `String?`，
     /// nil 的时候身份判断会变得很微妙 —— 用字符串最省心。
     @State private var confirming: String?
+    /// 搜索词。用户 2026-09-27：「购买订单是可以搜索的…就是搜索这个订单号」。
+    @State private var keyword = ""
+
+    /// 过滤后的列表。**订单号 / 邮箱 / QQ 号 / 两张码都能搜** ——
+    /// 他在群里找人时，手边是哪串就搜哪串。
+    private var shown: [AdminOrder] {
+        let key = keyword.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !key.isEmpty else { return store.orders }
+        return store.orders.filter { order in
+            [order.id, order.contact, order.unlockCode, order.inviteCode]
+                .compactMap { $0?.lowercased() }
+                .contains { $0.contains(key) }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -24,19 +38,29 @@ struct OrdersSection: View {
             if let stats = store.orderStats, !store.orders.isEmpty {
                 summaryCard(stats)
             }
-            if store.orders.isEmpty {
-                AdminCard {
-                    AdminEmpty(text: store.loading
-                               ? "读取中…"
-                               : "还没有订单。买家在购买页下单后，这里就会出现。")
-                }
-            } else {
-                AdminCard {
-                    ForEach(Array(store.orders.enumerated()), id: \.offset) { index, order in
-                        row(order, divider: index > 0)
+            // 搜索框**放在折叠外面** —— 收起来也要能搜，不然还得先展开再收
+            if !store.orders.isEmpty {
+                AdminSearchField(placeholder: "搜订单号 / 邮箱 / QQ 号", text: $keyword)
+            }
+
+            AdminFold("订单明细", key: "section.orders", count: shown.count) {
+                if store.orders.isEmpty {
+                    AdminCard {
+                        AdminEmpty(text: store.loading
+                                   ? "读取中…"
+                                   : "还没有订单。买家在购买页下单后，这里就会出现。")
+                    }
+                } else if shown.isEmpty {
+                    AdminCard { AdminEmpty(text: "没有匹配「\(keyword)」的订单。") }
+                } else {
+                    AdminCard {
+                        ForEach(Array(shown.enumerated()), id: \.offset) { index, order in
+                            row(order, divider: index > 0)
+                        }
                     }
                 }
             }
+
             AdminNote(text: "「记已收款」按下去就发码，钱没到别点。"
                      + "（解锁码 + 注册码一起发到他留的邮箱，这里也会显示那两串，"
                      + "可以直接复制发给他。）")

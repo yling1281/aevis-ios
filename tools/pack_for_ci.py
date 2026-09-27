@@ -139,6 +139,8 @@ MUST_HAVE = [
     "AevisAdmin/OrdersSection.swift",
     "AevisAdmin/UnlockSection.swift",
     "AevisAdmin/PaymentsSection.swift",
+    # 1.0.3 加的：可折叠的块 + 共用的搜索框（订单页和账号页都靠它）
+    "AevisAdmin/AdminFold.swift",
     # ——— VPN 探针（**独立 target + 嵌套扩展**，第 3 个包）———
     # ⚠️ 这几个**必须**在包里：`project.yml` 里已经有它的 target，
     #    源码要是没跟上，CI 会报"找不到 target"，而那报错看着

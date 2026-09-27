@@ -24,9 +24,10 @@ struct UnlockSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            AdminSectionTitle(text: "生成解锁码")
-            issueCard
-            if !fresh.isEmpty { freshCard }
+            AdminFold("生成解锁码", key: "section.unlock.new") {
+                issueCard
+                if !fresh.isEmpty { freshCard }
+            }
 
             if let stats = store.unlockStats, !store.unlockCodes.isEmpty {
                 AdminCard {
@@ -38,20 +39,22 @@ struct UnlockSection: View {
                 }
             }
 
-            AdminSectionTitle(text: "解锁码")
-            if store.unlockCodes.isEmpty {
-                AdminCard {
-                    AdminEmpty(text: store.loading
-                               ? "读取中…"
-                               : "还没有解锁码。上面「生成」一张，发给付过钱的人。")
-                }
-            } else {
-                AdminCard {
-                    ForEach(Array(store.unlockCodes.enumerated()), id: \.offset) { index, item in
-                        row(item, divider: index > 0)
+            AdminFold("解锁码", key: "section.unlock.list", count: store.unlockCodes.count) {
+                if store.unlockCodes.isEmpty {
+                    AdminCard {
+                        AdminEmpty(text: store.loading
+                                   ? "读取中…"
+                                   : "还没有解锁码。上面「生成」一张，发给付过钱的人。")
+                    }
+                } else {
+                    AdminCard {
+                        ForEach(Array(store.unlockCodes.enumerated()), id: \.offset) { index, item in
+                            row(item, divider: index > 0)
+                        }
                     }
                 }
             }
+
             AdminNote(text: "作废是不可逆的，而且会把用这张码解锁过的设备一起撤掉 ——"
                      + "只标记不撤的话会变成最气人的半死状态：装包工具里看得到 App，"
                      + "一点下载就失败。")

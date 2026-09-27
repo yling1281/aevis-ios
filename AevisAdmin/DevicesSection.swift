@@ -14,28 +14,30 @@ struct DevicesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            AdminSectionTitle(text: "待处理（\(pending.count)）")
-            if pending.isEmpty {
-                AdminCard { AdminEmpty(text: "没有待处理的换机申请。") }
-            } else {
-                ForEach(pending) { request in
-                    AdminCard { requestCard(request, actionable: true) }
+            AdminFold("待处理", key: "section.devices.pending", count: pending.count) {
+                if pending.isEmpty {
+                    AdminCard { AdminEmpty(text: "没有待处理的换机申请。") }
+                } else {
+                    ForEach(pending) { request in
+                        AdminCard { requestCard(request, actionable: true) }
+                    }
                 }
             }
 
             if !done.isEmpty {
-                AdminSectionTitle(text: "处理过的")
-                AdminCard {
-                    ForEach(Array(done.enumerated()), id: \.element.stableID) { index, request in
-                        AdminCardRow(showsDivider: index > 0) {
-                            AdminLine(
-                                title: request.email ?? "—",
-                                subtitle: "\(request.statusText)　\(AdminFormat.when(request.at))",
-                                detail: "新设备 \(request.deviceId ?? "—")\n"
-                                    + "原来绑的 \(request.currentDevice ?? "（没绑过）")"
-                            )
-                        } trailing: {
-                            EmptyView()
+                AdminFold("处理过的", key: "section.devices.done", count: done.count) {
+                    AdminCard {
+                        ForEach(Array(done.enumerated()), id: \.element.stableID) { index, request in
+                            AdminCardRow(showsDivider: index > 0) {
+                                AdminLine(
+                                    title: request.email ?? "—",
+                                    subtitle: "\(request.statusText)　\(AdminFormat.when(request.at))",
+                                    detail: "新设备 \(request.deviceId ?? "—")\n"
+                                        + "原来绑的 \(request.currentDevice ?? "（没绑过）")"
+                                )
+                            } trailing: {
+                                EmptyView()
+                            }
                         }
                     }
                 }

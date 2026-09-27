@@ -242,9 +242,12 @@ struct FlexText: Decodable {
 
     init(from decoder: Decoder) throws {
         let box = try decoder.singleValueContainer()
-        if (try? box.decodeNil()) == true {
-            text = ""
-        } else if let value = try? box.decode(String.self) {
+        // ⚠️ 这里**故意不写 `decodeNil()`**。两个原因：
+        //   ① 它本来就不抛错（`SingleValueDecodingContainer.decodeNil()` 是 `-> Bool`），
+        //      写 `try?` 会白吃一条编译警告（第一版就吃了）；
+        //   ② 不写也不影响判空 —— JSON 的 `null` 落到下面三个 `try?` 全都会抛，
+        //      最后自然走到 `text = ""`，和行为完全一致。
+        if let value = try? box.decode(String.self) {
             text = value
         } else if let value = try? box.decode(Int.self) {
             text = String(value)

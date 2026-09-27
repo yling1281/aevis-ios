@@ -13,24 +13,28 @@ struct CodesSection: View {
     @State private var note = ""
     @State private var fresh: [String] = []
 
-    private var usedCount: Int { store.codes.filter(\.isUsed).count }
+    // ⚠️ 原来这儿有个 `usedCount`（算用了多少张）。标题交给 `AdminFold` 之后
+    //    那一行标题没有了，它就没人用了 —— **当场删掉**，别留死代码
+    //    （不留的话下次有人以为它还在某处显示着）。
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            AdminSectionTitle(text: "发注册码")
-            issueCard
-            if !fresh.isEmpty { freshCard }
+            AdminFold("发注册码", key: "section.codes.new") {
+                issueCard
+                if !fresh.isEmpty { freshCard }
+            }
             AdminNote(text: "码是一次性的，一人一码，用过就不能再用。"
                      + "删码只删这一张，不影响已经注册的账号。"
                      + "（`n` 键在码上面写着被哪个邮箱用掉了。）")
 
-            AdminSectionTitle(text: "注册码（共 \(store.codes.count)，已用 \(usedCount)）")
-            if store.codes.isEmpty {
-                AdminCard { AdminEmpty(text: store.loading ? "读取中…" : "还没有发过码。") }
-            } else {
-                AdminCard {
-                    ForEach(Array(store.codes.enumerated()), id: \.element.id) { index, code in
-                        row(code, divider: index > 0)
+            AdminFold("注册码", key: "section.codes.list", count: store.codes.count) {
+                if store.codes.isEmpty {
+                    AdminCard { AdminEmpty(text: store.loading ? "读取中…" : "还没有发过码。") }
+                } else {
+                    AdminCard {
+                        ForEach(Array(store.codes.enumerated()), id: \.element.id) { index, code in
+                            row(code, divider: index > 0)
+                        }
                     }
                 }
             }
