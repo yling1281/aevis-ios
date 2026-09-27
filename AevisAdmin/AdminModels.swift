@@ -229,6 +229,133 @@ struct BotInfo: Decodable {
     }
 }
 
+// MARK: - 弹性文本
+
+/// 同一个字段**忽而是字符串、忽而是数字**的兜底解码。
+///
+/// SQLite 的列是弱类型的：`amount` 声明成 TEXT，但只要有人插进去一个数字，
+/// 吐出来就是数字。直接 `decode(String.self)` 碰到数字会抛，
+/// 而抛了整条记录就没了 —— 这类字段最容易把一整页变成空白
+/// （本文件开头那条「宁可显示 —，也不能整页空」说的就是它）。
+struct FlexText: Decodable {
+    let text: String
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.singleValueContainer()
+        if (try? box.decodeNil()) == true {
+            text = ""
+        } else if let value = try? box.decode(String.self) {
+            text = value
+        } else if let value = try? box.decode(Int.self) {
+            text = String(value)
+        } else if let value = try? box.decode(Double.self) {
+            text = String(value)
+        } else {
+            text = ""
+        }
+    }
+
+    /// 显示用：空就是「—」。
+    var shown: String { text.isEmpty ? "—" : text }
+}
+
+// MARK: - 支付宝收款（监听服务抓的，只读）
+
+struct AdminPayment: Decodable, Identifiable {
+    var tradeNo: String?
+    var amount: FlexText?
+    var memo: String?
+    var direction: String?
+    var status: String?
+    var buyer: String?
+    var goods: String?
+    /// ⚠️ 支付宝那边给的是**字符串**（`2026-09-27 23:13:50`），不是时间戳。
+    var paidAt: String?
+    var orderId: String?
+    var seenAt: Int?
+
+    var id: String { tradeNo ?? UUID().uuidString }
+    /// 备注里认出了我们的订单号 —— 对上了才是"照订单付的这笔钱"。
+    var isMapped: Bool { !(orderId ?? "").isEmpty }
+}
+
+struct AdminPaymentStats: Decodable {
+    var total: Int?
+    var mapped: Int?
+    /// 后端是 `round(x, 2)` 出来的**数字**（不是字符串）。
+    var amount: Double?
+}
+
+struct AdminPaymentList: Decodable {
+    var items: [AdminPayment]?
+    var stats: AdminPaymentStats?
+}
+
+// MARK: - 购买订单
+
+struct AdminOrder: Decodable, Identifiable {
+    /// ⚠️ 订单号本身就是主键，后端 JSON 里的键就是 `id`（`AEXXXXXXXX`）。
+    var id: String?
+    var contact: String?
+    var amount: FlexText?
+    var createdAt: Int?
+    var paidAt: Int?
+    var paidBy: String?
+    var paidNote: String?
+    var unlockCode: String?
+    var inviteCode: String?
+    var mailOk: Int?
+    var ip: String?
+
+    var isPaid: Bool { (paidAt ?? 0) > 0 }
+    var mailSent: Bool { (mailOk ?? 0) > 0 }
+}
+
+struct AdminOrderStats: Decodable {
+    var total: Int?
+    var paid: Int?
+    var waiting: Int?
+}
+
+struct AdminOrderList: Decodable {
+    var items: [AdminOrder]?
+    var stats: AdminOrderStats?
+}
+
+// MARK: - 解锁码
+
+struct AdminUnlockCode: Decodable, Identifiable {
+    var code: String?
+    var note: String?
+    var price: FlexText?
+    var issuedAt: Int?
+    var firstUse: Int?
+    var usedIp: String?
+    var usedUa: String?
+    var uses: Int?
+    var disabled: Int?
+
+    var id: String { code ?? UUID().uuidString }
+    var isDisabled: Bool { (disabled ?? 0) > 0 }
+    var isUsed: Bool { (uses ?? 0) > 0 }
+}
+
+struct AdminUnlockStats: Decodable {
+    var total: Int?
+    var used: Int?
+    var disabled: Int?
+}
+
+struct AdminUnlockList: Decodable {
+    var items: [AdminUnlockCode]?
+    var stats: AdminUnlockStats?
+}
+
+struct IssuedUnlockCodes: Decodable {
+    var ok: Bool?
+    var codes: [String]?
+}
+
 // MARK: - 登录 / 后台账号
 
 struct LoginReply: Decodable {

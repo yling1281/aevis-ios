@@ -234,7 +234,7 @@ struct DiagDetailView: View {
     }
 
     private var fullReport: String {
-        var out = "【Aevis 崩溃现场】\n错误码 \(report.codeText)\n"
+        var out = "【\(AdminBrand.name) 崩溃现场】\n错误码 \(report.codeText)\n"
         out += "版本 \(report.version ?? "—") · iOS \(report.os ?? "—") · \(report.machine ?? "—")\n"
         out += "设备 \(report.deviceId ?? "—")\n"
         out += "上报 \(report.count ?? 0) 次　最后 \(AdminFormat.when(report.lastAt))\n"

@@ -61,7 +61,7 @@ struct AdminLoginView: View {
                 .padding(18)
                 .background(AdminSkin.brand.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            Text("Aevis 管理端")
+            Text(AdminBrand.displayName)
                 .font(.system(size: 22, weight: .bold))
             Text("看崩溃现场、发注册码、封设备")
                 .font(.system(size: 13))

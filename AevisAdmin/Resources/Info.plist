@@ -5,7 +5,12 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>Aevis 管理端</string>
+	<string>$(ADMIN_BRAND) 管理端</string>
+	<!-- ⭐ 品牌名（跟 project.yml 的 ADMIN_BRAND 走）——
+	     App 里的标题由 `AdminBrand.swift` 读这个键派生。
+	     **别在 Swift 里写死名字**，不然换名字时一定会漏掉一处。 -->
+	<key>AEAdminBrand</key>
+	<string>$(ADMIN_BRAND)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

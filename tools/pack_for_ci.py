@@ -127,7 +127,18 @@ MUST_HAVE = [
     "AevisAdmin/AdminRootView.swift",
     "AevisAdmin/AdminStyle.swift",
     "AevisAdmin/DiagSection.swift",
+    # 管理端的**名字**只有一处来源（project.yml 的 ADMIN_BRAND）——
+    # 读它的就是这个文件，漏了管理端会编译不过
+    "AevisAdmin/AdminBrand.swift",
     "AevisAdmin/Resources/Info.plist",
+    # ——— 买家那一侧的三块（2026-09-27 跟网页后台对齐时加的）———
+    # ⚠️ `AevisAdmin` 是**整目录收录**，漏一个也不会编译失败 ——
+    #    但那几个文件就不会进包，CI 编出来等于没加，日志还挺"成功"。
+    #    所以把新的硬点出来（它们依赖 AdminModels.swift 里的 FlexText 等新类型）。
+    "AevisAdmin/AdminModels.swift",
+    "AevisAdmin/OrdersSection.swift",
+    "AevisAdmin/UnlockSection.swift",
+    "AevisAdmin/PaymentsSection.swift",
     # ——— VPN 探针（**独立 target + 嵌套扩展**，第 3 个包）———
     # ⚠️ 这几个**必须**在包里：`project.yml` 里已经有它的 target，
     #    源码要是没跟上，CI 会报"找不到 target"，而那报错看着

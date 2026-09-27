@@ -7,7 +7,7 @@ import UIKit
 /// 手机上按 `tab` 归到底栏，iPad 上全部摊在侧栏里。
 /// 加一块新东西时只改这里，两个端一起生效。
 enum AdminSection: String, CaseIterable, Identifiable, Hashable {
-    case overview, diag, users, codes, devices, blocks, bot, account
+    case overview, diag, users, orders, unlock, payments, codes, devices, blocks, bot, account
 
     var id: String { rawValue }
 
@@ -16,6 +16,9 @@ enum AdminSection: String, CaseIterable, Identifiable, Hashable {
         case .overview: return "总览"
         case .diag: return "崩溃现场"
         case .users: return "账号"
+        case .orders: return "购买订单"
+        case .unlock: return "解锁码"
+        case .payments: return "支付宝收款"
         case .codes: return "注册码"
         case .devices: return "换机申请"
         case .blocks: return "封禁"
@@ -29,6 +32,9 @@ enum AdminSection: String, CaseIterable, Identifiable, Hashable {
         case .overview: return "chart.bar.fill"
         case .diag: return "exclamationmark.triangle.fill"
         case .users: return "person.2.fill"
+        case .orders: return "cart.fill"
+        case .unlock: return "lock.open.fill"
+        case .payments: return "creditcard.fill"
         case .codes: return "ticket.fill"
         case .devices: return "arrow.triangle.2.circlepath"
         case .blocks: return "hand.raised.fill"
@@ -77,7 +83,7 @@ enum AdminTab: String, CaseIterable, Identifiable {
         case .home: return [.overview]
         case .diag: return [.diag]
         case .users: return [.users]
-        case .more: return [.codes, .devices, .blocks, .bot, .account]
+        case .more: return [.orders, .unlock, .payments, .codes, .devices, .blocks, .bot, .account]
         }
     }
 }
@@ -161,7 +167,12 @@ struct AdminSplitView: View {
                     }
                 }
                 Section("发放与售后") {
-                    ForEach([AdminSection.codes, .devices, .blocks]) { item in
+                    ForEach([AdminSection.orders, .unlock, .codes, .devices, .blocks]) { item in
+                        Label(item.title, systemImage: item.symbol).tag(item)
+                    }
+                }
+                Section("对账") {
+                    ForEach([AdminSection.payments]) { item in
                         Label(item.title, systemImage: item.symbol).tag(item)
                     }
                 }
@@ -171,7 +182,7 @@ struct AdminSplitView: View {
                     }
                 }
             }
-            .navigationTitle("Aevis 管理")
+            .navigationTitle(AdminBrand.navTitle)
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
                     SignOutButton()
@@ -199,6 +210,9 @@ struct AdminSectionBody: View {
         case .overview: OverviewSection()
         case .diag: DiagSection()
         case .users: UsersSection()
+        case .orders: OrdersSection()
+        case .unlock: UnlockSection()
+        case .payments: PaymentsSection()
         case .codes: CodesSection()
         case .devices: DevicesSection()
         case .blocks: BlocksSection()
@@ -216,7 +230,14 @@ struct MoreView: View {
     var body: some View {
         List {
             Section("发放与售后") {
-                ForEach([AdminSection.codes, .devices, .blocks]) { item in
+                ForEach([AdminSection.orders, .unlock, .codes, .devices, .blocks]) { item in
+                    NavigationLink(value: item) {
+                        Label(item.title, systemImage: item.symbol)
+                    }
+                }
+            }
+            Section("对账") {
+                ForEach([AdminSection.payments]) { item in
                     NavigationLink(value: item) {
                         Label(item.title, systemImage: item.symbol)
                     }

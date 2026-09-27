@@ -36,6 +36,16 @@ final class AdminStore: ObservableObject {
     @Published var bot: BotInfo?
     @Published var accountInfo: AdminAccountInfo?
 
+    // ⭐ 下面三块是 2026-09-27 跟网页后台对齐时加的（用户：「后台和 iOS 管理端全部更新」）。
+    //    以前 iOS 端只看得到「注册码」，看不到买家这一侧的整条链路 ——
+    //    谁下单了、钱到没到、码发没发出去，都得开电脑看网页。
+    @Published var orders: [AdminOrder] = []
+    @Published var orderStats: AdminOrderStats?
+    @Published var unlockCodes: [AdminUnlockCode] = []
+    @Published var unlockStats: AdminUnlockStats?
+    @Published var payments: [AdminPayment] = []
+    @Published var paymentStats: AdminPaymentStats?
+
     // MARK: 界面状态
 
     @Published var loading = false
@@ -107,6 +117,12 @@ final class AdminStore: ObservableObject {
         diag = []
         bot = nil
         accountInfo = nil
+        orders = []
+        orderStats = nil
+        unlockCodes = []
+        unlockStats = nil
+        payments = []
+        paymentStats = nil
         openDiag = nil
     }
 
@@ -153,6 +169,19 @@ final class AdminStore: ObservableObject {
         if let me = await get("/api/admin/account", as: AdminAccountInfo.self) {
             accountInfo = me
             if let mail = me.email, !mail.isEmpty { signedInEmail = mail }
+        }
+        // 买家这一侧的三块：订单 → 解锁码 → 支付宝流水（顺序就是他对账的思路）
+        if let list = await get("/api/admin/orders", as: AdminOrderList.self) {
+            orders = list.items ?? []
+            orderStats = list.stats
+        }
+        if let list = await get("/api/admin/unlock", as: AdminUnlockList.self) {
+            unlockCodes = list.items ?? []
+            unlockStats = list.stats
+        }
+        if let list = await get("/api/admin/payments", as: AdminPaymentList.self) {
+            payments = list.items ?? []
+            paymentStats = list.stats
         }
     }
 
@@ -242,6 +271,44 @@ final class AdminStore: ObservableObject {
     func approveDevice(id: Int, approve: Bool) async {
         await post("/api/admin/approve_device", ["id": id, "approve": approve],
                    done: approve ? "已批准换机" : "已拒绝")
+    }
+
+    // MARK: - 购买订单 / 解锁码
+
+    /// 点「记已收款」—— **按下去就发码**（解锁码 + 注册码一起，发到他留的邮箱）。
+    ///
+    /// ⚠️ 界面上必须先弹确认（钱没到别点）：这个调用是**一次性的**，
+    /// 码发出去就收不回来了。
+    func markOrderPaid(_ orderId: String) async {
+        await post("/api/admin/order/paid", ["order": orderId], done: "已记收款，码已发给他")
+    }
+
+    /// 生成解锁码（人工收款那条路：他手动发码）。
+    @discardableResult
+    func issueUnlockCodes(count: Int, note: String, price: String) async -> [String] {
+        guard isSignedIn else { return [] }
+        busy = true
+        defer { busy = false }
+        do {
+            let reply: IssuedUnlockCodes = try await AdminAPI.call(
+                "/api/admin/unlock/new", method: "POST",
+                body: ["count": count, "note": note, "price": price], token: token
+            )
+            await refreshAll()
+            return reply.codes ?? []
+        } catch {
+            errorText = describe(error)
+            return []
+        }
+    }
+
+    /// 作废 / 恢复一张解锁码。
+    ///
+    /// ⚠️ **作废会连它解锁过的设备一起撤掉**（后端就是这么写的）——
+    /// 只标记不撤的话会出现"界面看得到 App、点下载 403"这种最气人的半死状态。
+    func setUnlockDisabled(_ code: String, disabled: Bool) async {
+        await post("/api/admin/unlock/disable", ["code": code, "disabled": disabled],
+                   done: disabled ? "已作废（用它的设备也一起撤了）" : "已恢复")
     }
 
     // MARK: - 后台账号密码

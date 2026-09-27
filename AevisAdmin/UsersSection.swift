@@ -165,6 +165,10 @@ struct UsersSection: View {
         else if ua.contains("Macintosh") { out.append("Mac") }
         else if ua.contains("Windows") { out.append("Windows") }
         else { out.append("浏览器") }
+        // ⚠️ 这里的 "aevis" 是**主 App 的 User-Agent 特征**（用来在登录记录里
+        //    标出"这条是 App 里来的"），**不是本管理端的名字** ——
+        //    给管理端换名字（`AdminBrand`）时**别动这一行**，
+        //    主 App 一直叫 Aevis，它的 UA 不会跟着改。
         if ua.contains("aevis") { out.append("Aevis") }
         else if ua.contains("MicroMessenger") { out.append("微信内") }
         else if ua.contains("Edg/") { out.append("Edge") }
