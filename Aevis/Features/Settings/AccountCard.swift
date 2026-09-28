@@ -208,8 +208,8 @@ struct AccountCard: View {
                 Text(account.isSignedIn ? "退出登录" : "登录")
                     .font(.aevis(15))
                 Text(account.isSignedIn
-                     ? "只清掉本机的登录状态，别的都不动"
-                     : "密码登录用账号号；验证码和 QQ 授权在网页上")
+                     ? "退出之后会回到登录页，重新登录就能进来"
+                     : "在登录页登 —— 验证码 / 密码 / QQ 都能用")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -218,35 +218,21 @@ struct AccountCard: View {
             if account.isSignedIn {
                 Button("退出") {
                     account.signOut()
-                    note = "已退出。"
+                    note = "已退出，回到登录页了。"
                 }
                 .font(.aevis(14))
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
-            } else {
-                HStack(spacing: 14) {
-                    Button("密码登录") { showForm = true }
-                        .font(.aevis(14))
-                        .buttonStyle(.borderless)
-                    Button(busy ? "打开中…" : "验证码 / QQ") {
-                        startWebLogin()
-                    }
-                    .font(.aevis(14))
-                    .buttonStyle(.borderless)
-                    .disabled(busy)
-                }
             }
         }
     }
 
-    // MARK: - 网页登录
+    // MARK: - 登录这一块
     //
-    // 账号后端是**邮箱验证码**（没有密码），所以这里不再自己画用户名/密码框 ——
-    // 把官网登录页交给**系统浏览器**：用户在那个页面收码登录（第一次用就在同一页
-    // 拿注册码注册），完事页面跳 `aevis://login?token=...`，我们收下。
-    //
-    // ⚠️ 回调是 `aevis://login`，这是服务端 `api_verify` 里拼的
-    //（`app_url = aevis://login?token=<token>`）。改服务端要同步这里。
+    // ⚠️ 2026-09-28 起**登录搬进了 App**（`LoginView`：验证码 / 密码 / 注册码 / QQ），
+    //    而且**强制登录** —— 没登录时进不了主界面，所以这一张卡实际上只在
+    //    "已登录"的状态下看得到（这里那个 else 分支留给演示模式和以后复用）。
+    //    以前这里会开系统浏览器去官网登录页，现在已经不需要了。
     private func startWebLogin() {
         guard let url = account.webLoginURL() else {
             note = "登录页地址拼不出来，检查一下服务器地址。"

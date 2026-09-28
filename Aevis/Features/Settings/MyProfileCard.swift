@@ -11,9 +11,12 @@ import UIKit
 /// 用户原话：「我的话也能改头像、改名称、改气泡。」
 struct MyProfileCard: View {
     @ObservedObject private var profile = ProfileStore.shared
+    /// 登录状态 + 账号上的那份资料（用来做"同步到账号"）。
+    @ObservedObject private var account = AccountService.shared
 
     @State private var pickedAvatar: PhotosPickerItem?
     @State private var note: String?
+    @State private var busyPush = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -76,6 +79,12 @@ struct MyProfileCard: View {
                         )
                 }
 
+                // ⚠️ **名字和头像要跟账号走**（用户 2026-09-28：
+                //    「我说的账号名称是这里……我的资料那里是绑定的账号」）。
+                //    登录之后这里改的是**账号上的名字** —— 换手机登同一个账号，
+                //    名字头像照样在。没登录就只改本地这份。
+                accountRow
+
                 // 个性签名（用户 2026-09-28 要的）。
                 // 就是"我在 TA 朋友圈里"名字下面那句。
                 VStack(alignment: .leading, spacing: 7) {
@@ -92,8 +101,9 @@ struct MyProfileCard: View {
                         )
                 }
 
-                Text("这是你自己 —— 头像、名字、签名只存在这台手机上，会显示在 TA 的朋友圈里。"
-                     + "要说给 TA 听的名字，写在「TA 的设定 → TA 怎么叫你」里。")
+                Text(account.isSignedIn
+                     ? "名字和头像跟着账号走 —— 换台手机登同一个账号，这边还是你。"
+                     : "现在还没登录，改的只是这台手机上的记录。登录之后会同步到账号。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -108,7 +118,69 @@ struct MyProfileCard: View {
         }
     }
 
+    // MARK: - 账号那一行
+
+    @ViewBuilder
+    private var accountRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if account.isSignedIn {
+                HStack(spacing: 8) {
+                    Text("账号")
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(account.profile?.displayName ?? "已登录")
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        pushNickname()
+                    } label: {
+                        Text(busyPush ? "同步中…" : "同步到账号")
+                            .font(.aevis(13, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .aevisGlass(cornerRadius: 12)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busyPush || !nicknameChanged)
+                    .opacity(nicknameChanged ? 1 : 0.45)
+                }
+            } else {
+                Text("还没登录账号。登录之后名字和头像会跟着账号走。")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 本地名字和账号上的对不上 → 那个按钮才有意义。
+    private var nicknameChanged: Bool {
+        let mine = profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let theirs = (account.profile?.nickname ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return mine != theirs
+    }
+
     // MARK: - 动作
+
+    private func pushNickname() {
+        guard !busyPush else { return }
+        busyPush = true
+        let want = profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { @MainActor in
+            defer { busyPush = false }
+            do {
+                let fresh = try await account.pushNickname(want)
+                // 服务端会自己清掉换行/控制字符，回包才是"真正存下来的那个"
+                profile.nickname = fresh.nickname
+                note = "已经同步到账号了。"
+            } catch {
+                note = "没同步上去：\(error.localizedDescription)"
+            }
+        }
+    }
 
     private func loadAvatar(_ item: PhotosPickerItem) {
         note = nil
@@ -119,9 +191,20 @@ struct MyProfileCard: View {
                 pickedAvatar = nil
                 return
             }
+            // 本地先换上（断网也不耽误看），再往账号上推
             profile.setAvatar(image)
-            note = "头像换好了。"
             pickedAvatar = nil
+
+            guard account.isSignedIn else {
+                note = "头像换好了。"
+                return
+            }
+            do {
+                _ = try await account.uploadAvatar(image)
+                note = "头像换好了，账号上也更新了。"
+            } catch {
+                note = "本机已经换了，但账号上没传上去：\(error.localizedDescription)"
+            }
         }
     }
 

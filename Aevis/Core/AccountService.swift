@@ -1,6 +1,10 @@
 import CryptoKit
 import Foundation
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// 账号 —— 给「以后要接的那个服务器」留的接口层。
 ///
 /// 用户的原话：「我希望到时候点进去的话加一个注册账号，到时候会拿新的服务器跟你对接。」
@@ -10,8 +14,10 @@ import Foundation
 /// 等他那边定下来，改这一处就够了（界面一行都不用动）。
 ///
 /// 三条硬规矩：
-/// 1. **离线可用**。没登录、连不上，App 的所有功能照常 —— 这是本地 App，
-///    账号只是"多一样东西"，绝不能变成"必须先登录"。
+/// 1. **登录过就能离线用**。用户 2026-09-28 拍板要**强制登录**（「你一定要强制性登录的，
+///    去退出登录的话，就回到初始界面，就要登录账号」）—— 所以没登录进不了主界面。
+///    但**登录过之后**（本地有 token）断网照进：聊天记录都在这台手机里，
+///    拿网络去锁它等于把用户自己的东西扣住了。§只在"从没登录过"时才拦。
 /// 2. **密码不落盘**。登录成功后只存 token（进钥匙串），密码当场用完就丢。
 /// 3. 失败要说清是哪一步（连不上 / 密码错 / 服务器返回了什么），不许吞成一句"失败了"。
 final class AccountService: ObservableObject {
@@ -117,7 +123,7 @@ final class AccountService: ObservableObject {
         try adopt(json)
         // 登录接口只回 token（不回资料）→ 顺手拉一次，界面上就能立刻显示
         // 昵称 / 账号号 / 头像，不用用户再点一下「刷新资料」。
-        await refreshProfile()
+        await afterSignIn()
     }
 
     /// 退出只清本地的 token。**不调服务器** —— 退出不该因为连不上而失败。
@@ -171,6 +177,9 @@ final class AccountService: ObservableObject {
             settings.accountToken = previous
             throw error
         }
+        // 验过了才做收尾（拉本地资料 + 绑设备）
+        await applyToLocalProfile()
+        await bindThisDevice()
     }
 
     /// 给别的模块用：带着账号 token 调服务器（百度网盘连接就用这个）。
@@ -180,6 +189,154 @@ final class AccountService: ObservableObject {
 
     func authedPost(_ path: String, _ body: [String: Any]) async throws -> [String: Any] {
         try await post(path, body)
+    }
+
+    // MARK: - 原生登录（2026-09-28）
+    //
+    // 用户原话：「登录账号，你不要跳转网页了吧」「邮箱验证码那些也是内置啊」——
+    // 所以验证码和密码**都在 App 自己的界面里**做完，不再开系统浏览器那一套。
+    // （QQ 是唯一的例外：它必须在浏览器环境里跳授权，所以走**内置**浏览器。）
+
+    /// 给已有账号发一封登录验证码。
+    ///
+    /// ⚠️ 服务端**只给库里有的邮箱发码**（没注册的会回 `not_registered`）——
+    ///    这道门槛是防止有人拿它当发信机轰炸陌生人。所以提示要照实说。
+    func sendLoginCode(email: String) async throws {
+        let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard target.contains("@") else { throw AccountError.missingFields }
+        _ = try await post("/api/send_code", ["email": target])
+    }
+
+    /// 验证码登录。成功就存下 token 并拉一次资料。
+    func signIn(email: String, code: String) async throws {
+        let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let pin = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard target.contains("@"), !pin.isEmpty else { throw AccountError.missingFields }
+        let json = try await post("/api/verify", ["email": target, "code": pin])
+        try adopt(json)
+        await afterSignIn()
+    }
+
+    /// App 里点 QQ 登录时要打开的那一页（内置浏览器）。
+    ///
+    /// `?app=1` 是给服务端的暗号：**这一次跳完要回 App**（`aevis://login?token=…`），
+    /// 不是回网页登录页 —— 不然用户就被丢在浏览器里出不来了。
+    func qqLoginURL() -> URL? {
+        URL(string: base + "/api/qq/start?app=1")
+    }
+
+    // MARK: - 用注册码注册（也在 App 里做完，不用去网页）
+    //
+    // 两步，跟服务端一致：① 注册码 + 邮箱 → 服务器发验证码（**这一步不消费注册码**，
+    // 邮箱写错、没收到信都能重来）；② 邮箱验证码 → 建号、这时才把注册码吃掉 → 直接给登录态。
+
+    /// 第一步：验注册码，让服务器给这个邮箱发验证码。
+    func registerStart(code: String, email: String) async throws {
+        let invite = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !invite.isEmpty, target.contains("@") else { throw AccountError.missingFields }
+        _ = try await post("/api/register/start", ["code": invite, "email": target])
+    }
+
+    /// 第二步：验证码 + 注册码 → 建号并直接登录。
+    func registerFinish(code: String, email: String, emailCode: String) async throws {
+        let invite = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let pin = emailCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !invite.isEmpty, target.contains("@"), !pin.isEmpty else {
+            throw AccountError.missingFields
+        }
+        let json = try await post("/api/register/finish",
+                                 ["code": invite, "email": target, "email_code": pin])
+        try adopt(json)
+        await afterSignIn()
+    }
+
+    /// 「我的资料」改名 → 推到账号上。
+    ///
+    /// ⚠️ 服务端**只认这几个键**（`nickname` / `account_no`），多传的会被忽略；
+    ///    传 `nickname` 就是只改昵称，不会顺手动别的。
+    @MainActor
+    @discardableResult
+    func pushNickname(_ nickname: String) async throws -> Profile {
+        let json = try await post("/api/me/profile", ["nickname": nickname])
+        let fresh = Self.profile(from: (json["profile"] as? [String: Any]) ?? json)
+        profile = fresh
+        return fresh
+    }
+
+    /// 换头像：压到 512 传上去（服务端收 **base64 的 JSON**，不收 multipart）。
+    ///
+    /// ⚠️ `@MainActor`：里面会改 `@Published profile`，而 `await` 回来之后
+    ///    线程是随机的 —— 不在主线程上改 `@Published` 在 iOS 26 上会硬崩。
+    @MainActor
+    @discardableResult
+    func uploadAvatar(_ image: UIImage) async throws -> Profile {
+        guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
+            throw AccountError.badResponse("这张图压不出来，换一张试试。")
+        }
+        let json = try await post("/api/me/avatar", ["image": jpeg.base64EncodedString()])
+        let fresh = Self.profile(from: (json["profile"] as? [String: Any]) ?? json)
+        profile = fresh
+        return fresh
+    }
+
+    /// 把账号上的资料落到**本地**（`ProfileStore`）。
+    ///
+    /// 为什么还要落一份：朋友圈、聊天那些地方读的都是 `ProfileStore`（本地 UIImage），
+    /// 它们不联网、也不该为了显示一个头像去请求服务器。
+    /// 顺手把头像下载下来缓存 —— 这样断网时头像也不会变成空白。
+    @MainActor
+    func applyToLocalProfile() async {
+        guard let me = profile else { return }
+        let nick = me.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !nick.isEmpty, ProfileStore.shared.nickname != nick {
+            ProfileStore.shared.nickname = nick
+        }
+        guard let url = avatarURL else { return }
+        // 已经缓存过同一张就别反复下（URL 里带文件名，换了图名字就变）
+        if let stamp = avatarCacheStamp, stamp == url.absoluteString { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let image = UIImage(data: data) {
+                ProfileStore.shared.setAvatar(image)
+                avatarCacheStamp = url.absoluteString
+            }
+        } catch {
+            // 下载失败不算错：本地那份旧的照用，界面上还是他自己的头像。
+        }
+    }
+
+    /// 已经缓存到本地的账号头像是哪一张（存 URL，不是图）。
+    private var avatarCacheStamp: String? {
+        get { UserDefaults.standard.string(forKey: "aevis.accountAvatarStamp") }
+        set { UserDefaults.standard.set(newValue, forKey: "aevis.accountAvatarStamp") }
+    }
+
+    // MARK: - 登录成功之后统一要做的三件事
+
+    /// 三条登录路（验证码 / 密码 / 注册码 / QQ）**收尾都调它**，别再各写一遍。
+    ///
+    /// 以前每条路各写各的，结果就是"有的路会拉资料、有的不会" ——
+    /// 用户看到的现象就是「头像和名称获取不了」。一处收口最省心。
+    @MainActor
+    func afterSignIn() async {
+        await refreshProfile()
+        await applyToLocalProfile()
+        await bindThisDevice()
+    }
+
+    /// 把**这台设备**绑到刚登录的账号上（`/api/device/bind`）。
+    ///
+    /// 用户 2026-09-28：「设备码的话，就是也不是绑定账号吗？」
+    /// 绑上之后这台机器就跟账号挂钩了：换机要审批、封设备能连账号一起治 ——
+    /// 这是反白嫖那条线。**失败不报错**：绑不上不影响他用 App，
+    /// 而且服务端本来就有「一台设备只能绑一个账号」的规矩（409 也是正常的）。
+    @MainActor
+    func bindThisDevice() async {
+        let code = DeviceIdentity.wireCode
+        guard !code.isEmpty else { return }
+        _ = try? await post("/api/device/bind", ["device_id": code])
     }
 
     // MARK: - 底层
@@ -251,9 +408,12 @@ final class AccountService: ObservableObject {
             signOut()
             throw AccountError.unauthorized
         default:
-            // 服务器自己说的话最有用，优先原样带出来
-            let serverSaid = (json?["error"] as? String)
-                ?? (json?["message"] as? String)
+            // ⚠️ **`message` 优先，不是 `error`**：服务端回的是
+            //    `{"error":"bad_email","message":"这个邮箱地址看起来不对。"}` ——
+            //    给用户看 `error` 那种机器码（bad_email）等于什么都没说，
+            //    界面上就是"改了没反应，只蹦一句英文"。中文那句才是人看的。
+            let serverSaid = (json?["message"] as? String)
+                ?? (json?["error"] as? String)
                 ?? String(decoding: data.prefix(160), as: UTF8.self)
             throw AccountError.http(status: status, body: serverSaid)
         }
@@ -321,7 +481,7 @@ enum AccountError: LocalizedError {
         case .badURL:
             return "服务器地址拼不出合法网址，检查一下是不是写全了（要带 http:// 或 https://）。"
         case .missingFields:
-            return "账号和密码都要填。"
+            return "该填的还没填完。"
         case let .unreachable(reason):
             return "连不上服务器：\(reason)"
         case .unauthorized:

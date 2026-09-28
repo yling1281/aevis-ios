@@ -34,6 +34,12 @@
 	</array>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<!-- 只读给自己看的一个常量：**App 自己的 URL scheme 叫什么**。
+	     QQ 登录那条路要用它 —— 服务端授权完往 `aevis://login?token=…` 跳，
+	     App 那个内置浏览器就是靠它认出来的（`LoginView.appScheme`）。
+	     改这里就得同步改服务端的 AEVIS_APP_SCHEME 和上面的 CFBundleURLSchemes。 -->
+	<key>AEVIS_APP_SCHEME</key>
+	<string>aevis</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>AevisCommit</key>

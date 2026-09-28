@@ -6,6 +6,8 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// 授权门禁。**没授权的时候，它挡住整个 App**（2026-09-25 用户明确要求）。
     @StateObject private var gate = DeviceGate.shared
+    /// 账号状态 —— 退出登录之后要立刻退回登录页，所以得盯着它。
+    @ObservedObject private var account = AccountService.shared
     /// 快捷指令回传来的那一句话，在顶上飘一下就消失。
     @State private var bridgeNote: String?
     /// 上次崩了 → **整个屏幕报错误码**（用户 2026-09-26 明确要求）。
@@ -60,6 +62,8 @@ struct RootView: View {
         // ⚠️ 盯的是 `gate.authorized` 而不是 `isBlocking` —— 后者是计算属性，
         // 不是 `@Published`，在这里不会触发刷新。
         .animation(.easeInOut(duration: 0.3), value: gate.authorized)
+        // 登录 / 退出登录也一样要淡：退出之后退回登录页，不能"啪"一下硬切。
+        .animation(.easeInOut(duration: 0.3), value: account.isSignedIn)
         // 快捷指令最后一步「打开 URL」打开的就是这里 ——
         // 这是我们唯一能把数据收回来的通道（run-shortcut 没有返回值）。
         .onOpenURL { url in
@@ -178,7 +182,7 @@ struct RootView: View {
         #endif
     }
 
-    /// 授权门禁。
+    /// 授权门禁（**第一道**）。
     ///
     /// 用户 2026-09-25 的口径：「打开 APP 就提示没有授权，然后就展示设备码
     /// 和没有授权的那个界面」「填设备码之后就自动通过，就是一个账号一个设备码」。
@@ -186,15 +190,41 @@ struct RootView: View {
     /// **只拦"从没授权过的设备"**：一旦授权过（存在本机），
     /// 以后断网、服务器挂了都照样进 —— 聊天记录都在这台手机里，
     /// 拿网络去锁它等于把用户自己的东西扣住了。
+    ///
+    /// 顺序（用户 2026-09-28 定的）：「先那个设备码，然后你还要登录账号」——
+    /// 所以**设备码在前、账号在后**，两道都过才进主界面。
     @ViewBuilder
     private var gated: some View {
         if gate.isBlocking {
             DeviceGateView()
                 .transition(.opacity)
+        } else if needsLogin {
+            LoginView()
+                .transition(.opacity)
         } else {
             normal
                 .transition(.opacity)
         }
+    }
+
+    /// 要不要先登录账号（**第二道门**）。
+    ///
+    /// 用户原话：「你一定要强制性登录的，去退出登录的话，就回到初始界面，就要登录账号」。
+    ///
+    /// 两道刻意留的口子：
+    ///  · **只拦"从没登录过"的**。本地有 token（`isSignedIn`）就放行 ——
+    ///    断网、服务器挂了照样进（`isSignedIn` 只看本地有没有 token，不联网）。
+    ///  · **截图自检要能跳过**：CI 那 36 张图全走 `-aevisDemo`，
+    ///    被登录门拦住的话每张都会变成登录页。
+    ///    `-aevisForceLogin` 是专门用来看登录页那张截图的。
+    private var needsLogin: Bool {
+        guard account.isConfigured else { return false }
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-aevisForceLogin") { return true }
+        if args.contains("-aevisDemo") || args.contains("-aevisSkipGate") { return false }
+        #endif
+        return !account.isSignedIn
     }
 
     @ViewBuilder

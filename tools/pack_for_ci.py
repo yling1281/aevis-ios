@@ -93,6 +93,8 @@ MUST_HAVE = [
     "Aevis/Features/Chat/PersonaSheet.swift",
     # 「转发朋友圈」（聊天加号里那个面板）
     "Aevis/Features/Chat/ShareToMomentsSheet.swift",
+    # 登录门（验证码 / 密码 / 注册码 / QQ 四条路都在这儿）
+    "Aevis/Features/Login/LoginView.swift",
     "Aevis/Features/Moments/MomentsDecorSheet.swift",
     "Aevis/Core/Pronoun.swift",
     "Aevis/Core/WebAuth.swift",

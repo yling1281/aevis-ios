@@ -33,8 +33,12 @@ settings:
     #    （「文件」撤掉）、「朋友圈」改成「转发朋友圈」；「TA 的资料」只留「编辑资料」；
     #    外观入口只看聊天背景+气泡圆角（完整的仍在总设置里）；朋友圈封面能拉大/点成全屏、
     #    评论可回复；装扮朋友圈加「我在 TA 朋友圈里的样子」；新增个性签名。
-    MARKETING_VERSION: "0.0.82"
-    CURRENT_PROJECT_VERSION: "82"
+    # ⚠️ 2026-09-28 0.0.83：**登录搬进 App 并强制登录** —— 验证码 / 密码 / 注册码 /
+    #    QQ 四条路都在 App 里做完（不再跳系统浏览器，QQ 走内置浏览器）；
+    #    进门顺序 = 先设备码、再登录；退出登录回登录页；
+    #    「我的资料」的名字和头像跟着账号走；登录后自动把设备码绑到账号上。
+    MARKETING_VERSION: "0.0.83"
+    CURRENT_PROJECT_VERSION: "83"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

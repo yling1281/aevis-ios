@@ -32,6 +32,16 @@ enum DeviceIdentity {
     /// 给人看的形态。
     static var pretty: String { format(canonical) }
 
+    /// **发请求时用的那一串**（只留 ASCII 字母数字）。
+    ///
+    /// ⚠️ 这一串必须**处处一致**：设备门（`/api/device/lookup`）和
+    ///    「绑到账号」（`/api/device/bind`）用的要是同一个值，
+    ///    差一个字符就会变成"门放行了、绑定却说没这台设备"。
+    ///    所以提出来放这儿，谁要用谁来取。
+    static var wireCode: String {
+        canonical.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    }
+
     /// 网页上绑定的入口 —— 绑定**只在网页上做**，App 里不需要登录。
     /// 域名走 `AevisHosts`，别写死。
     static let bindPage = AevisHosts.accountURL("/me")
