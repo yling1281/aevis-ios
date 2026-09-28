@@ -32,6 +32,8 @@ final class AdminStore: ObservableObject {
     @Published var deviceRequests: [DeviceRequest] = []
     @Published var blockedUsers: [BlockedUser] = []
     @Published var blockedDevices: [BlockedDevice] = []
+    /// 封禁记录（含已解封的）—— 看"为什么封的"就靠它（2026-09-28）。
+    @Published var banEvents: [BanEvent] = []
     @Published var diag: [DiagReport] = []
     @Published var bot: BotInfo?
     @Published var accountInfo: AdminAccountInfo?
@@ -114,6 +116,7 @@ final class AdminStore: ObservableObject {
         deviceRequests = []
         blockedUsers = []
         blockedDevices = []
+        banEvents = []
         diag = []
         bot = nil
         accountInfo = nil
@@ -161,6 +164,7 @@ final class AdminStore: ObservableObject {
         if let reply = await get("/api/admin/blocks", as: BlocksReply.self) {
             blockedUsers = reply.users ?? []
             blockedDevices = reply.devices ?? []
+            banEvents = reply.events ?? []
         }
         if let list = await get("/api/admin/diag", as: DiagReportList.self) {
             diag = list.items ?? []

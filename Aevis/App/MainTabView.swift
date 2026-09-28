@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// 底下那四个 tab。
 ///
@@ -47,32 +50,17 @@ struct MainTabView: View {
     /// 她主动提的申请（打电话 / 看屏幕 / 一起听）—— 你要点一下才会真的开始。
     @ObservedObject private var companionRequest = CompanionRequest.shared
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     @State private var tab: MainTab = .contacts
 
     var body: some View {
-        TabView(selection: $tab) {
-            // ⚠️ 这四行 `.aevisScreen` 是**全量操作埋点**的一半，别删 ——
-            // 底栏四个页面 + 下面那几个弹层全是从这一处呈现的，
-            // 挂在这里 = 9 个页面一处改完（用户要求「不管点了哪个按键都要记起来」）。
-            ChatListView()
-                .aevisScreen("聊天列表")
-                .tabItem { Label(MainTab.chats.title, systemImage: MainTab.chats.symbol) }
-                .tag(MainTab.chats)
-
-            ContactsView()
-                .aevisScreen("通讯录")
-                .tabItem { Label(MainTab.contacts.title, systemImage: MainTab.contacts.symbol) }
-                .tag(MainTab.contacts)
-
-            DiscoverView()
-                .aevisScreen("发现")
-                .tabItem { Label(MainTab.discover.title, systemImage: MainTab.discover.symbol) }
-                .tag(MainTab.discover)
-
-            MeView()
-                .aevisScreen("我")
-                .tabItem { Label(MainTab.me.title, systemImage: MainTab.me.symbol) }
-                .tag(MainTab.me)
+        Group {
+            if usesSplitLayout {
+                splitLayout
+            } else {
+                phoneTabs
+            }
         }
         // 这几个面板提到根上，二级页面和根视图都能触发（截图自检也靠它）
         .sheet(isPresented: $router.showSettings, onDismiss: { router.settingsFocus = nil }) {
@@ -143,6 +131,104 @@ struct MainTabView: View {
             // 「看到屏幕」，界面却永远停在进设置那一刻的样子，
             // 于是反馈就变成了「录屏还是不行」。
             ScreenCompanion.shared.startPolling()
+        }
+    }
+
+    // MARK: - 两种布局（iPhone 底栏 / iPad 分栏）
+    //
+    // 2026-09-28 用户要求：「iPad 上现在只是 iPhone 布局拉伸」→ 做真布局。
+    //
+    // 做法是**只换外层容器，页面本身一个字不动** ——
+    // 四个页面各自都带着自己的 `NavigationStack`，塞进分栏的详情区正好，
+    // 再包一层反而会变成嵌套导航（push 两次、返回按钮叠两层）。
+
+    /// 要不要用 iPad 那种「左边一列、右边内容」的布局。
+    ///
+    /// ⚠️ `idiom == .pad` **和** size class 是 regular，**两个都要**：
+    /// - 只看 size class 的话，**iPhone 横屏也是 regular**（Plus / Max 那几款），
+    ///   手机会莫名其妙变成 iPad 布局；
+    /// - 只看 idiom 的话，iPad 分屏到很窄（Slide Over）也硬要分栏，
+    ///   左边那一列挤掉小半个屏，右边内容窄得没法看。
+    private var usesSplitLayout: Bool {
+        guard sizeClass == .regular else { return false }
+        #if canImport(UIKit)
+        return UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        return false
+        #endif
+    }
+
+    /// iPhone：底下那四个 tab（原样）。
+    private var phoneTabs: some View {
+        TabView(selection: $tab) {
+            // ⚠️ `page(for:)` 里那四行 `.aevisScreen` 是**全量操作埋点**的一半，
+            // 别删 —— 底栏四个页面 + 那几个弹层全是从这一处呈现的，
+            // 挂在那里 = 一种布局改完两种布局都覆盖
+            //（用户要求「不管点了哪个按键都要记起来」）。
+            page(for: .chats)
+                .tabItem { Label(MainTab.chats.title, systemImage: MainTab.chats.symbol) }
+                .tag(MainTab.chats)
+
+            page(for: .contacts)
+                .tabItem { Label(MainTab.contacts.title, systemImage: MainTab.contacts.symbol) }
+                .tag(MainTab.contacts)
+
+            page(for: .discover)
+                .tabItem { Label(MainTab.discover.title, systemImage: MainTab.discover.symbol) }
+                .tag(MainTab.discover)
+
+            page(for: .me)
+                .tabItem { Label(MainTab.me.title, systemImage: MainTab.me.symbol) }
+                .tag(MainTab.me)
+        }
+    }
+
+    /// iPad：左边一列导航、右边是选中的那一页。
+    ///
+    /// ⚠️ 侧边栏的选中态要**接回 `tab`**（而不是自己另存一份）——
+    /// 这样「设置里选了默认进哪一页」「`-aevisOpenTab=` 截图参数」
+    /// 和底栏那套逻辑是**同一份状态**，两边不会各说各话。
+    private var splitLayout: some View {
+        NavigationSplitView {
+            List(selection: padSelection) {
+                Section {
+                    ForEach(MainTab.allCases) { item in
+                        Label(item.title, systemImage: item.symbol)
+                            .tag(item)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Aevis")
+            .navigationBarTitleDisplayMode(.inline)
+        } detail: {
+            page(for: tab)
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    /// 右栏当前显示哪一页。
+    ///
+    /// ⚠️ `List(selection:)` 只吃**可选**绑定（没选中时是 nil），
+    /// 所以这里做一层桥接：往 `tab` 写的时候把 nil 挡掉，
+    /// 免得点空白处把当前页清没了。
+    private var padSelection: Binding<MainTab?> {
+        Binding(get: { tab },
+                set: { if let picked = $0 { tab = picked } })
+    }
+
+    /// 四个主页面。**两种布局共用** —— 埋点只写一遍。
+    @ViewBuilder
+    private func page(for item: MainTab) -> some View {
+        switch item {
+        case .chats:
+            ChatListView().aevisScreen("聊天列表")
+        case .contacts:
+            ContactsView().aevisScreen("通讯录")
+        case .discover:
+            DiscoverView().aevisScreen("发现")
+        case .me:
+            MeView().aevisScreen("我")
         }
     }
 

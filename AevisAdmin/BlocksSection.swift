@@ -59,6 +59,41 @@ struct BlocksSection: View {
                 }
             }
 
+            // 封禁记录（2026-09-28）：**含已解封的**。
+            // 「自动封」是后端判出来的（同账号 24h 跨了 3 个网络），
+            // 这里要把跨了哪几个 IP 摆出来 —— 误封申诉就靠这个判断。
+            AdminFold("封禁记录", key: "section.blocks.events",
+                      count: store.banEvents.count) {
+                if store.banEvents.isEmpty {
+                    AdminCard { AdminEmpty(text: "还没有封禁记录。") }
+                } else {
+                    AdminCard {
+                        ForEach(Array(store.banEvents.enumerated()),
+                                id: \.element.stableID) { index, ev in
+                            AdminCardRow(showsDivider: index > 0) {
+                                AdminLine(
+                                    title: ev.email ?? "—",
+                                    subtitle: (ev.isAuto ? "自动封" : "人工封")
+                                        + ((ev.ips?.isEmpty == false) ? " · 跨 " + ev.ips! : "")
+                                        + (ev.notified == false ? "（还没播报）" : ""),
+                                    detail: AdminFormat.when(ev.at)
+                                        + ((ev.reason?.isEmpty == false) ? "\n" + ev.reason! : "")
+                                        + ((ev.deviceId?.isEmpty == false)
+                                           ? "\n设备 " + ev.deviceId! : "")
+                                )
+                            } trailing: {
+                                AdminMiniButton(title: "解封", tint: AdminSkin.brand) {
+                                    Task { await store.blockUser(ev.email ?? "", blocked: false) }
+                                }
+                            }
+                        }
+                    }
+                    AdminNote(text: "「自动封」是后端判出来的：同一个账号 24 小时内跨了 3 个"
+                             + "不同网络（家里 WiFi + 出门 4G 是正常的两个，第 3 个说明在共享）。"
+                             + "误封就点解封 —— 解封之后这个账号不会再被自动封。")
+                }
+            }
+
             AdminFold("手动封一台机器", key: "section.blocks.manual") {
                 AdminCard {
                     VStack(alignment: .leading, spacing: 11) {

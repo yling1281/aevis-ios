@@ -36,6 +36,18 @@ struct DeviceGateView: View {
     private static let blockedHelp =
         "管理员停用了这台设备。\n解封之后这个页面会自己进去，不用重装。"
 
+    /// 申诉要交什么。**用户 2026-09-28 定的口径**：
+    /// 交录屏 + 翻到 3 天前的聊天记录 → 人工审。
+    ///
+    /// ⚠️ 必须把"交什么、交到哪"写死在页面上。只写"有疑问联系管理员"的话，
+    /// 他会来问"为什么封我"、"怎么解封"、"发什么给你"，来回好几轮 ——
+    /// 而这一屏是他**唯一**能看到的地方（App 进不去）。
+    private static let appealSteps = [
+        "一段录屏：从打开 App 到能正常用为止",
+        "聊天记录翻到 3 天前，截个图",
+        "把上面那串设备码一起发过去（方便对号）",
+    ]
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -61,6 +73,13 @@ struct DeviceGateView: View {
 
                 codeCard
                     .padding(.top, 24)
+
+                // 被封时多摆一块「怎么申诉」——**只在被封时出现**。
+                // 没被封的人看到"你要申诉"会莫名其妙（同一屏上两套话术会打架）。
+                if gate.blocked {
+                    appealCard
+                        .padding(.top, 14)
+                }
 
                 // 被封时**不给「去绑定」按钮** —— 那会误导他以为再绑一次就行。
                 // 留着「再查一次」，解封之后点一下（或者等下一轮自动查）就恢复了。
@@ -156,6 +175,51 @@ struct DeviceGateView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
         }
+        .aevisGlass(cornerRadius: 18)
+    }
+
+    // MARK: - 申诉（只在被封时出现）
+
+    /// 「怎么恢复」那张卡。**这是被封的人唯一能自救的入口** ——
+    /// 所以步骤要一条条摆出来，不能写成一整段话（那种没人读）。
+    private var appealCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 13, weight: .medium))
+                Text("觉得是误封？")
+                    .font(.aevis(14, weight: .semibold))
+            }
+            .foregroundStyle(settings.accentColor)
+
+            Text("把下面几样一起发到 QQ 群，@ 管理员人工看：")
+                .font(.aevis(12.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Array(Self.appealSteps.enumerated()), id: \.offset) { index, step in
+                    HStack(alignment: .top, spacing: 7) {
+                        Text("\(index + 1).")
+                            .font(.aevis(12.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text(step)
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Text("人工看过没问题就解封 —— 解封后这一页自己会进去。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .aevisGlass(cornerRadius: 18)
     }
 

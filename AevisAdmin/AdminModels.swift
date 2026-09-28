@@ -128,6 +128,32 @@ struct BlockedDevice: Decodable, Identifiable {
 struct BlocksReply: Decodable {
     var users: [BlockedUser]?
     var devices: [BlockedDevice]?
+    /// 封禁记录（2026-09-28 加）。老版本后端不返回这个字段 ——
+    /// 所以是**可选**，解码不会炸。
+    var events: [BanEvent]?
+}
+
+/// 一条封禁记录 —— 谁封的（自动 / 人工）、什么时候、**跨了哪几个网络**。
+///
+/// 这是封禁闭环的"案卷"。误封申诉全靠它：光说"你被封了"根本没法判断，
+/// 得能看见"哦，他一天跨了 3 个网络"或者"这明显是误伤，赶紧解"。
+struct BanEvent: Decodable, Identifiable {
+    var id: Int?
+    var email: String?
+    var deviceId: String?
+    /// 跨的那几个 IP —— 后端已经拼成 "1.2.3.4 / 5.6.7.8" 这种串了。
+    var ips: String?
+    var reason: String?
+    var at: Int?
+    var source: String?
+    /// 有没有播报到群里（false = 桥还没轮到它）。
+    var notified: Bool?
+
+    /// ⚠️ 身份用字符串、不用 `id`：`id` 是**可选 Int**，
+    /// `ForEach` 拿可选值当身份在重渲染时容易错位（`AdminOrder` 那次栽过）。
+    var stableID: String { id.map(String.init) ?? (email ?? UUID().uuidString) }
+
+    var isAuto: Bool { source == "auto" }
 }
 
 // MARK: - 崩溃现场
