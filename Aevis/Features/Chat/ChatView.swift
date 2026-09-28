@@ -338,6 +338,33 @@ struct ChatView: View {
             .onTapGesture {
                 composerFocused = false
             }
+            // ⚠️⚠️ **打开聊天必须主动滚到底**（用户反复提过好几次）。
+            //
+            // 下面三个 `onChange` 只在「消息变了」的时候才滚 —— 而打开一个
+            // **已经有历史记录**的聊天时，一条新消息都没有，三个 onChange
+            // 一个都不响 → 界面就停在最上面，看起来就是"没滑到最新那条"。
+            //
+            // 滚两次是**故意的**：第一次立刻滚（布局已好时一次到位）；历史记录
+            // 多的时候 LazyVStack 还在铺，"bottom"那个锚点可能还没生成，滚了等于
+            // 没滚 —— 所以隔一拍再滚一次兜底。少这一次就变成"有时能到底、
+            // 有时不能"的玄学。
+            .onAppear {
+                proxy.scrollTo("bottom", anchor: .bottom)
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+            // 换了聊天对象（从别处切过来、路径没变、视图没重建）：
+            // 两个联系人消息条数**正好一样**的话，上面那个 `count` 钩子不会响，
+            // 所以再认一下"第一条消息换人了没有"。换人了就说明整段都换了 → 滚到底。
+            .onChange(of: chat.messages.first?.id) { _, _ in
+                proxy.scrollTo("bottom", anchor: .bottom)
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
             .onChange(of: chat.messages.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo("bottom", anchor: .bottom)

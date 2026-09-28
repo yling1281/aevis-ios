@@ -22,29 +22,43 @@ struct AppearanceSettingsCard: View {
     @State private var importingFont = false
     @State private var fontNote: String?
 
+    /// 收起来的组。**默认空 = 全部展开**。
+    ///
+    /// ⚠️ 折叠只是让人**一眼看清分了几类**，不是把东西藏起来 ——
+    ///    藏起来的功能在用户眼里等于没做（这条栽过两次）。
+    ///    所以默认全开，想清爽自己收。
+    @State private var foldedSections: Set<String> = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             title("外观")
 
-            glassSection
+            // ⚠️ **「聊天背景」放在第一位**。
+            //    以前它排在最后一屏之后 —— 用户进来找"改背景"，
+            //    要划过玻璃/圆角/主题色/图标/字体五段才看到，反馈就是
+            //    "点开外观怎么还是全部设置"。最常改的先给。
+            group("background", "聊天背景") { backgroundSection }
             rule
 
-            toneSection
+            group("accent", "主题色") { accentSection }
             rule
 
-            toggleRow("简易模式", subtitle: "字更大、间距更松，去掉花哨的装饰", isOn: $settings.simpleMode)
+            group("tone", "气泡与圆角") { toneSection }
             rule
 
-            accentSection
+            group("font", "字体与字号") { fontSection }
             rule
 
-            appIconSection
+            group("icon", "App 图标") { appIconSection }
             rule
 
-            fontSection
+            group("glass", "玻璃与质感") { glassSection }
             rule
 
-            backgroundSection
+            group("misc", "其它") {
+                toggleRow("简易模式", subtitle: "字更大、间距更松，去掉花哨的装饰",
+                          isOn: $settings.simpleMode)
+            }
         }
         .aevisGlass(cornerRadius: 20)
         .fileImporter(
@@ -53,6 +67,38 @@ struct AppearanceSettingsCard: View {
             allowsMultipleSelection: true
         ) { result in
             handleFontImport(result)
+        }
+    }
+
+    /// 一个能折的组：点标题收/展开（跟设置页那些组头一个手感）。
+    @ViewBuilder
+    private func group<Content: View>(_ key: String, _ text: String,
+                                      @ViewBuilder content: () -> Content) -> some View {
+        let open = !foldedSections.contains(key)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    if open { foldedSections.insert(key) } else { foldedSections.remove(key) }
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Text(text)
+                        .font(.aevis(13.5, weight: .medium))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, open ? 6 : 13)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if open { content() }
         }
     }
 

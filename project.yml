@@ -22,8 +22,10 @@ settings:
     #    + 停用屏加申诉指引（封禁闭环的 App 侧收口）。
     # ⚠️ 2026-09-28 0.0.78：App 端账号跟账号走（昵称/头像/账号号显示 + 密码登录）
     #    + 清掉构建日志里全部 17 条警告（含 QQBot 锁、WebAuth 主线程、字体注册静默失败）。
-    MARKETING_VERSION: "0.0.78"
-    CURRENT_PROJECT_VERSION: "78"
+    # ⚠️ 2026-09-28 0.0.79：**打开聊天默认滚到底**（补 onAppear，以前只有 onChange）
+    #    + 「外观」卡分类（7 个可折叠组头，并把「聊天背景」从最后一屏提到第一位）。
+    MARKETING_VERSION: "0.0.79"
+    CURRENT_PROJECT_VERSION: "79"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
