@@ -91,11 +91,34 @@ enum AdminTab: String, CaseIterable, Identifiable {
 // MARK: - 根视图
 
 struct AdminRootView: View {
+    @EnvironmentObject private var store: AdminStore
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            AdminSplitView()
-        } else {
-            AdminTabsView()
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                AdminSplitView()
+            } else {
+                AdminTabsView()
+            }
+        }
+        // ⚠️⚠️ **进主界面必须自动拉一次数据**。
+        //
+        // 以前 `refreshAll()` 只在「登录成功」和「做完某个操作」之后调 ——
+        // 而**冷启动这条路没人管**：钥匙串里存着令牌 → `AdminStore.init()`
+        // 直接把它读出来、`isSignedIn` 就是 true → 进主界面 → **一个请求都不发**
+        // → 所有列表是空的。用户的体感就是「把 App 划掉、再打开，数据全都获取不了」
+        // （他报的就是这个 bug）。
+        //
+        // 放在这里而不是每个子页面：`AdminRootView` 是登录之后**唯一的总入口**，
+        // 手机（TabView）和 iPad（分栏）两种摆法都从它走 —— 一处盖住全部。
+        // （下拉刷新是另一回事，那个在 `AdminPage` 上，一直都在。）
+        .task { await store.refreshAll() }
+        // **从后台切回来也拉一次**：卖家常常一边看手机一边在网页上改，
+        // 切回来看到的应该是新的 —— 不然又是"怎么还是旧数据"那种观感。
+        // （`.task` 只在这个视图**第一次出现**时跑，切回前台不会重跑，所以必须单加这一条。）
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await store.refreshAll() } }
         }
     }
 }

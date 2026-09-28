@@ -212,7 +212,6 @@ struct AppearanceSettingsCard: View {
 
     private var accentSection: some View {
         VStack(alignment: .leading, spacing: 11) {
-            label("主题色")
 
             HStack(spacing: 13) {
                 ForEach(Array(AppSettings.accentPalette.enumerated()), id: \.offset) { index, color in
@@ -291,7 +290,6 @@ struct AppearanceSettingsCard: View {
 
     private var appIconSection: some View {
         VStack(alignment: .leading, spacing: 11) {
-            label("桌面图标")
 
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
@@ -341,7 +339,6 @@ struct AppearanceSettingsCard: View {
 
     private var fontSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            label("字体与字号")
 
             HStack {
                 Text("字号")
@@ -462,7 +459,6 @@ struct AppearanceSettingsCard: View {
 
     private var backgroundSection: some View {
         VStack(alignment: .leading, spacing: 11) {
-            label("聊天背景")
 
             Picker("聊天背景", selection: $settings.backgroundStyle) {
                 ForEach(BackgroundStyle.allCases) { style in
