@@ -715,6 +715,13 @@ struct ChatView: View {
             /// 结束时再调一次 `finishStreamingLine(pending)`，它会发现最后一条已经
             /// 不是空的了，于是**又追加一条一模一样的内容** ——
             /// 表现就是她每句话都说两遍。
+            ///
+            /// ⚠️ `@MainActor` **不能省**：`chat` 是主线程隔离的属性，
+            ///    而 Swift 里**局部函数不会自动继承外层 `Task { @MainActor }` 的隔离**，
+            ///    不标的话编译器要警告"从非隔离上下文访问主线程属性"。
+            ///    （只加 `@MainActor` 而不是把整段搬到别处：调用点就在同一个
+            ///      MainActor 任务里，搬走反而要来回 hop。）
+            @MainActor
             func flushLines() {
                 while let index = pending.firstIndex(of: "\n") {
                     let line = String(pending[pending.startIndex..<index])

@@ -104,7 +104,8 @@ final class MCPClient {
         )
 
         // 规范要求握手完再发一个通知。服务器不回东西，失败也不影响后面。
-        try? await rpc("notifications/initialized", params: [:], id: nil)
+        // `_ =` 明确表示**故意丢掉返回值** —— 不然编译器会警告"结果没被用到"。
+        _ = try? await rpc("notifications/initialized", params: [:], id: nil)
 
         let info = result["serverInfo"] as? [String: Any]
         let title = (info?["name"] as? String) ?? config.name

@@ -20,8 +20,10 @@ settings:
     #   不是 run_number**（两者相等是靠每次都对上，不是自动的）。
     # ⚠️ 2026-09-28 0.0.77：iPad 真布局（分栏，不再是手机布局拉伸）
     #    + 停用屏加申诉指引（封禁闭环的 App 侧收口）。
-    MARKETING_VERSION: "0.0.77"
-    CURRENT_PROJECT_VERSION: "77"
+    # ⚠️ 2026-09-28 0.0.78：App 端账号跟账号走（昵称/头像/账号号显示 + 密码登录）
+    #    + 清掉构建日志里全部 17 条警告（含 QQBot 锁、WebAuth 主线程、字体注册静默失败）。
+    MARKETING_VERSION: "0.0.78"
+    CURRENT_PROJECT_VERSION: "78"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

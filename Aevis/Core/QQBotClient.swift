@@ -59,14 +59,33 @@ final class QQBotClient {
 
     // MARK: - 换 token
 
+    /// 读缓存里那个还没过期的 token。**同步函数** —— 见下面 `store` 的说明。
+    private func validCachedToken() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let token = cachedToken, Date() < tokenExpiresAt else { return nil }
+        return token
+    }
+
+    /// 把新 token 连同过期时间写进缓存。**同步函数**。
+    ///
+    /// ⚠️ 为什么包成同步的小函数，而不是在 `accessToken()`（async）里直接 lock：
+    ///    `NSLock` 在 Swift 里标着 `noasync` —— 直接在 async 上下文调 `lock()`
+    ///    编译器会警告"asynchronous contexts 不可用"。这不是唠叨：
+    ///    **要是在持锁期间 await，别的任务一进来就死锁**。
+    ///    包成同步函数之后，锁的作用域里**必定没有 await**，既安全又没警告。
+    private func store(token: String, expires: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        cachedToken = token
+        tokenExpiresAt = Date().addingTimeInterval(max(60, expires - 300))
+    }
+
     /// 拿 access_token。**缓存一份**，提前 5 分钟过期 —— 每次发消息都换一次会被限流。
     func accessToken(force: Bool = false) async throws -> String {
-        lock.lock()
-        if !force, let token = cachedToken, Date() < tokenExpiresAt {
-            lock.unlock()
+        if !force, let token = validCachedToken() {
             return token
         }
-        lock.unlock()
 
         let creds = credentials
         guard !creds.appID.isEmpty, !creds.secret.isEmpty else {
@@ -88,10 +107,7 @@ final class QQBotClient {
         }
         // expires_in 有时是字符串、有时是数字，两种都认
         let expires = Self.number(json["expires_in"]) ?? 7200
-        lock.lock()
-        cachedToken = token
-        tokenExpiresAt = Date().addingTimeInterval(max(60, expires - 300))
-        lock.unlock()
+        store(token: token, expires: expires)
         return token
     }
 

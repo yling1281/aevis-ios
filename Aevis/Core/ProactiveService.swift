@@ -291,7 +291,10 @@ final class ProactiveService {
             request.timeoutInterval = 20
             request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
-            if let result = try? await Self.perform(request) {
+            // 成功就到此为止；失败往下走兜底。
+            // 用 `!= nil` 而不是 `if let result =`：返回值我们**根本不用**，
+            // 绑定一个从来没人读的变量只会让编译器警告。
+            if (try? await Self.perform(request)) != nil {
                 return
             }
             // 失败就往下走兜底 —— 老版本 Bark 或自建服务可能没有 /push

@@ -51,12 +51,21 @@ final class WebAuth: NSObject, ASWebAuthenticationPresentationContextProviding {
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         #if canImport(UIKit)
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        for scene in scenes {
-            if let window = scene.windows.first(where: { $0.isKeyWindow }) { return window }
+        // ⚠️ `UIApplication.shared` 是**主线程专用**的。这个回调系统保证在主线程上调用，
+        //    但协议签名是 `nonisolated`，编译器不知道 —— 所以用 `assumeIsolated`
+        //    明确告诉它"这里就是主线程"。
+        // ⚠️ 千万别改成 `DispatchQueue.main.sync { ... }` —— 这个回调本来就可能在
+        //    主线程上跑，`sync` 到主队列等于**自己等自己**，直接死锁。
+        return MainActor.assumeIsolated { () -> ASPresentationAnchor in
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            for scene in scenes {
+                if let window = scene.windows.first(where: { $0.isKeyWindow }) { return window }
+            }
+            if let window = scenes.first?.windows.first { return window }
+            return ASPresentationAnchor()
         }
-        if let window = scenes.first?.windows.first { return window }
-        #endif
+        #else
         return ASPresentationAnchor()
+        #endif
     }
 }

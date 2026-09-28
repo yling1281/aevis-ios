@@ -24,11 +24,35 @@ final class AccountService: ObservableObject {
     @Published var lastError: String?
 
     /// 服务器上的用户信息。
+    ///
+    /// ⚠️ 这个结构体**不落盘**（只有 token 进钥匙串），所以以后加字段是安全的 ——
+    ///    不会出现"老版本存下来的 JSON 解不出来"那种事。
     struct Profile: Codable, Hashable {
         var id: String
+        /// 邮箱。也是登录时「账号」那一栏可以填的东西之一。
         var username: String
+        /// 昵称，用户自己设的。空 = 没设过。
         var nickname: String
+        /// 账号号（8 位数字，像 QQ 号）。
+        /// ⚠️ 服务端是**懒补发**：老账号第一次拉资料时才生成，所以可能是空串。
+        var accountNo: String
+        /// 头像地址，服务端给的是**路径**（`/api/avatar?name=xxx`）。
+        /// 空 = 没设过头像，界面回落到昵称首字。
+        var avatar: String
         var expiresAt: Date?
+
+        /// 界面上显示哪个名字 —— 昵称优先，其次账号号，最后邮箱。
+        var displayName: String {
+            if !nickname.isEmpty { return nickname }
+            if !accountNo.isEmpty { return accountNo }
+            return username
+        }
+
+        /// 头像没设过时，界面用这个字当占位。
+        var initial: String {
+            let base = nickname.isEmpty ? (accountNo.isEmpty ? username : accountNo) : nickname
+            return base.isEmpty ? "A" : String(base.prefix(1)).uppercased()
+        }
     }
 
     private init() {}
@@ -49,10 +73,22 @@ final class AccountService: ObservableObject {
     var statusLine: String {
         if !isConfigured { return "还没填服务器地址。这个功能是可选的，不填也不影响别的。" }
         if isSignedIn {
-            if let profile { return "已登录：\(profile.nickname.isEmpty ? profile.username : profile.nickname)" }
+            if let profile { return "已登录：" + profile.displayName }
             return "已登录（还没拉到资料）"
         }
-        return "还没登录。可以注册一个，或者用已有的账号登录。"
+        return "还没登录。可以用账号号 + 密码，或者用邮箱验证码登录。"
+    }
+
+    /// 头像的完整地址。没设过头像返回 nil（界面自己回落成首字）。
+    ///
+    /// ⚠️ 服务端在 `profile.avatar` 里给的是**路径**（`/api/avatar?name=..`），
+    ///    这里补上**当前线路**的域名 —— 所以换线（线路一 ↔ 线路二）之后
+    ///    头像也跟着走新线，不用重新登录。
+    var avatarURL: URL? {
+        guard let path = profile?.avatar, !path.isEmpty else { return nil }
+        // 万一以后服务端改成给绝对地址，也能直接用
+        if path.hasPrefix("http://") || path.hasPrefix("https://") { return URL(string: path) }
+        return URL(string: base + path)
     }
 
     private var base: String {
@@ -63,21 +99,25 @@ final class AccountService: ObservableObject {
 
     // MARK: - 注册 / 登录 / 退出
 
-    func register(username: String, password: String, nickname: String) async throws {
-        let body: [String: Any] = [
-            "username": username,
-            "password": password,
-            "nickname": nickname.isEmpty ? username : nickname,
-            // 让服务器那边能区分设备 —— 用户很在意"一机一码"这类东西
-            "device": Self.deviceTag()
-        ]
-        let json = try await post("/api/register", body)
-        try adopt(json)
-    }
+    // MARK: - 登录 / 退出
+    //
+    // ⚠️ **注册不在这里**：注册必须有**注册码**（一人一码，在群里找机器人领），
+    //    服务端只有 `/api/register/start` + `/api/register/finish`。
+    //    早先这里有个 `register()` 打的是 `/api/register` —— 那个接口**根本不存在**，
+    //    点下去只会 404（2026-09-28 清理）。注册一律走网页登录页。
 
-    func signIn(username: String, password: String) async throws {
-        let json = try await post("/api/login", ["username": username, "password": password])
+    /// 账号号 / 邮箱 + 密码 登录。
+    ///
+    /// 「账号」那一栏**两种都收**（服务端自己分辨是邮箱还是账号号）——
+    /// 别让用户去想"我该填哪个"，老用户压根没有账号号。
+    func signIn(account: String, password: String) async throws {
+        let name = account.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !password.isEmpty else { throw AccountError.missingFields }
+        let json = try await post("/api/login", ["account": name, "password": password])
         try adopt(json)
+        // 登录接口只回 token（不回资料）→ 顺手拉一次，界面上就能立刻显示
+        // 昵称 / 账号号 / 头像，不用用户再点一下「刷新资料」。
+        await refreshProfile()
     }
 
     /// 退出只清本地的 token。**不调服务器** —— 退出不该因为连不上而失败。
@@ -222,14 +262,25 @@ final class AccountService: ObservableObject {
     // MARK: - 零件
 
     private static func profile(from json: [String: Any]) -> Profile {
-        // 服务器两种形状都认：`{"user": {...}}` 和把用户字段直接平铺在顶层。
-        // 我们自己的后端是**平铺**那种（`/api/me` 直接回 email / created_at / login_count）。
-        let user = (json["user"] as? [String: Any]) ?? json
+        // 服务器三种形状都认：
+        //   `{"profile": {…}}` ← **我们后端 `/api/me` 就是这种**（2026-09-28 起：
+        //                        资料在 `profile` 里，顶层的 email/created_at 是账号元信息）
+        //   `{"user": {…}}`
+        //   用户字段直接平铺在顶层
+        //
+        // ⚠️ 顺序不能反：`profile` 优先。顶层的 email 和 profile 里的 email 是同一个值，
+        //    但 `account_no` / `nickname` / `avatar` **只在 profile 里** ——
+        //    先取平铺的话，这几个字段永远是空的（界面上就是"昵称头像一直不显示"）。
+        let user = (json["profile"] as? [String: Any])
+            ?? (json["user"] as? [String: Any])
+            ?? json
         let email = Self.text(user["email"])
         return Profile(
             id: Self.text(user["id"]).isEmpty ? email : Self.text(user["id"]),
             username: email.isEmpty ? ((user["username"] as? String) ?? "") : email,
             nickname: (user["nickname"] as? String) ?? "",
+            accountNo: Self.text(user["account_no"]),
+            avatar: Self.text(user["avatar"]),
             expiresAt: nil
         )
     }
@@ -257,6 +308,7 @@ final class AccountService: ObservableObject {
 enum AccountError: LocalizedError {
     case notConfigured
     case badURL
+    case missingFields
     case unreachable(String)
     case unauthorized
     case http(status: Int, body: String)
@@ -268,6 +320,8 @@ enum AccountError: LocalizedError {
             return "还没填服务器地址。"
         case .badURL:
             return "服务器地址拼不出合法网址，检查一下是不是写全了（要带 http:// 或 https://）。"
+        case .missingFields:
+            return "账号和密码都要填。"
         case let .unreachable(reason):
             return "连不上服务器：\(reason)"
         case .unauthorized:

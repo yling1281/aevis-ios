@@ -15,7 +15,6 @@ struct AccountCard: View {
     @State private var showForm = false
     @State private var username = ""
     @State private var password = ""
-    @State private var nickname = ""
     @State private var note: String?
     @State private var busy = false
     @State private var probing = false
@@ -27,6 +26,10 @@ struct AccountCard: View {
             serverRow
             rule
             statusRow
+            if account.isSignedIn {
+                rule
+                profileRow
+            }
             rule
             actionRow
 
@@ -53,7 +56,8 @@ struct AccountCard: View {
             rule
             Text("服务器地址已经内嵌在 App 里，不用你填。这个账号是可选的："
                  + "人设、聊天记录、记忆本来都只存在这台手机上。\n"
-                 + "密码只在你点「登录 / 注册」的那一下用，不会被存下来。")
+                 + "账号用来同步昵称和头像（在网页的「我的账号」里改，这里点「刷新资料」同步）。"
+                 + "密码只在点「密码登录」的那一下用，不会被存下来。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -136,14 +140,76 @@ struct AccountCard: View {
         }
     }
 
+    /// 已登录时显示的**账号资料**：头像 + 昵称 + 账号号。
+    ///
+    /// 这三样都**跟着账号走**：在网页的「我的账号」里改了昵称或头像，
+    /// 这里点一下「刷新资料」就同步过来（换手机登录也是同一份）。
+    /// 没设过头像就回落成昵称首字，不会留一块空白。
+    private var profileRow: some View {
+        row {
+            avatarView
+                .frame(width: 46, height: 46)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(account.profile?.displayName ?? "已登录")
+                    .font(.aevis(15, weight: .medium))
+                    .lineLimit(1)
+                Text(handleText)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("改昵称 / 换头像在网页「我的账号」里")
+                    .font(.aevis(10.5))
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 8)
+        }
+    }
+
+    /// 「账号号 12345678 · xxx@qq.com」—— 两个都有就都显示，只有一个就显示那一个。
+    private var handleText: String {
+        guard let profile = account.profile else { return "资料还没拉到，点「刷新资料」" }
+        var parts: [String] = []
+        if !profile.accountNo.isEmpty { parts.append("账号号 " + profile.accountNo) }
+        if !profile.username.isEmpty { parts.append(profile.username) }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+
+    /// 头像。有图就加载，没有（或加载失败）回落成首字圆点。
+    ///
+    /// ⚠️ `AsyncImage` 失败时**什么都不画**（留一块空的），所以必须给 fallback ——
+    ///    否则网络一差，那一行就变成"名字旁边一个洞"。
+    @ViewBuilder
+    private var avatarView: some View {
+        if let url = account.avatarURL {
+            AsyncImage(url: url) { phase in
+                if case .success(let image) = phase {
+                    image.resizable().scaledToFill()
+                } else {
+                    avatarFallback
+                }
+            }
+            .clipShape(Circle())
+        } else {
+            avatarFallback
+        }
+    }
+
+    private var avatarFallback: some View {
+        Text(account.profile?.initial ?? "A")
+            .font(.aevis(18, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Circle().fill(Color.accentColor.opacity(0.8)))
+    }
+
     private var actionRow: some View {
         row {
             VStack(alignment: .leading, spacing: 3) {
-                Text(account.isSignedIn ? "退出登录" : "登录 / 注册")
+                Text(account.isSignedIn ? "退出登录" : "登录")
                     .font(.aevis(15))
                 Text(account.isSignedIn
                      ? "只清掉本机的登录状态，别的都不动"
-                     : "在系统浏览器里收个验证码就行，不用记密码")
+                     : "密码登录用账号号；验证码和 QQ 授权在网页上")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -158,12 +224,17 @@ struct AccountCard: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
             } else {
-                Button(busy ? "打开中…" : "用邮箱登录") {
-                    startWebLogin()
+                HStack(spacing: 14) {
+                    Button("密码登录") { showForm = true }
+                        .font(.aevis(14))
+                        .buttonStyle(.borderless)
+                    Button(busy ? "打开中…" : "验证码 / QQ") {
+                        startWebLogin()
+                    }
+                    .font(.aevis(14))
+                    .buttonStyle(.borderless)
+                    .disabled(busy)
                 }
-                .font(.aevis(14))
-                .buttonStyle(.borderless)
-                .disabled(busy)
             }
         }
     }
@@ -211,15 +282,19 @@ struct AccountCard: View {
             .value
     }
 
-    // MARK: - 注册 / 登录表单
+    // MARK: - 密码登录表单
+    //
+    // ⚠️ 这里**没有「注册」**：注册必须有注册码，服务端只有 `/api/register/start`
+    //    + `/api/register/finish` 两步，注册码在群里找机器人领。
+    //    早先这里画了个注册按钮、打的是不存在的 `/api/register`，点下去只会 404。
+    //    所以注册 / 验证码 / QQ 授权统一走网页登录页（就是上面那个「验证码 / QQ」按钮）。
 
     private var formSheet: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    field("用户名", text: $username, secret: false)
+                    field("账号号或邮箱", text: $username, secret: false)
                     field("密码", text: $password, secret: true)
-                    field("昵称（可以不填）", text: $nickname, secret: false)
 
                     if let note {
                         Text(note)
@@ -230,21 +305,9 @@ struct AccountCard: View {
 
                     HStack(spacing: 10) {
                         Button {
-                            submit(register: true)
+                            submit()
                         } label: {
-                            Text("注册")
-                                .font(.aevis(14, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 9)
-                                .aevisGlass(cornerRadius: 14)
-                        }
-                        .disabled(busy || !canSubmit)
-
-                        Button {
-                            submit(register: false)
-                        } label: {
-                            Text("登录")
+                            Text(busy ? "登录中…" : "登录")
                                 .font(.aevis(14, weight: .medium))
                                 .foregroundStyle(.primary)
                                 .padding(.horizontal, 16)
@@ -258,14 +321,18 @@ struct AccountCard: View {
                         Spacer(minLength: 0)
                     }
 
-                    Text("密码只在这一下用掉，不会被保存；成功后只存服务器给的 token（在钥匙串里）。")
-                        .font(.aevis(11.5))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("密码只在这一下用掉，不会被保存；成功后只存服务器给的 token（在钥匙串里）。")
+                        Text("还没账号？回到上一页点「验证码 / QQ」，在网页上用注册码注册（注册码在群里找机器人领）。")
+                        Text("忘了密码？在网页登录页点「忘记密码」，用邮箱收个验证码就能重设。")
+                    }
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(18)
             }
-            .navigationTitle("登录 / 注册")
+            .navigationTitle("密码登录")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -310,26 +377,20 @@ struct AccountCard: View {
             && !password.isEmpty
     }
 
-    private func submit(register: Bool) {
+    private func submit() {
         busy = true
         note = nil
         let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
         let pass = password
-        let nick = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task { @MainActor in
             defer { busy = false }
             do {
-                if register {
-                    try await account.register(username: user, password: pass, nickname: nick)
-                    note = "注册好了，已经登录。"
-                } else {
-                    try await account.signIn(username: user, password: pass)
-                    note = "登录成功。"
-                }
+                try await account.signIn(account: user, password: pass)
                 // 密码用完就丢，别留在内存里
                 password = ""
                 showForm = false
+                note = "登录好了。"
             } catch {
                 note = error.localizedDescription
             }

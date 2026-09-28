@@ -8,6 +8,8 @@ struct MeView: View {
     @EnvironmentObject private var personaStore: PersonaStore
     @ObservedObject private var profile = ProfileStore.shared
     @ObservedObject private var settings = AppSettings.shared
+    /// 观察账号 —— 拉到资料后这一页要跟着刷新（昵称/账号号那一行）。
+    @ObservedObject private var account = AccountService.shared
 
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
@@ -85,6 +87,11 @@ struct MeView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
+            // 打开这一页就顺手把账号资料拉一次。
+            // 昵称和头像是在**网页**的「我的账号」里改的 —— 不主动拉的话，
+            // 用户换完头像回到 App 看到的还是旧的（得自己去点一下「刷新资料」）。
+            // 没登录时这个方法直接返回，不发请求。
+            .task { await account.refreshProfile() }
             .navigationTitle("我")
             .navigationBarTitleDisplayMode(.inline)
             // ⚠️ 右上角那个齿轮**已经去掉了**（用户 2026-09-26 原话：
@@ -207,8 +214,8 @@ struct MeView: View {
     /// 账号那一行。**不填也能用**这件事必须写在行上，
     /// 否则会让人以为"没登录就不能用"。
     private var accountLine: String {
-        if !AccountService.shared.isConfigured { return "服务器连不上" }
-        return AccountService.shared.statusLine
+        if !account.isConfigured { return "服务器连不上" }
+        return account.statusLine
     }
 
     // MARK: - 零件

@@ -53,7 +53,14 @@ final class FontStore: ObservableObject {
         installed = Self.loadList()
 
         for font in installed {
-            Self.register(url: directory.appendingPathComponent(font.fileName))
+            // ⚠️ 返回值**必须接住**。它是一句「为什么没注册上」（成功是 nil）：
+            //    字体文件被系统清掉、或者字体本身不合法，都会走到这里。
+            //    早先这里直接丢弃返回值 → **静默失败**：那种字体在列表里显示着、
+            //    也能选中，但打出来还是系统字体，用户只会说「导入了没用」，
+            //    而我们连一下日志都看不到（黑匣子里一个字都没有）。
+            if let why = Self.register(url: directory.appendingPathComponent(font.fileName)) {
+                BlackBox.log("⚠️ 启动时注册字体 \(font.fileName) 失败：\(why)")
+            }
         }
     }
 
