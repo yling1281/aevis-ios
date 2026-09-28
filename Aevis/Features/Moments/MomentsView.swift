@@ -13,6 +13,8 @@ struct MomentsView: View {
     @ObservedObject private var moments = MomentStore.shared
     @ObservedObject private var personaStore = PersonaStore.shared
     @ObservedObject private var settings = AppSettings.shared
+    /// 我的名字 / 头像 / 个性签名 —— 「我在 TA 朋友圈里的样子」。
+    @ObservedObject private var profile = ProfileStore.shared
 
     @Environment(\.dismiss) private var dismiss
 
@@ -37,6 +39,19 @@ struct MomentsView: View {
 
     @State private var commentingOn: Moment?
     @State private var commentDraft = ""
+    /// 这条评论是回复谁的（nil = 直接评论动态）。
+    @State private var replyToName: String?
+
+    // —— 封面：能往下拉大，也能点开成全屏 ——
+    //
+    // 用户 2026-09-28 原话：「这个背景图你还是没有改变啊，我的是半屏甚至全屏都可以」。
+    // 以前封面是**写死 170 高**的一块，怎么拉都不动。现在：
+    //   · 手指往下拖 → 跟着长高（拖到哪算哪，**半屏**就出来了）
+    //   · 点一下 → 在「170」和「铺满一屏」之间切换（**全屏**）
+    @State private var coverPull: CGFloat = 0
+    @State private var coverFullScreen = false
+    /// 可视区高度（当"全屏"高度的基准，不写死数字）。
+    @State private var viewportHeight: CGFloat = 600
 
     @State private var busy = false
     @State private var note: String?
@@ -77,6 +92,10 @@ struct MomentsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: cardSpacing) {
+                    // 量「往下拖了多少」——0 高，不占地方。
+                    // 拖出来的正值用来把封面拉高（见 coverHeight）。
+                    ScrollOffsetReader(pull: $coverPull)
+
                     coverHeader
                     composer
 
@@ -93,6 +112,21 @@ struct MomentsView: View {
                 .padding(.bottom, 30)
             }
             .scrollDismissesKeyboard(.immediately)
+            // ⚠️ 用新的 `.coordinateSpace(.named(_:))`：老写法
+            //    `.coordinateSpace(name:)` 在 iOS 17 起是**废弃 API**，会出编译警告
+            //    （这个项目的规矩是构建日志 0 警告）。
+            .coordinateSpace(.named("momentsScroll"))
+            // 内容不满一屏时也要能往下拖（否则拉不动封面）
+            .scrollBounceBehavior(.always, axes: .vertical)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { viewportHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, height in
+                            viewportHeight = height
+                        }
+                }
+            )
             .navigationTitle("朋友圈")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -148,13 +182,13 @@ struct MomentsView: View {
             .sheet(isPresented: $showDecor) {
                 MomentsDecorSheet()
             }
-            .alert("评论", isPresented: Binding(
+            .alert(commentAlertTitle, isPresented: Binding(
                 get: { commentingOn != nil },
-                set: { if !$0 { commentingOn = nil } }
+                set: { if !$0 { commentingOn = nil; replyToName = nil } }
             )) {
                 TextField("说点什么…", text: $commentDraft, axis: .vertical)
                 Button("发出去") { submitComment() }
-                Button("取消", role: .cancel) { commentingOn = nil }
+                Button("取消", role: .cancel) { commentingOn = nil; replyToName = nil }
             }
             .onChange(of: pickedPhoto) { _, item in
                 guard let item else { return }
@@ -170,6 +204,17 @@ struct MomentsView: View {
 
     // MARK: - 我发一条
 
+    /// 封面当前该多高。
+    ///
+    /// · 点成了全屏 → 铺满一个可视区（= 全屏）
+    /// · 手指正往下拖 → 170 + 拖出来的量（拖一半就是**半屏**）
+    /// · 平时 → 170
+    private var coverHeight: CGFloat {
+        let base: CGFloat = 170
+        if coverFullScreen { return max(base, viewportHeight) }
+        return min(base + coverPull, max(base, viewportHeight))
+    }
+
     /// 朋友圈封面 + 那句话（用户自己装扮的那块）。
     ///
     /// **没设就不显示** —— 不留一块空白占地方（他可以在「⋯ → 装扮朋友圈」里加上）。
@@ -177,7 +222,7 @@ struct MomentsView: View {
     private var coverHeader: some View {
         if let data = settings.momentCoverData, let image = UIImage(data: data) {
             Color.clear
-                .frame(height: 170)
+                .frame(height: coverHeight)
                 // ⚠️ 同上：`image` 是 UIImage，要先包成 `Image(uiImage:)` 才能 .resizable()
                 .overlay(Image(uiImage: image).resizable().scaledToFill())
                 // ⚠️ overlay **不裁剪** → 不补这句，图会撑大整棵布局（踩过）
@@ -197,7 +242,24 @@ struct MomentsView: View {
                             .padding(.bottom, 12)
                     }
                 }
+                .overlay(alignment: .topTrailing) {
+                    // 全屏时给个"点回去"的提示，不然容易迷路（以为退不出去了）。
+                    if coverFullScreen {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(8)
+                            .background(Circle().fill(Color.black.opacity(0.32)))
+                            .padding(10)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: cardCorner, style: .continuous))
+                // 点一下在全屏 / 原大小之间切
+                .onTapGesture {
+                    withAnimation(.snappy(duration: 0.26)) {
+                        coverFullScreen.toggle()
+                    }
+                }
         }
 
         if settings.momentCoverData == nil, !settings.momentSignature.isEmpty {
@@ -220,6 +282,16 @@ struct MomentsView: View {
                     .lineLimit(1...4)
                     .font(mfont(15))
                     .padding(.vertical, 6)
+            }
+
+            // 我的**个性签名**（用户 2026-09-28 要的）——
+            // 挂在我自己那一行下面。改的地方在「我 → 我的资料」或者「装扮朋友圈」。
+            if !profile.signature.isEmpty {
+                Text(profile.signature)
+                    .font(mfont(12))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 44)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let image = pendingImage {
@@ -383,7 +455,7 @@ struct MomentsView: View {
 
                     ForEach(moment.comments) { comment in
                         HStack(alignment: .top, spacing: 5) {
-                            Text(displayName(for: comment.author) + "：")
+                            Text(commentLabel(comment))
                                 .font(mfont(12.5, weight: .medium))
                                 .foregroundStyle(comment.author.isMe
                                                  ? settings.accentColor
@@ -394,6 +466,14 @@ struct MomentsView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // 点一条评论 = **回复它**（用户 2026-09-28：「朋友圈有回复功能」）。
+                        // 用"点"而不是再加个按钮：评论行本来就窄，塞按钮会挤成一团。
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            replyToName = displayName(for: comment.author)
+                            commentDraft = ""
+                            commentingOn = moment
+                        }
                     }
                 }
                 .padding(10)
@@ -407,6 +487,7 @@ struct MomentsView: View {
             HStack(spacing: 14) {
                 Button {
                     commentDraft = ""
+                    replyToName = nil
                     commentingOn = moment
                 } label: {
                     Label("评论", systemImage: "bubble.right")
@@ -430,6 +511,21 @@ struct MomentsView: View {
         }
     }
 
+    /// 弹窗标题：回复某个人时写清楚回的是谁，不然容易发错人。
+    private var commentAlertTitle: String {
+        guard let replyToName, !replyToName.isEmpty else { return "评论" }
+        return "回复 \(replyToName)"
+    }
+
+    /// 评论那一行的"谁说的"—— 回复别人时带上「回复 XX」。
+    private func commentLabel(_ comment: MomentComment) -> String {
+        let who = displayName(for: comment.author)
+        if let target = comment.replyTo, !target.isEmpty {
+            return "\(who) 回复 \(target)："
+        }
+        return who + "："
+    }
+
     private func displayName(for author: Moment.Author) -> String {
         if author.isMe {
             let mine = ProfileStore.shared.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -444,9 +540,11 @@ struct MomentsView: View {
     private func submitComment() {
         guard let moment = commentingOn else { return }
         let text = commentDraft
+        let target = replyToName
         commentingOn = nil
+        replyToName = nil
 
-        moments.comment(text, on: moment, author: .me)
+        moments.comment(text, on: moment, author: .me, replyTo: target)
 
         let config = settings.llm
         let prompt = persona
@@ -513,5 +611,28 @@ struct MomentsView: View {
         if elapsed < 86400 { return "\(Int(elapsed / 3600)) 小时前" }
         if elapsed < 86400 * 7 { return "\(Int(elapsed / 86400)) 天前" }
         return relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+/// 量朋友圈「往下拖了多少」——拖出来的量决定封面拉多高。
+///
+/// ⚠️ **为什么单独写成一个 View，而不是在 `MomentsView` 里用
+///    `GeometryReader + onPreferenceChange`**：
+///    `onPreferenceChange` 在新 SDK 里的闭包是 `@Sendable` 的，而
+///    `MomentsView` 身上挂着 `@ObservedObject`（引用类型）→ **自身不是 Sendable**，
+///    在里面写状态会报「捕获了非 Sendable 的 self」（构建日志会多一条警告）。
+///    `onChange` 的闭包不是 `@Sendable`，所以把测量放进这个独立小视图最干净。
+private struct ScrollOffsetReader: View {
+    @Binding var pull: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onChange(of: geo.frame(in: .named("momentsScroll")).minY) { _, y in
+                    // 只认「往下拉」的量：往上滚的时候是负数，不算。
+                    pull = max(0, y)
+                }
+        }
+        .frame(height: 0)
     }
 }

@@ -76,7 +76,24 @@ struct MyProfileCard: View {
                         )
                 }
 
-                Text("这是你自己 —— 头像和名字只存在这台手机上。要说给 TA 听的名字，写在「TA 的设定 → TA 怎么叫你」里。")
+                // 个性签名（用户 2026-09-28 要的）。
+                // 就是"我在 TA 朋友圈里"名字下面那句。
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("个性签名")
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                    TextField("比如：今天也想你", text: $profile.signature)
+                        .font(.aevis(14))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                }
+
+                Text("这是你自己 —— 头像、名字、签名只存在这台手机上，会显示在 TA 的朋友圈里。"
+                     + "要说给 TA 听的名字，写在「TA 的设定 → TA 怎么叫你」里。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

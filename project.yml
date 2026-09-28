@@ -29,8 +29,12 @@ settings:
     #    以前只有 onChange 滚到底，消息不满一屏时根本滚不动，所以在用户看来
     #    就是打开停在最上面）+ 发现页只留朋友圈（抖音收起）+ 外观卡默认只展开
     #    「聊天背景」「气泡与圆角」。
-    MARKETING_VERSION: "0.0.81"
-    CURRENT_PROJECT_VERSION: "81"
+    # ⚠️ 2026-09-28 0.0.82：键盘弹出/收起都重新贴底；加号面板只留「相册/拍照」
+    #    （「文件」撤掉）、「朋友圈」改成「转发朋友圈」；「TA 的资料」只留「编辑资料」；
+    #    外观入口只看聊天背景+气泡圆角（完整的仍在总设置里）；朋友圈封面能拉大/点成全屏、
+    #    评论可回复；装扮朋友圈加「我在 TA 朋友圈里的样子」；新增个性签名。
+    MARKETING_VERSION: "0.0.82"
+    CURRENT_PROJECT_VERSION: "82"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

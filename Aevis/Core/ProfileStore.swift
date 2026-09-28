@@ -20,7 +20,18 @@ final class ProfileStore: ObservableObject {
     /// 我的头像。存成文件，不塞进 UserDefaults。
     @Published private(set) var avatarImage: UIImage?
 
+    /// 个性签名。朋友圈里挂在我名字下面那句。
+    ///
+    /// ⚠️ 和「封面上的那句话」（`AppSettings.momentSignature`）**不是一回事**：
+    ///    · 这一句是**我**的签名，跟着我走（TA 的朋友圈里、我的资料里都显示这句）
+    ///    · 那一句是他给朋友圈**封面**配的说明文字
+    ///    用户 2026-09-28 要的是这个「个性签名」。
+    @Published var signature: String {
+        didSet { UserDefaults.standard.set(signature, forKey: Self.signatureKey) }
+    }
+
     private static let nicknameKey = "aevis.myNickname"
+    private static let signatureKey = "aevis.mySignature"
 
     private static var avatarFileURL: URL {
         let base = FileManager.default
@@ -32,6 +43,7 @@ final class ProfileStore: ObservableObject {
 
     private init() {
         nickname = UserDefaults.standard.string(forKey: Self.nicknameKey) ?? ""
+        signature = UserDefaults.standard.string(forKey: Self.signatureKey) ?? ""
 
         #if canImport(UIKit)
         if let data = try? Data(contentsOf: Self.avatarFileURL), let image = UIImage(data: data) {

@@ -11,6 +11,12 @@ struct MomentComment: Codable, Identifiable, Equatable {
     var author: Moment.Author
     var text: String
     var createdAt: Date = Date()
+
+    /// 这条评论是**回复谁**的（名字）。nil = 直接评论那条动态。
+    ///
+    /// 用户 2026-09-28 要的「朋友圈要有回复功能」。
+    /// ⚠️ 声明成可选：老存档里没这个键，缺了就当 nil，**不会读崩**。
+    var replyTo: String? = nil
 }
 
 /// 一条朋友圈动态。
@@ -308,11 +314,16 @@ final class MomentStore: ObservableObject {
         return comments[(lastMine + 1)...].filter { $0.author == .ta }.count
     }
 
-    func comment(_ text: String, on moment: Moment, author: Moment.Author) {
+    /// 评论一条动态。`replyTo` 给了就是**回复某个人**（朋友圈的回复功能）。
+    func comment(_ text: String, on moment: Moment, author: Moment.Author,
+                 replyTo: String? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let index = moments.firstIndex(where: { $0.id == moment.id }) else { return }
-        moments[index].comments.append(MomentComment(author: author, text: trimmed))
+        let target = replyTo?.trimmingCharacters(in: .whitespacesAndNewlines)
+        moments[index].comments.append(
+            MomentComment(author: author, text: trimmed,
+                          replyTo: (target?.isEmpty == false) ? target : nil))
         save()
     }
 

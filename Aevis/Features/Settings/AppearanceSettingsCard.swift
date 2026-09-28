@@ -34,9 +34,16 @@ struct AppearanceSettingsCard: View {
 
     @State private var foldedSections: Set<String> = ["accent", "font", "icon", "glass", "misc"]
 
+    /// 只显示「聊天背景」+「气泡与圆角」两组。
+    ///
+    /// 用在**从聊天那边进来的入口**上（用户 2026-09-28 原话：
+    /// 「聊天背景与外观……你就只要那个那个气泡，他发的圆角这些，你不要全部的设置」）。
+    /// 完整的 7 组仍在「设置 → 外观」里 —— 功能一个都没删，只是换个地方看。
+    var chatOnly: Bool = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            title("外观")
+            title(chatOnly ? "聊天背景与气泡" : "外观")
 
             // ⚠️ **「聊天背景」放在第一位**。
             //    以前它排在最后一屏之后 —— 用户进来找"改背景"，
@@ -45,24 +52,29 @@ struct AppearanceSettingsCard: View {
             group("background", "聊天背景") { backgroundSection }
             rule
 
-            group("accent", "主题色") { accentSection }
-            rule
-
             group("tone", "气泡与圆角") { toneSection }
-            rule
 
-            group("font", "字体与字号") { fontSection }
-            rule
+            // 从聊天那边进来的入口**只看这两组**（见 `chatOnly`）；
+            // 完整的 7 组在「设置 → 外观」里，功能一个都没少。
+            if !chatOnly {
+                rule
 
-            group("icon", "App 图标") { appIconSection }
-            rule
+                group("accent", "主题色") { accentSection }
+                rule
 
-            group("glass", "玻璃与质感") { glassSection }
-            rule
+                group("font", "字体与字号") { fontSection }
+                rule
 
-            group("misc", "其它") {
-                toggleRow("简易模式", subtitle: "字更大、间距更松，去掉花哨的装饰",
-                          isOn: $settings.simpleMode)
+                group("icon", "App 图标") { appIconSection }
+                rule
+
+                group("glass", "玻璃与质感") { glassSection }
+                rule
+
+                group("misc", "其它") {
+                    toggleRow("简易模式", subtitle: "字更大、间距更松，去掉花哨的装饰",
+                              isOn: $settings.simpleMode)
+                }
             }
         }
         .aevisGlass(cornerRadius: 20)

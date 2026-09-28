@@ -1,3 +1,4 @@
+import Combine
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -35,12 +36,18 @@ struct ChatView: View {
     /// 从会话列表点进来之后，靠它退回去。
     @Environment(\.dismiss) private var dismiss
 
-    // 附件：拍照 / 选图 / 选文件 → OCR → 塞进输入框
+    // 附件：拍照 / 选图 → OCR → 塞进输入框
+    //
+    // ⚠️ **「文件」入口 2026-09-28 撤掉了**（用户原话：「加号的话，文件的话，
+    //    你也是发不出去的啊，就只能按相册和拍照」）。说明白点：选了文件也只是
+    //    读文字塞进输入框，他试过几次都发不出去，所以直接不给这个入口。
+    //    `AttachmentService` 那条读文件的链路还留着（别的入口可能用得上）。
     @State private var pickedPhotos: [PhotosPickerItem] = []
-    @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var attaching = false
     @State private var showScreenPanel = false
+    /// 加号里的「转发朋友圈」面板。
+    @State private var shareToMoments = false
     @FocusState private var composerFocused: Bool
 
     private var persona: Persona { personaStore.persona }
@@ -116,13 +123,6 @@ struct ChatView: View {
         .onChange(of: pickedPhotos) { _, items in
             handlePickedPhotos(items)
         }
-        .fileImporter(
-            isPresented: $showFileImporter,
-            allowedContentTypes: attachmentTypes,
-            allowsMultipleSelection: false
-        ) { result in
-            handlePickedFile(result)
-        }
         #if canImport(UIKit)
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { image in
@@ -131,6 +131,12 @@ struct ChatView: View {
             .ignoresSafeArea()
         }
         #endif
+        // 「转发朋友圈」的选消息面板（加号里那个）。
+        .sheet(isPresented: $shareToMoments) {
+            ShareToMomentsSheet()
+                .environmentObject(chat)
+                .environmentObject(personaStore)
+        }
         .sheet(isPresented: $showScreenPanel) {
             screenPanel
         }
@@ -147,10 +153,6 @@ struct ChatView: View {
     // 取出的文字**直接放进输入框**，不是偷偷发出去。
     // 用户能在后面接着写"帮我总结一下"，发出去的是「内容 + 指令」——
     // 她收到的是一段能读的文字，不是一张她看不见的图。
-
-    private var attachmentTypes: [UTType] {
-        AttachmentService.allowedFileTypes.compactMap { UTType(filenameExtension: $0) }
-    }
 
     private func handlePickedPhotos(_ items: [PhotosPickerItem]) {
         guard let item = items.first else { return }
@@ -185,22 +187,6 @@ struct ChatView: View {
                 ? "（我发了一张图片，但里面没认出文字。）"
                 : AttachmentService.composerBlock(text, source: source)
             send(text: block, image: picture)
-        }
-    }
-
-    private func handlePickedFile(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            if let text = AttachmentService.readTextFile(at: url) {
-                draft = AttachmentService.composerBlock(text, source: url.lastPathComponent) + draft
-                errorText = nil
-            } else {
-                errorText = "这个文件我读不了文字。能读的是：PDF、Word（docx）、RTF，"
-                    + "以及纯文本类（txt / md / csv / json / 代码）。"
-            }
-        case .failure(let error):
-            errorText = "选文件失败：\(error.localizedDescription)"
         }
     }
 
@@ -390,6 +376,35 @@ struct ChatView: View {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
+            // ⚠️⚠️ **键盘弹出来 / 收起来，都要重新贴到底**（用户 2026-09-28 原话：
+            //   「点击输入法的话就跟微信一样，就聊天就都顶到最下面，然后取消输入法
+            //    就顶到最下面嘛」）。
+            //
+            // `.defaultScrollAnchor(.bottom)` 只管**内容高度变化**时的贴底；
+            // 键盘一出现，变的是**可视区高度**，滚动位置会跟着漂 —— 表现就是
+            // "点开键盘以后消息被顶上去了一截"。所以这里在系统通知里再贴一次。
+            //
+            // 为什么滚两次：键盘动画约 0.25 秒，布局是**边动边算**的，
+            // 通知刚到时新高度还没生效。第一次在 60ms（动画中段）稳住，
+            // 第二次在 240ms（动画结束后）拍板。少一次就会"有时贴有时不贴"。
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillShowNotification)) { _ in
+                stickToBottom(proxy, delay: 60, thenAnother: 180)
+            }
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillHideNotification)) { _ in
+                stickToBottom(proxy, delay: 60, thenAnother: 180)
+            }
+        }
+    }
+
+    /// 贴到底（带一次延迟补滚）。
+    private func stickToBottom(_ proxy: ScrollViewProxy, delay: UInt64, thenAnother: UInt64) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: delay * 1_000_000)
+            proxy.scrollTo("bottom", anchor: .bottom)
+            try? await Task.sleep(nanoseconds: thenAnother * 1_000_000)
+            proxy.scrollTo("bottom", anchor: .bottom)
         }
     }
 
@@ -542,17 +557,16 @@ struct ChatView: View {
             .opacity(AttachmentService.cameraAvailable ? 1 : 0.4)
             #endif
 
-            Button {
-                showFileImporter = true
-            } label: {
-                moreTile("文件", "doc.text")
-            }
-
+            // ⚠️ 这里以前有两个坑（用户 2026-09-28 提的）：
+            //   ① 「文件」—— 选了也只是读出文字塞进输入框，他试几次都发不出去
+            //      → 入口直接撤掉，只留相册和拍照。
+            //   ② 「朋友圈」—— 点它是想**把聊天里的东西转过去**，不是想看朋友圈
+            //      → 改成「转发朋友圈」，选一条消息发到朋友圈。
             Button {
                 closeMorePanel()
-                router.showMoments = true
+                shareToMoments = true
             } label: {
-                moreTile("朋友圈", "photo.on.rectangle.angled")
+                moreTile("转发朋友圈", "arrowshape.turn.up.right")
             }
 
             // 一起听 / 通话 默认不显示（见 `Experimental`）：这两个入口以前藏在

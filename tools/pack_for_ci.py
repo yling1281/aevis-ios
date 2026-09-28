@@ -91,6 +91,8 @@ MUST_HAVE = [
     # 界面里指代 TA 的那个词（不许再写死「她」）
     # 「TA 的资料」（聊天页右上角）
     "Aevis/Features/Chat/PersonaSheet.swift",
+    # 「转发朋友圈」（聊天加号里那个面板）
+    "Aevis/Features/Chat/ShareToMomentsSheet.swift",
     "Aevis/Features/Moments/MomentsDecorSheet.swift",
     "Aevis/Core/Pronoun.swift",
     "Aevis/Core/WebAuth.swift",

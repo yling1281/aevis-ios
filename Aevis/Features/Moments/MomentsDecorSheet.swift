@@ -16,10 +16,14 @@ import UIKit
 struct MomentsDecorSheet: View {
 
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var profile = ProfileStore.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var pickedCover: PhotosPickerItem?
+    @State private var pickedMyAvatar: PhotosPickerItem?
     @State private var signature = ""
+    @State private var myName = ""
+    @State private var mySignature = ""
     @State private var note: String?
 
     var body: some View {
@@ -75,6 +79,11 @@ struct MomentsDecorSheet: View {
                         .buttonStyle(.borderless)
                     }
 
+                    // ⚠️ 用户 2026-09-28：「装扮朋友圈是装扮对方的朋友圈，
+                    //    就是对方的朋友圈里我是怎么样的」——
+                    //    所以除了 TA 的封面，还得能设置**我在 TA 朋友圈里的样子**。
+                    myLooks
+
                     if let note {
                         Text(note)
                             .font(.aevis(12))
@@ -99,10 +108,18 @@ struct MomentsDecorSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .onAppear { signature = settings.momentSignature }
+            .onAppear {
+                signature = settings.momentSignature
+                myName = profile.nickname
+                mySignature = profile.signature
+            }
             .onChange(of: pickedCover) { _, item in
                 guard let item else { return }
                 loadCover(item)
+            }
+            .onChange(of: pickedMyAvatar) { _, item in
+                guard let item else { return }
+                loadMyAvatar(item)
             }
         }
     }
@@ -141,6 +158,73 @@ struct MomentsDecorSheet: View {
         }
     }
 
+    // MARK: - 我在 TA 朋友圈里的样子
+
+    private var myLooks: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("我在 \(personaName) 的朋友圈里")
+                .font(.aevis(13, weight: .medium))
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 12) {
+                AevisAvatar(source: .me, size: 52)
+
+                PhotosPicker(selection: $pickedMyAvatar, matching: .images) {
+                    Text("换我的头像")
+                        .font(.aevis(13.5, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 8)
+                        .aevisGlass(cornerRadius: 13)
+                }
+                .tint(Color.primary)
+
+                Spacer(minLength: 0)
+            }
+
+            field("我的名字", placeholder: "留空就显示「我」", text: $myName)
+            field("个性签名", placeholder: "比如：今天也想你", text: $mySignature)
+
+            Button("保存") {
+                profile.nickname = myName.trimmingCharacters(in: .whitespacesAndNewlines)
+                profile.signature = mySignature.trimmingCharacters(in: .whitespacesAndNewlines)
+                note = "我在 TA 朋友圈里的样子已经改好了。"
+            }
+            .font(.aevis(14))
+            .foregroundStyle(settings.accentColor)
+            .buttonStyle(.borderless)
+
+            Text("改的就是「我的资料」里那套 —— 名字、头像、签名只有一份，这边改完那边也变。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .aevisGlass(cornerRadius: 16)
+    }
+
+    private func field(_ label: String, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label)
+                .font(.aevis(12))
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .font(.aevis(14.5))
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+        }
+    }
+
+    private var personaName: String {
+        let name = PersonaStore.shared.persona.name
+        return name.isEmpty ? "TA" : name
+    }
+
     // MARK: - 动作
 
     private func loadCover(_ item: PhotosPickerItem) {
@@ -162,6 +246,27 @@ struct MomentsDecorSheet: View {
             note = "封面换好了。"
             #else
             note = "这个平台上换不了封面。"
+            #endif
+        }
+    }
+
+    private func loadMyAvatar(_ item: PhotosPickerItem) {
+        note = nil
+        Task { @MainActor in
+            defer { pickedMyAvatar = nil }
+            guard let raw = try? await item.loadTransferable(type: Data.self) else {
+                note = "这张图读不出来，换一张试试。"
+                return
+            }
+            #if canImport(UIKit)
+            guard let image = UIImage(data: raw) else {
+                note = "这张图格式不支持，换成 JPG 或 PNG 再试。"
+                return
+            }
+            profile.setAvatar(image)
+            note = "我的头像换好了。"
+            #else
+            note = "这个平台上换不了头像。"
             #endif
         }
     }

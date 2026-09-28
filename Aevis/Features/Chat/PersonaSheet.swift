@@ -17,7 +17,6 @@ struct PersonaSheet: View {
 
     @EnvironmentObject private var personaStore: PersonaStore
     @EnvironmentObject private var settings: AppSettings
-    @ObservedObject private var router = AppRouter.shared
 
     @Environment(\.dismiss) private var dismiss
 
@@ -124,18 +123,16 @@ struct PersonaSheet: View {
 
     private var editCard: some View {
         VStack(spacing: 0) {
+            // ⚠️⚠️ **这一页只留「编辑资料」**（用户 2026-09-28 原话：
+            //    「我说了好多遍了，就是右上角的话，就只有编辑资料」）。
+            //
+            // 以前这里还挂着两行：
+            //   ·「聊天背景与外观」→ 其实开的是**整个设置页**（20 多张卡），
+            //     他每次都要骂一次"说了多少遍不要全部设置"
+            //   ·「TA 的朋友圈」→ 看朋友圈在「发现」那一页，这里不需要第二个入口
+            // 两行都撤了。外观设置仍在「设置 → 外观」里，功能一个没少。
             row("编辑资料", "名字、性别、性格、说话方式、关系、音色") {
                 editing = true
-            }
-            rule
-            row("聊天背景与外观", "玻璃、背景图、主题色、字体") {
-                // ⚠️ 背景目前是**全局**的（改一次所有联系人跟着变）。
-                // 所以这里如实说是"外观设置"，不假装是"只改这个人"。
-                open { router.showSettings = true }
-            }
-            rule
-            row("TA 的朋友圈", "TA 发过的动态和装扮") {
-                open { router.showMoments = true }
             }
         }
         .aevisGlass(cornerRadius: 20)
@@ -162,15 +159,6 @@ struct PersonaSheet: View {
     }
 
     // MARK: - 动作
-
-    /// 先关掉这一页、再开别处。
-    ///
-    /// ⚠️ **两个 sheet 同时 present 会被系统吞掉**（表现就是"点了没反应"），
-    /// 所以中间让出一拍再开。
-    private func open(_ action: @escaping () -> Void) {
-        dismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { action() }
-    }
 
     private func chatClear() {
         ChatStore.shared.clear()
