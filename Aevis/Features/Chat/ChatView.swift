@@ -332,6 +332,18 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 10)
             }
+            // ⚠️⚠️ **这一行才是「打开就停在最新那条」的关键，别删**。
+            //
+            // 以前只有下面那几个 `onChange` 滚到底 —— 那**只在消息超过一屏时有用**。
+            // 消息不满一屏时（刚装的、刚聊几句的）**根本滚不动**：ScrollView 把内容
+            // 顶到最上面、下面留一大片空白，看起来就是"停在最上面"。
+            // 用户反复提了很多次「打开要跳到最新的聊天记录」，就是这个。
+            //
+            // `.defaultScrollAnchor(.bottom)` 让内容**默认贴底**：
+            // 不满一屏 → 贴着输入框（上面留白）；超过一屏 → 直接显示最新那条。
+            // 跟微信一致。（iOS 17 API；部署目标正好是 17。）
+            .defaultScrollAnchor(.bottom)
+
             // 手指一拖就收
             .scrollDismissesKeyboard(.immediately)
             // 点消息区任意位置也能收

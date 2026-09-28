@@ -32,11 +32,16 @@ struct DiscoverView: View {
                             }
                         }
                     }
-                    card {
-                        entry("抖音", "play.rectangle", "打开抖音、点赞、评论、解析分享链接") {
-                            showDouyin = true
-                        }
-                        if Experimental.enabled {
+                    // ⚠️ 抖音默认**不显示**（用户 2026-09-28：「抖音是不是也要关掉，
+                    //    是不是说了抖音关掉」）—— 跟「一起听 / 音乐 / 实时通话」一个待遇，
+                    //    全挂在 `Experimental.enabled` 后面，开了试验开关才回来。
+                    //    **代码不删**：哪天想放开，只改这一个开关，不用翻代码。
+                    //    这一页现在只剩「朋友圈」——用户要的就是这个。
+                    if Experimental.enabled {
+                        card {
+                            entry("抖音", "play.rectangle", "打开抖音、点赞、评论、解析分享链接") {
+                                showDouyin = true
+                            }
                             entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
                                 router.showCall = true
                             }

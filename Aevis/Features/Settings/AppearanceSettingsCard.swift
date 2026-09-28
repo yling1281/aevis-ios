@@ -27,7 +27,12 @@ struct AppearanceSettingsCard: View {
     /// ⚠️ 折叠只是让人**一眼看清分了几类**，不是把东西藏起来 ——
     ///    藏起来的功能在用户眼里等于没做（这条栽过两次）。
     ///    所以默认全开，想清爽自己收。
-    @State private var foldedSections: Set<String> = []
+    /// ⚠️ **默认只展开「聊天背景」和「气泡与圆角」**（用户 2026-09-28 原话：
+    ///    「点开背景与外观，不要全部的设置都出来，就只要气泡、圆角这些」）。
+    ///    其余几组默认收着 —— 想调再点开。**不是删掉**：功能一个不少，
+    ///    只是不让它们一进来就糊满一屏。
+
+    @State private var foldedSections: Set<String> = ["accent", "font", "icon", "glass", "misc"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

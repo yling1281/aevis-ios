@@ -19,6 +19,7 @@ import Foundation
 ///     -aevisSkipGate           跳过授权门禁（-aevisDemo 已隐含跳过）
 ///     -aevisCallHistory        往聊天里塞一条通话记录
 ///     -aevisCompanionAsk       显示一条「TA 想…」的申请条
+///     -aevisChatHistory=24     往当前对话塞 24 条 —— **专门验「打开是不是停在最新那条」**
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，把每个界面都截下来。
 ///
@@ -35,11 +36,44 @@ enum DemoSeed {
 
         seedContacts()
         seedMessages()
+        seedLongHistory(intArg(args, "-aevisChatHistory"))
         applyToggles(args)
         seedProfile()
         seedMemory()
         seedMoments()
         #endif
+    }
+
+    /// 从 `-名字=123` 这种参数里抠出数字（没有就返回 0）。
+    private static func intArg(_ args: [String], _ name: String) -> Int {
+        let prefix = name + "="
+        for a in args where a.hasPrefix(prefix) {
+            return Int(a.dropFirst(prefix.count)) ?? 0
+        }
+        return 0
+    }
+
+    /// `-aevisChatHistory=24`：往当前对话里塞 N 条，**专门用来验「打开停在哪儿」**。
+    ///
+    /// ⚠️ 为什么非要有这个：截图里只有 3-4 条消息时**一屏就装下了**，
+    /// 滚动/贴底对不对**根本看不出来** —— 用户报了很多次的
+    /// 「打开聊天停在最上面」就是这么一直漏掉的。
+    /// 塞到一屏半，截图上「停在最新那条」还是「停在最上面」一眼就分得出。
+    private static func seedLongHistory(_ n: Int) {
+        guard n > 0 else { return }
+        let chat = ChatStore.shared
+        let lines = [
+            "在干嘛", "刚吃完饭", "你吃了吗", "嗯，吃的面", "好吃吗",
+            "一般般", "那下次换一家", "好", "今天有点累", "早点睡",
+            "你也是", "晚安", "怎么不说话了", "我在呢", "嗯嗯",
+            "明天几点起", "八点", "那我叫你", "行", "别忘了",
+            "忘不了", "哈哈", "傻样", "睡吧",
+        ]
+        for i in 0..<n {
+            let text = lines[i % lines.count]
+            chat.append(ChatMessage(role: i % 2 == 0 ? .user : .assistant,
+                                    text: "\(text)（第 \(i + 1) 条）"))
+        }
     }
 
     #if DEBUG
