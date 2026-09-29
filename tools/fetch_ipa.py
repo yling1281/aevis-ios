@@ -45,18 +45,30 @@ def wait_for_quota():
 
 
 def newest_run():
-    runs, err = get_json("https://api.github.com/repos/%s/actions/runs?per_page=1" % REPO)
+    """最近一次**主 App 的** CI 运行。
+
+    ⚠️ 2026-09-29 修：以前是 `actions/runs?per_page=1` 直接取第一条 ——
+    可这个仓库有**三条流水线**（CI / Admin / Probe），run_number 各算各的。
+    探针或管理端刚跑完，第一条就是它（`build-19` 这种），于是这里报
+    「拿不到 release build-19: 404 → 没有 IPA」，而真正的包在 `build-90`。
+    所以必须多取几十条、**按 workflow 名字挑**，不能拿第一条当最新。
+    """
+    runs, err = get_json("https://api.github.com/repos/%s/actions/runs?per_page=40" % REPO)
     if not runs:
         print("拿不到运行列表:", err, flush=True)
         return None
-    run = runs["workflow_runs"][0]
-    return {
-        "id": run["id"],
-        "number": run.get("run_number"),
-        "head": run["head_sha"][:7],
-        "status": run["status"],
-        "conclusion": run["conclusion"],
-    }
+    for run in runs["workflow_runs"]:
+        if run.get("name") != "CI":
+            continue
+        return {
+            "id": run["id"],
+            "number": run.get("run_number"),
+            "head": run["head_sha"][:7],
+            "status": run["status"],
+            "conclusion": run["conclusion"],
+        }
+    print("最近 40 条里没有主 App 的 CI 运行", flush=True)
+    return None
 
 
 def wait_for_run(run):
@@ -171,8 +183,21 @@ def main():
     if args:
         out_path = args[0]
 
+    # 直接点名一个 tag —— 部署时用得上：最新那次运行未必就是要发的那一轮，
+    # 而 tag 用的是 run_number，跟包里的版本号本来就错着位（见 topics/ci.md）。
+    forced = None
+    for i, item in enumerate(sys.argv):
+        if item == "--tag" and i + 1 < len(sys.argv):
+            forced = sys.argv[i + 1]
+
     if "--wait-quota" in sys.argv:
         wait_for_quota()
+
+    if forced:
+        print("指定版本: %s" % forced, flush=True)
+        if not download(forced, out_path):
+            raise SystemExit(1)
+        return
 
     run = newest_run()
     tag = None

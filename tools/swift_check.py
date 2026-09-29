@@ -878,9 +878,27 @@ def check_markdown_in_strings(path, source, localized):
                 break
             literal = line[index + 1:scan]
             before = line[:index].rstrip()
-            if _looks_like_prose(literal) and not re.search(r"\bText\(\s*$", before):
+            # ⚠️ 只有**直接写在 `Text(` 里的那个字面量**才是 LocalizedStringKey、才解析
+            #    markdown。一旦后面接了 `+`（字符串拼接），`Text` 收到的是个 String
+            #    表达式，会走 `Text(String)` 那个重载 —— **星号照样原样显示**。
+            #    2026-09-29 真栽了：钱包底部那行
+            #    `Text("这是**本机上的假钱包** …" + "…")`，截图里星号明晃晃地露着，
+            #    而这条规则当时正因为"它紧跟 Text(" 把它放过去了。
+            #    `+` 可能写在下一行（拼接常这么断行），所以下一行也要看一眼。
+            after = line[scan + 1:].strip()
+            if not after and number < len(lines):
+                after = lines[number].strip()
+            # 三种拿法分开判：
+            #   Text(LocalizedStringKey("…**…**…"))  → 安全，拼接也没事（它就是要来解析的）
+            #   Text("…**…**…")                     → 安全，**前提是后面没接 `+`**
+            #   Text("…**…**…" + "…")               → 危险：成了 String 表达式，星号原样显示
+            wrapped_key = bool(re.search(r"\bText\(\s*LocalizedStringKey\(\s*$", before))
+            plain_text = bool(re.search(r"\bText\(\s*$", before))
+            is_plain_literal = wrapped_key or (plain_text and not after.startswith("+"))
+            if _looks_like_prose(literal) and not is_plain_literal:
                 report("R17", path, number,
-                       "这个字符串有 ** 加粗，但不是 Text 字面量，星号会原样显示")
+                       "这个字符串有 ** 加粗，但不是 Text 字面量，星号会原样显示"
+                       "（拼接出来的要用 Text(LocalizedStringKey(…))）")
                 break
             index = scan + 1
 

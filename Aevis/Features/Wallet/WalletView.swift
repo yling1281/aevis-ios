@@ -49,8 +49,12 @@ struct WalletView: View {
                             .padding(.horizontal, 4)
                     }
 
-                    Text("这是**本机上的假钱包** —— 余额和转账都只存在这台手机上，"
-                         + "不接任何真的支付，也不会真的扣谁的钱。")
+                    // ⚠️ 拼接出来的字符串**必须包 LocalizedStringKey**，
+                    //    否则 Text 走的是 `Text(String)` 那个重载，
+                    //    `**加粗**` 不会解析 —— 截图里星号就明晃晃地露着
+                    //    （2026-09-29 真栽了，检查器 R17 已补上这条）。
+                    Text(LocalizedStringKey("这是**本机上的假钱包** —— 余额和转账都只存在这台手机上，"
+                                            + "不接任何真的支付，也不会真的扣谁的钱。"))
                         .font(.aevis(11.5))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

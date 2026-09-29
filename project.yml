@@ -40,8 +40,13 @@ settings:
     # ⚠️ 2026-09-29 0.0.84：**假钱包**（转账 / 红包气泡 + 两边余额，纯本地假数据）
     #    + **弹窗消息落进聊天记录**（通知里带上正文，App 一起来就补进会话；
     #      前台时当场落进聊天、不弹横幅）。
-    MARKETING_VERSION: "0.0.84"
-    CURRENT_PROJECT_VERSION: "84"
+    # ⚠️ 2026-09-29 0.0.85：0.0.84 的**文案修正**。
+    #    钱包底部那行是 `Text("…" + "…")` —— 拼接出来的字符串走 `Text(String)`
+    #    重载，`**加粗**` 不解析，**星号原样显示**（截图里明晃晃的，就是抓出来的）。
+    #    改成 `Text(LocalizedStringKey(…))`；顺带给本地检查器补了 R17（以前它看到
+    #    字面量紧跟 `Text(` 就放行，没注意后面接了 `+`）。
+    MARKETING_VERSION: "0.0.85"
+    CURRENT_PROJECT_VERSION: "85"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
