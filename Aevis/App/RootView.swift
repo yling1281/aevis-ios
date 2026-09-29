@@ -84,6 +84,9 @@ struct RootView: View {
             if settings.qqBotEnabled {
                 QQBotService.shared.reconnectIfNeeded()
             }
+            // 她"弹出来过但还没进聊天"的那几句话，补进聊天记录
+            // （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的」）。
+            Task { await ProactiveService.shared.deliverPendingToChat() }
         }
         .onChange(of: personaStore.avatarImage) { _, image in
             settings.refreshAvatarTint(from: image)
@@ -108,6 +111,11 @@ struct RootView: View {
             // 本地通知只能在排程时定下时间，这是能做到的最接近随机的办法。
             guard phase == .active else { return }
             Task { await ProactiveService.shared.reschedule() }
+
+            // 通知弹过、但那次没进聊天的那几句 —— 回前台补上。
+            // 跟 onAppear 那次是**两条不同的路**：冷启动走 onAppear，
+            // 从后台切回来走这里。少一个就有场景漏。
+            Task { await ProactiveService.shared.deliverPendingToChat() }
 
             // 回到前台顺手问一句「我这个账号还在不在」——
             // 卖家在后台把账号删掉之后，这台设备就该**立刻退回未授权**，

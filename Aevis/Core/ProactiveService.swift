@@ -68,6 +68,11 @@ final class ProactiveService {
     func reschedule() async {
         let settings = AppSettings.shared
         let persona = PersonaStore.shared.persona
+        // 「这些话说给谁听」—— 排程时把当前联系人记在通知里，
+        // 弹出来之后好落回**对的那个会话**。
+        // ⚠️ 回主线程读：`ChatStore` 是 `@Published`，在后台读它
+        //    跟后台写一样会让 SwiftUI 收到别的线程的通知，iOS 26 上会崩（踩过）。
+        let owner = await MainActor.run { ChatStore.shared.currentID?.uuidString }
 
         center.removePendingNotificationRequests(
             withIdentifiers: await pendingProactiveIdentifiers()
@@ -105,7 +110,8 @@ final class ProactiveService {
                 guard let (hour, minute) = Self.parse(time) else { continue }
                 let content = makeContent(
                     title: persona.name.isEmpty ? "Aevis" : persona.name,
-                    body: nextLine()
+                    body: nextLine(),
+                    owner: owner
                 )
                 var comps = DateComponents()
                 comps.hour = hour
@@ -131,7 +137,8 @@ final class ProactiveService {
                 let fireAt = now.addingTimeInterval(max(offset, 300))
                 let content = makeContent(
                     title: persona.name.isEmpty ? "Aevis" : persona.name,
-                    body: nextLine()
+                    body: nextLine(),
+                    owner: owner
                 )
                 let trigger = UNCalendarNotificationTrigger(
                     dateMatching: Calendar.current.dateComponents(
@@ -160,13 +167,22 @@ final class ProactiveService {
         }
     }
 
-    private func makeContent(title: String, body: String) -> UNMutableNotificationContent {
+    private func makeContent(title: String, body: String,
+                             owner: String? = nil) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         // 她的话应该能穿透专注模式
         content.interruptionLevel = .timeSensitive
+        // ⚠️⚠️ **把正文塞进通知里带着走** —— 这是「弹窗消息要落进聊天记录」
+        //    （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的，像微信那样」）
+        //    唯一可行的做法：本地通知在 App **没运行**的时候也在弹，那时候我们
+        //    一行代码都执行不了。所以只能把这句话存在通知自己身上，
+        //    等 App 一起来再补进聊天记录（见 `deliverPendingToChat`）。
+        var info: [String: Any] = ["text": body]
+        if let owner, !owner.isEmpty { info["persona"] = owner }
+        content.userInfo = info
         return content
     }
 
@@ -178,6 +194,58 @@ final class ProactiveService {
             return nil
         }
         return (hour, minute)
+    }
+
+    // MARK: - 弹出来的话，补进聊天记录
+    //
+    // 用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的，像微信那样」
+    //
+    // 微信的行为是：通知弹出来，点进去**那条消息就在聊天里**。
+    // 我们以前只弹通知、不落聊天 —— 用户点进去发现聊天里没有那句话，
+    // 看起来就像"她说的这句丢了"。
+    //
+    // 两条路都要走，少一条就有场景漏：
+    //   ① App 正在前台 → 系统先交给代理（`willPresent`），当场落进聊天；
+    //   ② App 没运行 / 在后台 → 通知自己弹出去，**等 App 一起来**扫一遍
+    //      "已送达但还没进聊天"的通知，补进去（`deliverPendingToChat`）。
+
+    /// 从一条通知里把「她说了什么 + 说给谁」抠出来。
+    static func payload(from notification: UNNotification) -> (text: String, owner: UUID?)? {
+        let request = notification.request
+        guard request.identifier.hasPrefix(idPrefix) else { return nil }
+        let info = request.content.userInfo
+        let text = (info["text"] as? String) ?? request.content.body
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let owner = (info["persona"] as? String).flatMap(UUID.init(uuidString:))
+        return (text, owner)
+    }
+
+    /// 把「已经弹过、还没进聊天」的那几条补进去。
+    ///
+    /// 调用时机：App 启动、每次回到前台（`RootView`）。
+    /// 处理完就把那条从"已送达"里删掉 —— 不删的话每次回前台都会重复补。
+    @MainActor
+    func deliverPendingToChat() async {
+        let delivered = await center.deliveredNotifications()
+        guard !delivered.isEmpty else { return }
+        var handled: [String] = []
+        for item in delivered {
+            guard let payload = Self.payload(from: item) else { continue }
+            ChatStore.shared.appendProactive(payload.text, for: payload.owner)
+            handled.append(item.request.identifier)
+        }
+        if !handled.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: handled)
+        }
+    }
+
+    /// 前台时系统先把通知交给我们（[`willPresent`]）—— 那就当场落进聊天。
+    @MainActor
+    func absorbForegroundNotification(_ notification: UNNotification) {
+        guard let payload = Self.payload(from: notification) else { return }
+        ChatStore.shared.appendProactive(payload.text, for: payload.owner)
+        // 从"已送达"里删掉：不然回前台那次扫描会把它再补一遍。
+        center.removeDeliveredNotifications(withIdentifiers: [notification.request.identifier])
     }
 
     // MARK: - 话术池
@@ -336,5 +404,33 @@ final class ProactiveService {
         var allowed = CharacterSet.urlPathAllowed
         allowed.remove(charactersIn: "/?#")
         return text.addingPercentEncoding(withAllowedCharacters: allowed) ?? text
+    }
+}
+
+
+/// 通知代理。
+///
+/// 只干一件事：**App 正在前台时，把那条通知当场塞进聊天记录，且不弹横幅**。
+/// 用户就在 App 里看着，再弹个横幅纯属噪音（微信也是这个行为）。
+final class ProactiveNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+
+    static let shared = ProactiveNotificationDelegate()
+
+    private override init() { super.init() }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        await ProactiveService.shared.absorbForegroundNotification(notification)
+        return []
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        // 用户点了通知 → 那条话必须已经在聊天里（点进来看得见）。
+        await ProactiveService.shared.absorbForegroundNotification(response.notification)
     }
 }

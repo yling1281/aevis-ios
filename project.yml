@@ -37,8 +37,11 @@ settings:
     #    QQ 四条路都在 App 里做完（不再跳系统浏览器，QQ 走内置浏览器）；
     #    进门顺序 = 先设备码、再登录；退出登录回登录页；
     #    「我的资料」的名字和头像跟着账号走；登录后自动把设备码绑到账号上。
-    MARKETING_VERSION: "0.0.83"
-    CURRENT_PROJECT_VERSION: "83"
+    # ⚠️ 2026-09-29 0.0.84：**假钱包**（转账 / 红包气泡 + 两边余额，纯本地假数据）
+    #    + **弹窗消息落进聊天记录**（通知里带上正文，App 一起来就补进会话；
+    #      前台时当场落进聊天、不弹横幅）。
+    MARKETING_VERSION: "0.0.84"
+    CURRENT_PROJECT_VERSION: "84"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

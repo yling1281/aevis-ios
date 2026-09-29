@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct AevisApp: App {
@@ -28,6 +29,12 @@ struct AevisApp: App {
         // 崩过的话，把现场传给服务器一次（后台按错误码能查到）。
         // 不 await —— 启动路径上不干等网络；传不上去也没关系，本机那份还在。
         Task { await DiagUploader.uploadCrashIfNeeded() }
+
+        // 通知代理：App 正在前台时，那条通知要**当场落进聊天记录**、不弹横幅
+        // （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的」）。
+        // ⚠️ 必须在这里设：`UNUserNotificationCenter` 的 delegate 是**弱引用**，
+        //    存成局部变量的话当场就没了，回调永远不会来。
+        UNUserNotificationCenter.current().delegate = ProactiveNotificationDelegate.shared
 
         // 账号后端有主域名 + 备用域名（拦截是按线路抽样的，谁通走谁）。
         // 结果写回 `AppSettings.accountServerURL` —— 各处读的都是它，改一处全跟着走。

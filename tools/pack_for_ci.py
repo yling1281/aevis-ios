@@ -95,6 +95,9 @@ MUST_HAVE = [
     "Aevis/Features/Chat/ShareToMomentsSheet.swift",
     # 登录门（验证码 / 密码 / 注册码 / QQ 四条路都在这儿）
     "Aevis/Features/Login/LoginView.swift",
+    # 假钱包（转账 / 红包气泡 + 余额）
+    "Aevis/Core/WalletStore.swift",
+    "Aevis/Features/Wallet/WalletView.swift",
     "Aevis/Features/Moments/MomentsDecorSheet.swift",
     "Aevis/Core/Pronoun.swift",
     "Aevis/Core/WebAuth.swift",

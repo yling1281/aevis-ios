@@ -76,6 +76,44 @@ final class ChatStore: ObservableObject {
         save()
     }
 
+    // MARK: - 转账 / 红包（假钱包）
+
+    /// 记一条转账。**故意不走 `isRepeat`** ——
+    /// 连着转两笔一模一样的金额（比如给两次 5.20）是正当行为，
+    /// 被"防重复"吃掉的话用户只会看到"转了但聊天里没有"。
+    @discardableResult
+    func appendTransfer(_ transfer: ChatMessage.Transfer) -> UUID {
+        let message = ChatMessage(role: .user,
+                                  text: ChatMessage.transferLine(transfer, mine: true),
+                                  kind: .transfer,
+                                  transfer: transfer)
+        messages.append(message)
+        track(message)
+        save()
+        return message.id
+    }
+
+    /// 对面收下了 → 气泡上那个「待收款」变成「已收款」。
+    func markTransferAccepted(_ id: UUID) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].transfer?.accepted = true
+        save()
+    }
+
+    /// 她发给我一条转账 / 红包（她也有钱包）。
+    @discardableResult
+    func appendIncomingTransfer(_ transfer: ChatMessage.Transfer) -> UUID? {
+        guard canReceiveProactive else { return nil }
+        let message = ChatMessage(role: .assistant,
+                                  text: ChatMessage.transferLine(transfer, mine: false),
+                                  kind: .transfer,
+                                  transfer: transfer)
+        messages.append(message)
+        track(message)
+        save()
+        return message.id
+    }
+
     /// 把这条聊天记进黑匣子（用户 2026-09-26 要求：「聊天记录也要进日志」）。
     ///
     /// ⚠️ 两块内容**刻意只记类型、不记内容**：
@@ -182,16 +220,41 @@ final class ChatStore: ObservableObject {
     /// 返回是否真的放下了。
     @discardableResult
     func appendProactive(_ text: String) -> Bool {
+        appendProactive(text, for: nil)
+    }
+
+    /// 同上，但指定**落到哪个会话**。
+    ///
+    /// ⚠️ 为什么要这个重载：通知是在**排程那一刻**就写好"说给谁听"的，
+    ///    而用户可能在通知弹出来之后切到了另一个联系人。
+    ///    `owner` 为 nil 时才落到当前会话。
+    @discardableResult
+    func appendProactive(_ text: String, for owner: UUID?) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, canReceiveProactive else { return false }
-        // 她主动来的这句跟上一句一模一样就别再发一遍
-        if let last = messages.last(where: { !$0.text.isEmpty }),
+        guard !trimmed.isEmpty else { return false }
+
+        // 落到"别人"的会话时，只能看那个会话自己的最后一条 ——
+        // 拿当前会话的 `messages` 判断会把刚说的话当成重复。
+        let target = owner ?? currentID
+        let list: [ChatMessage]
+        if let target, target != currentID {
+            list = byContact[target] ?? []
+        } else {
+            list = messages
+        }
+
+        // 正在等她回复的时候不行 —— 最后一条是空的 assistant 占位，
+        // 这时候插一条会把她正在流式吐出来的半句话顶乱。
+        if let last = list.last, last.role == .assistant, last.text.isEmpty {
+            return false
+        }
+        if let last = list.last(where: { !$0.text.isEmpty }),
            last.role == .assistant,
            Self.isSameLine(last.text, trimmed) {
             return false
         }
-        messages.append(ChatMessage(role: .assistant, text: trimmed))
-        save()
+
+        append(ChatMessage(role: .assistant, text: trimmed), for: target)
         return true
     }
 

@@ -148,17 +148,16 @@ final class AccountService: ObservableObject {
         }
     }
 
-    // MARK: - 网页登录（唯一的路）
+    // MARK: - 内置浏览器的回调换 token
     //
-    // 账号后端是**邮箱验证码**（没有密码），所以 App 里不该有密码框。
-    // 做法：打开官网登录页 → 用户收码登录（以后要注册就在同一页用注册码注册）
-    //      → 页面跳 `aevis://login?token=...` → 我们把 token 收下。
-    // 输验证码的是系统浏览器，**凭据不经过我们的代码**。
-
-    /// 拿去给系统浏览器打开的登录页。
-    func webLoginURL() -> URL? {
-        URL(string: base + "/")
-    }
+    // 登录页是在**内置浏览器**里跑的（`WebAuth` → `ASWebAuthenticationSession`）：
+    // 收验证码 / 输密码 / 走 QQ 都在那一页完成，页面跳
+    // `aevis://login?token=...` 把凭证交回来，这里收下。
+    // 输验证码的是系统那一层，**密码不经过我们的代码**。
+    //
+    // ⚠️ 2026-09-29 删掉了 `webLoginURL()` —— 它只被 `AccountCard` 里一段
+    //    "从设置页开系统浏览器去官网登录"的死代码调用，那段已经清掉；
+    //    现在唯一入口是 `LoginView`（QQ 登录）里的 `WebAuth.shared.run`。
 
     /// 收下登录页带回来的 token。拉一次资料确认它真的能用。
     @MainActor

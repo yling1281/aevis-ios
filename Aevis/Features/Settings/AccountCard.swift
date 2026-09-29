@@ -7,14 +7,20 @@ import SwiftUI
 /// 地址留空就整块是「未连接」，App 别的功能一样都不少（这是本地 App）。
 ///
 /// 密码**不落盘**：填完当场用掉，成功只留 token（进钥匙串）。
+///
+/// ⚠️ 2026-09-29：这一页**不再承担任何登录动作**。
+///    2026-09-28 起登录整体搬进了 App（`LoginView`：验证码 / 密码 / 注册码 / QQ），
+///    而且是**强制登录** —— 没登录时进不了主界面。
+///    所以这张卡实际只在「已登录」状态下看得到，能做的只有：
+///    **看状态 / 刷新资料 / 退出 / 换线**。
+///    （以前这里有一套"开系统浏览器去官网登录"的死代码 + 一个永远打不开的
+///     密码表单 sheet，2026-09-29 清掉了：`startWebLogin`、`formSheet`、
+///     以及配合它的 `webLoginURL()`。留着只会让人以为还能从这儿登。）
 struct AccountCard: View {
 
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var account = AccountService.shared
 
-    @State private var showForm = false
-    @State private var username = ""
-    @State private var password = ""
     @State private var note: String?
     @State private var busy = false
     @State private var probing = false
@@ -57,7 +63,7 @@ struct AccountCard: View {
             Text("服务器地址已经内嵌在 App 里，不用你填。这个账号是可选的："
                  + "人设、聊天记录、记忆本来都只存在这台手机上。\n"
                  + "账号用来同步昵称和头像（在网页的「我的账号」里改，这里点「刷新资料」同步）。"
-                 + "密码只在点「密码登录」的那一下用，不会被存下来。")
+                 + "密码只在登录页那一下用，不会被存下来。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -65,9 +71,6 @@ struct AccountCard: View {
                 .padding(.vertical, 12)
         }
         .aevisGlass(cornerRadius: 20)
-        .sheet(isPresented: $showForm) {
-            formSheet
-        }
     }
 
     // MARK: - 各行
@@ -131,7 +134,11 @@ struct AccountCard: View {
             Spacer(minLength: 8)
             if account.isSignedIn {
                 Button("刷新资料") {
-                    Task { await account.refreshProfile() }
+                    Task {
+                        busy = true
+                        await account.refreshProfile()
+                        busy = false
+                    }
                 }
                 .font(.aevis(14))
                 .buttonStyle(.borderless)
@@ -223,162 +230,6 @@ struct AccountCard: View {
                 .font(.aevis(14))
                 .buttonStyle(.borderless)
                 .foregroundStyle(.red)
-            }
-        }
-    }
-
-    // MARK: - 登录这一块
-    //
-    // ⚠️ 2026-09-28 起**登录搬进了 App**（`LoginView`：验证码 / 密码 / 注册码 / QQ），
-    //    而且**强制登录** —— 没登录时进不了主界面，所以这一张卡实际上只在
-    //    "已登录"的状态下看得到（这里那个 else 分支留给演示模式和以后复用）。
-    //    以前这里会开系统浏览器去官网登录页，现在已经不需要了。
-    private func startWebLogin() {
-        guard let url = account.webLoginURL() else {
-            note = "登录页地址拼不出来，检查一下服务器地址。"
-            return
-        }
-        busy = true
-        note = nil
-        Task { @MainActor in
-            let callback = await WebAuth.shared.run(url: url, scheme: "aevis")
-            busy = false
-            guard let callback else {
-                note = "登录取消了。"
-                return
-            }
-            guard let token = Self.token(from: callback) else {
-                note = "登录回来了，但没带凭证。回调是：\(callback.absoluteString.prefix(70))"
-                return
-            }
-            do {
-                try await account.adoptWebToken(token)
-                note = "登录好了。"
-            } catch {
-                note = "没登成：" + error.localizedDescription
-            }
-        }
-    }
-
-    /// 从 `aevis://login?token=xxxx` 里把 token 抠出来。
-    private static func token(from url: URL) -> String? {
-        URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?
-            .first(where: { $0.name == "token" })?
-            .value
-    }
-
-    // MARK: - 密码登录表单
-    //
-    // ⚠️ 这里**没有「注册」**：注册必须有注册码，服务端只有 `/api/register/start`
-    //    + `/api/register/finish` 两步，注册码在群里找机器人领。
-    //    早先这里画了个注册按钮、打的是不存在的 `/api/register`，点下去只会 404。
-    //    所以注册 / 验证码 / QQ 授权统一走网页登录页（就是上面那个「验证码 / QQ」按钮）。
-
-    private var formSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    field("账号号或邮箱", text: $username, secret: false)
-                    field("密码", text: $password, secret: true)
-
-                    if let note {
-                        Text(note)
-                            .font(.aevis(12.5))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: 10) {
-                        Button {
-                            submit()
-                        } label: {
-                            Text(busy ? "登录中…" : "登录")
-                                .font(.aevis(14, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 9)
-                                .aevisGlass(cornerRadius: 14)
-                        }
-                        .disabled(busy || !canSubmit)
-
-                        if busy { ProgressView().controlSize(.small) }
-
-                        Spacer(minLength: 0)
-                    }
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("密码只在这一下用掉，不会被保存；成功后只存服务器给的 token（在钥匙串里）。")
-                        Text("还没账号？回到上一页点「验证码 / QQ」，在网页上用注册码注册（注册码在群里找机器人领）。")
-                        Text("忘了密码？在网页登录页点「忘记密码」，用邮箱收个验证码就能重设。")
-                    }
-                    .font(.aevis(11.5))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(18)
-            }
-            .navigationTitle("密码登录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { showForm = false }
-                }
-            }
-        }
-    }
-
-    private func field(_ label: String, text: Binding<String>, secret: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label)
-                .font(.aevis(12))
-                .foregroundStyle(.secondary)
-            if secret {
-                SecureField("", text: text)
-                    .textContentType(.password)
-                    .font(.aevis(15))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
-                    )
-            } else {
-                TextField("", text: text)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.aevis(15))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
-                    )
-            }
-        }
-    }
-
-    private var canSubmit: Bool {
-        !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !password.isEmpty
-    }
-
-    private func submit() {
-        busy = true
-        note = nil
-        let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pass = password
-
-        Task { @MainActor in
-            defer { busy = false }
-            do {
-                try await account.signIn(account: user, password: pass)
-                // 密码用完就丢，别留在内存里
-                password = ""
-                showForm = false
-                note = "登录好了。"
-            } catch {
-                note = error.localizedDescription
             }
         }
     }
