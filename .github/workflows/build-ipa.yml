@@ -141,6 +141,27 @@ jobs:
       - name: Maybe strip the screen-recording extension
         run: python3 scripts/strip_extension.py
 
+      # 把 Secrets 里的凭据就地写进 BuiltInSecrets.swift，让包内自带。
+      #
+      # ⚠️ 位置很讲究：**必须排在所有 git commit / push 步骤之后** ——
+      # 这一步是就地把文件改掉，要是排在提交之前，真值会被提交回公开仓库，
+      # 等于白做还泄露。上面那个会用 `git add -A` 的步骤（临时通道用的）
+      # 远在这之前；下面重置标记的步骤只 add 单个文件，也不会把它带上。
+      #
+      # 没配 Secrets 时脚本什么都不做（保持空值），编译照常。
+      #
+      # ⚠️ 2026-09-29 补：`AEVIS_ACCOUNT_BOT_KEY` 以前**只写在脚本里、没往这儿接**
+      #    —— 「配了 Secret 就会自动填上」这条被 `BuiltInSecrets.swift` 明文承诺过的
+      #    行为其实做不到，那把钥匙永远填不进去。三个都要接。
+      #    （另注：GitHub 仓库上那份 workflow **比本地旧**，连这一段都没有，
+      #     见 `.workbuddy/memory/topics/ci.md`。）
+      - name: Inject built-in credentials
+        env:
+          AEVIS_BAIDU_APP_KEY: ${{ secrets.AEVIS_BAIDU_APP_KEY }}
+          AEVIS_BAIDU_SECRET_KEY: ${{ secrets.AEVIS_BAIDU_SECRET_KEY }}
+          AEVIS_ACCOUNT_BOT_KEY: ${{ secrets.AEVIS_ACCOUNT_BOT_KEY }}
+        run: python3 scripts/inject_secrets.py
+
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -262,7 +283,6 @@ jobs:
             grep -E "error:" build.log 2>/dev/null | head -60 || true
             grep -q "error:" build.log 2>/dev/null \
               || echo "（build.log 里没有 error: 行 —— 可能挂在编译之前的步骤）"
-            echo '```'
           } > errors.txt
           cat errors.txt
 
