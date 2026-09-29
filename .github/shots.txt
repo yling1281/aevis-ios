@@ -13,10 +13,14 @@
 #   -aevisSettingsFocus=xx  只显示某一张设置卡（设置页太长，一屏截不全）
 #   -aevisNoGlass / -aevisSimple / -aevisCustomBackground
 #   -aevisOpenMoments / -aevisOpenTogether / -aevisOpenMemoryList
+#   -aevisOpenPlayer        打开全屏播放器（会顺手塞一首假歌）
+#   -aevisTogetherDemo      假装一起听开着（两个头像那一行才会出现）
 #   -aevisSelfCheck         自检页
+#   -aevisShowGate          强制显示「未授权」门禁页（本机存过授权也照样显示）
+#   -aevisSkipGate          跳过授权门禁（-aevisDemo 已经隐含跳过，裸跑才需要它）
 
-01-onboarding
-02-chat        -aevisDemo
+01-onboarding  -aevisSkipGate
+02-chat        -aevisDemo -aevisOpenTab=chats -aevisOpenChat
 03-noglass     -aevisDemo -aevisNoGlass
 04-simple      -aevisDemo -aevisSimple
 05-paper       -aevisDemo -aevisCustomBackground
@@ -37,3 +41,50 @@
 18-emoji       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=emoji
 19-mcp         -aevisDemo -aevisOpenSettings -aevisSettingsFocus=mcp
 20-selfcheck   -aevisSelfCheck
+
+# 底下那个「更多」面板（微信的加号）—— 不打开就截不到
+21-more        -aevisDemo -aevisOpenTab=chats -aevisOpenChat -aevisOpenMore
+
+# 微信式的四个 tab（用户要求：进去是联系人，底下四个 tab）
+22-tab-chats     -aevisDemo -aevisOpenTab=chats
+23-tab-contacts  -aevisDemo -aevisOpenTab=contacts
+24-tab-discover  -aevisDemo -aevisOpenTab=discover
+25-tab-me        -aevisDemo -aevisOpenTab=me
+
+# 全屏播放界面（仿网易云：模糊封面 + 转着的唱片 + 歌词 + 两个头像）
+# 两个头像那一行要「一起听」开着才出现，模拟器里等不到 → 用 -aevisTogetherDemo 假装
+26-player        -aevisDemo -aevisOpenPlayer -aevisTogetherDemo
+
+# 第二批新功能：QQ 桥接 / 账号 / 分享与搬家 / 外观（密度 + 主题色跟头像）
+27-qq            -aevisDemo -aevisOpenSettings -aevisSettingsFocus=qq
+28-account       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=account
+29-share         -aevisDemo -aevisOpenSettings -aevisSettingsFocus=share
+30-appearance    -aevisDemo -aevisOpenSettings -aevisSettingsFocus=appearance
+
+# QQ 官方机器人 —— **唯一能在手机上跑、不用电脑的一条路**
+31-qqbot         -aevisDemo -aevisOpenSettings -aevisSettingsFocus=qqbot
+
+# 授权门禁页 —— 没授权的话，这是进 App 唯一能看到的一屏（用户 2026-09-25 要求）
+32-gate          -aevisDemo -aevisShowGate
+
+# 通话记录（微信那种居中的小字）+ 她主动提的申请（从顶上滑进来那条）
+33-call-record   -aevisDemo -aevisOpenTab=chats -aevisOpenChat -aevisCallHistory
+34-companion-ask -aevisDemo -aevisCompanionAsk
+
+# 试验功能开关（在「关于」最底下）—— 打开它那四块才回来
+35-experimental -aevisDemo -aevisOpenSettings -aevisSettingsFocus=about
+
+# ⚠️ 聊天滚动用这一条验，**别删**：
+#   上面 02-chat 只有 3-4 条消息，一屏就装下了 —— 看不出「贴底还是贴顶」。
+#    这里塞 24 条（一屏半），截图里「停在最新那条」还是「停在最上面」一眼就分得出。
+#    用户报了很多次的「打开要跳到最新的聊天记录」就是靠这张图盯住的。
+# ⚠️ `-aevisOpenTab=chats` 不能少：ChatListView 里那个自动进对话的 onAppear
+#    只在**聊天 tab 出现**的时候才跑 —— 少了它截图会停在通讯录，白截。
+36-chat-long    -aevisDemo -aevisOpenTab=chats -aevisOpenChat -aevisChatHistory=24
+
+# 登录门那张（用户 2026-09-28 要的原生登录页）。
+# ⚠️ 必须带 -aevisForceLogin：不然 -aevisDemo 会跳过登录门，截出来的是主界面。
+37-login       -aevisDemo -aevisForceLogin
+
+# 假钱包那张（转账 / 红包）—— 必须带 -aevisOpenWallet，不然截到的是聊天页。
+38-wallet      -aevisDemo -aevisOpenTab=chats -aevisOpenChat -aevisOpenWallet

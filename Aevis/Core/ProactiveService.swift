@@ -72,7 +72,7 @@ final class ProactiveService {
         // 弹出来之后好落回**对的那个会话**。
         // ⚠️ 回主线程读：`ChatStore` 是 `@Published`，在后台读它
         //    跟后台写一样会让 SwiftUI 收到别的线程的通知，iOS 26 上会崩（踩过）。
-        let owner = await MainActor.run { ChatStore.shared.currentID?.uuidString }
+        let owner = await MainActor.run { ChatStore.shared.currentContactID?.uuidString }
 
         center.removePendingNotificationRequests(
             withIdentifiers: await pendingProactiveIdentifiers()

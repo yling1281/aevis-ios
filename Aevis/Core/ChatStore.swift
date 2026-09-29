@@ -15,6 +15,19 @@ final class ChatStore: ObservableObject {
     private var byContact: [UUID: [ChatMessage]] = [:]
     private var currentID: UUID?
 
+    /// 「现在这个会话是说给谁听的」—— 排程主动消息时要把它记在通知身上，
+    /// 弹出来之后才知道该落回**哪个**会话（见 `ProactiveService.makeContent(owner:)`）。
+    ///
+    /// ⚠️ **只在主线程读。** `ChatStore` 是 `ObservableObject`，
+    ///    在后台读它的状态和后台写一样，会让 SwiftUI 收到别的线程的通知，
+    ///    iOS 26 上会崩（真崩过）。外面请这样用：
+    ///    `await MainActor.run { ChatStore.shared.currentContactID }`
+    ///
+    /// 为什么不直接把 `currentID` 改成 `private(set)`：那样任何地方都能读，
+    /// 上面那条"主线程"的约定就只靠自觉了。给个起了名字的口子，
+    /// 读的人会先看到这句警告。
+    var currentContactID: UUID? { currentID }
+
     private let fileURL: URL
     private let legacyFileURL: URL
 
