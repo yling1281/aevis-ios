@@ -6,6 +6,18 @@ import UIKit
 
 /// 全屏播放器 —— 仿网易云那个界面。
 ///
+/// ## 它同时就是「一起听」的界面（2026-10-01 用户拍板）
+///
+/// 用户原话：「把『一起听』砍掉，做成官网那样的界面」「现在的『一起听』不好用」。
+///
+/// 拍板后的结论：**这个界面本来就是那个"官网那样的界面"** ——
+/// 而原来「发现 → 一起听」打开的是 `TogetherView`，三张设置卡片，
+/// 跟"一起听"这件事本身毫无关系。所以这次：
+/// - `TogetherView` **整个删掉**，模式选择搬进这里（见 `modePicker`）
+/// - 所有「一起听」入口（发现页 / 聊天加号 / 通话申请）**都改成打开这个界面**
+/// - 找歌也从「音乐」页搬进来（右上角放大镜，见 `MusicSearchSheet`）——
+///   以前想换歌得退出去翻页，一起听会断，这是"不好用"的一半原因
+///
 /// 四样东西撑起它的长相：
 /// 1. **模糊放大的封面**当底子（歌是它的一部分，界面也是）
 /// 2. 中间一张**会慢慢转的唱片**，旁边搭一根唱针
@@ -24,6 +36,9 @@ struct PlayerView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// 找歌面板。没歌在放时进来会自动弹 —— 不然这个界面是一片空白。
+    @State private var showSearch = false
+
     private var persona: Persona { personaStore.persona }
 
     /// 唱片直径。跟屏幕宽度挂钩，但别大得离谱。
@@ -40,7 +55,21 @@ struct PlayerView: View {
             backdrop
             content
         }
-        .onAppear { autoStartTogether() }
+        .onAppear {
+            // 空着进来就先让他找首歌 —— 否则界面上一句「还没在放歌」，
+            // 加上「一起听」的按钮全是灰的，等于白打开一次。
+            if player.current == nil {
+                showSearch = true
+            } else {
+                autoStartTogether()
+            }
+        }
+        // ⚠️ `onDismiss` 里那个 `autoStartTogether()` 不能省：
+        // 空着进来时 `onAppear` 只把找歌面板打开了、没启动一起听；
+        // 等他挑完歌把面板收起来，才轮到一起听开始。
+        .sheet(isPresented: $showSearch, onDismiss: { autoStartTogether() }) {
+            MusicSearchSheet()
+        }
         .preferredColorScheme(.dark)
     }
 
@@ -134,8 +163,20 @@ struct PlayerView: View {
 
                     Spacer(minLength: 8)
 
-                    // 和左边那个按钮等宽，歌名/小标才真的居中
-                    Color.clear.frame(width: 40, height: 40)
+                    // 找歌。以前这块是个 `Color.clear` —— 只为了跟左边那个箭头等宽、
+                    // 让歌名真的居中。现在正好拿它放放大镜：尺寸一样，居中不变，
+                    // 白捡一个入口（而且是最需要的那个：一起听时想换歌）。
+                    Button {
+                        BlackBox.tap("播放器 · 找歌")
+                        showSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.aevis(17, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -257,11 +298,24 @@ struct PlayerView: View {
                     .font(.aevis(17, weight: .medium))
                     .foregroundStyle(.white.opacity(0.55))
             } else {
-                Text("在「音乐」里搜一首，或者直接跟 \(Pronoun.spaced(persona.pronoun)) 说「放首歌」")
-                    .font(.aevis(14))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                // 空界面上的这句话**能点** —— 它说的就是"去找一首"，
+                // 那就别让他再去找那个放大镜（右上角那个小图标不一定看得见）。
+                Button {
+                    BlackBox.tap("播放器 · 空界面点了找歌")
+                    showSearch = true
+                } label: {
+                    VStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.aevis(20, weight: .medium))
+                        Text("点这里找一首，或者跟 \(Pronoun.spaced(persona.pronoun)) 说「放首歌」")
+                            .font(.aevis(14))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(.white.opacity(0.66))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
 
             // 她刚说的那句。**不自动念** —— 想听点小喇叭。
@@ -423,6 +477,11 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                 }
             } else {
+                // 形态选择从 `TogetherView` 搬过来的。
+                // 原来它长在一个单独的设置面板里 —— 而用户真正要挑形态的时刻
+                // 就是"站在播放界面、准备一起听"的这一刻，摆在这儿才对。
+                modePicker
+
                 Toggle(isOn: $settings.listenTogetherAutoStart) {
                     Text("放歌就一起听")
                         .font(.aevis(13))
@@ -458,6 +517,40 @@ struct PlayerView: View {
     }
 
     // MARK: - 一起听
+
+    /// 形态绑到设置里（而不是一个本地 `@State`）—— 挑完就记住了，
+    /// 下次打开还是这个。老 `TogetherView` 也是存进 `settings` 的，口径没变。
+    private var modeBinding: Binding<ListenTogetherMode> {
+        Binding(
+            get: { ListenTogetherMode(rawValue: settings.listenTogetherMode) ?? .sync },
+            set: { settings.listenTogetherMode = $0.rawValue }
+        )
+    }
+
+    private var listenMode: ListenTogetherMode {
+        ListenTogetherMode(rawValue: settings.listenTogetherMode) ?? .sync
+    }
+
+    private var modePicker: some View {
+        VStack(spacing: 5) {
+            Picker("形态", selection: modeBinding) {
+                ForEach(ListenTogetherMode.allCases) { item in
+                    Text(item.label).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            // 没做的形态照样摆出来，但**照实说** —— 不假装能用。
+            // 老 `TogetherView` 里那句解释性文案留着，只压成一行。
+            if !listenMode.isImplemented {
+                Text("这种形态还没接（房间接口要逆向签名）。先用另外两种。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
     /// 打开播放器就顺手开始一起听 —— 用户要的「默认一起听」。
     ///

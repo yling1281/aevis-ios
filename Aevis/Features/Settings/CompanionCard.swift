@@ -9,7 +9,12 @@ struct CompanionCard: View {
     @ObservedObject private var companion = ScreenCompanion.shared
     @ObservedObject private var player = MusicPlayer.shared
 
-    @State private var showTogether = false
+    /// ⚠️ 2026-10-01：这里以前开的是 `TogetherView`（三张设置卡片）。
+    /// 用户说「一起听不好用」「里面的东西全部重来」→ 那个面板整个删掉，
+    /// 改成开**全屏播放器**（它本来就是"官网那样的界面"），
+    /// 形态选择和找歌都搬进去了。变量也跟着改名，免得跟已删的
+    /// `AppRouter.showTogether` 混起来。
+    @State private var showPlayer = false
     @State private var showCall = false
     @State private var editingGroup = false
     @State private var groupDraft = ""
@@ -32,7 +37,7 @@ struct CompanionCard: View {
                         ? "进行中 · \(together.currentTrackTitle)"
                         : (player.current?.display ?? "歌在这台手机上放，她跟着一起听")
                 ) {
-                    showTogether = true
+                    showPlayer = true
                 }
 
                 rule
@@ -242,8 +247,9 @@ struct CompanionCard: View {
         } message: {
             Text("留空就是自动挑。填上之后主 App 和录屏扩展都会用它 —— 改完要重新开一次录屏才生效。")
         }
-        .sheet(isPresented: $showTogether) {
-            TogetherView()
+        .fullScreenCover(isPresented: $showPlayer) {
+            // 一起听 = 全屏播放器（仿网易云那个界面）
+            PlayerView()
         }
         .fullScreenCover(isPresented: $showCall) {
             CallView()

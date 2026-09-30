@@ -134,14 +134,29 @@ final class ChatStore: ObservableObject {
     }
 
     /// 她发给我一条转账 / 红包（她也有钱包）。
+    ///
+    /// ## ⚠️ 这个方法以前是**纯死代码**（2026-10-01 才发现）
+    /// 「她给我打钱」那条路从来没接通：没人调它，`WalletStore.receive` 也没人调。
+    /// 现在由 `WalletTools` 里的 `wallet_give_money` 真正调起来。
+    ///
+    /// ## ⚠️ 门槛不能用 `canReceiveProactive`
+    /// 老代码在这里 `guard canReceiveProactive else { return nil }` ——
+    /// 但她是在**回复你的过程中**决定给你转钱的，那一刻最后一条正是
+    /// **空着的 assistant 占位**（她的话还在流式往外吐），一挡就全没了：
+    /// 表现是「余额动了、聊天里什么都没有」，比不做还糟。
+    ///
+    /// 所以改成：**插到那个空占位前面**。她的话接着往后流、气泡在上面 ——
+    /// 正好就是微信里「先发个红包、再补一句话」的顺序。
+    /// `replaceLast(with:)` 认的是列表**最后一条**，插在前面不影响它在改谁。
     @discardableResult
     func appendIncomingTransfer(_ transfer: ChatMessage.Transfer) -> UUID? {
-        guard canReceiveProactive else { return nil }
         let message = ChatMessage(role: .assistant,
                                   text: ChatMessage.transferLine(transfer, mine: false),
                                   kind: .transfer,
                                   transfer: transfer)
-        messages.append(message)
+        let isStreamingPlaceholder = messages.last?.role == .assistant
+            && messages.last?.text.isEmpty == true
+        messages.insert(message, at: isStreamingPlaceholder ? messages.count - 1 : messages.count)
         track(message)
         save()
         return message.id

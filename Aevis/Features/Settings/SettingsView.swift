@@ -123,7 +123,9 @@ struct SettingsView: View {
             CardSection(id: "brain", title: "模型与联网",
                         keys: ["model", "search"]),
             CardSection(id: "power", title: "能力",
-                        keys: ["companion", "baidupan", "music", "douyin",
+                        // 「AI 权限」排在最前：它是这一组的总闸，
+                        // 其余那些能力都归它管，放中间会让人以为只是并列的一项。
+                        keys: ["aitools", "companion", "baidupan", "music", "douyin",
                                "qqbot", "qq", "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
                         keys: ["account", "device", "share", "about"])
@@ -149,6 +151,7 @@ struct SettingsView: View {
         case "memory": MemoryCard()
         case "moments": MomentsCard()
         case "companion": CompanionCard()
+        case "aitools": AIToolsCard()
         case "proactive": ProactiveSettingsCard()
         case "voice": VoiceSettingsCard()
         case "music": musicCard

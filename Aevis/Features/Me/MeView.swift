@@ -62,6 +62,11 @@ struct MeView: View {
                         entry("QQ 机器人", "bubble.left.and.bubble.right", qqBotLine) {
                             route = SettingsRoute(focus: "qqbot")
                         }
+                        // 「AI 权限」放这一组，而且**不藏在「更多设置」里** ——
+                        // 用户要的就是一句话能关掉她的手脚，藏起来等于没有。
+                        entry("AI 权限", "lock.shield", aiToolsLine) {
+                            route = SettingsRoute(focus: "aitools")
+                        }
                     }
 
                     defaultTabCard
@@ -216,6 +221,13 @@ struct MeView: View {
     private var accountLine: String {
         if !account.isConfigured { return "服务器连不上" }
         return account.statusLine
+    }
+
+    /// 「AI 权限」那一行 —— 一眼看出现在她能不能动手、关了几类。
+    private var aiToolsLine: String {
+        guard settings.aiToolsEnabled else { return "已关掉，她只剩聊天" }
+        let off = settings.disabledToolCategories.count
+        return off == 0 ? "全部开着，聊天以外她都能动手" : "关掉了 \(off) 类"
     }
 
     // MARK: - 零件

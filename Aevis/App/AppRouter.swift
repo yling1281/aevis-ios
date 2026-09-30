@@ -21,13 +21,17 @@ final class AppRouter: ObservableObject {
     @Published var showMoments = false {
         didSet { track("朋友圈", showMoments) }
     }
-    @Published var showTogether = false {
-        didSet { track("一起听", showTogether) }
-    }
     @Published var showCall = false {
         didSet { track("通话", showCall) }
     }
     /// 全屏播放器（仿网易云那个封面转盘）。**在列表里点一首歌就弹它。**
+    ///
+    /// ⚠️ **它同时就是「一起听」的界面**（2026-10-01 用户拍板）。
+    /// 以前另有一个 `showTogether` 开 `TogetherView`（三张设置卡片），
+    /// 用户说「把一起听砍掉，做成官网那样的界面」「现在的不好用」——
+    /// 于是 `showTogether` 和 `TogetherView` 一起删了，
+    /// 发现页 / 聊天加号 / 通话申请这几处的「一起听」**全部改成开这个**。
+    /// 形态选择和找歌都搬进来了，见 `PlayerView`。
     @Published var showPlayer = false {
         didSet { track("播放器", showPlayer) }
     }

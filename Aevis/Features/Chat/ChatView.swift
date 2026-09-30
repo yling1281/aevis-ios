@@ -654,7 +654,8 @@ struct ChatView: View {
             if Experimental.enabled {
                 Button {
                     closeMorePanel()
-                    router.showTogether = true
+                    // 一起听 → 直接开全屏播放器（它现在就是一起听的界面）
+                    router.showPlayer = true
                 } label: {
                     moreTile("一起听", "music.note.list")
                 }
@@ -772,7 +773,8 @@ struct ChatView: View {
         }
         if bridge.openListen {
             bridge.openListen = false
-            router.showTogether = true
+            // 一起听 = 全屏播放器（见 AppRouter.showPlayer 的说明）
+            router.showPlayer = true
         }
     }
 
@@ -824,6 +826,11 @@ struct ChatView: View {
         let history = chat.messages.filter { $0.goesToModel }
         // 背景资料 = 长期记忆 +（快捷指令发过数据的话）屏幕使用时间 + 外面来的信息
         var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
+        // 情侣空间（在一起多少天 / 倒数日）。
+        // ⚠️ **不挂 `memoryInjectEnabled` 开关**：那个开关管的是"她自动提炼的长期记忆"，
+        //    而这里是用户自己手填的硬事实 —— 关掉记忆就让她"忘了生日"，
+        //    那不是省事，那是 bug。
+        context.append(contentsOf: CoupleStore.shared.injectedLines())
         let screenTime = ScreenTimeInsight.shared.digest()
         if !screenTime.isEmpty { context.append(screenTime) }
         // 位置 / 电量 / 步数 / 天气这些是**用户主动用快捷指令喂进来的**，

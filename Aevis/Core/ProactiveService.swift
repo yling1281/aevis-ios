@@ -1,5 +1,10 @@
 import Foundation
 import UserNotifications
+import Intents
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum BarkError: LocalizedError {
     case notConfigured
@@ -35,6 +40,45 @@ final class ProactiveService {
 
     private let center = UNUserNotificationCenter.current()
     private static let idPrefix = "aevis.proactive."
+
+    // MARK: - 通知分类（那个「直接在通知上回她」的输入框）
+    //
+    // 用户 2026-09-30：「能不能专门弄一个 IPA 给它弄通知……那样子感觉会很好玩」。
+    //
+    // ⚠️ **不用第二个 IPA**。iOS 不允许一个 App 让另一个 App 弹通知；
+    //    而"通知 App"自己不在运行时，收不到任何信号（没有 APNs 付费账号的话）。
+    //    真能把通知变得像"她发消息"的，是下面这两样：
+    //      ① 分类 + 输入框 → **不打开 App 直接在通知上打字回她**；
+    //      ② `INSendMessageIntent` → 横幅顶上显示**她的头像和名字**。
+
+    /// 通知上那个「回一句」用的分类 id。
+    /// ⚠️ 分类是**跟系统注册**的，不是跟单条通知走的 —— 漏注册就没有输入框。
+    static let replyCategory = "aevis.reply"
+
+    /// 「直接回复」那个动作的 id。代理里靠它认出"用户是打字回的"。
+    static let replyAction = "aevis.reply.send"
+
+    /// 注册通知分类。幂等，重复调没有副作用。
+    ///
+    /// 时机：**App 启动时**（`AevisApp.init`）+ 每次重排时都调一次。
+    static func registerCategories() {
+        let reply = UNTextInputNotificationAction(
+            identifier: replyAction,
+            title: "回一句",
+            options: [],
+            textInputButtonTitle: "发出去",
+            textInputPlaceholder: "说点什么…"
+        )
+        let category = UNNotificationCategory(
+            identifier: replyCategory,
+            actions: [reply],
+            // ⚠️ 别删这一行：把分类和 `INSendMessageIntent` 绑在一起，
+            //    系统才会把这条通知当成"和这个人的会话"。
+            intentIdentifiers: ["INSendMessageIntent"],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
 
     private init() {}
 
@@ -74,6 +118,13 @@ final class ProactiveService {
         //    跟后台写一样会让 SwiftUI 收到别的线程的通知，iOS 26 上会崩（踩过）。
         let owner = await MainActor.run { ChatStore.shared.currentContactID?.uuidString }
 
+        // 她的头像 —— 通知里要能一眼看出"是她"，不是一个冷冰冰的 App 名。
+        // ⚠️ 回主线程读：`PersonaStore` 跟 `ChatStore` 一样是主线程隔离的。
+        let avatarData = await MainActor.run { () -> Data? in
+            guard let owner, let id = UUID(uuidString: owner) else { return nil }
+            return PersonaStore.shared.avatar(for: id)?.jpegData(compressionQuality: 0.8)
+        }
+
         center.removePendingNotificationRequests(
             withIdentifiers: await pendingProactiveIdentifiers()
         )
@@ -94,6 +145,11 @@ final class ProactiveService {
 
         guard await isAuthorized() else { return }
 
+        // 分类注册一遍（幂等）。它决定通知上有没有那个「回一句」的输入框。
+        Self.registerCategories()
+        // 上一轮那些附件已经随 pending 通知一起作废了，先扫干净。
+        Self.clearAvatarCache()
+
         let lines = await linePool(persona: persona, settings: settings)
         guard !lines.isEmpty else { return }
 
@@ -111,7 +167,8 @@ final class ProactiveService {
                 let content = makeContent(
                     title: persona.name.isEmpty ? "Aevis" : persona.name,
                     body: nextLine(),
-                    owner: owner
+                    owner: owner,
+                    avatarData: avatarData
                 )
                 var comps = DateComponents()
                 comps.hour = hour
@@ -138,7 +195,8 @@ final class ProactiveService {
                 let content = makeContent(
                     title: persona.name.isEmpty ? "Aevis" : persona.name,
                     body: nextLine(),
-                    owner: owner
+                    owner: owner,
+                    avatarData: avatarData
                 )
                 let trigger = UNCalendarNotificationTrigger(
                     dateMatching: Calendar.current.dateComponents(
@@ -168,13 +226,16 @@ final class ProactiveService {
     }
 
     private func makeContent(title: String, body: String,
-                             owner: String? = nil) -> UNMutableNotificationContent {
+                             owner: String? = nil,
+                             avatarData: Data? = nil) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         // 她的话应该能穿透专注模式
         content.interruptionLevel = .timeSensitive
+        // ⭐ 横幅上那个「回一句」的打字框 —— **不打开 App 就能跟她说话**。
+        content.categoryIdentifier = Self.replyCategory
         // ⚠️⚠️ **把正文塞进通知里带着走** —— 这是「弹窗消息要落进聊天记录」
         //    （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的，像微信那样」）
         //    唯一可行的做法：本地通知在 App **没运行**的时候也在弹，那时候我们
@@ -183,7 +244,129 @@ final class ProactiveService {
         var info: [String: Any] = ["text": body]
         if let owner, !owner.isEmpty { info["persona"] = owner }
         content.userInfo = info
-        return content
+
+        // 她的话得**看起来是她说的**，而不是"某个 App 推了条消息"。
+        // 两步，谁都可能失败，所以**一步都不许把通知本身带下水**：
+        //   ① 她的头像挂成附件（本地通知一定生效）；
+        //   ② 试 Communication Notification（要系统能力，失败就退回普通样式）。
+        if let avatarData {
+            Self.attachAvatar(avatarData, to: content, owner: owner)
+        }
+        return Self.upgradeToCommunication(content,
+                                           owner: owner,
+                                           name: title,
+                                           avatarData: avatarData)
+    }
+
+    // MARK: - 让通知看起来是「她」发的
+
+    /// 通知附件的存放目录。
+    ///
+    /// ⚠️ **不能放 `tmp/`** —— 排程和真正弹出来可能差好几个小时，
+    ///    而系统会清临时目录。放在 Application Support 下自己建的目录里最稳。
+    private static func avatarDirectory() -> URL {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = base.appendingPathComponent("AevisNotify", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 把她的头像挂成通知附件 —— 通知里就能看到她的脸。
+    ///
+    /// ⚠️ 附件只认**磁盘上的文件**（`UNNotificationAttachment` 不收 `UIImage`）。
+    /// ⚠️⚠️ 而且它初始化时会把文件**移走**（不是复制）！所以**每条通知都得有自己的
+    ///    文件** —— 共用同一个路径的话，从第二条起就找不到文件、附件静默失效。
+    private static func attachAvatar(_ data: Data,
+                                     to content: UNMutableNotificationContent,
+                                     owner: String?) {
+        guard owner != nil else { return }
+        let url = avatarDirectory()
+            .appendingPathComponent("notify-\(UUID().uuidString).jpg")
+        do {
+            try data.write(to: url, options: .atomic)
+            content.attachments = [
+                try UNNotificationAttachment(identifier: "aevis.avatar", url: url, options: nil)
+            ]
+        } catch {
+            // 挂不上就不挂。头像只是锦上添花，**绝不能因为它发不出通知**。
+        }
+    }
+
+    /// 排程前把上一轮的附件扫干净。
+    ///
+    /// 调用点在 `reschedule()`：那上面刚把所有 pending 通知都清了，它们的附件
+    /// 也就没人用了（已经弹出去的那些，系统早就把附件复制到自己的地方了）。
+    private static func clearAvatarCache() {
+        let manager = FileManager.default
+        let dir = avatarDirectory()
+        let names = (try? manager.contentsOfDirectory(atPath: dir.path)) ?? []
+        for name in names where name.hasPrefix("notify-") {
+            try? manager.removeItem(at: dir.appendingPathComponent(name))
+        }
+    }
+
+    /// 试一次「像她发来的消息」那种通知。
+    ///
+    /// iOS 15 起，通知可以借 `INSendMessageIntent` 变成**真人消息**的样式：
+    /// 顶上显示**她的头像 + 名字**（而不是 App 名），专注模式也会把它当成
+    /// "联系人消息"放行。**这是唯一能改掉横幅顶上那个 App 名的办法。**
+    ///
+    /// ⚠️ **可能失败**：完整生效要「Communication Notifications」能力，
+    ///    而侧载重签用的描述文件里未必有它。所以这里全程 `try?`，
+    ///    失败就原样返回普通通知 ——
+    ///    「通知发不出去」比「通知不够好看」严重得多。
+    private static func upgradeToCommunication(_ content: UNMutableNotificationContent,
+                                               owner: String?,
+                                               name: String,
+                                               avatarData: Data?) -> UNMutableNotificationContent {
+        guard let owner, let id = UUID(uuidString: owner) else { return content }
+
+        var components = PersonNameComponents()
+        components.nickname = name
+        let avatar = avatarData.map { INImage(imageData: $0) }
+
+        let sender = INPerson(personHandle: INPersonHandle(value: id.uuidString, type: .unknown),
+                              nameComponents: components,
+                              displayName: name,
+                              image: avatar,
+                              contactIdentifier: nil,
+                              customIdentifier: id.uuidString,
+                              isMe: false,
+                              suggestionType: .none)
+        // 「我」这一头也得给一个 —— 缺了它 intent 会被系统判成无效。
+        let me = INPerson(personHandle: INPersonHandle(value: "me", type: .unknown),
+                          nameComponents: nil,
+                          displayName: nil,
+                          image: nil,
+                          contactIdentifier: nil,
+                          customIdentifier: nil,
+                          isMe: true,
+                          suggestionType: .none)
+
+        let intent = INSendMessageIntent(recipients: [me],
+                                         outgoingMessageType: .outgoingMessageText,
+                                         content: content.body,
+                                        speakableGroupName: nil,
+                                        conversationIdentifier: "aevis.chat." + id.uuidString,
+                                        serviceName: "Aevis",
+                                        sender: sender,
+                                        attachments: nil)
+        if let avatar {
+            intent.setImage(avatar, forParameterNamed: \.sender)
+        }
+
+        // 让系统"认识"这个人 —— 专注模式的白名单、Siri 的建议都靠它。
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .incoming
+        interaction.donate(completion: nil)
+
+        guard let upgraded = try? content.updating(from: intent),
+              let mutable = upgraded.mutableCopy() as? UNMutableNotificationContent else {
+            return content
+        }
+        return mutable
     }
 
     private static func parse(_ text: String) -> (Int, Int)? {
@@ -211,7 +394,14 @@ final class ProactiveService {
 
     /// 从一条通知里把「她说了什么 + 说给谁」抠出来。
     static func payload(from notification: UNNotification) -> (text: String, owner: UUID?)? {
-        let request = notification.request
+        payload(fromRequest: notification.request)
+    }
+
+    /// 同上，只是从 `request` 取。
+    ///
+    /// 单独开一个口子是因为**用户在通知上直接打字回复**时，递过来的是
+    /// `UNNotificationResponse`（里面只有 `request`），而不是 `UNNotification`。
+    static func payload(fromRequest request: UNNotificationRequest) -> (text: String, owner: UUID?)? {
         guard request.identifier.hasPrefix(idPrefix) else { return nil }
         let info = request.content.userInfo
         let text = (info["text"] as? String) ?? request.content.body
@@ -246,6 +436,95 @@ final class ProactiveService {
         ChatStore.shared.appendProactive(payload.text, for: payload.owner)
         // 从"已送达"里删掉：不然回前台那次扫描会把它再补一遍。
         center.removeDeliveredNotifications(withIdentifiers: [notification.request.identifier])
+    }
+
+    // MARK: - 用户在通知上直接回复
+    //
+    // ⭐ 2026-09-30。用户原话：「能不能专门弄一个 IPA 给它弄通知啊？就是本地联动……
+    //    那样子感觉会很好玩」。
+    //
+    // **不用第二个 IPA** —— iOS 不允许一个 App 让另一个 App 弹通知，而"通知 App"
+    // 自己不在运行时就收不到任何信号（侧载又没有 APNs 付费账号）。
+    // 真正能实现"好玩"的是这条：**通知横幅上直接打字回她，不用打开 App**。
+
+    /// 用户在**通知上打字**回了她一句。
+    ///
+    /// ⚠️ 这时候 App 多半在后台（甚至刚被系统冷启动），系统只给几十秒 ——
+    ///    所以这里**只动数据、不碰界面**，而且每一步都不许抛错。
+    ///
+    /// 干两件事：
+    ///   ① 两边的话都落进聊天（他回头打开 App 时，聊天里要是完整的）；
+    ///   ② 让模型回一句再弹一条通知（不然他发完就干等，像没人搭理）。
+    @MainActor
+    func handleQuickReply(_ text: String, from request: UNNotificationRequest) async {
+        // 她刚才那句也得在聊天里 —— 它就是这条通知的内容。
+        if let payload = Self.payload(fromRequest: request) {
+            ChatStore.shared.appendProactive(payload.text, for: payload.owner)
+        }
+        center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+
+        let owner = ChatStore.shared.currentContactID
+        ChatStore.shared.append(ChatMessage(role: .user, text: text), for: owner)
+
+        // 后台时间有限：回复尽力而为。拿不到也没关系 ——
+        // 用户那句已经存进去了，打开 App 正常聊一样接得上。
+        guard let reply = await quickReply(to: text) else { return }
+        ChatStore.shared.appendProactive(reply, for: owner)
+        await scheduleInstantNotification(reply, owner: owner)
+    }
+
+    /// 用一次短调用替她回一句（通知上那条不需要长篇大论）。
+    @MainActor
+    private func quickReply(to text: String) async -> String? {
+        let settings = AppSettings.shared
+        guard settings.isConfigured else { return nil }
+        let persona = PersonaStore.shared.persona
+        guard persona.isComplete else { return nil }
+
+        var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
+        context.append(contentsOf: CoupleStore.shared.injectedLines())
+
+        var collected = ""
+        do {
+            for try await piece in LLMService.streamReply(
+                config: settings.llm,
+                systemPrompt: persona.systemPrompt,
+                history: [ChatMessage(role: .user, text: text)],
+                memory: context
+            ) {
+                collected += piece
+                // 通知里塞不下长文；够一句就走。
+                if collected.count > 200 { break }
+            }
+        } catch {
+            return nil
+        }
+        let trimmed = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// 立刻弹一条通知（她刚回的那句）。
+    ///
+    /// ⚠️ App 在**前台**时不弹 —— 用户正看着屏幕，再弹个横幅是噪音
+    ///    （跟 `willPresent` 那条口径一致：前台的话系统自己会走 `willPresent`）。
+    private func scheduleInstantNotification(_ text: String, owner: UUID?) async {
+        let state = await MainActor.run { UIApplication.shared.applicationState }
+        guard state != .active else { return }
+
+        let persona = await MainActor.run { PersonaStore.shared.persona }
+        let avatarData = await MainActor.run { () -> Data? in
+            guard let owner else { return nil }
+            return PersonaStore.shared.avatar(for: owner)?.jpegData(compressionQuality: 0.8)
+        }
+        let content = makeContent(title: persona.name.isEmpty ? "Aevis" : persona.name,
+                                  body: text,
+                                  owner: owner?.uuidString,
+                                  avatarData: avatarData)
+        // trigger 给 nil = 立刻送达。
+        let request = UNNotificationRequest(identifier: Self.idPrefix + "reply." + UUID().uuidString,
+                                            content: content,
+                                            trigger: nil)
+        try? await center.add(request)
     }
 
     // MARK: - 话术池
@@ -430,6 +709,19 @@ final class ProactiveNotificationDelegate: NSObject, UNUserNotificationCenterDel
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        // ⭐ 用户在通知上**直接打字**回的那一句 —— 不打开 App 也能跟她说话。
+        //    这是通知这一块最像真人的地方（用户 2026-09-30 想要的那个"好玩"）。
+        if response.actionIdentifier == ProactiveService.replyAction,
+           let typed = response as? UNTextInputNotificationResponse {
+            let text = typed.userText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                await ProactiveService.shared.handleQuickReply(
+                    text,
+                    from: response.notification.request
+                )
+                return
+            }
+        }
         // 用户点了通知 → 那条话必须已经在聊天里（点进来看得见）。
         await ProactiveService.shared.absorbForegroundNotification(response.notification)
     }

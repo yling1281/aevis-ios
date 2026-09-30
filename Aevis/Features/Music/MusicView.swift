@@ -1,6 +1,17 @@
 import SwiftUI
 
-/// 音乐页：登录、搜歌、播放。
+/// 音乐页：登录、进找歌、看现在放什么。
+///
+/// ## 搜索**不在这里**了（2026-10-01 收敛）
+/// 这里原来有一整块自己的搜索（输入框 + 结果列表 + 每日推荐），而
+/// `PlayerView` 里又是同一套 —— **同一件事写了两个实现**。
+/// 拼 URL 那个崩溃就是"两处各写一遍、只在一处踩到"的典型，
+/// 所以这次把搜索收成一份：`MusicSearchSheet`，本页和播放器都用它。
+///
+/// 本页只剩三件事（都很薄）：
+/// 1. **登录**（在 App 里登 / 手动贴 Cookie）—— 这是别处没有的
+/// 2. 一个「找歌」按钮 → 弹 `MusicSearchSheet`
+/// 3. 「正在播放」的摘要 + 全屏播放界面入口
 ///
 /// 登录有两条路：
 /// 1. **在 App 里登录**（推荐）—— 登进去之后凭据自动从 cookie 里抓过来，
@@ -13,23 +24,19 @@ struct MusicView: View {
     /// 点一首歌就弹全屏播放器 —— 和网易云一样，点了直接进播放界面。
     @ObservedObject private var router = AppRouter.shared
 
-    @State private var keyword = ""
-    @State private var results: [MusicTrack] = []
-    @State private var searching = false
     @State private var note: String?
     @State private var editingCookie = false
     @State private var cookieDraft = ""
     @State private var showLogin = false
+    /// 找歌面板（搜索的唯一实现）
+    @State private var showSearch = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 loginCard
                 if NeteaseClient.shared.isLoggedIn {
-                    searchCard
-                    if !results.isEmpty {
-                        resultsCard
-                    }
+                    findCard
                 }
                 nowPlayingCard
                 hintCard
@@ -41,6 +48,9 @@ struct MusicView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showLogin) {
             NeteaseLoginView()
+        }
+        .sheet(isPresented: $showSearch) {
+            MusicSearchSheet()
         }
         .alert("网易云 Cookie", isPresented: $editingCookie) {
             TextField("MUSIC_U=...; 或整段 Cookie", text: $cookieDraft)
@@ -72,7 +82,6 @@ struct MusicView: View {
                     Spacer(minLength: 8)
                     Button("退出") {
                         NeteaseClient.shared.signOut()
-                        results = []
                         note = "已退出。"
                     }
                     .font(.aevis(13.5))
@@ -128,124 +137,44 @@ struct MusicView: View {
         .aevisGlass(cornerRadius: 20)
     }
 
-    // MARK: - 搜索
+    // MARK: - 找歌
 
-    private var searchCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    /// 只留一个入口 —— 真正的搜索在 `MusicSearchSheet` 里（本页和播放器共用那一份）。
+    private var findCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
             label("找歌")
 
-            HStack(spacing: 8) {
-                TextField("歌名、歌手、或者一句歌词", text: $keyword)
-                    .font(.aevis(14.5))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .onSubmit { runSearch() }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
-
-                Button(action: runSearch) {
-                    HStack(spacing: 6) {
-                        if searching {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(searching ? "找…" : "搜")
-                            .font(.aevis(14, weight: .medium))
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 9)
-                    .aevisGlass(cornerRadius: 14)
-                }
-                .disabled(searching)
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    Task { await loadDaily() }
-                } label: {
-                    Text("每日推荐")
+            Button {
+                showSearch = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
                         .font(.aevis(14, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 9)
-                        .aevisGlass(cornerRadius: 14)
+                    Text("搜歌名、歌手、或者一句歌词")
+                        .font(.aevis(14.5))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.aevis(12, weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
+                .background(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+
+            Text("点了直接进全屏播放界面。播放界面右上角也有这个放大镜 —— 一起听的时候不用退出来。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .aevisGlass(cornerRadius: 20)
-    }
-
-    private var resultsCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                label("结果")
-                Spacer(minLength: 8)
-                Button("全部播放") {
-                    Task { @MainActor in
-                        await player.play(results)
-                        router.showPlayer = true
-                    }
-                }
-                .font(.aevis(13))
-                .foregroundStyle(settings.accentColor)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 6)
-
-            // ⚠️ 唯一标识用**序号**，不用曲目 id。
-            // 网易云的搜索结果偶尔会出现同一个 id 出现两次（不同版本/不同音质条目），
-            // 而 SwiftUI 遇到重复 id 是未定义行为 —— 轻则错行，重则直接崩。
-            ForEach(Array(results.prefix(30).enumerated()), id: \.offset) { index, track in
-                Button {
-                    // 点了直接进全屏播放器（网易云也是这个行为）——
-                    // 先在后台把播放地址取回来，取到再弹，这样画面一出来就是对的封面和歌词。
-                    Task { @MainActor in
-                        await player.play(queue: results, index: index)
-                        router.showPlayer = true
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        Text("\(index + 1)")
-                            .font(.aevisMono(11.5))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 22, alignment: .trailing)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(track.title)
-                                .font(.aevis(14.5))
-                                .foregroundStyle(
-                                    player.current?.id == track.id ? settings.accentColor : .primary
-                                )
-                                .lineLimit(1)
-                            Text(track.display)
-                                .font(.aevis(11.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 8)
-
-                        if player.current?.id == track.id, player.isPlaying {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 13))
-                                .foregroundStyle(settings.accentColor)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.bottom, 8)
         .aevisGlass(cornerRadius: 20)
     }
 
@@ -315,9 +244,17 @@ struct MusicView: View {
                         .foregroundStyle(.red)
                 }
             } else {
-                Text("还没在放。搜一首，或者让我帮你放。")
-                    .font(.aevis(13))
-                    .foregroundStyle(.secondary)
+                Button {
+                    showSearch = true
+                } label: {
+                    Text("还没在放。点这里找一首，或者让我帮你放。")
+                        .font(.aevis(13))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
 
             if let error = player.errorText {
@@ -353,35 +290,10 @@ struct MusicView: View {
     }
 
     // MARK: - 动作
-
-    private func runSearch() {
-        let text = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !searching else { return }
-        searching = true
-        note = nil
-
-        Task { @MainActor in
-            do {
-                results = try await NeteaseClient.shared.search(text)
-                if results.isEmpty { note = "没搜到「\(text)」。" }
-            } catch {
-                note = error.localizedDescription
-            }
-            searching = false
-        }
-    }
-
-    private func loadDaily() async {
-        searching = true
-        note = nil
-        do {
-            results = try await NeteaseClient.shared.dailyRecommend()
-            note = "每日推荐拿到 \(results.count) 首。"
-        } catch {
-            note = error.localizedDescription
-        }
-        searching = false
-    }
+    //
+    // ⚠️ 这里原来有 `runSearch()` / `loadDaily()` 两个方法 —— 都搬到
+    // `MusicSearchSheet` 里了。**别在这儿再加一份**：同一件事写两遍，
+    // 修 bug 的时候一定会漏一处（拼 URL 崩的那次就是这么来的）。
 
     private func label(_ text: String) -> some View {
         Text(text)

@@ -132,6 +132,10 @@ final class NeteaseClient {
     // MARK: - 搜索
 
     func search(_ keyword: String, limit: Int = 20) async throws -> [MusicTrack] {
+        // ⚠️ 这三行 `step` 是"搜歌闪退"的定位器，别删：
+        // 崩了之后黑匣子里最后停在哪个箭头，就知道死在哪一步。
+        //（2026-09-30 就是这么定位到 `attachCovers` 拼 URL 崩的。）
+        BlackBox.step("搜歌「\(keyword.prefix(30))」")
         let json = try await request(
             plain: ("/api/search/get", [
                 "s": keyword, "type": "1", "offset": "0", "limit": "\(limit)"
@@ -144,6 +148,7 @@ final class NeteaseClient {
               let songs = result["songs"] as? [[String: Any]] else {
             throw NeteaseError.badResponse("搜索结果里没有 songs（\(Self.brief(json))）")
         }
+        BlackBox.step("搜到 \(songs.count) 条，解析 + 补封面")
         return await attachCovers(to: Self.dedupe(songs.compactMap(Self.track(from:))))
     }
 
@@ -170,11 +175,18 @@ final class NeteaseClient {
     // 失败就静默跳过：播放界面会退回一个渐变圆盘，不影响听歌。
 
     /// 给一批歌补上封面地址。
+    ///
+    /// 🔴 **这里曾经是「搜歌必闪退」的案发现场**（2026-09-30）：
+    /// `c` 的值长这样 `[{"id":123}]`，旧代码把方括号当"安全字符"放行、
+    /// 再手工赋给 `percentEncodedQuery` → setter 校验不过 → ObjC 异常 → 进程当场死。
+    /// `search` 本身没有方括号所以搜得到结果，**用户看到的就是"搜着搜着闪退"**。
+    /// 现在整个 query 交给 `queryItems` 编码，这条路上不会再出现非法字符。
     func attachCovers(to tracks: [MusicTrack]) async -> [MusicTrack] {
         guard !tracks.isEmpty else { return tracks }
         let ids = tracks.prefix(60).map(\.id)
         let payload = "[" + ids.map { "{\"id\":\($0)}" }.joined(separator: ",") + "]"
 
+        BlackBox.step("补封面（\(ids.count) 首）")
         guard let json = try? await plainRequest("/api/v3/song/detail", ["c": payload]),
               let songs = json["songs"] as? [[String: Any]] else {
             return tracks
@@ -231,7 +243,12 @@ final class NeteaseClient {
     // MARK: - 播放地址与歌词
 
     /// 取播放地址。网易给的是临时链接（`expi` 约 1200 秒），所以每次播放前都要现取。
+    ///
+    /// ⚠️ `ids` 的值是 `[123]` —— **带方括号**。这里同样踩过
+    /// `percentEncodedQuery` 那个坑（历史 bug「点歌就闪退」）。
+    /// 现在方括号由 `queryItems` 编成 `%5B%5D`，服务端解码后一样。
     func playableURL(for id: String, quality: Int = 320000) async throws -> URL {
+        BlackBox.step("取播放地址 id=\(id)")
         let json = try await request(
             plain: ("/api/song/enhance/player/url", ["ids": "[\(id)]", "br": "\(quality)"]),
             encrypted: ("/weapi/song/enhance/player/url", ["ids": "[\(id)]", "br": quality])
@@ -299,14 +316,47 @@ final class NeteaseClient {
         throw firstError ?? NeteaseError.badResponse("两条通道都没走通")
     }
 
-    /// 明文接口：GET + 参数直接挂 URL 上。
+    /// 明文接口：GET + 参数挂在 query 上。
+    ///
+    /// ## 🔴 这里曾经是「搜歌必闪退」的元凶（2026-09-30 定位）
+    ///
+    /// 老写法是**自己拼 query 串**再赋给 `components.percentEncodedQuery`：
+    ///
+    /// ```swift
+    /// components?.percentEncodedQuery = Self.queryString(query)   // ← 崩在这
+    /// ```
+    ///
+    /// `percentEncodedQuery` 的 setter **会校验**：串里出现它不认的字符
+    /// （`[` `]` 空格 `"` `%` `{` 等等）就抛 `NSInvalidArgumentException`
+    /// —— 那是**未捕获的 ObjC 异常，进程当场终止**，没有任何补救机会。
+    ///
+    /// 要命的是这套代码**故意放行了方括号**（旧注释写「探针里用原始方括号能过」），
+    /// 于是两条最常走的路全中：
+    ///   - `attachCovers` → `c=[{"id":123}]`
+    ///   - `playableURL` → `ids=[123]`
+    /// 而 `search` 本身没有方括号，**所以结果其实已经搜回来了** ——
+    /// 用户看到的是「搜了一下，然后闪退」，正是他报的「搜歌的时候」。
+    ///
+    /// ⚠️ **旧验证为什么是错的**：探针是 Python 写的，`urllib` **不做 URL 校验**，
+    /// 裸方括号照样发得出去。本地怎么测都通，问题只在 App 里。
+    /// （同一类坑的第二次复发，第一次是 `CharacterSet.alphanumerics` 那个 Unicode 问题。）
+    ///
+    /// ## 现在的写法
+    /// 走 `queryItems`，**交给 Foundation 自己编码** —— 它按 RFC 3986 来，
+    /// 不可能拼出非法串，这类崩溃从此不存在。
+    /// 方括号会被编成 `%5B` / `%5D`，网易服务端 URL 解码后拿到的是同一个
+    /// `[123]`，与 Python 探针实际发的字节一致。
     private func plainRequest(_ path: String, _ query: [String: String]) async throws -> [String: Any] {
-        var components = URLComponents(string: base + path)
-        if !query.isEmpty {
-            components?.percentEncodedQuery = Self.queryString(query)
-        }
-        guard let url = components?.url else {
+        guard var components = URLComponents(string: base + path) else {
             throw NeteaseError.badResponse("路径拼错了：\(path)")
+        }
+        if !query.isEmpty {
+            components.queryItems = query
+                .sorted { $0.key < $1.key }
+                .map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        guard let url = components.url else {
+            throw NeteaseError.badResponse("参数拼不出合法 URL：\(path)")
         }
 
         var request = URLRequest(url: url)
@@ -393,35 +443,29 @@ final class NeteaseClient {
 
     // MARK: - 拼串与编码
 
-    /// 拼 URL 参数时"不该编码"的字符：字母、数字、`-._~`，外加**方括号** ——
-    /// 网易的 `ids=[123]` 就是这么写的，探针里用原始方括号能过。
+    /// **只给 `weapiRequest` 的 form body 用**，⚠️ **不要拿它去拼 query**。
+    ///
+    /// 为什么改名（原名 `urlSafe`）：名字太中性，谁都可能顺手拿去拼 URL 串 ——
+    /// 而 query 那条路现在是 `queryItems` 交给 Foundation 编码了（见 `plainRequest`）。
+    /// 名字里带 `form` 就是为了让"拿去拼 query"这件事看起来不对。
     ///
     /// ⚠️ **绝对不能用 `CharacterSet.alphanumerics`** —— 那个是 **Unicode** 的，
     /// **中文也算「字母数字」**，所以中文关键词一个字符都不会被编码，
     /// 拼出来的 URL 直接非法。网易回的就是那句「格式错误」。
     ///
     /// 这个坑特别阴：本机探针是 Python 写的（`urllib.parse.quote` 老老实实编码中文），
-    /// 所以**本地怎么测都是通的**，问题只出在 App 里 ——
-    /// 白烧了一轮编译才定位到。
-    private static let urlSafe = CharacterSet(
+    /// 所以**本地怎么测都是通的**，问题只出在 App 里。
+    private static let formSafe = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             + "abcdefghijklmnopqrstuvwxyz"
             + "0123456789"
-            + "-._~[]"
+            + "-._~"
     )
 
-    private static func queryString(_ query: [String: String]) -> String {
-        query.sorted { $0.key < $1.key }.map { key, value in
-            let k = key.addingPercentEncoding(withAllowedCharacters: urlSafe) ?? key
-            let v = value.addingPercentEncoding(withAllowedCharacters: urlSafe) ?? value
-            return "\(k)=\(v)"
-        }.joined(separator: "&")
-    }
-
-    /// weapi 的 form 编码。base64 里只有 ASCII，碰不到中文，
-    /// 但为了一致（不多留一个"看起来能用"的隐患），这里用同一份白名单。
+    /// weapi 的 form 编码。内容只有 base64 的 ASCII 字符，
+    /// 但 `+` `/` `=` 这三个必须编掉 —— 尤其 `+`，不编会被服务端当成空格。
     private static func formEncode(_ text: String) -> String {
-        text.addingPercentEncoding(withAllowedCharacters: urlSafe) ?? text
+        text.addingPercentEncoding(withAllowedCharacters: formSafe) ?? text
     }
 
     private static func brief(_ json: [String: Any]) -> String {

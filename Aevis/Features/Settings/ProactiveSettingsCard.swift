@@ -224,7 +224,15 @@ struct ProactiveSettingsCard: View {
                         .truncationMode(.middle)
                 }
 
-                Text("Bark 是另一个 App 提供的推送通道。好处是消息会留在通知历史里；但它需要 App 在运行时才发得出去，所以真正的定时仍然靠上面那两条本地通知。")
+                // ⚠️ 这段是直接回答用户 2026-09-30 的困惑 ——
+                //    「每次发弹窗都是那个名称，都是那个什么 PUSH」。
+                //    他真的看到过那个名字，所以要在这儿把它讲明白，
+                //    不然他会以为是 App 写错了。
+                Text("Bark 是另一个 App 提供的推送通道：走它的话，消息会留在 Bark 的历史里。"
+                     + "但它需要 App 正在运行才发得出去，所以真正的定时仍然靠上面的本地通知。"
+                     + "另外 —— Bark 弹出来的通知，左上角写的是 Bark 这个 App 的名字，"
+                     + "那是它改不了的。想让通知看起来就是 TA 发给你的（带 TA 的头像、"
+                     + "还能直接在通知上回一句），就把 Bark 关掉，用上面的本地通知。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

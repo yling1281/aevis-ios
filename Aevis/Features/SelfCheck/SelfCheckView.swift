@@ -101,18 +101,26 @@ struct SelfCheckView: View {
     static func buildEnvironmentChecks() -> [NeteaseCrypto.SelfCheck] {
         var rows: [NeteaseCrypto.SelfCheck] = []
 
+        // ⚠️ 判据用**全量**工具（内置 + 外接），跟用户的「AI 权限」开关无关。
+        //    自检是查"App 有没有坏"，不是查"用户关了哪几类"。
+        //    拿允许的那份当判据，用户一关总开关就会看到一条假故障 ——
+        //    看起来像 App 坏了，其实是他自己关的。detail 里两个数都写出来，好分清。
+        let allTools = DeviceTools.builtinTools + MCPStore.shared.bridgedTools
         let tools = DeviceTools.all()
         rows.append(NeteaseCrypto.SelfCheck(
             name: "她有多少只手",
-            passed: tools.count >= 10,
-            detail: "\(tools.count) 个工具：" + tools.map(\.name).joined(separator: ", ")
+            passed: allTools.count >= 10,
+            detail: "内置 + 外接共 \(allTools.count) 个，当前允许 \(tools.count) 个："
+                + tools.map(\.name).joined(separator: ", ")
         ))
 
-        let names = Set(tools.map(\.name))
+        let names = Set(allTools.map(\.name))
         rows.append(NeteaseCrypto.SelfCheck(
             name: "工具名不重复",
-            passed: names.count == tools.count,
-            detail: names.count == tools.count ? "没有重名" : "有重名：\(tools.count) 个工具只有 \(names.count) 个不同名字"
+            passed: names.count == allTools.count,
+            detail: names.count == allTools.count
+                ? "没有重名"
+                : "有重名：\(allTools.count) 个工具只有 \(names.count) 个不同名字"
         ))
 
         let definitions = DeviceTools.definitions()

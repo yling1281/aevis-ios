@@ -77,17 +77,15 @@ struct MainTabView: View {
         // 是固定的"从下往上弹"，SwiftUI 改不了方向。所以这里自己做一层 overlay
         // 配 `.move(edge: .trailing)`，关闭由 MomentsView 的 onClose 回调触发
         // （自定义呈现下 `@Environment(\.dismiss)` 是失效的）。
-        .sheet(isPresented: $router.showTogether) {
-            TogetherView()
-                .aevisScreen("一起听")
-                .environmentObject(personaStore)
-        }
+        // ⚠️ 一起听**不再有独立面板**了（2026-10-01）：以前这里是
+        // `.sheet { TogetherView() }`，现在所有「一起听」入口都直接开下面的
+        // 全屏播放器 —— 用户原话「把一起听砍掉，做成官网那样的界面」。
         .fullScreenCover(isPresented: $router.showCall) {
             CallView()
                 .aevisScreen("通话")
                 .environmentObject(personaStore)
         }
-        // 全屏播放器（仿网易云那个）。点一首歌就弹它。
+        // 全屏播放器（仿网易云那个）。点一首歌就弹它；「一起听」也开它。
         .fullScreenCover(isPresented: $router.showPlayer) {
             PlayerView()
                 .aevisScreen("播放器")
@@ -242,7 +240,7 @@ struct MainTabView: View {
         case .call:
             router.showCall = true
         case .listenTogether:
-            router.showTogether = true
+            router.showPlayer = true
         case .screenShare:
             router.settingsFocus = "companion"
             router.showSettings = true
@@ -264,7 +262,7 @@ struct MainTabView: View {
         // 所以从根上弹（这几个开关以前挂在聊天页里，搬家了）。
         if args.contains("-aevisOpenSettings") { router.showSettings = true }
         if args.contains("-aevisOpenMoments") { router.showMoments = true }
-        if args.contains("-aevisOpenTogether") { router.showTogether = true }
+        if args.contains("-aevisOpenTogether") { router.showPlayer = true }
         if args.contains("-aevisOpenPlayer") { router.showPlayer = true }
         #endif
     }

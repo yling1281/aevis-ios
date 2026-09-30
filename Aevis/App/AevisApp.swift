@@ -44,6 +44,11 @@ struct AevisApp: App {
         //    存成局部变量的话当场就没了，回调永远不会来。
         UNUserNotificationCenter.current().delegate = ProactiveNotificationDelegate.shared
 
+        // 通知分类：横幅上那个「回一句」的输入框靠它。
+        // ⚠️ 分类是**跟系统注册**的（不是跟单条通知走的），所以启动时就得注册一次 ——
+        //    漏了这一步，通知上根本不会出现打字框（而且不报错，只是悄悄没有）。
+        ProactiveService.registerCategories()
+
         // 账号后端有主域名 + 备用域名（拦截是按线路抽样的，谁通走谁）。
         // 结果写回 `AppSettings.accountServerURL` —— 各处读的都是它，改一处全跟着走。
         // ⚠️ 必须回到主线程再写：`AppSettings` 不是 `@MainActor`，在后台改 `@Published`

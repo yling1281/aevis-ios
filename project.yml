@@ -75,8 +75,11 @@ settings:
     #       `aevis.lastBackupName`。
     #    ③ 恢复收尾补 `syncActive()`：把 `currentID` 摆到搬过来的 `activeID` 上
     #       （导入期间只是没落盘，没重切的话界面还停在旧会话）。
-    MARKETING_VERSION: "0.0.88"
-    CURRENT_PROJECT_VERSION: "88"
+    # 0.0.89 = 下一批 5 条：音乐/一起听、情侣空间、银行卡、通知「像她」、AI 权限。
+    # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
+    #    必须在这里手改，否则出的包还叫 0.0.88，装的时候会跟旧包撞版本。
+    MARKETING_VERSION: "0.0.89"
+    CURRENT_PROJECT_VERSION: "89"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

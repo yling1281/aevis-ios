@@ -15,7 +15,78 @@ struct DeviceTool {
     let title: String
     let description: String
     let parameters: [String: Any]
+    var category: ToolCategory = .core
     let run: ([String: Any]) async -> String
+}
+
+/// 「AI 权限」给工具分的类。
+///
+/// 用户 2026-09-30：「AI 拥有操控这个手机的全部功能。当然，你拥有最高权限，
+/// 可以控制它开或者不开」→ 问他要哪种形态，他选了 **总开关 + 分类开关**。
+///
+/// ⚠️ 分类**集中维护**在 `DeviceTools.allGroups` 那张表里，不散落在各工具定义上。
+///    理由是"漏一个"的代价不对称：漏掉一个**安全的**分类只是少一个开关；
+///    漏掉一个**敏感的**分类，就是"用户以为关掉了、其实那个能力还在"。
+enum ToolCategory: String, CaseIterable, Identifiable {
+    case core
+    case calendar
+    case sense
+    case web
+    case music
+    case moment
+    case pan
+    case qq
+    case system
+    case wallet
+    case couple
+    case companion
+    case mcp
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .core: return "时间 / 计算 / 剪贴板"
+        case .calendar: return "日历与提醒"
+        case .sense: return "定位 / 天气 / 健康"
+        case .web: return "上网搜索与看网页"
+        case .music: return "音乐与一起听"
+        case .moment: return "朋友圈"
+        case .pan: return "百度网盘"
+        case .qq: return "QQ"
+        case .system: return "系统动作"
+        case .wallet: return "钱包"
+        case .couple: return "情侣空间"
+        case .companion: return "她主动申请的事"
+        case .mcp: return "外接能力（MCP）"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .core: return "看时间、算数、读写剪贴板"
+        case .calendar: return "翻日程、建日程、记提醒"
+        case .sense: return "你在哪、什么天气、步数心率睡眠"
+        case .web: return "搜索、把网页读出来"
+        case .music: return "搜歌放歌、一起听、看歌词"
+        case .moment: return "发朋友圈、翻朋友圈"
+        case .pan: return "读你百度网盘里的文件"
+        case .qq: return "在 QQ 上回消息"
+        case .system: return "锁屏、跑快捷指令、看你的屏幕、回主屏、跑命令行"
+        case .wallet: return "看余额、往你钱包里打钱（只能给，不能拿）"
+        case .couple: return "看纪念日、往里加倒数日"
+        case .companion: return "申请给你打电话 / 看屏幕 / 一起听（真正开始还要你点头）"
+        case .mcp: return "你自己接进来的那些工具"
+        }
+    }
+
+    /// 敏感的那些 —— 界面上标一下，让用户在关之前知道它有多能干。
+    var isSensitive: Bool {
+        switch self {
+        case .system, .pan, .mcp, .qq: return true
+        default: return false
+        }
+    }
 }
 
 /// TA 的手。
@@ -23,42 +94,73 @@ struct DeviceTool {
 /// 这些工具会被发给模型（function calling），由她自己决定什么时候用、用什么参数。
 /// 每个工具都只做一件小事，而且**只读她能读的东西**——
 /// 日历、提醒这类要用户授权的，授权被拒就老老实实返回「没授权」，绝不假装成功。
+///
+/// ## 🔴 用户手里的两个闸（2026-09-30）
+/// - **总开关** `AppSettings.aiToolsEnabled`：关掉她只剩聊天。
+/// - **分类开关** `AppSettings.disabledToolCategories`：逐类关。
+/// 两者都只影响**发给模型的清单**，见 `all()`。
 enum DeviceTools {
 
     // MARK: - 登记
 
-    /// 她全部的手 = App 自带的 + 外接的。
+    /// 她全部的手 = App 自带的（**已按「AI 权限」过滤**）+ 外接的。
     ///
     /// **所有链路都走这里**（打字聊天、语音通话、一起听、主动消息、朋友圈），
     /// 所以外接的 MCP 工具接一次就处处可用 —— 包括你直接对她说话的时候。
     static func all() -> [DeviceTool] {
-        builtinTools + MCPStore.shared.bridgedTools
+        grantedBuiltinTools + (isOn(.mcp) ? MCPStore.shared.bridgedTools : [])
     }
 
-    /// App 自带的那些，不含 MCP。
+    /// 🔴 总开关。关掉之后她**只能聊天**。
+    static var masterEnabled: Bool { AppSettings.shared.aiToolsEnabled }
+
+    /// 某一类现在是不是开着的。
+    static func isOn(_ category: ToolCategory) -> Bool {
+        AppSettings.shared.isToolOn(category)
+    }
+
+    /// App 自带、**并且用户允许**的那些。发给模型的就是这一份。
+    static var grantedBuiltinTools: [DeviceTool] {
+        guard masterEnabled else { return [] }
+        let off = Set(AppSettings.shared.disabledToolCategories)
+        return allGroups
+            .filter { !off.contains($0.category.rawValue) }
+            .flatMap(\.tools)
+    }
+
+    /// **全部**内置工具，不管开关。
     ///
-    /// 单独拆出来是有原因的：`MCPStore.bridgedTools` 判重时要看这些名字，
-    /// 如果它去调 `all()`，就绕回来变成无限递归了（真会崩栈）。
+    /// ⚠️ 单独留这一份是有原因的：`MCPStore.bridgedTools` 判重时要看**全部**名字 ——
+    ///    只看"允许的"那些，同名的 MCP 工具就会被再发一遍（模型收到两份同名函数）。
+    /// ⚠️ 也**不能**让判重去调 `all()`：那会绕回来变成无限递归（真会崩栈）。
     static var builtinTools: [DeviceTool] {
-        [timeTool, clipboardReadTool, clipboardWriteTool, calculatorTool,
-         calendarListTool, calendarCreateTool, reminderCreateTool]
-        + senseTools
-        + webTools
-        + musicTools
-        + momentTools
-        + panTools
-        + qqTools
-        + qqBotTools
-        + systemTools
-        // ⚠️ 音乐 / 百度网盘 默认不给她（见 `Experimental`）——
-        //    光藏界面不够：她要是还拿着这些工具，会对买家说"我给你放首歌"、
-        //    或者去读人家的网盘，而买家根本没开那个功能。
-        + (Experimental.enabled ? musicTools : [])
-        + (Experimental.enabled ? panTools : [])
-        // 她**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
-        // 和别的工具不一样的地方：这几个只是"提出来"，真正开始要用户点头。
-        + CompanionTools.tools
-        + [shellTool]
+        allGroups.flatMap(\.tools)
+    }
+
+    /// 内置工具，**按类别分组** —— 「AI 权限」的开关就是在这张表上过滤的。
+    ///
+    /// ⭐ 集中成一张表的好处：加新工具时只要放进对应的组，开关自动就管得到它。
+    ///    （以前这里是一长串 `+` 拼接，`musicTools` 和 `panTools` 还被加了两遍 ——
+    ///      模型会收到两份同名函数。改成分组表之后那个重复也一并没了。）
+    private static var allGroups: [(category: ToolCategory, tools: [DeviceTool])] {
+        [
+            (.core, [timeTool, clipboardReadTool, clipboardWriteTool, calculatorTool]),
+            (.calendar, [calendarListTool, calendarCreateTool, reminderCreateTool]),
+            (.sense, senseTools),
+            (.web, webTools),
+            (.music, musicTools),
+            (.moment, momentTools),
+            (.pan, panTools),
+            (.qq, qqTools + qqBotTools),
+            // 系统动作 + `shellTool`（命令行）放一类 ——
+            // shell 是这里最狠的一个，它就该跟"能不能替我操作这台手机"捆在一起。
+            (.system, systemTools + [shellTool]),
+            (.wallet, WalletTools.walletTools),
+            (.couple, CoupleTools.coupleTools),
+            // 她**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
+            // 跟别的不一样的地方：这几个只是"提出来"，真正开始还要用户点头。
+            (.companion, CompanionTools.tools)
+        ]
     }
 
     /// 发给模型的工具定义（OpenAI function calling 格式）。
@@ -75,11 +177,24 @@ enum DeviceTools {
         }
     }
 
+    /// 工具的中文名（黑匣子/工具条上显示用）。
+    ///
+    /// ⚠️ 查的是**全部**内置工具，不是"允许的"那一份 ——
+    ///    不然用户后来关掉某一类，历史记录里那些调用就变成一串英文 id 了。
     static func title(for name: String) -> String {
-        all().first(where: { $0.name == name })?.title ?? name
+        if let hit = builtinTools.first(where: { $0.name == name }) { return hit.title }
+        if let hit = MCPStore.shared.bridgedTools.first(where: { $0.name == name }) { return hit.title }
+        return name
     }
 
     static func run(name: String, arguments: [String: Any]) async -> String {
+        // ⚠️ 「工具不存在」和「工具被关掉了」必须**分开说**：
+        //    前一种模型会去猜别的工具，后一种它才会老实告诉用户"这个没开"。
+        //    混成一句话的后果，是用户看着她去用另一个工具绕过去。
+        if let blocked = blockedTool(named: name) {
+            return "「\(blocked.title)」这个能力被用户关掉了（设置 → AI 权限）。"
+                + "照实跟他说这个没开，别自己想办法绕过。"
+        }
         guard let tool = all().first(where: { $0.name == name }) else {
             return "没有叫「\(name)」的工具。"
         }
@@ -88,6 +203,28 @@ enum DeviceTools {
         //    绝不带聊天/人设/剪贴板/日历标题这些原文。
         BlackBox.tool(name, summarize(arguments))
         return await tool.run(arguments)
+    }
+
+    /// 内置清单里有、但**用户不让用**的那个工具。
+    ///
+    /// 拿它把"不存在"和"被关掉"分开 —— 见 `run(name:arguments:)` 上面那段。
+    private static func blockedTool(named name: String) -> DeviceTool? {
+        guard let tool = builtinTools.first(where: { $0.name == name }) else { return nil }
+        guard masterEnabled else { return tool }
+        return grantedBuiltinTools.contains(where: { $0.name == name }) ? nil : tool
+    }
+
+    /// 被用户关掉的能力的中文名 —— **给她的提示词用**。
+    ///
+    /// ⚠️ 为什么非要有这个：关掉之后工具**根本不发给她**，于是她**不知道自己不能做**，
+    ///    用户一句「放首歌」她就顺口「好呀，正在放～」—— 那就是"假装完成"，
+    ///    用户最不能接受的一种。所以关掉的能力必须**明写进系统提示**。
+    ///
+    /// 总开关关掉时返回空 —— 那种情况由提示词那边单独说一句更完整的（列 13 条太长）。
+    static var disabledCategoryLabels: [String] {
+        guard masterEnabled else { return [] }
+        let off = Set(AppSettings.shared.disabledToolCategories)
+        return ToolCategory.allCases.filter { off.contains($0.rawValue) }.map(\.label)
     }
 
     /// 脱敏入参摘要：字符串只记 `key=长度`，标量记值，其它记 `key=?`。

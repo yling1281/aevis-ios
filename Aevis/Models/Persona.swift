@@ -101,6 +101,27 @@ struct Persona: Codable, Equatable {
             lines.append(EmojiPack.promptNote)
         }
 
+        // 「AI 权限」被关掉的能力，必须**明说**。
+        // ⚠️ 不说会怎样：工具压根没发给她 ⇒ 她不知道自己不能做 ⇒ 用户一句「放首歌」
+        //    她就顺口「好呀，正在放～」。那正是用户最恨的"假装完成"。
+        //    （工具照发、只在调用时拒绝，也治不了这个 —— 她压根不会去调一个看不见的工具。）
+        if !DeviceTools.masterEnabled {
+            lines.append("""
+            对方把「AI 权限」整个关掉了 —— 你现在没有任何动手的能力
+            （查不了天气、翻不了日历、放不了歌、发不了朋友圈……），只剩下聊天。
+            对方要你做这些时，照实说「这个我这边被关掉了」，别假装做了，也别换个说法糊过去。
+            """)
+        } else {
+            let off = DeviceTools.disabledCategoryLabels
+            if !off.isEmpty {
+                lines.append("""
+                有几样能力被对方关掉了：\(off.joined(separator: "、"))。
+                这些事你现在做不到 —— 对方提起时照实说「这个我这边没开」，
+                千万别假装做了，也别换个说法糊过去。
+                """)
+            }
+        }
+
         return lines.joined(separator: "\n")
     }
 }
@@ -216,6 +237,7 @@ final class PersonaStore: ObservableObject {
         ChatStore.shared.forget(id)
         MemoryStore.shared.forget(id)
         MomentStore.shared.forget(id)
+        CoupleStore.shared.forget(id)
 
         if activeID == id || activeID == nil {
             activeID = contacts.first?.id
@@ -224,7 +246,7 @@ final class PersonaStore: ObservableObject {
         save()
     }
 
-    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈）。
+    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间）。
     ///
     /// **集中在这一处**：以后再加「按人分开存」的东西时，
     /// 只要往这里加一行，就不会出现「换了人但某一块没跟着切」。
@@ -232,6 +254,7 @@ final class PersonaStore: ObservableObject {
         ChatStore.shared.switchTo(id)
         MemoryStore.shared.setOwner(id)
         MomentStore.shared.setOwner(id)
+        CoupleStore.shared.setOwner(id)
     }
 
     /// 搬家恢复完之后，把四家一起切到搬过来的那个人。

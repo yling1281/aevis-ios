@@ -46,6 +46,19 @@
 	<string>$(AEVIS_COMMIT)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- ⭐ 让通知「看起来是她发来的消息」（Communication Notifications）。
+	     有了这个键，`INSendMessageIntent` 才能把通知变成**真人消息**的样式：
+	     横幅顶上显示**她的头像和名字**，而不是 App 名；专注模式也会把
+	     它当成"联系人消息"放行（而不是被塞进通知摘要里）。
+	     ⚠️ 完整生效还需要「Communication Notifications」能力（entitlement），
+	        而侧载重签用的描述文件里未必有它 —— 所以代码那一步是 try/catch，
+	        失败就原样退回普通通知，**绝不连累通知本身**。
+	     用户 2026-09-30：「每次发弹窗都是那个名称……都是那个 PUSH」——
+	     本地通知顶上一定是 Aevis，那个 PUSH 只可能来自 Bark（见该设置项的说明）。 -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>shortcuts</string>

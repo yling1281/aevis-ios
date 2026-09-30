@@ -61,7 +61,16 @@ enum NeteaseCrypto {
     /// `encSecKey = int(hex(倒序 secretKey)) ^ 65537 mod N`，左侧补 0 到 256 位十六进制。
     static func encSecKey(_ secret: String) -> String {
         let reversed = String(secret.reversed())
-        let message = Big(hex: reversed.data(using: .utf8)!.map { String(format: "%02x", $0) }.joined())
+        // ⚠️ 这里原来是 `reversed.data(using: .utf8)!` —— 整条加密链上**唯一一个强解包**。
+        // 理论上 String 转 UTF-8 不会失败，但它一旦失败就是**当场崩**，
+        // 而这条链现在只在"明文通道失败"的兜底里跑，最难复现的正是兜底路径。
+        // 换成 guard 是零成本的：失败就交一把全 0 的钥匙（请求注定被拒，但不会崩），
+        // 并往黑匣子记一笔 —— 至少能看见它发生过。
+        guard let raw = reversed.data(using: .utf8) else {
+            BlackBox.failure("weapi 加密失败", detail: "secretKey 转 UTF-8 失败")
+            return String(repeating: "0", count: 256)
+        }
+        let message = Big(hex: raw.map { String(format: "%02x", $0) }.joined())
         let encrypted = message.power(rsaExponent, modulus: modulus)
         return encrypted.hexString(paddedTo: 256)
     }

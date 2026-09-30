@@ -492,6 +492,9 @@ final class QQBotService: ObservableObject {
         history.append(ChatMessage(role: .user, text: text))
 
         var memory = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
+        // 情侣空间（纪念日 / 在一起天数）—— 理由同 `ChatView`：不挂记忆开关。
+        // 用户在 QQ 上问「我们在一起多久了」也得答得上来。
+        memory.append(contentsOf: CoupleStore.shared.injectedLines())
         memory.append("现在你在 QQ 上跟他说话（不是在 App 里）。对方叫「\(name)」。"
                       + "回复要短、要像平时发消息那样，别写成一大段。")
 

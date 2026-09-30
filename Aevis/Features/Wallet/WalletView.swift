@@ -24,7 +24,6 @@ struct WalletView: View {
     @State private var noteText = ""
     @State private var isRedPacket = false
     @State private var note: String?
-    @State private var sending = false
 
     private var personaName: String {
         let name = personaStore.persona.name
@@ -48,6 +47,8 @@ struct WalletView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 4)
                     }
+
+                    statement
 
                     // ⚠️ 拼接出来的字符串**必须包 LocalizedStringKey**，
                     //    否则 Text 走的是 `Text(String)` 那个重载，
@@ -189,8 +190,7 @@ struct WalletView: View {
             send()
         } label: {
             HStack(spacing: 8) {
-                if sending { ProgressView().controlSize(.small) }
-                Text(sending ? "发出去…" : (isRedPacket ? "塞进红包" : "转给\(personaName)"))
+                Text(isRedPacket ? "塞进红包" : "转给\(personaName)")
                     .font(.aevis(15, weight: .medium))
             }
             .foregroundStyle(.primary)
@@ -199,7 +199,87 @@ struct WalletView: View {
             .aevisGlass(cornerRadius: 16)
         }
         .buttonStyle(.plain)
-        .disabled(sending)
+    }
+
+    // MARK: - 流水
+    //
+    // ⭐ 2026-10-01 新增。用户要的「银行卡」那个感觉 —— 光有余额不够，
+    //    得能看见**钱去哪儿了**。
+    //
+    // ⚠️ 这里只列**我的收支**（`delta != 0`）：她收下我的转账、她自己的余额变多，
+    //    都**不进这张表**。理由写在 `WalletStore.acceptIncoming` 上 ——
+    //    流水讲的是"我这边进出了多少"，把别人的余额混进来只会越看越糊涂。
+
+    private var statement: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("流水")
+                    .font(.aevis(12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if !wallet.entries.isEmpty {
+                    Text("\(wallet.entries.count) 笔")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+
+            if wallet.entries.isEmpty {
+                Text("还没有进出账。你给 TA 转一笔，或者等 TA 给你转 —— "
+                     + "两边都是真的动余额。")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+            } else {
+                // 新的在前（`WalletStore.record` 是 insert(at: 0)），所以直接取前 30。
+                ForEach(Array(wallet.entries.prefix(30))) { entry in
+                    statementRow(entry)
+                }
+                if wallet.entries.count > 30 {
+                    Text("只显示最近 30 笔。")
+                        .font(.aevis(11))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 2)
+                        .padding(.bottom, 12)
+                }
+            }
+        }
+        .aevisGlass(cornerRadius: 20)
+    }
+
+    private func statementRow(_ entry: WalletStore.Entry) -> some View {
+        let income = WalletStore.isIncome(entry)
+        return HStack(spacing: 10) {
+            Image(systemName: income ? "arrow.down.left" : "arrow.up.right")
+                .font(.aevis(12, weight: .medium))
+                .foregroundStyle(income ? Color.red : Color.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.note)
+                    .font(.aevis(13.5))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(WalletStore.shortTime(entry.date))
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            // 进账用红色、出账用正文色 —— 微信零钱明细也是这个读法。
+            Text(WalletStore.signedMoney(entry.delta))
+                .font(.aevisMono(13.5))
+                .foregroundStyle(income ? Color.red : Color.primary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
     }
 
     // MARK: - 动作
@@ -212,7 +292,6 @@ struct WalletView: View {
     }
 
     private func send() {
-        guard !sending else { return }
         let cleaned = amountText.replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespaces)
         guard let value = Double(cleaned), value > 0 else {
@@ -232,23 +311,115 @@ struct WalletView: View {
                                         isRedPacket: isRedPacket)
         let id = chat.appendTransfer(info)
 
-        // ⭐ #23（2026-09-30）：不再「隔一拍假装收下」—— 让她**犹豫一下再决定收不收**：
-        //   大概率收下（回一句），小概率不肯收（钱退回，也回一句）。
-        sending = true
+        // ⭐ 转账**当场生效、当场收工**：钱已经从「我」这边扣掉、气泡也落地了。
+        //    「她收不收」是她的反应，跟转账本身是两件事 —— 让她想一下再定，
+        //    所以先回去（用户在聊天页等她的回话，跟微信一样自然）。
+        //
+        // ⚠️ 以前这里是 `sleep(1.3s)` + `Double.random(in: 0..<1) < 0.85`：
+        //    那个"她在犹豫"是假的，而且**她的人设完全不参与** ——
+        //    你写「这是给你买药的钱」，她照样有 15% 概率给你退回来。
+        dismiss()
+
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_300_000_000)
-            if Double.random(in: 0..<1) < 0.85 {
-                wallet.acceptIncoming(sent)
-                chat.markTransferAccepted(id)
-                chat.append(ChatMessage(role: .assistant, text: Self.acceptLines.randomElement()!))
-            } else {
+            let decision = await Self.askHerAbout(sent, note: tail, isRedPacket: isRedPacket)
+            guard decision.accept else {
                 wallet.refund(sent)
                 chat.markTransferDeclined(id)
-                chat.append(ChatMessage(role: .assistant, text: Self.declineLines.randomElement()!))
+                chat.append(ChatMessage(role: .assistant, text: decision.line))
+                return
             }
-            sending = false
-            dismiss()
+            wallet.acceptIncoming(sent)
+            chat.markTransferAccepted(id)
+            chat.append(ChatMessage(role: .assistant, text: decision.line))
         }
+    }
+
+    // MARK: - 她的决定（收 / 不收）
+    //
+    // ⭐ 2026-10-01：让**她自己**看一眼再定，而不是掷骰子。
+    //    用户这次要的整句话是「能让 AI **真的**给内置的虚拟银行卡打钱」——
+    //    「真的」两个字同样适用于"她怎么回应"，不只是余额有没有动。
+    //
+    // ⚠️ 失败（没配 Key / 网络不通 / 输出看不懂）退回老办法。
+    //    绝不能因为模型没答上，就让钱**卡在半路**（气泡一直挂着「待收款」）。
+
+    private struct Decision {
+        var accept: Bool
+        var line: String
+    }
+
+    /// 问她一句，让她决定收不收、顺带回一句话。
+    @MainActor
+    private static func askHerAbout(_ amount: Double,
+                                    note: String,
+                                    isRedPacket: Bool) async -> Decision {
+        let config = AppSettings.shared.llm
+        let persona = PersonaStore.shared.persona
+        guard persona.isComplete,
+              !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return rollDice()
+        }
+
+        let kind = isRedPacket ? "红包" : "转账"
+        let noteText = note.isEmpty ? "（没写附言）" : note
+        let instruction = """
+        他刚刚在 App 里给你转了 \(WalletStore.money(amount)) 的\(kind)，附言：\(noteText)
+
+        你要不要收？照你平时说话的方式回一句就行。
+
+        ⚠️ 第一行只写「收」或者「不收」这两个字中的一个，别的什么都不要写。
+        第二行起才是你想说的话，一两句，别太长。
+        """
+
+        var collected = ""
+        do {
+            for try await piece in LLMService.streamReply(
+                config: config,
+                systemPrompt: persona.systemPrompt,
+                history: [ChatMessage(role: .user, text: instruction)],
+                // 让她带着"纪念日 / 在一起多少天"看这件事 ——
+                // 纪念日当天的转账和普通日子，她的反应本来就该不一样。
+                memory: CoupleStore.shared.injectedLines()
+            ) {
+                collected += piece
+                if collected.count > 400 { break }
+            }
+        } catch {
+            return rollDice()
+        }
+
+        return parseDecision(collected) ?? rollDice()
+    }
+
+    /// 认她给的答复。**宽容**一点 —— 她不一定会老老实实守格式。
+    private static func parseDecision(_ raw: String) -> Decision? {
+        let lines = raw.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let head = lines.first(where: { !$0.isEmpty }) else { return nil }
+
+        let declines = head.contains("不收") || head.contains("不要")
+            || head.contains("退回") || head.contains("算了")
+        let accepts = head.hasPrefix("收") || head.contains("收下")
+        // 第一行既不像收也不像不收 → 当没看懂，走兜底。
+        guard declines || accepts else { return nil }
+
+        let body = lines
+            .drop { $0.isEmpty || $0 == head }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        let defaultLine = declines
+            ? declineLines.randomElement()!
+            : acceptLines.randomElement()!
+        return Decision(accept: !declines, line: body.isEmpty ? defaultLine : body)
+    }
+
+    /// 兜底：模型没答上来时用老办法（大概率收下）。
+    private static func rollDice() -> Decision {
+        if Double.random(in: 0..<1) < 0.85 {
+            return Decision(accept: true, line: acceptLines.randomElement()!)
+        }
+        return Decision(accept: false, line: declineLines.randomElement()!)
     }
 
     /// 她收下时随口回的那句。

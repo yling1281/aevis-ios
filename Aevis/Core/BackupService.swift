@@ -57,7 +57,11 @@ enum BackupError: LocalizedError {
 /// 而**切人**那一下会触发各 Store 的 `stash()`（把当前内存那份写回字典）。
 /// 那一刻 `currentID` 还停在**这台旧机器**上的人，于是旧会话被写了回去，
 /// 最后落盘的是旧数据 —— 用户看到的就是「聊天记录一条都没搬过来」。
-/// 现在四个 Store 都有 `loading` 标志位，导入期间 `stash()` / `save()` 直接返回。
+/// 现在五个 Store 都有 `loading` 标志位，导入期间 `stash()` / `save()` 直接返回。
+/// ⚠️ **以后再加「按联系人分开存」的 Store，两件事必须一起做**：
+///    ① 在 `PersonaStore.broadcastSwitch` / `remove` 里挂号；
+///    ② 自己带 `loading` 标志位，并进 `BackupService.stores()`。
+///    漏掉 ① 是「换了人还看着上一个人的东西」，漏掉 ② 是「搬家搬丢」。
 final class BackupService {
 
     static let shared = BackupService()
@@ -100,7 +104,8 @@ final class BackupService {
     ]
 
     private static func stores() -> [BackupableStore] {
-        [PersonaStore.shared, ChatStore.shared, MemoryStore.shared, MomentStore.shared]
+        [PersonaStore.shared, ChatStore.shared, MemoryStore.shared,
+         MomentStore.shared, CoupleStore.shared]
     }
 
     /// 恢复收尾：把「现在看着谁」摆到搬过来的那个 activeID 上。

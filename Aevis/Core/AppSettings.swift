@@ -409,6 +409,9 @@ final class AppSettings: ObservableObject {
         static let momentTimeStyle = "aevis.momentTimeStyle"
         static let momentCorner = "aevis.momentCorner"
         static let douyinConfirmRisky = "aevis.douyinConfirmRisky"
+        /// AI 权限：总开关 + 被关掉的分类（存 `ToolCategory.rawValue`）。
+        static let aiToolsEnabled = "aevis.aiToolsEnabled"
+        static let aiToolsDisabled = "aevis.aiToolsDisabled"
         static let companionEnabled = "aevis.companionEnabled"
         static let companionInterval = "aevis.companionInterval"
         static let shortcutName = "aevis.shortcutName"
@@ -1063,6 +1066,46 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(douyinConfirmRisky, forKey: Key.douyinConfirmRisky) }
     }
 
+    // MARK: - AI 权限（总开关 + 分类）
+    //
+    // 用户 2026-09-30：「AI 拥有操控这个手机的全部功能。当然，**你拥有最高权限**，
+    // 可以控制它开或者不开。」→ 问他要哪种形态，他选了 **总开关 + 分类开关**。
+    //
+    // ⚠️ 这两个值只影响**发给模型的工具清单**（`DeviceTools.all()`）。
+    //    关掉不等于"她不会说话了" —— **聊天永远在**。
+
+    /// 🔴 总开关。关掉之后她**只能聊天**，一个工具都拿不到。
+    ///
+    /// 出厂是开的 —— 这些能力本来就是卖点，默认关掉等于没有。
+    @Published var aiToolsEnabled: Bool {
+        didSet { UserDefaults.standard.set(aiToolsEnabled, forKey: Key.aiToolsEnabled) }
+    }
+
+    /// 被关掉的工具类别（存 `ToolCategory.rawValue`）。**空 = 全开**。
+    ///
+    /// 存"关掉的"而不是"开着的"：以后新增分类时，老用户的默认值天然是"开着"，
+    /// 不会因为存档里没有那个新名字而被静默关掉。
+    @Published var disabledToolCategories: [String] {
+        didSet { UserDefaults.standard.set(disabledToolCategories, forKey: Key.aiToolsDisabled) }
+    }
+
+    /// 某一类现在是不是开着的（总开关 + 分类开关都要满足）。
+    func isToolOn(_ category: ToolCategory) -> Bool {
+        guard aiToolsEnabled else { return false }
+        return !disabledToolCategories.contains(category.rawValue)
+    }
+
+    /// 开 / 关某一类。
+    func setTool(_ category: ToolCategory, on: Bool) {
+        var next = Set(disabledToolCategories)
+        if on {
+            next.remove(category.rawValue)
+        } else {
+            next.insert(category.rawValue)
+        }
+        disabledToolCategories = next.sorted()
+    }
+
     // MARK: - 录屏陪伴
 
     /// 让她看你的屏幕（只在本机认文字，不传画面）。
@@ -1447,6 +1490,9 @@ final class AppSettings: ObservableObject {
         momentTimeStyle = defaults.string(forKey: Key.momentTimeStyle) ?? "relative"
         momentCorner = defaults.object(forKey: Key.momentCorner) as? Double ?? 16
         douyinConfirmRisky = defaults.object(forKey: Key.douyinConfirmRisky) as? Bool ?? true
+        // AI 权限：出厂总开关**开**、分类全开（一个都没关）。
+        aiToolsEnabled = defaults.object(forKey: Key.aiToolsEnabled) as? Bool ?? true
+        disabledToolCategories = defaults.stringArray(forKey: Key.aiToolsDisabled) ?? []
         companionEnabled = defaults.object(forKey: Key.companionEnabled) as? Bool ?? false
         companionInterval = defaults.object(forKey: Key.companionInterval) as? Double ?? 20
         shortcutName = defaults.string(forKey: Key.shortcutName) ?? ""
