@@ -160,6 +160,17 @@ MUST_HAVE = [
     "AevisVPNProbe/Tunnel/PacketTunnelProvider.swift",
     "AevisVPNProbe/Tunnel/Info.plist",
     "AevisVPNProbe/Tunnel/AevisVPNProbeTunnel.entitlements",
+    # ——— 通话探针（**独立 target**，第 4 个包，2026-10-01）———
+    # ⚠️ 理由和上面 VPN 探针一模一样：`project.yml` 里已经有它的 target，
+    #    源码要是没跟上，CI 会报"找不到 target"，而那报错看着
+    #    跟"探针代码写错了"一样，很难想到是打包漏了。
+    # ⚠️ 权限文件（`.entitlements`）**必须在** —— 整个探针就是为了验
+    #    `aps-environment` 能不能被签进去，漏了它等于什么都没测。
+    "AevisCallProbe/App/CallProbeApp.swift",
+    "AevisCallProbe/App/CallProbeModel.swift",
+    "AevisCallProbe/App/CallProbeView.swift",
+    "AevisCallProbe/App/Info.plist",
+    "AevisCallProbe/App/AevisCallProbe.entitlements",
     # ——— 域名与线路（2026-09-26 换 apekin 那次加的）———
     # ⚠️ 漏了这两个编译就直接失败：全项目的域名都从 AevisHosts 拿，
     #    而且 `project.yml` 把这两个文件也写进了管理端 target 的 sources。

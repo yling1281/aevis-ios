@@ -50,6 +50,9 @@ SWIFT_ROOTS = [
     os.path.join(PROJECT, "AevisAdmin"),
     os.path.join(PROJECT, "AevisVPNProbe", "App"),
     os.path.join(PROJECT, "AevisVPNProbe", "Tunnel"),
+    # 通话探针（2026-10-01）。**必须加进来** —— 它也是一份独立源码，
+    # 不进这里就等于"没人检查"，而它要验的又是最要紧的通话权限。
+    os.path.join(PROJECT, "AevisCallProbe", "App"),
 ]
 
 # 每个 target 的 Info.plist 都要验。

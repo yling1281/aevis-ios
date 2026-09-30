@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  ⭐ 整个探针就是为了验这一条。
+
+	  LiveCommunicationKit **主动拨出**（`StartConversationAction`）不需要 PushKit、
+	  不需要推送服务器 —— 这一点 Apple 文档写得很明白。但它仍然要求 App
+	  **具备通话资格**，而资格就写在这条权限里：
+
+	      aps-environment = development
+
+	  ⚠️ 这正是**侧载最大的疑点**：全能签重签的时候是拿**它自己的**证书 +
+	  **它自己的**描述文件，我们这份 `aps-environment` 到底有没有被继承过去，
+	  谁也说不准 —— 只能装上去真跑一次。
+
+	  ⚠️ 这里**故意不写** `push` / `voip` 之类的值：
+	  探针只回答"这套签名认不认通话资格"这一个问题，别混进别的东西把水搅浑。
+	  真做功能的时候，如果走「TA 打给我」那条路，再补 VoIP 推送那一套。
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

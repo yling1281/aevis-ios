@@ -296,6 +296,56 @@ targets:
         Release:
           SWIFT_COMPILATION_MODE: "wholemodule"
 
+  # ——— 通话探针（2026-10-01）———
+  #
+  # 只回答一个问题：
+  #   **这套签名（侧载重签之后），能不能弹系统级通话界面？**
+  #
+  # 背景：Apple 的 `LiveCommunicationKit`（iOS 17.4+，微信"语音通话用弹窗快捷接听"
+  # 用的那个，就是用户问的"苹果那样的 LIVE"）有两条路 ——
+  #   · 「收来电」**必须** PushKit VoIP 推送，没推送系统会**杀掉 App**
+  #   · 「主动拨出」`StartConversationAction`**不要**推送
+  # 我们这是"你拨给 TA"，走第二条。但它要求 App 有通话资格（`aps-environment`），
+  # 而那句话必须写在**描述文件**里 —— 那是全能签给的，我们看不到也改不了。
+  # **只能装上去真跑一次。**
+  #
+  # ⚠️ 三个刻意的安排（照抄 VPN 探针那套，理由一样）：
+  #   ① 它在 `extension` 标记块**外面** —— 走"摘掉录屏扩展"那条应急路时
+  #      不会被连带摘掉（两者毫无关系）
+  #   ② 主 App **不依赖**它 —— 探测失败绝不影响买家那个包
+  #   ③ 它自己一个包（com.aevis.callprobe）—— 探针要声明 aps-environment、
+  #      加 voip 后台模式、动 entitlements，这些在买家包上做**有风险**
+  #      （描述文件对不上连装都装不上），不能拿买家包去赌
+  #
+  # ⚠️ 它**不接真实通话**（3 秒自动挂断），只测"界面弹不弹"。
+  # 要出探针 IPA：把 `.release/callprobe` 改成 1 再推。出完**人工**改回 0。
+  AevisCallProbe:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AevisCallProbe/App
+        excludes:
+          - "Info.plist"
+          - "AevisCallProbe.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: AevisCallProbe
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.callprobe
+        INFOPLIST_FILE: AevisCallProbe/App/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: AevisCallProbe/App/AevisCallProbe.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # 探针是**一次性工具**，版本号自己一套，跟主 App 的 0.0.x 无关
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+
 schemes:
   Aevis:
     build:
@@ -316,6 +366,15 @@ schemes:
       targets:
         AevisVPNProbe: all
         AevisVPNProbeTunnel: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  AevisCallProbe:
+    build:
+      targets:
+        AevisCallProbe: all
     run:
       config: Debug
     archive:
