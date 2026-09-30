@@ -107,6 +107,9 @@ enum BlackBox {
         defer { lock.unlock() }
         loadLocked()
         UserDefaults.standard.set(false, forKey: runningKey)
+        // 卡死看门狗：这次会话「正常退出」了，就不留待补传的卡死标记 ——
+        // 卡死那一刻的轻量上报已经把 `[freeze]` 传出去了，富 body 只是锦上添花。
+        Watchdog.clearFreezePending()
         write("— 进后台（正常）—")
     }
 
@@ -146,6 +149,17 @@ enum BlackBox {
     /// 用户发来的码才有意义（"又是点歌那一步"而不是"又是某行英文"）。
     static func step(_ text: String) {
         log("▸ \(text)")
+    }
+
+    /// 记一次工具调用。格式 `[tool] <name> <摘要>`。
+    ///
+    /// `summary` 在调用方已经脱敏（字符串只记 `key=长度`、标量记值），
+    /// **绝不能**带聊天/人设/剪贴板/日历标题这类原文。
+    /// `crashCode(for:)` 会把它截到 `[tool] <name>` 再算码，
+    /// 所以「同一工具不同参数 = 同一个错误码」。
+    static func tool(_ name: String, _ summary: String) {
+        let trimmed = summary.trimmingCharacters(in: .whitespaces)
+        log(trimmed.isEmpty ? "[tool] \(name)" : "[tool] \(name) \(trimmed)")
     }
 
     // MARK: - 全量操作埋点（2026-09-26 用户要求：「不管点了哪个按键都要记起来」）
@@ -221,15 +235,31 @@ enum BlackBox {
         var seed = step
         // 去掉行首时间戳（"HH:mm:ss "）—— 带上它就每次都算成不同的码了
         if seed.count > 9 { seed = String(seed.dropFirst(9)) }
+        // ⚠️ 工具调用这行带脱敏摘要（`[tool] name 摘要`），摘要是随参数变的，
+        //    得截到 `[tool] name`，否则「同一工具不同参数」会算成两个码。
+        if seed.hasPrefix("[tool] ") {
+            let parts = seed.split(separator: " ", maxSplits: 2)
+            if parts.count >= 2 { seed = String(parts[0]) + " " + String(parts[1]) }
+        }
         seed = "v\(Diagnostics.appVersion)|\(seed)"
+        return code(prefix: "AE", seed: seed)
+    }
 
+    /// 卡死码：`版本|freeze` 的 FNV，前缀 `FR-`（跟崩溃码 `AE-` 区分开）。
+    /// 不掺黑匣子里的任何一行 —— 卡死没有"最后一个动作"这一说，同一版本永远同一个码。
+    static var freezeCode: String {
+        code(prefix: "FR", seed: "v\(Diagnostics.appVersion)|freeze")
+    }
+
+    /// FNV-1a → `AE-XXXX-XXXX` / `FR-XXXX-XXXX` 这类 8 位码。规则只写这一份。
+    private static func code(prefix: String, seed: String) -> String {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325          // FNV-1a
         for byte in seed.utf8 {
             hash ^= UInt64(byte)
             hash = hash &* 0x0000_0100_0000_01b3
         }
         let hex = String(format: "%08X", UInt32(truncatingIfNeeded: hash))
-        return "AE-\(hex.prefix(4))-\(hex.suffix(4))"
+        return "\(prefix)-\(hex.prefix(4))-\(hex.suffix(4))"
     }
 
     /// 攒成一段可以直接发出去的文本。

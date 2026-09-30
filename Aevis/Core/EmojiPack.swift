@@ -33,54 +33,90 @@ final class EmojiPack: ObservableObject {
         var emoji: String
         /// 自定义图片的文件名；有值就优先用图片
         var imageFile: String?
+        /// 归到哪一套（经典 / 心情 / 恋爱 / 动物日常 / 搞怪 / 我的）。
+        var packID: String = "classic"
 
         var id: String { name }
         var isCustom: Bool { imageFile != nil }
+    }
+
+    // MARK: - 一套表情
+
+    /// 一套表情。内置 5 套 + 自定义「我的」永远最后。
+    struct Pack: Identifiable {
+        let id: String
+        let name: String
+        let isCustom: Bool
+        /// 这套里的表情名（按 `items` 的顺序）。
+        var names: [String]
+    }
+
+    /// 内置套的顺序，界面按它排。
+    static let packOrder: [String] = ["classic", "mood", "love", "animal", "silly"]
+
+    /// 套 id → 显示名。
+    static func packName(_ id: String) -> String {
+        switch id {
+        case "classic": return "经典"
+        case "mood": return "心情"
+        case "love": return "恋爱"
+        case "animal": return "动物日常"
+        case "silly": return "搞怪"
+        case "custom": return "我的"
+        default: return id
+        }
     }
 
     // MARK: - 内置表
     //
     // 名字取自微信和 QQ 两家的常用表情。两家的名字本来就大量重合
     // （`[微笑]` `[呲牙]` `[大哭]` 这些是一样的），所以合并成一张表。
+    // 三元组是 (套 id, 名字, 表情)；每名字只归一套，总数 148。
 
-    private static let builtin: [(String, String)] = [
-        ("微笑", "😊"), ("大笑", "😄"), ("呲牙", "😁"), ("偷笑", "🤭"),
-        ("害羞", "😊"), ("憨笑", "😄"), ("可爱", "🥰"), ("调皮", "😜"),
-        ("吐舌", "😝"), ("馋", "😋"), ("得意", "😎"), ("酷", "😎"),
-        ("坏笑", "😏"), ("勾引", "😏"), ("傲慢", "😤"), ("白眼", "🙄"),
-        ("鄙视", "😒"), ("无语", "😑"), ("尴尬", "😅"), ("流汗", "😅"),
-        ("擦汗", "😓"), ("冷汗", "😰"), ("惊恐", "😱"), ("震惊", "😲"),
-        ("发呆", "😳"), ("困", "😪"), ("睡", "😴"), ("哈欠", "🥱"),
-        ("委屈", "🥺"), ("可怜", "🥺"), ("难过", "😔"), ("失望", "😞"),
-        ("苦涩", "😖"), ("快哭了", "😖"), ("大哭", "😭"), ("流泪", "😭"),
-        ("心碎", "💔"), ("裂开", "💔"), ("发怒", "😡"), ("咒骂", "🤬"),
-        ("抓狂", "😫"), ("折磨", "😩"), ("晕", "😵"), ("疯了", "🤪"),
-        ("骷髅", "💀"), ("闭嘴", "🤐"), ("嘘", "🤫"), ("疑问", "❓"),
-        ("思考", "🤔"), ("惊喜", "🤩"), ("激动", "🤩"), ("期待", "🥰"),
-        ("爱心", "❤️"), ("示爱", "❤️"), ("爱你", "😘"), ("亲亲", "😘"),
-        ("飞吻", "😘"), ("抱抱", "🤗"), ("拥抱", "🤗"), ("握手", "🤝"),
-        ("合十", "🙏"), ("鞠躬", "🙇"), ("磕头", "🙇"), ("比心", "🫶"),
-        ("鼓掌", "👏"), ("加油", "💪"), ("奋斗", "💪"), ("强壮", "💪"),
-        ("强", "👍"), ("赞", "👍"), ("弱", "👎"), ("差劲", "👎"),
-        ("OK", "👌"), ("好的", "👌"), ("明白", "👌"), ("拒绝", "🙅"),
-        ("耶", "✌️"), ("胜利", "✌️"), ("抱拳", "🙏"), ("拳头", "👊"),
-        ("挥手", "👋"), ("再见", "👋"), ("回头", "👀"), ("偷看", "👀"),
-        ("围观", "👀"), ("吃瓜", "🍉"), ("摸鱼", "🐟"), ("捂脸", "🤦"),
-        ("撇嘴", "😖"), ("囧", "😅"), ("抠鼻", "🤧"), ("悠闲", "😌"),
-        ("哭笑不得", "😂"), ("狗头", "🐶"), ("旺柴", "🐶"), ("打脸", "🫲"),
-        ("天啊", "😱"), ("哇", "😲"), ("六六六", "🤙"), ("嗯哼", "😤"),
-        ("玫瑰", "🌹"), ("凋谢", "🥀"), ("太阳", "☀️"), ("月亮", "🌙"),
-        ("星星", "⭐"), ("闪电", "⚡"), ("炸弹", "💣"), ("礼物", "🎁"),
-        ("蛋糕", "🎂"), ("咖啡", "☕"), ("奶茶", "🧋"), ("啤酒", "🍺"),
-        ("干杯", "🍻"), ("饭", "🍚"), ("猪头", "🐷"), ("便便", "💩"),
-        ("刀", "🔪"), ("足球", "⚽"), ("篮球", "🏀"), ("乒乓", "🏓"),
-        ("转圈", "🌀"), ("发抖", "🥶"), ("火", "🔥"), ("敲打", "🔨"),
-        ("吃面", "🍜"), ("吃糖", "🍬"), ("饮料", "🥤"), ("香槟", "🍾"),
-        ("泳池", "🏊"), ("跑步", "🏃"), ("骑车", "🚴"), ("飞机", "✈️"),
-        ("月亮脸", "🌚"), ("笑脸", "🌝"), ("菜刀", "🔪"), ("药丸", "💊"),
-        ("困倦", "😩"), ("不耐烦", "😒"), ("微笑面对", "🙂"), ("扶额", "🤦"),
-        ("嘿嘿", "😁"), ("嘿嘿嘿", "😏"), ("装死", "🙃"), ("倒立", "🙃"),
-        ("小手", "🤚"), ("举手", "🙋"), ("拒绝三连", "🙅"), ("点头", "🙆")
+    private static let builtin: [(String, String, String)] = [
+        // —— 经典 ——
+        ("classic", "微笑", "😊"), ("classic", "大笑", "😄"), ("classic", "呲牙", "😁"), ("classic", "偷笑", "🤭"),
+        ("classic", "害羞", "😊"), ("classic", "憨笑", "😄"), ("classic", "可爱", "🥰"), ("classic", "调皮", "😜"),
+        ("classic", "疑问", "❓"), ("classic", "思考", "🤔"), ("classic", "握手", "🤝"), ("classic", "合十", "🙏"),
+        ("classic", "鞠躬", "🙇"), ("classic", "鼓掌", "👏"), ("classic", "加油", "💪"), ("classic", "奋斗", "💪"),
+        ("classic", "强壮", "💪"), ("classic", "强", "👍"), ("classic", "赞", "👍"), ("classic", "弱", "👎"),
+        ("classic", "差劲", "👎"), ("classic", "OK", "👌"), ("classic", "好的", "👌"), ("classic", "明白", "👌"),
+        ("classic", "拒绝", "🙅"), ("classic", "耶", "✌️"), ("classic", "胜利", "✌️"), ("classic", "抱拳", "🙏"),
+        ("classic", "拳头", "👊"), ("classic", "挥手", "👋"), ("classic", "再见", "👋"), ("classic", "回头", "👀"),
+        ("classic", "围观", "👀"), ("classic", "哭笑不得", "😂"), ("classic", "太阳", "☀️"), ("classic", "月亮", "🌙"),
+        ("classic", "星星", "⭐"), ("classic", "闪电", "⚡"), ("classic", "礼物", "🎁"), ("classic", "蛋糕", "🎂"),
+        ("classic", "咖啡", "☕"), ("classic", "奶茶", "🧋"), ("classic", "啤酒", "🍺"), ("classic", "干杯", "🍻"),
+        ("classic", "饭", "🍚"), ("classic", "足球", "⚽"), ("classic", "篮球", "🏀"), ("classic", "乒乓", "🏓"),
+        ("classic", "火", "🔥"), ("classic", "吃面", "🍜"), ("classic", "吃糖", "🍬"), ("classic", "饮料", "🥤"),
+        ("classic", "香槟", "🍾"), ("classic", "泳池", "🏊"), ("classic", "跑步", "🏃"), ("classic", "骑车", "🚴"),
+        ("classic", "飞机", "✈️"), ("classic", "笑脸", "🌝"), ("classic", "药丸", "💊"), ("classic", "微笑面对", "🙂"),
+        ("classic", "小手", "🤚"), ("classic", "举手", "🙋"), ("classic", "拒绝三连", "🙅"), ("classic", "点头", "🙆"),
+        // —— 心情 ——
+        ("mood", "馋", "😋"), ("mood", "得意", "😎"), ("mood", "酷", "😎"), ("mood", "傲慢", "😤"),
+        ("mood", "白眼", "🙄"), ("mood", "鄙视", "😒"), ("mood", "无语", "😑"), ("mood", "尴尬", "😅"),
+        ("mood", "流汗", "😅"), ("mood", "擦汗", "😓"), ("mood", "冷汗", "😰"), ("mood", "惊恐", "😱"),
+        ("mood", "震惊", "😲"), ("mood", "发呆", "😳"), ("mood", "困", "😪"), ("mood", "睡", "😴"),
+        ("mood", "哈欠", "🥱"), ("mood", "委屈", "🥺"), ("mood", "可怜", "🥺"), ("mood", "难过", "😔"),
+        ("mood", "失望", "😞"), ("mood", "苦涩", "😖"), ("mood", "快哭了", "😖"), ("mood", "大哭", "😭"),
+        ("mood", "流泪", "😭"), ("mood", "发怒", "😡"), ("mood", "咒骂", "🤬"), ("mood", "抓狂", "😫"),
+        ("mood", "折磨", "😩"), ("mood", "晕", "😵"), ("mood", "惊喜", "🤩"), ("mood", "激动", "🤩"),
+        ("mood", "捂脸", "🤦"), ("mood", "撇嘴", "😖"), ("mood", "囧", "😅"), ("mood", "悠闲", "😌"),
+        ("mood", "天啊", "😱"), ("mood", "哇", "😲"), ("mood", "嗯哼", "😤"), ("mood", "发抖", "🥶"),
+        ("mood", "困倦", "😩"), ("mood", "不耐烦", "😒"), ("mood", "扶额", "🤦"),
+        // —— 恋爱 ——
+        ("love", "心碎", "💔"), ("love", "期待", "🥰"), ("love", "爱心", "❤️"), ("love", "示爱", "❤️"),
+        ("love", "爱你", "😘"), ("love", "亲亲", "😘"), ("love", "飞吻", "😘"), ("love", "抱抱", "🤗"),
+        ("love", "拥抱", "🤗"), ("love", "比心", "🫶"), ("love", "玫瑰", "🌹"), ("love", "凋谢", "🥀"),
+        // —— 动物日常 ——
+        ("animal", "摸鱼", "🐟"), ("animal", "狗头", "🐶"), ("animal", "旺柴", "🐶"), ("animal", "猪头", "🐷"),
+        // —— 搞怪 ——
+        ("silly", "吐舌", "😝"), ("silly", "坏笑", "😏"), ("silly", "勾引", "😏"), ("silly", "裂开", "💔"),
+        ("silly", "疯了", "🤪"), ("silly", "骷髅", "💀"), ("silly", "闭嘴", "🤐"), ("silly", "嘘", "🤫"),
+        ("silly", "磕头", "🙇"), ("silly", "偷看", "👀"), ("silly", "吃瓜", "🍉"), ("silly", "抠鼻", "🤧"),
+        ("silly", "打脸", "🫲"), ("silly", "六六六", "🤙"), ("silly", "炸弹", "💣"), ("silly", "便便", "💩"),
+        ("silly", "刀", "🔪"), ("silly", "转圈", "🌀"), ("silly", "敲打", "🔨"), ("silly", "月亮脸", "🌚"),
+        ("silly", "菜刀", "🔪"), ("silly", "嘿嘿", "😁"), ("silly", "嘿嘿嘿", "😏"), ("silly", "装死", "🙃"),
+        ("silly", "倒立", "🙃")
     ]
 
     // MARK: - 状态
@@ -129,18 +165,18 @@ final class EmojiPack: ObservableObject {
         var table: [String: Item] = [:]
         var used = Set<String>()
 
-        for (name, emoji) in Self.builtin where !used.contains(name) {
+        for (packID, name, emoji) in Self.builtin where !used.contains(name) {
             used.insert(name)
             // 同名导过图就用图
-            let item = Item(name: name, emoji: emoji, imageFile: custom[name])
+            let item = Item(name: name, emoji: emoji, imageFile: custom[name], packID: packID)
             list.append(item)
             table[name] = item
         }
 
-        // 用户自己导入的、内置表里没有的，接在后面
+        // 用户自己导入的、内置表里没有的，接在后面（归「我的」）
         for (name, file) in custom.sorted(by: { $0.key < $1.key }) where !used.contains(name) {
             used.insert(name)
-            let item = Item(name: name, emoji: "🖼️", imageFile: file)
+            let item = Item(name: name, emoji: "🖼️", imageFile: file, packID: "custom")
             list.append(item)
             table[name] = item
         }
@@ -151,6 +187,28 @@ final class EmojiPack: ObservableObject {
 
     /// 内置表情的条数（界面拿来说"内置了多少个"）。
     static var builtinCount: Int { builtin.count }
+
+    /// 全部套：5 内置套按顺序 + 「我的」永远最后。
+    var packs: [Pack] {
+        var result = Self.packOrder.map { id in
+            Pack(id: id, name: Self.packName(id), isCustom: false, names: items(inPack: id).map(\.name))
+        }
+        result.append(
+            Pack(id: "custom", name: Self.packName("custom"), isCustom: true,
+                 names: items(inPack: "custom").map(\.name))
+        )
+        return result
+    }
+
+    /// 按套取表情；`query` 非空时再按名字模糊过滤（空串返回全套）。
+    func items(inPack id: String, matching query: String = "") -> [Item] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = items.filter { $0.packID == id }
+        if !trimmed.isEmpty {
+            result = result.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+        }
+        return result
+    }
 
     func lookup(_ name: String) -> Item? {
         index[name]
@@ -249,11 +307,27 @@ final class EmojiPack: ObservableObject {
         imageCache[file] = loaded
         return loaded
     }
+
+    /// 统一落盘：UIImage → PNG 重编码 → `名字.png`。
+    /// 覆盖 iPhone HEIC 等「苹果上传特殊性」—— 落盘一律 PNG，之后渲染不挑格式。
+    static func savePNG(_ image: UIImage, name: String, into directory: URL) -> String? {
+        guard let data = image.pngData() else { return nil }
+        let file = "\(name).png"
+        let target = directory.appendingPathComponent(file)
+        do {
+            if FileManager.default.fileExists(atPath: target.path) {
+                try FileManager.default.removeItem(at: target)
+            }
+            try data.write(to: target)
+        } catch {
+            return nil
+        }
+        return file
+    }
     #endif
 
     /// 导入一批表情图片。**文件名就是表情名** —— `微笑.png` 对应 `[微笑]`。
-    ///
-    /// 返回成功和失败各一批，界面把它们分别说清楚（失败不能闷着不说）。
+    /// 统一重编码成 PNG 落盘（覆盖 HEIC 等格式），返回成功和失败各一批。
     @discardableResult
     func importImages(from urls: [URL]) -> (added: [String], failed: [String]) {
         var added: [String] = []
@@ -276,31 +350,84 @@ final class EmojiPack: ObservableObject {
             }
 
             #if canImport(UIKit)
-            guard UIImage(data: data) != nil else {
+            guard let image = UIImage(data: data) else {
                 failed.append("\(url.lastPathComponent)（不是图片）")
                 continue
             }
-            #endif
-
-            let ext = url.pathExtension.isEmpty ? "png" : url.pathExtension.lowercased()
-            let file = "\(name).\(ext)"
-            let target = directory.appendingPathComponent(file)
-
-            do {
-                if FileManager.default.fileExists(atPath: target.path) {
-                    try FileManager.default.removeItem(at: target)
-                }
-                try data.write(to: target)
-            } catch {
+            guard let file = Self.savePNG(image, name: name, into: directory) else {
                 failed.append("\(url.lastPathComponent)（存不进去）")
                 continue
             }
-
             custom[name] = file
-            #if canImport(UIKit)
             imageCache[file] = nil
-            #endif
             added.append(name)
+            #else
+            failed.append("\(url.lastPathComponent)（这台设备不支持图片）")
+            #endif
+        }
+
+        if !added.isEmpty {
+            UserDefaults.standard.set(custom, forKey: Self.customKey)
+            rebuild()
+        }
+
+        return (added, failed)
+    }
+
+    /// 一行一个图床 URL，批量导入成表情。
+    /// URL 最后一段文件名（去扩展名）= 表情名；下载 → 解码 → PNG 重编码 → 落盘。
+    ///
+    /// ⚠️ `@MainActor`：`URLSession` 的下载在它自己的线程上，`await` 回来之后
+    /// 这里继续在**主线程**改 `custom` / `rebuild()` —— 后台改 @Published 在 iOS 26 会硬崩。
+    @MainActor
+    func importRemoteURLs(_ lines: [String]) async -> (added: [String], failed: [String]) {
+        var added: [String] = []
+        var failed: [String] = []
+
+        for raw in lines {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            guard let url = URL(string: trimmed), url.host != nil else {
+                failed.append("\(trimmed)（不是有效的网址）")
+                continue
+            }
+
+            let rawName = url.deletingPathExtension().lastPathComponent
+            let name = (rawName.removingPercentEncoding ?? rawName)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.count <= Self.nameLimit,
+                  !name.contains("["), !name.contains("]") else {
+                failed.append("\(trimmed)（名字太长或有特殊符号）")
+                continue
+            }
+
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode) else {
+                    failed.append("\(name)（下载失败）")
+                    continue
+                }
+
+                #if canImport(UIKit)
+                guard let image = UIImage(data: data) else {
+                    failed.append("\(name)（不是图片）")
+                    continue
+                }
+                guard let file = Self.savePNG(image, name: name, into: directory) else {
+                    failed.append("\(name)（存不进去）")
+                    continue
+                }
+                custom[name] = file
+                imageCache[file] = nil
+                added.append(name)
+                #else
+                failed.append("\(name)（这台设备不支持图片）")
+                #endif
+            } catch {
+                failed.append("\(name)（下载失败：\(error.localizedDescription)）")
+            }
         }
 
         if !added.isEmpty {
@@ -339,9 +466,15 @@ final class EmojiPack: ObservableObject {
     // MARK: - 给她看的说明
 
     /// 拼进系统提示词的一段话 —— 不告诉她规矩，她就会乱用。
-    static let promptNote = """
-    你想发表情的时候，可以像微信那样写方括号里的名字，比如 [微笑]、[呲牙]、[偷笑]、[大哭]。
-    整条消息只写一个表情是可以的，那样会放大显示。
-    别每句都带，正常说话就行。
-    """
+    /// 按用户设置的「表情发送频率」给出三档不同的话。
+    static var promptNote: String {
+        switch AppSettings.shared.emojiFrequency {
+        case .rarely:
+            return "你很少发表情，偶尔特别想表达时才发一个方括号表情，比如 [微笑]。"
+        case .moderate:
+            return "你想发表情时可以写方括号里的名字，比如 [微笑]、[呲牙]。整条只写一个表情会放大显示。别每句都带。"
+        case .always:
+            return "你几乎每句话都想带一个方括号表情，比如 [微笑]、[偷笑]，让聊天更生动。"
+        }
+    }
 }

@@ -160,6 +160,20 @@ struct AppearanceSettingsCard: View {
 
     private var toneSection: some View {
         VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 9) {
+                label("聊天主题")
+                Picker("聊天主题", selection: $settings.chatTheme) {
+                    ForEach(ChatTheme.allCases) { theme in
+                        Text(theme.label).tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("微信风走原来的气泡；iMessage 风换成蓝气泡、白字和 iMessage 表情面板。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("圆角")

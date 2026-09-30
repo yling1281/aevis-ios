@@ -47,6 +47,10 @@ final class AdminStore: ObservableObject {
     @Published var unlockStats: AdminUnlockStats?
     @Published var payments: [AdminPayment] = []
     @Published var paymentStats: AdminPaymentStats?
+    @Published var payproOrders: [AdminPayProOrder] = []
+    @Published var payproStats: AdminPayProStats?
+    /// PayPro 那边暂时连不上时的一句话（不影响其它节）。
+    @Published var payproUnavailable: String?
 
     // MARK: 界面状态
 
@@ -126,6 +130,9 @@ final class AdminStore: ObservableObject {
         unlockStats = nil
         payments = []
         paymentStats = nil
+        payproOrders = []
+        payproStats = nil
+        payproUnavailable = nil
         openDiag = nil
     }
 
@@ -186,6 +193,18 @@ final class AdminStore: ObservableObject {
         if let list = await get("/api/admin/payments", as: AdminPaymentList.self) {
             payments = list.items ?? []
             paymentStats = list.stats
+        }
+        // PayPro 收款（内嵌的那个收款系统）—— 只读，后端代理去拉。
+        if let list = await get("/api/admin/paypro", as: AdminPayProList.self) {
+            if list.ok == false {
+                payproOrders = []
+                payproStats = nil
+                payproUnavailable = list.why ?? "暂时连不上"
+            } else {
+                payproOrders = list.items ?? []
+                payproStats = list.stats
+                payproUnavailable = nil
+            }
         }
     }
 

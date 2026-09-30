@@ -100,16 +100,27 @@ enum LLMService {
     /// 让她知道"现在"是什么时候。
     /// 单独一条 system 消息，不混进人设提示词 —— 人设是用户写的，不该被我改。
     private static func timeContext() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年M月d日 EEEE HH:mm"
-        let now = formatter.string(from: Date())
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "zh_CN")
+        dateFormatter.dateFormat = "yyyy年M月d日"
+        let day = dateFormatter.string(from: Date())
+
+        let weekdayFormatter = DateFormatter()
+        weekdayFormatter.locale = Locale(identifier: "zh_CN")
+        weekdayFormatter.dateFormat = "EEEE"
+        let weekday = weekdayFormatter.string(from: Date())
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "zh_CN")
+        timeFormatter.dateFormat = "HH:mm"
+        let time = timeFormatter.string(from: Date())
 
         let timezone = TimeZone.current
-        let offset = Double(timezone.secondsFromGMT()) / 3600
+        // 整数化：+8.0 显示成 +8，口语一些。
+        let offset = Int(Double(timezone.secondsFromGMT()) / 3600)
         let sign = offset >= 0 ? "+" : ""
 
-        return "现在是 \(now)（\(timezone.identifier)，UTC\(sign)\(offset)）。"
+        return "今天是 \(day)，\(weekday)；现在时刻是 \(time)（\(timezone.identifier)，UTC\(sign)\(offset)）。"
             + "你知道今天几号、现在几点，直接用这个回答就行，不用去查。"
     }
 

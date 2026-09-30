@@ -320,6 +320,47 @@ struct AdminPaymentList: Decodable {
     var stats: AdminPaymentStats?
 }
 
+// MARK: - PayPro 收款（内嵌的那个收款系统，只读）
+
+struct AdminPayProOrder: Decodable, Identifiable {
+    var id: String?
+    /// 后端 `paypro_money()` 给的是**两位小数字符串**（如 "12.00"）。
+    var amount: String?
+    var actualAmount: String?
+    var state: Int?
+    var stateText: String?
+    var payType: String?
+    var payNum: String?
+    var nickname: String?
+    var email: String?
+    var source: String?
+    var createdAt: String?
+    var paidAt: String?
+
+    var payTypeLabel: String {
+        switch payType {
+        case "wechat": return "微信"
+        case "alipay": return "支付宝"
+        case "alipay_dmf": return "支付宝当面付"
+        case "wechat_zs": return "微信赞赏"
+        default: return payType?.isEmpty == false ? payType! : "—"
+        }
+    }
+}
+
+struct AdminPayProStats: Decodable {
+    var total: Int?
+    var paid: Int?
+    var unpaid: Int?
+}
+
+struct AdminPayProList: Decodable {
+    var ok: Bool?
+    var why: String?
+    var items: [AdminPayProOrder]?
+    var stats: AdminPayProStats?
+}
+
 // MARK: - 购买订单
 
 struct AdminOrder: Decodable, Identifiable {

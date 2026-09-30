@@ -11,10 +11,14 @@ import UniformTypeIdentifiers
 struct EmojiCard: View {
 
     @ObservedObject private var emoji = EmojiPack.shared
+    @ObservedObject private var settings = AppSettings.shared
 
     @State private var importing = false
     @State private var note: String?
     @State private var showAll = false
+    @State private var remoteURLs = ""
+    @State private var remoteNote: String?
+    @State private var importingRemote = false
 
     private var importedCount: Int { emoji.custom.count }
 
@@ -27,6 +31,30 @@ struct EmojiCard: View {
                 subtitle: "\(Pronoun.current)写 [微笑] 这样的名字，聊天里会显示成真表情",
                 isOn: $emoji.enabled
             )
+
+            rule
+
+            // ——— 发送频率 ———
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("表情发送频率")
+                    .font(.aevis(12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Picker("表情发送频率", selection: $settings.emojiFrequency) {
+                    ForEach(EmojiFrequency.allCases, id: \.rawValue) { freq in
+                        Text(freq.label).tag(freq)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("这决定写进提示词里的那句「怎么发表情」，不影响表情包本身。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
 
             rule
 
@@ -73,6 +101,82 @@ struct EmojiCard: View {
 
                 if let note {
                     Text(note)
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+
+            rule
+
+            // ——— 从图床批量导入 ———
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("从图床批量导入")
+                    .font(.aevis(12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: $remoteURLs)
+                    .font(.aevis(13))
+                    .frame(height: 80)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                    )
+
+                HStack(spacing: 10) {
+                    Button {
+                        importingRemote = true
+                        Task { @MainActor in
+                            let lines = remoteURLs
+                                .split(whereSeparator: { $0.isNewline })
+                                .map { String($0) }
+                            let outcome = await emoji.importRemoteURLs(lines)
+                            var parts: [String] = []
+                            if !outcome.added.isEmpty {
+                                parts.append("导入了 \(outcome.added.count) 个："
+                                             + outcome.added.prefix(6).joined(separator: "、"))
+                            }
+                            if !outcome.failed.isEmpty {
+                                parts.append("这些没成："
+                                             + outcome.failed.prefix(3).joined(separator: "；"))
+                            }
+                            remoteNote = parts.isEmpty ? "没有可导入的网址。" : parts.joined(separator: "\n")
+                            importingRemote = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if importingRemote {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(importingRemote ? "导入中…" : "开始导入")
+                                .font(.aevis(14, weight: .medium))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 9)
+                        .aevisGlass(cornerRadius: 14)
+                    }
+                    .disabled(importingRemote)
+
+                    Spacer(minLength: 0)
+                }
+
+                Text("一行一个图床图片地址。URL 最后一段文件名当表情名，比如 .../微笑.png → [微笑]；下载后会统一转成 PNG 存到本机。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let remoteNote {
+                    Text(remoteNote)
                         .font(.aevis(11.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

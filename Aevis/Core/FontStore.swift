@@ -65,20 +65,40 @@ final class FontStore: ObservableObject {
     }
 
     /// 导入时允许的文件类型。
-    /// 除了字体扩展名，还放开了 `.data` 和 `.item` ——
-    /// 有些字体文件在系统里没有对应的类型标识，会被文件选择器灰掉选不了
-    /// （用户反馈「点了没反应」很可能就是这个）。
     ///
-    /// ⚠️ 还有一半原因**不在我们这边**：iOS 的「文件」里，
-    /// **别的 App 文件夹下的文件系统会直接灰掉**（读不到别人的沙盒），
-    /// 那时候点「打开」也是毫无反应。所以界面上的说明文字同样重要。
+    /// ⚠️ 苹果的特殊性：字体文件的 UTI 在 iOS 上很碎 —— `.ttf` 是
+    /// `public.truetype-font`、`.otf` 是 `public.opentype-font`、`.ttc` 是
+    /// `public.truetype-collection`，而且 `.otf`/`.ttc` 用
+    /// `UTType(filenameExtension:)` 经常**查不到**（返回 nil，就不在列表里）。
+    /// 光靠一个 `.font` 兜不住，用户点字体文件会**灰掉、点不动**。
+    /// 所以这里显式列全 UTI + 扩展名，最后再补 `.data`/`.item` 兜底。
+    ///
+    /// ⚠️ 还有一半原因**改不了**：iOS 的「文件」里，**别的 App 文件夹下的文件
+    /// 会直接灰掉**（读不到别人的沙盒）。那时候点「打开」也是毫无反应，
+    /// 只能让用户先把字体拷到「我的 iPhone」或 iCloud Drive。
     static var allowedTypes: [UTType] {
-        var types: [UTType] = [.font]
-        for ext in ["ttf", "otf", "ttc", "woff", "woff2"] {
+        var types: [UTType] = []
+        // 显式字体 UTI（比单个 `.font` 稳，覆盖 ttf/otf/ttc 等）
+        let utis = [
+            "public.truetype-font",        // .ttf
+            "public.opentype-font",        // .otf
+            "public.truetype-ttf-font",    // 老式 .ttf 标识
+            "public.truetype-collection",  // .ttc
+            "com.adobe.postscript-font",   // .pfb/.pfm（少见）
+            "public.font",
+        ]
+        for uti in utis {
+            if let type = UTType(uti), !types.contains(type) {
+                types.append(type)
+            }
+        }
+        // 扩展名兜底（otc/dfont 等少见格式也认）
+        for ext in ["ttf", "otf", "ttc", "otc", "dfont", "pfb", "pfm"] {
             if let type = UTType(filenameExtension: ext), !types.contains(type) {
                 types.append(type)
             }
         }
+        // 最终兜底：任何文件都能选（选进来再判断是不是字体，不是再报错）
         types.append(.data)
         types.append(.item)
         return types

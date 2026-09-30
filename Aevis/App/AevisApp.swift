@@ -30,6 +30,14 @@ struct AevisApp: App {
         // 不 await —— 启动路径上不干等网络；传不上去也没关系，本机那份还在。
         Task { await DiagUploader.uploadCrashIfNeeded() }
 
+        // 卡死看门狗：主线程 5 秒没回心跳 = 冻住（simulator 自动跳过）。
+        // 检测到会轻量上报一次 freeze，并把标记留到下次启动补传富 body。
+        Watchdog.start()
+
+        // 上次若卡死过，这里用黑匣子富 body 补传一次（成功后清标记）。
+        // 不 await —— 跟崩溃上报一样，不挡启动路径。
+        Task { await DiagUploader.uploadFreezeIfNeeded() }
+
         // 通知代理：App 正在前台时，那条通知要**当场落进聊天记录**、不弹横幅
         // （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的」）。
         // ⚠️ 必须在这里设：`UNUserNotificationCenter` 的 delegate 是**弱引用**，

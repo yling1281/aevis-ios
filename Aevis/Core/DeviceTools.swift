@@ -83,7 +83,25 @@ enum DeviceTools {
         guard let tool = all().first(where: { $0.name == name }) else {
             return "没有叫「\(name)」的工具。"
         }
+        // ⭐ 全工具埋点：内置工具 + 外接 MCP **全都走这个入口**，埋这一处即全覆盖。
+        //    在**执行前**记一笔；摘要已脱敏 —— 字符串只记 key=长度、标量记值，
+        //    绝不带聊天/人设/剪贴板/日历标题这些原文。
+        BlackBox.tool(name, summarize(arguments))
         return await tool.run(arguments)
+    }
+
+    /// 脱敏入参摘要：字符串只记 `key=长度`，标量记值，其它记 `key=?`。
+    /// 按 key 排序，同一调用算出同一串 —— 日志里好比对，也绝不会泄原文。
+    private static func summarize(_ arguments: [String: Any]) -> String {
+        guard !arguments.isEmpty else { return "" }
+        let parts = arguments.keys.sorted().map { key -> String in
+            let value = arguments[key]
+            if let text = value as? String { return "\(key)=\(text.count)" }
+            if let flag = value as? Bool { return "\(key)=\(flag)" }
+            if let number = value as? NSNumber { return "\(key)=\(number)" }
+            return "\(key)=?"
+        }
+        return parts.joined(separator: " ")
     }
 
     // MARK: - 时间

@@ -7,7 +7,7 @@ import UIKit
 /// 手机上按 `tab` 归到底栏，iPad 上全部摊在侧栏里。
 /// 加一块新东西时只改这里，两个端一起生效。
 enum AdminSection: String, CaseIterable, Identifiable, Hashable {
-    case overview, diag, users, orders, unlock, payments, codes, devices, blocks, bot, account
+    case overview, diag, users, orders, unlock, payments, paypro, codes, devices, blocks, bot, account
 
     var id: String { rawValue }
 
@@ -19,6 +19,7 @@ enum AdminSection: String, CaseIterable, Identifiable, Hashable {
         case .orders: return "购买订单"
         case .unlock: return "解锁码"
         case .payments: return "支付宝收款"
+        case .paypro: return "PayPro 收款"
         case .codes: return "注册码"
         case .devices: return "换机申请"
         case .blocks: return "封禁"
@@ -35,6 +36,7 @@ enum AdminSection: String, CaseIterable, Identifiable, Hashable {
         case .orders: return "cart.fill"
         case .unlock: return "lock.open.fill"
         case .payments: return "creditcard.fill"
+        case .paypro: return "bag.fill"
         case .codes: return "ticket.fill"
         case .devices: return "arrow.triangle.2.circlepath"
         case .blocks: return "hand.raised.fill"
@@ -83,7 +85,7 @@ enum AdminTab: String, CaseIterable, Identifiable {
         case .home: return [.overview]
         case .diag: return [.diag]
         case .users: return [.users]
-        case .more: return [.orders, .unlock, .payments, .codes, .devices, .blocks, .bot, .account]
+        case .more: return [.orders, .unlock, .payments, .paypro, .codes, .devices, .blocks, .bot, .account]
         }
     }
 }
@@ -236,6 +238,7 @@ struct AdminSectionBody: View {
         case .orders: OrdersSection()
         case .unlock: UnlockSection()
         case .payments: PaymentsSection()
+        case .paypro: PayProSection()
         case .codes: CodesSection()
         case .devices: DevicesSection()
         case .blocks: BlocksSection()
@@ -260,7 +263,7 @@ struct MoreView: View {
                 }
             }
             Section("对账") {
-                ForEach([AdminSection.payments]) { item in
+                ForEach([AdminSection.payments, .paypro]) { item in
                     NavigationLink(value: item) {
                         Label(item.title, systemImage: item.symbol)
                     }

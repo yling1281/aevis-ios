@@ -142,8 +142,8 @@ struct SelfCheckView: View {
         let background = AppSettings.shared.backgroundStyle
         rows.append(NeteaseCrypto.SelfCheck(
             name: "背景与外观配置能读能写",
-            passed: BackgroundStyle.allCases.count == 4,
-            detail: "四种背景；当前是「\(background.label)」，遮罩 \(String(format: "%.2f", AppSettings.shared.backgroundDim))"
+            passed: BackgroundStyle.allCases.count >= 4,
+            detail: "\(BackgroundStyle.allCases.count) 种背景；当前是「\(background.label)」，遮罩 \(String(format: "%.2f", AppSettings.shared.backgroundDim))"
         ))
 
         rows.append(NeteaseCrypto.SelfCheck(

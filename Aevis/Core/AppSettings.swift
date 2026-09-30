@@ -43,8 +43,9 @@ struct TTSConfig {
     var rate: Double
 }
 
-/// 聊天背景。默认给一个，但不锁死。
+/// 聊天背景。默认纯白，但用户可以换成光晕、纯色、纸感或自己的图。
 enum BackgroundStyle: String, Codable, CaseIterable, Identifiable {
+    case white
     case aurora
     case plain
     case paper
@@ -54,12 +55,51 @@ enum BackgroundStyle: String, Codable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .white: return "纯白"
         case .aurora: return "光晕"
         case .plain: return "纯色"
         case .paper: return "纸感"
         case .custom: return "我的图片"
         }
     }
+}
+
+/// 聊天主题。微信风是默认；iMessage 风把气泡、表情面板都换成 iMessage 的样子。
+enum ChatTheme: String, CaseIterable, Codable, Identifiable {
+    case wechat
+    case imessage
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .wechat: return "微信风"
+        case .imessage: return "iMessage 风"
+        }
+    }
+}
+
+/// 表情发送频率 —— 只决定写进系统提示词的那句「怎么发表情」，不碰渲染逻辑。
+enum EmojiFrequency: String, CaseIterable, Codable {
+    case rarely
+    case moderate
+    case always
+
+    var label: String {
+        switch self {
+        case .rarely: return "少发"
+        case .moderate: return "适量"
+        case .always: return "每句都带"
+        }
+    }
+}
+
+/// iMessage 风的配色。集中在这一个地方，想改色不用到处翻。
+enum ImessagePalette {
+    /// iMessage「我」这一侧的气泡蓝。
+    static let blue = Color(red: 10/255, green: 132/255, blue: 255/255)
+    /// iMessage「TA」那一侧的浅灰底。用 .primary 的半透明，深浅色都稳。
+    static let incoming = Color.primary.opacity(0.10)
 }
 
 /// 内置的 API 供应商预设。
@@ -330,6 +370,8 @@ final class AppSettings: ObservableObject {
         static let simpleMode = "aevis.simpleMode"
         static let backgroundStyle = "aevis.backgroundStyle"
         static let backgroundDim = "aevis.backgroundDim"
+        static let chatTheme = "aevis.chatTheme"
+        static let emojiFrequency = "aevis.emojiFrequency"
         static let accentIndex = "aevis.accentIndex"
         /// 界面密度（0/1/2）与「主题色跟着头像走」
         static let densityIndex = "aevis.densityIndex"
@@ -754,6 +796,16 @@ final class AppSettings: ObservableObject {
 
     @Published var backgroundStyle: BackgroundStyle {
         didSet { UserDefaults.standard.set(backgroundStyle.rawValue, forKey: Key.backgroundStyle) }
+    }
+
+    /// 聊天主题：微信风 / iMessage 风。
+    @Published var chatTheme: ChatTheme {
+        didSet { UserDefaults.standard.set(chatTheme.rawValue, forKey: Key.chatTheme) }
+    }
+
+    /// 她发表情的频率。只进提示词，不改渲染。
+    @Published var emojiFrequency: EmojiFrequency {
+        didSet { UserDefaults.standard.set(emojiFrequency.rawValue, forKey: Key.emojiFrequency) }
     }
 
     /// 自定义背景图（已压缩）。放文件，不放 UserDefaults。
@@ -1346,8 +1398,18 @@ final class AppSettings: ObservableObject {
         tintStrength = defaults.object(forKey: Key.tintStrength) as? Double ?? 1.0
         fontColorIndex = defaults.object(forKey: Key.fontColorIndex) as? Int ?? 0
         simpleMode = defaults.object(forKey: Key.simpleMode) as? Bool ?? false
-        backgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .aurora
+        // 背景样式：没显式存过 → 默认纯白；存过 → 原样读回来。
+        // 不能直接 `?? .white` 一把梭：老用户已经存了 aurora 的，得保留他们的选择，
+        // 别把正在用的背景偷偷换掉。backgroundStyle 只在 didSet 写 UserDefaults，
+        // 所以「没改过 = 没存过」天然成立。
+        if defaults.object(forKey: Key.backgroundStyle) == nil {
+            backgroundStyle = .white
+        } else {
+            backgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .white
+        }
         backgroundDim = defaults.object(forKey: Key.backgroundDim) as? Double ?? 0.12
+        chatTheme = ChatTheme(rawValue: defaults.string(forKey: Key.chatTheme) ?? "") ?? .wechat
+        emojiFrequency = EmojiFrequency(rawValue: defaults.string(forKey: Key.emojiFrequency) ?? "") ?? .moderate
         accentIndex = defaults.object(forKey: Key.accentIndex) as? Int ?? 0
         densityIndex = defaults.object(forKey: Key.densityIndex) as? Int ?? 1
         dynamicAccent = defaults.object(forKey: Key.dynamicAccent) as? Bool ?? false

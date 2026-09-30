@@ -61,6 +61,8 @@ struct AevisBackground: View {
     var body: some View {
         ZStack {
             switch settings.backgroundStyle {
+            case .white:
+                pureWhite
             case .aurora:
                 aurora
             case .plain:
@@ -75,6 +77,11 @@ struct AevisBackground: View {
     }
 
     // MARK: - 各样样式
+
+    /// 纯白：始终是白色，不随深浅色变。
+    private var pureWhite: Color {
+        Color.white
+    }
 
     private var base: Color {
         scheme == .dark
