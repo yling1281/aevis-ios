@@ -136,6 +136,10 @@ final class MemoryStore: ObservableObject {
               let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
             return
         }
+        // ⚠️ 读档 / 搬家期间禁写，理由同 `ChatStore.load()`：
+        //    紧接着的 `setOwner` 会先 `stash()`，用旧机器的 `items` 盖掉刚搬进来的。
+        loading = true
+        defer { loading = false }
         byOwner = archived.byOwner.reduce(into: [:]) { result, item in
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
@@ -149,12 +153,23 @@ final class MemoryStore: ObservableObject {
     }
 
     /// 把当前这份写回字典。任何落盘之前都要先做一次。
+    /// 正在「搬家」导入 / 启动读档 —— 期间只读不写。
+    /// 细节见 `ChatStore.loading`（同一条链路上同一个 bug）。
+    private var loading = false
+
     private func stash() {
+        guard !loading else { return }
         if let owner { byOwner[owner] = items }
     }
 
     private func save() {
+        guard !loading else { return }
         stash()
+        writeArchive()
+    }
+
+    /// 把 `byOwner` 原样落盘，不经过 `stash()`。导入时用。
+    private func writeArchive() {
         // 空字典不落盘 —— 否则第一次启动还没认人，就会写一份空存档，
         // 下次就再也认不到老的那份记忆了。
         guard !byOwner.isEmpty else { return }
@@ -477,11 +492,16 @@ extension MemoryStore: BackupableStore {
 
     func importBackup(_ data: Data) throws {
         let archive = try JSONDecoder().decode(Archive.self, from: data)
+        // ⚠️ 导入全程禁写：中途 `PersonaStore.broadcastSwitch` 会调 `setOwner`，
+        //    那一下要是允许 `stash()`，刚搬进来的记忆当场被旧机器的 `items` 顶掉。
+        loading = true
+        defer { loading = false }
         byOwner = archive.byOwner.reduce(into: [:]) { result, item in
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
         }
         items = owner.flatMap { byOwner[$0] } ?? []
-        save()
+        // 上面的 loading 还没解除，这里显式落盘
+        writeArchive()
     }
 }

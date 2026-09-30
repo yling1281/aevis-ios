@@ -118,6 +118,9 @@ final class MomentStore: ObservableObject {
               let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
             return
         }
+        // ⚠️ 读档 / 搬家期间禁写，理由同 `ChatStore.load()`。
+        loading = true
+        defer { loading = false }
         byOwner = archived.byOwner.reduce(into: [:]) { result, item in
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
@@ -131,12 +134,23 @@ final class MomentStore: ObservableObject {
     }
 
     /// 把当前这份写回字典。任何落盘之前都要先做一次。
+    /// 正在「搬家」导入 / 启动读档 —— 期间只读不写。
+    /// 细节见 `ChatStore.loading`（同一条链路上同一个 bug）。
+    private var loading = false
+
     private func stash() {
+        guard !loading else { return }
         if let owner { byOwner[owner] = moments }
     }
 
     private func save() {
+        guard !loading else { return }
         stash()
+        writeArchive()
+    }
+
+    /// 把 `byOwner` 原样落盘，不经过 `stash()`。导入时用。
+    private func writeArchive() {
         // 空字典不落盘 —— 否则第一次启动还没认人就会写一份空存档，
         // 下次就再也认不到老的那份动态了。
         guard !byOwner.isEmpty else { return }
@@ -725,11 +739,15 @@ extension MomentStore: BackupableStore {
     /// 所以恢复完带图的动态会变成纯文字 —— 这条得告诉用户。
     func importBackup(_ data: Data) throws {
         let archive = try JSONDecoder().decode(Archive.self, from: data)
+        // ⚠️ 导入全程禁写：中途 `setOwner` 的 `stash()` 会用旧机器的 `moments`
+        //    盖掉刚搬进来的动态。见 `ChatStore.loading`。
+        loading = true
+        defer { loading = false }
         byOwner = archive.byOwner.reduce(into: [:]) { result, item in
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
         }
         moments = owner.flatMap { byOwner[$0] } ?? []
-        save()
+        writeArchive()
     }
 }

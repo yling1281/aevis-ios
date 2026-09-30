@@ -43,10 +43,21 @@ enum BackupError: LocalizedError {
 /// API Key、网易云 Cookie、百度网盘自己的通行证 —— 这些是**这台设备的钥匙**，
 /// 传上云等于把钥匙交出去。搬家要搬的是「你们之间的东西」，不是钥匙。
 ///
+/// 同理还有 `aevis.device.`（设备授权凭证）和 `aevis.account.`（登录会话）——
+/// 搬过去新手机就会以为自己已经过审了。见 `excludedPrefixes`。
+///
 /// 实现上用**黑名单**兜底：任何键名里带 key / cookie / token / secret /
 /// password / authorization 的设置项一律不进包。
 /// 用黑名单而不是白名单，是因为设置项一直在加 —— 白名单总有一天会漏掉新项，
 /// 而漏掉一个**机密**的后果，比漏掉一个普通设置严重得多。
+///
+/// ## ⚠️⚠️ 恢复期间所有 Store 都「只读不写」
+/// 这条是 2026-10-01 修「搬家什么都不搬」时补的：`restore` 走的是
+/// 「先导 contacts → `broadcastSwitch` 切人 → 再导 chats/memory/moments」，
+/// 而**切人**那一下会触发各 Store 的 `stash()`（把当前内存那份写回字典）。
+/// 那一刻 `currentID` 还停在**这台旧机器**上的人，于是旧会话被写了回去，
+/// 最后落盘的是旧数据 —— 用户看到的就是「聊天记录一条都没搬过来」。
+/// 现在四个 Store 都有 `loading` 标志位，导入期间 `stash()` / `save()` 直接返回。
 final class BackupService {
 
     static let shared = BackupService()
@@ -73,8 +84,33 @@ final class BackupService {
         "key", "cookie", "token", "secret", "password", "authorization", "apikey"
     ]
 
+    /// 这些**前缀**开头的设置项不进包（子串黑名单抓不到的那些）。
+    ///
+    /// | 键 | 为什么不能搬 |
+    /// |---|---|
+    /// | `aevis.device.` | 这是**这台设备**过没过审的凭证。跟着包落到新手机上，新手机就会以为自己已经授权过了 —— 旧机被解绑 / 换了账号之后，新机还在裸奔。授权必须在新机上重新走一遍。 |
+    /// | `aevis.account.` | 这里放的是账号 token 的到期时刻、打码邮箱这些**跟当前登录会话绑死**的东西。服务器的 token 是发到具体设备上的，搬过去就是一份对不上的残留。 |
+    /// | `aevis.lastBackupName` | 网盘上那份备份的文件名，换了机器点「恢复」会指向别人那台机器存的包。 |
+    ///
+    /// 用前缀而不是逐个键名：以后这些模块再加键，不会漏。
+    private static let excludedPrefixes = [
+        "aevis.device.",
+        "aevis.account.",
+        "aevis.lastBackupName"
+    ]
+
     private static func stores() -> [BackupableStore] {
         [PersonaStore.shared, ChatStore.shared, MemoryStore.shared, MomentStore.shared]
+    }
+
+    /// 恢复收尾：把「现在看着谁」摆到搬过来的那个 activeID 上。
+    ///
+    /// 为什么不在导入中间做：导入期间各 Store 是「只写字典、不切当前」的状态，
+    /// 切人要等四份数据都落地了才安全 —— 不然切的那一下会把还没导的 Store
+    /// 按旧 owner 处理。
+    private func syncActive() {
+        guard PersonaStore.shared.activeID != nil else { return }
+        PersonaStore.shared.resyncToActive()
     }
 
     /// 打一个包出来（纯内存操作，不联网）。
@@ -122,11 +158,20 @@ final class BackupService {
             names.append(Self.label(store.backupName))
         }
 
+        // ⚠️ 设置放最后：`apply` 会往 UserDefaults 里写一堆键，
+        //    先写的话上面那些 Store 恢复完再切一次人，反而可能被脏值带偏。
         if let text = package["settings"] as? String,
            let raw = Data(base64Encoded: text),
            let settings = try? JSONDecoder().decode([String: StoredSetting].self, from: raw) {
             apply(settings)
         }
+
+        // ⚠️ 恢复完**必须把 currentID 摆正**。
+        //    搬过来的 `activeID` 由 `PersonaStore.importBackup` 写进通讯录，
+        //    但各 Store 的 `currentID`/`owner` 是在导入期间被 `switchTo` 设成
+        //    旧机器那个人的（只是被 `loading` 挡住没落盘）—— 不重切一次，
+        //    界面上显示的会是旧会话，用户一样会说「没搬过来」。
+        syncActive()
 
         return names.isEmpty ? "这个包里没有可恢复的数据。" : "已恢复：" + names.joined(separator: "、")
     }
@@ -170,6 +215,7 @@ final class BackupService {
             guard key.hasPrefix("aevis.") else { continue }
             let lowered = key.lowercased()
             guard !Self.secretHints.contains(where: { lowered.contains($0) }) else { continue }
+            guard !Self.excludedPrefixes.contains(where: { key.hasPrefix($0) }) else { continue }
 
             if let text = value as? String {
                 out[key] = StoredSetting(type: "s", value: text)

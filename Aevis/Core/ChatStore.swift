@@ -43,6 +43,19 @@ final class ChatStore: ObservableObject {
 
     // MARK: - 切人
 
+    /// 正在「搬家」导入 / 启动读档。
+    ///
+    /// ⚠️⚠️ **这个标志是「搬家什么都不搬」那个 bug 的修复。**
+    ///
+    /// 起因：`PersonaStore.importBackup` 换完通讯录会调 `broadcastSwitch(to:)`，
+    /// 而这时候我们（ChatStore）已经被恢复过了 —— `byContact` 里是**新搬进来的**，
+    /// 但 `currentID` 还停在**这台旧机器上的**那个人。于是 `switchTo` 里那一句
+    /// `byContact[currentID] = messages` 把旧会话写了回去，最后整个字典落盘的是
+    /// 旧数据 —— 用户看到的就是「聊天记录一条都没搬过来」。
+    ///
+    /// 修法：搬家的路上只允许**读**，绝不允许 `stash()` 往字典里**写**。
+    private var loading = false
+
     /// 切到某个联系人的对话。传 nil 就是「还没选定人」。
     func switchTo(_ id: UUID?) {
         stash()
@@ -361,7 +374,11 @@ final class ChatStore: ObservableObject {
     }
 
     /// 把当前这份写回字典。任何落盘之前都要先做一次。
+    ///
+    /// ⚠️ `loading` 为真时**什么都不写** —— 那会拿这台旧机器的会话
+    /// 覆盖掉刚搬进来的数据。见 `loading` 的注释。
     private func stash() {
+        guard !loading else { return }
         if let currentID { byContact[currentID] = messages }
     }
 
@@ -370,6 +387,10 @@ final class ChatStore: ObservableObject {
               let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
             return
         }
+        // ⚠️ 读档期间同样禁写：紧接着的 `broadcastSwitch` 会先切人，
+        //    那一句 `stash()` 会拿 `messages`（还是空的）盖掉刚读出来的记录。
+        loading = true
+        defer { loading = false }
         byContact = archived.byContact.reduce(into: [:]) { result, item in
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
@@ -379,7 +400,15 @@ final class ChatStore: ObservableObject {
     }
 
     private func save() {
+        // 搬家 / 读档的路上不落盘 —— 见 `loading` 的注释。
+        guard !loading else { return }
         stash()
+        writeArchive()
+    }
+
+    /// 把 `byContact` 原样写进文件，**不经过 `stash()`**。
+    /// 只在 `save()` 和导入里用 —— 这两处字典已经是最终状态了。
+    private func writeArchive() {
         let flat = byContact.reduce(into: [String: [ChatMessage]]()) { result, item in
             result[item.key.uuidString] = item.value
         }
@@ -404,12 +433,17 @@ extension ChatStore: BackupableStore {
 
     func importBackup(_ data: Data) throws {
         let archive = try JSONDecoder().decode(Archive.self, from: data)
+        // ⚠️ 整个导入过程禁掉 `stash()` / `save()`：中途 `setOwner` 会先切人，
+        //    那一下要是允许写回，刚搬进来的数据当场就被旧会话顶掉了。
+        loading = true
+        defer { loading = false }
         byContact = archive.byContact.reduce(into: [:]) { result, item in
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
         }
         // 当前看着的那个人也得跟着换一份，否则界面上还是旧内容
         messages = currentID.flatMap { byContact[$0] } ?? []
-        save()
+        // 字典已经在内存里了，这里**一定要真落盘**（上面的 loading 还没解除）
+        writeArchive()
     }
 }

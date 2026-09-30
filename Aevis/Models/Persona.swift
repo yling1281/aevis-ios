@@ -234,6 +234,15 @@ final class PersonaStore: ObservableObject {
         MomentStore.shared.setOwner(id)
     }
 
+    /// 搬家恢复完之后，把四家一起切到搬过来的那个人。
+    ///
+    /// 平时切人走 `select(_:)`，但它有个 `guard activeID != id else { return }` ——
+    /// 恢复的时候 `activeID` 早就被 `importBackup` 写好了，`select` 会被这句
+    /// 直接挡掉，于是界面还停在旧会话上。所以单独开这个口子。
+    func resyncToActive() {
+        broadcastSwitch(to: activeID)
+    }
+
     // MARK: - 头像
 
     func setAvatar(_ image: UIImage?) {

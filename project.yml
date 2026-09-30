@@ -54,8 +54,29 @@ settings:
     #       另外 4 处历史遗漏（抖音两处 / Bark 一处 / 抖音浏览器一处），一并修掉。
     #        ⚠️ **教训**：检查器说"没问题"而用户看得见星号，比没有检查器更糟。
     #    ② 聊天更真人、QQ 记忆互通等 11 项（详见下面的 0.0.87 段）。
-    MARKETING_VERSION: "0.0.87"
-    CURRENT_PROJECT_VERSION: "87"
+    # ⚠️ 2026-10-01 0.0.88：**修「搬家什么都不搬」**（用户实测报的：
+    #    「人设、聊天记录、记忆、朋友圈这些都没有」）。两个 bug：
+    #
+    #    ① **`stash()` 把刚搬进来的数据当场覆盖掉**（主因）。
+    #       恢复的顺序是「先导 contacts → `broadcastSwitch` 切人 → 再导其余三家」，
+    #       而切人会让每个 Store 先 `stash()`（把内存里那份写回字典）。
+    #       那一刻 `currentID`/`owner` 还停在**这台旧机器**上的人，于是旧会话被
+    #       写回字典、最后落盘的是旧数据 —— 表现就是「一条都没搬过来」。
+    #       修法：四个 Store（Chat/Memory/Moment + Persona 的调用链）都加 `loading`
+    #       标志位，导入与读档期间 `stash()` / `save()` 直接 return（只读不写）；
+    #       真正的落盘改走新的 `writeArchive()`（不经过 stash）。
+    #       ⚠️ 同一个 bug 在**每次启动**都在跑：`load()` 里 `byContact` 刚读出来，
+    #       紧接着 `broadcastSwitch` 就 `stash()` 拿空 `messages` 盖掉它 ——
+    #       只是后面还有别的写入把它救回来了，平时看不出来。
+    #    ② **`settings` 跨设备带授权**。`aevis.device.authorized`（这台设备过没过审）
+    #       和 `aevis.account.*` 都在 `aevis.` 前缀里、也不含机密关键词，
+    #       于是跟着包落到新手机上 —— 新机以为自己已经授权过了。
+    #       加 `excludedPrefixes` 黑名单：`aevis.device.` / `aevis.account.` /
+    #       `aevis.lastBackupName`。
+    #    ③ 恢复收尾补 `syncActive()`：把 `currentID` 摆到搬过来的 `activeID` 上
+    #       （导入期间只是没落盘，没重切的话界面还停在旧会话）。
+    MARKETING_VERSION: "0.0.88"
+    CURRENT_PROJECT_VERSION: "88"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
