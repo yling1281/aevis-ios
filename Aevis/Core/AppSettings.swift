@@ -311,6 +311,7 @@ final class AppSettings: ObservableObject {
         static let activeSearchSource = "aevis.activeSearchSource"
         static let autoTestOnLaunch = "aevis.autoTestOnLaunch"
         static let speakerEnabled = "aevis.speakerEnabled"
+        static let voiceMessageEnabled = "aevis.voiceMessageEnabled"
         static let speechRate = "aevis.speechRate"
         static let ttsMode = "aevis.ttsMode"
         static let ttsBaseURL = "aevis.ttsBaseURL"
@@ -663,6 +664,12 @@ final class AppSettings: ObservableObject {
 
     @Published var speakerEnabled: Bool {
         didSet { UserDefaults.standard.set(speakerEnabled, forKey: Key.speakerEnabled) }
+    }
+
+    /// ⭐ 她除了文字，再发一条**语音消息**（微信那种语音条，点一下播放）。
+    /// 依赖外部 API 音色（系统音色导不出音频文件）。
+    @Published var voiceMessageEnabled: Bool {
+        didSet { UserDefaults.standard.set(voiceMessageEnabled, forKey: Key.voiceMessageEnabled) }
     }
 
     @Published var speechRate: Double {
@@ -1320,6 +1327,7 @@ final class AppSettings: ObservableObject {
         }
         activeSearchSource = defaults.string(forKey: Key.activeSearchSource) ?? (SearchSource.builtIn.first?.name ?? "必应")
         speakerEnabled = defaults.object(forKey: Key.speakerEnabled) as? Bool ?? false
+        voiceMessageEnabled = defaults.object(forKey: Key.voiceMessageEnabled) as? Bool ?? false
         speechRate = defaults.object(forKey: Key.speechRate) as? Double ?? 0.48
         ttsMode = TTSMode(rawValue: defaults.string(forKey: Key.ttsMode) ?? "") ?? .system
         ttsBaseURL = defaults.string(forKey: Key.ttsBaseURL) ?? ""

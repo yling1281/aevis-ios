@@ -113,6 +113,13 @@ final class ChatStore: ObservableObject {
         save()
     }
 
+    /// ⭐ #23（2026-09-30）：对面没肯收，钱退回 → 气泡标「已退回」。
+    func markTransferDeclined(_ id: UUID) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].transfer?.declined = true
+        save()
+    }
+
     /// 她发给我一条转账 / 红包（她也有钱包）。
     @discardableResult
     func appendIncomingTransfer(_ transfer: ChatMessage.Transfer) -> UUID? {

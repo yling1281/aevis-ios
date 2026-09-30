@@ -20,6 +20,10 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         /// ⚠️ 和 `.call` 不一样：**这一条要发给模型**（她得知道你给她转钱了），
         ///    所以人话写在 `text` 里，`transfer` 只负责界面怎么画。
         case transfer
+        /// 她发来的一条**语音消息**（微信那种语音条，点一下播放）。
+        /// 音频在 `voiceData`，时长在 `voiceDuration`。文字版还在对应的
+        /// 那条 `.text` 里，所以这一条不进模型、也不参与去重。
+        case voice
     }
 
     /// 转账 / 红包这一条的内容。
@@ -32,6 +36,8 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         var note: String = ""
         /// 对面收下了没有。没收就一直挂着"待收款"。
         var accepted: Bool = false
+        /// ⭐ #23（2026-09-30）：TA 没肯收、钱退回来了。和「待收款」要分开显示。
+        var declined: Bool = false
         /// 红包画得喜庆一点；转账画得正经一点。
         var isRedPacket: Bool = false
     }
@@ -54,6 +60,11 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     ///
     /// 声明成可选，所以老存档读进来也不会报错（缺这个键就是 nil）。
     var imageData: Data? = nil
+
+    /// 她发来的语音消息的音频（mp3）。只有 `kind == .voice` 才有。
+    var voiceData: Data? = nil
+    /// 这条语音有多长（秒），气泡上要显示。
+    var voiceDuration: Double? = nil
 
     /// 转账那条消息**给模型看的那句人话**。
     ///
@@ -84,6 +95,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     /// 带图的消息显示「[图片]」—— 否则预览里会是一整段「【图片里的内容】…」。
     var previewText: String {
         if kind == .call { return text }
+        if kind == .voice { return "[语音]" }
         if kind == .transfer {
             guard let info = transfer else { return text }
             let tag = info.isRedPacket ? "红包" : "转账"

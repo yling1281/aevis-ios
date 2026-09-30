@@ -15,6 +15,10 @@ struct VoiceSettingsCard: View {
             toggleRow("回复后直接念出来", isOn: $settings.speakerEnabled)
             rule
 
+            // ⭐ 语音消息（2026-09-30）：除了文字，她再发一条语音条（点一下播放）。
+            toggleRow("回复也发一条语音消息", isOn: $settings.voiceMessageEnabled)
+            rule
+
             VStack(alignment: .leading, spacing: 9) {
                 label("语音来源")
                 Picker("语音来源", selection: $settings.ttsMode) {

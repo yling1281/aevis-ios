@@ -7,6 +7,7 @@ enum TTSError: LocalizedError {
     case noVoice
     case emptyAudio
     case http(status: Int, body: String)
+    case needsRemoteVoice
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +19,8 @@ enum TTSError: LocalizedError {
             return "还没有选音色。先点「拉取音色」拉一份，或者手动填一个音色 ID。"
         case .emptyAudio:
             return "接口没有返回音频。"
+        case .needsRemoteVoice:
+            return "语音消息只支持外部 API 音色（系统音色导不出音频文件）。"
         case let .http(status, body):
             switch status {
             case 401, 403: return "语音接口的 Key 被拒绝（\(status)）。"
@@ -110,6 +113,51 @@ final class SpeechService {
             player.stop()
         }
         player = nil
+    }
+
+    /// ⭐ 语音消息用（2026-09-30）：读一条音频的时长（秒）。
+    static func duration(of audio: Data) -> Double? {
+        (try? AVAudioPlayer(data: audio))?.duration
+    }
+
+    /// ⭐ 语音消息用（2026-09-30）：只合成**音频数据**、不播放。
+    ///
+    /// ⚠️ 只有**远程 TTS**（外部 API 音色）能拿回音频文件；系统音色
+    ///    （AVSpeechSynthesizer）没有「导出音频」的接口，所以语音消息
+    ///    这条只支持远程音色。
+    func synthesize(_ text: String, config: TTSConfig) async throws -> Data {
+        let cleaned = Self.plainText(text)
+        guard !cleaned.isEmpty else { throw TTSError.emptyAudio }
+        guard config.mode == .remote else { throw TTSError.needsRemoteVoice }
+
+        let key = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { throw TTSError.notConfigured }
+        let voice = config.voice.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !voice.isEmpty else { throw TTSError.noVoice }
+
+        var base = config.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { throw TTSError.badURL }
+        while base.hasSuffix("/") { base.removeLast() }
+        if !base.hasSuffix("/audio/speech") { base += "/audio/speech" }
+        guard let url = URL(string: base) else { throw TTSError.badURL }
+
+        let input = String(cleaned.prefix(1800))
+        var payload: [String: Any] = [
+            "model": config.model,
+            "input": input,
+            "voice": voice,
+            "response_format": "mp3"
+        ]
+        if abs(config.rate - 0.5) > 0.06 {
+            payload["speed"] = min(max(config.rate * 2.0, 0.25), 4.0)
+        }
+
+        do {
+            return try await requestSpeech(url: url, key: key, payload: payload)
+        } catch TTSError.http(let status, _) where status == 400 {
+            payload.removeValue(forKey: "response_format")
+            return try await requestSpeech(url: url, key: key, payload: payload)
+        }
     }
 
     var isSpeaking: Bool {

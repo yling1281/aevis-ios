@@ -23,6 +23,8 @@ struct PersonaSheet: View {
     @State private var pickedAvatar: PhotosPickerItem?
     @State private var editing = false
     @State private var showClearConfirm = false
+    /// #24（2026-09-30）：看 TA 的钱包改成从这里点进去。
+    @State private var showTaWallet = false
     @State private var note: String?
 
     private var persona: Persona { personaStore.persona }
@@ -64,6 +66,9 @@ struct PersonaSheet: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("只删聊天记录，人设、记忆、头像都留着。删了找不回来 —— 先导一份备份更稳妥。")
+            }
+            .sheet(isPresented: $showTaWallet) {
+                TaWalletSheet()
             }
             .onChange(of: pickedAvatar) { _, item in
                 guard let item else { return }
@@ -133,6 +138,10 @@ struct PersonaSheet: View {
             // 两行都撤了。外观设置仍在「设置 → 外观」里，功能一个没少。
             row("编辑资料", "名字、性别、性格、说话方式、关系、音色") {
                 editing = true
+            }
+            // #24（2026-09-30）：看 TA 的钱包从这儿点进去（钱包页里不再显示 TA 余额）。
+            row("TA 的钱包", WalletStore.money(WalletStore.shared.taBalance)) {
+                showTaWallet = true
             }
         }
         .aevisGlass(cornerRadius: 20)
@@ -217,5 +226,46 @@ struct PersonaSheet: View {
             .fill(Color.primary.opacity(0.07))
             .frame(height: 0.5)
             .padding(.leading, 16)
+    }
+}
+
+/// #24（2026-09-30）：从「TA 的资料」点进来的 TA 钱包（只读，假数据）。
+struct TaWalletSheet: View {
+    @ObservedObject private var wallet = WalletStore.shared
+    @ObservedObject private var personaStore = PersonaStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    private var personaName: String {
+        let name = personaStore.persona.name
+        return name.isEmpty ? "TA" : name
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text(WalletStore.money(wallet.taBalance))
+                    .font(.aevis(34, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("\(personaName)的钱包")
+                    .font(.aevis(13))
+                    .foregroundStyle(.secondary)
+                Text("这也是本机上的假数据 —— 不接真钱，也不会真的从谁那里扣。")
+                    .font(.aevis(12))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 54)
+            .frame(maxWidth: .infinity)
+            .background(AevisBackground().ignoresSafeArea())
+            .navigationTitle("TA 的钱包")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
     }
 }

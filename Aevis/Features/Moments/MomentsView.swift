@@ -42,15 +42,11 @@ struct MomentsView: View {
     /// 这条评论是回复谁的（nil = 直接评论动态）。
     @State private var replyToName: String?
 
-    // —— 封面：能往下拉大，也能点开成全屏 ——
+    // —— 封面：微信那样，半屏通栏、无圆角 ——
     //
-    // 用户 2026-09-28 原话：「这个背景图你还是没有改变啊，我的是半屏甚至全屏都可以」。
-    // 以前封面是**写死 170 高**的一块，怎么拉都不动。现在：
-    //   · 手指往下拖 → 跟着长高（拖到哪算哪，**半屏**就出来了）
-    //   · 点一下 → 在「170」和「铺满一屏」之间切换（**全屏**）
-    @State private var coverPull: CGFloat = 0
-    @State private var coverFullScreen = false
-    /// 可视区高度（当"全屏"高度的基准，不写死数字）。
+    // #26（用户 2026-09-30）推翻了 #19：「朋友圈你不要这样放大缩小，就是跟微信一样的」。
+    // 所以撤掉「往下拉长高」「点一下全屏」，改成**固定半屏高**的通栏封面，
+    // 右下角放 头像+名字+签名。
     @State private var viewportHeight: CGFloat = 600
 
     @State private var busy = false
@@ -91,12 +87,10 @@ struct MomentsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: cardSpacing) {
-                    // 量「往下拖了多少」——0 高，不占地方。
-                    // 拖出来的正值用来把封面拉高（见 coverHeight）。
-                    ScrollOffsetReader(pull: $coverPull)
+                // 封面通栏（半屏、无圆角），单独占一行；下面那些才有左右留白。
+                coverHeader
 
-                    coverHeader
+                LazyVStack(spacing: cardSpacing) {
                     composer
 
                     if moments.moments.isEmpty {
@@ -204,61 +198,44 @@ struct MomentsView: View {
 
     // MARK: - 我发一条
 
-    /// 封面当前该多高。
-    ///
-    /// · 点成了全屏 → 铺满一个可视区（= 全屏）
-    /// · 手指正往下拖 → 170 + 拖出来的量（拖一半就是**半屏**）
-    /// · 平时 → 170
+    /// 封面当前该多高。#26：固定半屏（取可视区的 42%），不再随拖动/点击变。
     private var coverHeight: CGFloat {
-        let base: CGFloat = 170
-        if coverFullScreen { return max(base, viewportHeight) }
-        return min(base + coverPull, max(base, viewportHeight))
+        max(220, viewportHeight * 0.42)
     }
 
-    /// 朋友圈封面 + 那句话（用户自己装扮的那块）。
+    /// 朋友圈封面 —— 微信那种：半屏通栏、无圆角，右下角 头像+名字+签名。
     ///
-    /// **没设就不显示** —— 不留一块空白占地方（他可以在「⋯ → 装扮朋友圈」里加上）。
+    /// **没设封面图就不显示**（不留一块空白占地方）。
     @ViewBuilder
     private var coverHeader: some View {
         if let data = settings.momentCoverData, let image = UIImage(data: data) {
             Color.clear
                 .frame(height: coverHeight)
-                // ⚠️ 同上：`image` 是 UIImage，要先包成 `Image(uiImage:)` 才能 .resizable()
                 .overlay(Image(uiImage: image).resizable().scaledToFill())
-                // ⚠️ overlay **不裁剪** → 不补这句，图会撑大整棵布局（踩过）
                 .clipped()
                 .overlay(
                     LinearGradient(
-                        colors: [Color.black.opacity(0.02), Color.black.opacity(0.5)],
+                        colors: [Color.black.opacity(0.02), Color.black.opacity(0.55)],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .overlay(alignment: .bottomLeading) {
-                    if !settings.momentSignature.isEmpty {
-                        Text(settings.momentSignature)
-                            .font(mfont(15, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                // 右下角：名字在头像左边，签名在名字下面。
+                .overlay(alignment: .bottomTrailing) {
+                    HStack(alignment: .bottom, spacing: 9) {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(displayName(for: .me))
+                                .font(mfont(16, weight: .semibold))
+                                .foregroundStyle(.white)
+                            if !profile.signature.isEmpty {
+                                Text(profile.signature)
+                                    .font(mfont(12))
+                                    .foregroundStyle(.white.opacity(0.92))
+                            }
+                        }
+                        AevisAvatar(source: .me, size: 62)
                     }
-                }
-                .overlay(alignment: .topTrailing) {
-                    // 全屏时给个"点回去"的提示，不然容易迷路（以为退不出去了）。
-                    if coverFullScreen {
-                        Image(systemName: "arrow.down.right.and.arrow.up.left")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(8)
-                            .background(Circle().fill(Color.black.opacity(0.32)))
-                            .padding(10)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: cardCorner, style: .continuous))
-                // 点一下在全屏 / 原大小之间切
-                .onTapGesture {
-                    withAnimation(.snappy(duration: 0.26)) {
-                        coverFullScreen.toggle()
-                    }
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 12)
                 }
         }
 
@@ -611,28 +588,5 @@ struct MomentsView: View {
         if elapsed < 86400 { return "\(Int(elapsed / 3600)) 小时前" }
         if elapsed < 86400 * 7 { return "\(Int(elapsed / 86400)) 天前" }
         return relativeFormatter.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-/// 量朋友圈「往下拖了多少」——拖出来的量决定封面拉多高。
-///
-/// ⚠️ **为什么单独写成一个 View，而不是在 `MomentsView` 里用
-///    `GeometryReader + onPreferenceChange`**：
-///    `onPreferenceChange` 在新 SDK 里的闭包是 `@Sendable` 的，而
-///    `MomentsView` 身上挂着 `@ObservedObject`（引用类型）→ **自身不是 Sendable**，
-///    在里面写状态会报「捕获了非 Sendable 的 self」（构建日志会多一条警告）。
-///    `onChange` 的闭包不是 `@Sendable`，所以把测量放进这个独立小视图最干净。
-private struct ScrollOffsetReader: View {
-    @Binding var pull: CGFloat
-
-    var body: some View {
-        GeometryReader { geo in
-            Color.clear
-                .onChange(of: geo.frame(in: .named("momentsScroll")).minY) { _, y in
-                    // 只认「往下拉」的量：往上滚的时候是负数，不算。
-                    pull = max(0, y)
-                }
-        }
-        .frame(height: 0)
     }
 }

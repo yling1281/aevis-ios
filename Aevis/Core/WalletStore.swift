@@ -45,13 +45,28 @@ final class WalletStore: ObservableObject {
     /// 我转给她。返回**实际转出去的金额**（钱不够就转不出来，回 0）。
     ///
     /// ⚠️ 真的会做余额校验 —— 假钱包也要自洽，不然余额变成负数就成了笑话。
+    /// ⭐ #23（2026-09-30）：这里**只扣我的钱**，TA 的钱等「她收下」那一刻才加
+    ///    （见 `acceptIncoming`）；她不肯收就 `refund` 退回。
     @discardableResult
     func send(amount: Double, note: String = "") -> Double {
         let value = (amount * 100).rounded() / 100
         guard value > 0, value <= myBalance else { return 0 }
         myBalance -= value
-        taBalance += value
         return value
+    }
+
+    /// 她收下我转过去的钱 → 加进她的余额。
+    func acceptIncoming(_ amount: Double) {
+        let value = (amount * 100).rounded() / 100
+        guard value > 0 else { return }
+        taBalance += value
+    }
+
+    /// 她不肯收 → 钱退回我的余额。
+    func refund(_ amount: Double) {
+        let value = (amount * 100).rounded() / 100
+        guard value > 0 else { return }
+        myBalance += value
     }
 
     /// 她转给我（红包 / 她主动给的那种）。**只加不减**，不会把我扣成负的。

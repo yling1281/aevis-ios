@@ -2,6 +2,7 @@ import Combine
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 #if canImport(UIKit)
 import UIKit
@@ -17,6 +18,8 @@ struct ChatView: View {
 
     /// 快捷指令送来的信号（要问的话、要弹的界面）在这里等着被取走。
     @ObservedObject private var bridge = BridgeInbox.shared
+    /// 表情包（输入框左边那个笑脸面板用；消息气泡那边也有自己的引用）。
+    @ObservedObject private var emoji = EmojiPack.shared
 
     @State private var draft = ""
     @State private var isSending = false
@@ -24,6 +27,8 @@ struct ChatView: View {
     @State private var toolNote: String?
     /// 底下那个「更多」面板（微信的加号）开没开。
     @State private var showMorePanel = false
+    /// 表情面板（输入框左边的笑脸点开）—— 用户 2026-09-30 要「我也能发表情包」。
+    @State private var showEmojiPanel = false
     /// 右上角「TA 的资料」开没开。
     @State private var showPersona = false
     @State private var sendTask: Task<Void, Never>?
@@ -78,6 +83,11 @@ struct ChatView: View {
                     morePanel
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+                // 表情面板（输入框左边笑脸点开）
+                if showEmojiPanel {
+                    emojiPanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 composer
             }
             // 面板和输入栏**共用**这一层背景，而且一直铺到屏幕最下沿 ——
@@ -121,6 +131,11 @@ struct ChatView: View {
             if focused, showMorePanel {
                 withAnimation(.snappy(duration: 0.22)) {
                     showMorePanel = false
+                }
+            }
+            if focused, showEmojiPanel {
+                withAnimation(.snappy(duration: 0.22)) {
+                    showEmojiPanel = false
                 }
             }
         }
@@ -483,6 +498,23 @@ struct ChatView: View {
     /// 输入栏这一排只留最必要的控件，不再铺一排按钮。
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 6) {
+            // 表情入口（微信输入框左边那个笑脸）—— 点开表情面板。
+            Button {
+                composerFocused = false
+                withAnimation(.snappy(duration: 0.22)) {
+                    showEmojiPanel.toggle()
+                    if showEmojiPanel { showMorePanel = false }
+                }
+            } label: {
+                Text(showEmojiPanel ? "⌨️" : "😊")
+                    .font(.aevis(settings.simpleMode ? 20 : 18))
+                    .frame(width: settings.simpleMode ? 38 : 34,
+                           height: settings.simpleMode ? 38 : 34)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 1)
+
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .font(.aevis(settings.simpleMode ? 17 : 15))
@@ -545,6 +577,52 @@ struct ChatView: View {
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 6)
+    }
+
+    // MARK: - 表情面板（用户 2026-09-30 要「我也能发表情包」）
+
+    private var emojiPanel: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            LazyVGrid(columns: emojiColumns, spacing: 8) {
+                ForEach(emoji.items) { item in
+                    Button {
+                        sendEmoji(item)
+                    } label: {
+                        emojiCell(item)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .frame(height: 230)
+    }
+
+    private let emojiColumns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 8)
+
+    @ViewBuilder
+    private func emojiCell(_ item: EmojiPack.Item) -> some View {
+        if let img = emoji.image(for: item) {
+            Image(uiImage: img)
+                .resizable().scaledToFit()
+                .frame(width: 34, height: 34)
+        } else {
+            Text(item.emoji)
+                .font(.aevis(26))
+                .frame(width: 34, height: 34)
+        }
+    }
+
+    /// 点一个表情就发出去。内置表情发 emoji 字符（气泡会放大显示）；
+    /// 自定义图片表情发图（正文写 `[名字]`，模型能懂那是什么）。
+    private func sendEmoji(_ item: EmojiPack.Item) {
+        if let img = emoji.image(for: item), let data = img.pngData() {
+            send(text: "[" + item.name + "]", image: data)
+        } else {
+            send(text: item.emoji, image: nil)
+        }
+        showEmojiPanel = false
     }
 
     // MARK: - 「更多」面板（微信那个加号下面的东西）
@@ -872,6 +950,24 @@ struct ChatView: View {
                     errorText = message
                 }
             }
+
+            // ⭐ 她发语音消息（2026-09-30）：文字之外再合成一条语音条（点一下播放）。
+            //    只走外部 API 音色（系统音色导不出音频文件）；合成失败就静默跳过，
+            //    文字已经在聊天里，不缺这一条。
+            if settings.voiceMessageEnabled, !accumulated.isEmpty {
+                let text = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    do {
+                        let audio = try await SpeechService.shared.synthesize(text, config: ttsConfig)
+                        var message = ChatMessage(role: .assistant, text: "", kind: .voice)
+                        message.voiceData = audio
+                        message.voiceDuration = SpeechService.duration(of: audio)
+                        chat.append(message)
+                    } catch {
+                        // 语音没合成出来也不挡，文字已经在了。
+                    }
+                }
+            }
         }
     }
 }
@@ -989,7 +1085,9 @@ private struct MessageBubble: View {
     private var bubble: some View {
         Group {
             #if canImport(UIKit)
-            if let data = message.imageData, let image = UIImage(data: data) {
+            if message.kind == .voice {
+                voiceBubble
+            } else if let data = message.imageData, let image = UIImage(data: data) {
                 // 图就是这条消息的全部内容 —— 那张图里 OCR 出来的文字在
                 // `message.text` 里，是**给她看的**，不该再显示一遍。
                 pictureBubble(image)
@@ -1005,6 +1103,57 @@ private struct MessageBubble: View {
                 textBubble
             }
             #endif
+        }
+    }
+
+    /// ⭐ 语音条（2026-09-30）：点一下播放/停止。
+    @State private var voicePlayer: AVAudioPlayer?
+    @State private var voicePlaying = false
+
+    private var voiceBubble: some View {
+        HStack(spacing: 8) {
+            Button(action: toggleVoice) {
+                Image(systemName: voicePlaying ? "stop.fill" : "play.fill")
+                    .font(.aevis(14, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+
+            Text(voiceLabel)
+                .font(.aevis(13))
+                .monospacedDigit()
+        }
+        .foregroundStyle(theme.fontColor)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, verticalPadding)
+        .background(
+            RoundedRectangle(cornerRadius: bubbleCorner, style: .continuous).fill(color)
+        )
+    }
+
+    private var voiceLabel: String {
+        guard let d = message.voiceDuration, d > 0 else { return "语音" }
+        return "\(Int(d.rounded()))″"
+    }
+
+    private func toggleVoice() {
+        guard let data = message.voiceData else { return }
+        if let p = voicePlayer, p.isPlaying {
+            p.stop()
+            voicePlayer = nil
+            voicePlaying = false
+            return
+        }
+        guard let p = try? AVAudioPlayer(data: data) else { return }
+        p.play()
+        voicePlayer = p
+        voicePlaying = true
+        let deadline = p.duration + 0.25
+        DispatchQueue.main.asyncAfter(deadline: .now() + deadline) { [weak self] in
+            guard let self else { return }
+            if self.voicePlayer === p {
+                self.voicePlaying = false
+                self.voicePlayer = nil
+            }
         }
     }
 

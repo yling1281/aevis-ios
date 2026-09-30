@@ -83,8 +83,6 @@ final class QQBotService: ObservableObject {
     private var attempt = 0
     private var running = false
 
-    /// 每个会话留一小段上下文 —— 不然她每一句都不记得上一句。
-    private var histories: [String: [ChatMessage]] = [:]
     /// 对同一条消息回过几次。**平台限制最多 5 次**，所以得自己数着。
     private var seqByMessage: [String: Int] = [:]
 
@@ -471,10 +469,27 @@ final class QQBotService: ObservableObject {
             return nil
         }
 
-        let key = "\(scope):\(target)"
-        var history = histories[key] ?? []
+        // ⭐【记忆互通】QQ 和 App 是同一个 TA、同一本账（用户 2026-09-30 定的）。
+        // 原来这里用一块临时内存 `histories[key]`（12 条、聊完就丢），
+        // 两边各记各的 —— QQ 上聊的 App 看不到，App 里聊的 QQ 也不知道。
+        // 现在改成直接读/写 App 的聊天记录（ChatStore），这样：
+        //   · 上下文 = 当前 TA 在 App 里的聊天记录（goesToModel 过滤掉占位/通话记录）
+        //   · 收到的、回出去的都写回 ChatStore —— App 聊天界面能看到 QQ 的对话
+        //   · 聊够一段顺手提炼长期记忆（MemoryStore），两边沉淀到同一本账
+        // ⚠️ ChatStore 是主线程隔离的（后台读会在 iOS 26 上崩），读写都要过 MainActor。
+        let ownerID = PersonaStore.shared.active?.id
+        let baseHistory: [ChatMessage] = await MainActor.run {
+            ChatStore.shared.messages.filter { $0.goesToModel }
+        }
+
+        // 用户这句记进 App 的聊天记录（role = .user 是「我」说的话）。
+        // 放在 guard 之后：只有确定是「跟她聊天」（不是「注册」那种指令）才记。
+        await MainActor.run {
+            ChatStore.shared.append(ChatMessage(role: .user, text: text), for: ownerID)
+        }
+
+        var history = baseHistory
         history.append(ChatMessage(role: .user, text: text))
-        if history.count > 12 { history.removeFirst(history.count - 12) }
 
         var memory = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
         memory.append("现在你在 QQ 上跟他说话（不是在 App 里）。对方叫「\(name)」。"
@@ -499,8 +514,22 @@ final class QQBotService: ObservableObject {
         let cleaned = Self.plain(collected)
         guard !cleaned.isEmpty else { return nil }
 
-        history.append(ChatMessage(role: .assistant, text: cleaned))
-        histories[key] = history
+        // 她的回复也写回 App 的聊天记录（role = .assistant 是 TA 说的话）。
+        await MainActor.run {
+            ChatStore.shared.append(ChatMessage(role: .assistant, text: cleaned), for: ownerID)
+        }
+
+        // 聊够一段就顺手提炼长期记忆（和 App 里聊天后那一步一样）。
+        // 传当前 TA 的全部消息，提炼时会跨 QQ 和 App 一起看。
+        if settings.memoryEnabled {
+            let all = await MainActor.run { ChatStore.shared.messages }
+            await MemoryStore.shared.extractIfNeeded(
+                config: settings.llm,
+                messages: all,
+                persona: persona
+            )
+        }
+
         return cleaned
     }
 

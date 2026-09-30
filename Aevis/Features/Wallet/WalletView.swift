@@ -73,13 +73,13 @@ struct WalletView: View {
         }
     }
 
-    // MARK: - 两边的余额
+    // MARK: - 我的余额
+    //
+    // ⚠️ #24（用户 2026-09-30）：钱包页**不再显示 TA 的余额** ——
+    //    看 TA 的钱包改成从聊天页右上角「TA 的资料」里点进去。
 
     private var balances: some View {
-        HStack(spacing: 12) {
-            balanceCard(title: "我的钱包", value: wallet.myBalance, mine: true)
-            balanceCard(title: "\(personaName)的钱包", value: wallet.taBalance, mine: false)
-        }
+        balanceCard(title: "我的钱包", value: wallet.myBalance, mine: true)
     }
 
     private func balanceCard(title: String, value: Double, mine: Bool) -> some View {
@@ -232,16 +232,33 @@ struct WalletView: View {
                                         isRedPacket: isRedPacket)
         let id = chat.appendTransfer(info)
 
-        // 隔一拍让"对面收下"—— 这是**假的**，但气泡上那个「待收款」得能变成
-        // 「已收款」，不然看起来就像钱转丢了。
+        // ⭐ #23（2026-09-30）：不再「隔一拍假装收下」—— 让她**犹豫一下再决定收不收**：
+        //   大概率收下（回一句），小概率不肯收（钱退回，也回一句）。
         sending = true
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            chat.markTransferAccepted(id)
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
+            if Double.random(in: 0..<1) < 0.85 {
+                wallet.acceptIncoming(sent)
+                chat.markTransferAccepted(id)
+                chat.append(ChatMessage(role: .assistant, text: Self.acceptLines.randomElement()!))
+            } else {
+                wallet.refund(sent)
+                chat.markTransferDeclined(id)
+                chat.append(ChatMessage(role: .assistant, text: Self.declineLines.randomElement()!))
+            }
             sending = false
             dismiss()
         }
     }
+
+    /// 她收下时随口回的那句。
+    private static let acceptLines = [
+        "收到啦，谢谢～", "好呀，收下了", "谢谢宝贝！", "那我就不客气啦", "收到，爱你"
+    ]
+    /// 她不肯收、把钱退回来时说的那句。
+    private static let declineLines = [
+        "这个就不收啦，心意领了", "不用啦，你自己留着花", "哎呀，这次先不要啦", "退给你啦，别破费"
+    ]
 }
 
 // MARK: - 聊天气泡
@@ -278,7 +295,7 @@ struct TransferBubble: View {
                     .font(.aevis(13.5, weight: .medium))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(info.accepted ? "已收款" : "待收款")
+                Text(transferStatus)
                     .font(.aevis(11))
                     .foregroundStyle(Color.white.opacity(0.85))
             }
@@ -297,6 +314,12 @@ struct TransferBubble: View {
                 .fill(LinearGradient(colors: [tint, tint.opacity(0.82)],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
         )
+    }
+
+    private var transferStatus: String {
+        if info.declined { return "已退回" }
+        if info.accepted { return "已收款" }
+        return "待收款"
     }
 }
 
@@ -319,6 +342,12 @@ struct TransferDetailSheet: View {
     private var personaName: String {
         let name = personaStore.persona.name
         return name.isEmpty ? "TA" : name
+    }
+
+    private var detailStatus: String {
+        if info.declined { return "已退回" }
+        if info.accepted { return "已收款" }
+        return "待收款"
     }
 
     var body: some View {
@@ -349,13 +378,14 @@ struct TransferDetailSheet: View {
                         .padding(.horizontal, 20)
                 }
 
-                Text(info.accepted ? "已收款" : "待收款")
+                Text(detailStatus)
                     .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
 
                 // 别人转给我的、还没收 → 给个「收下」。
-                // ⚠️ 只能是**她的转账**：我自己转出去的没有"收下"这回事。
-                if !isMine, !info.accepted {
+                // ⚠️ 只能是**她的转账**：我自己转出去的没有"收下"这回事；
+                //    已退回的也没有（钱早退回去了）。
+                if !isMine, !info.accepted, !info.declined {
                     Button {
                         wallet.receive(amount: info.amount)
                         chat.markTransferAccepted(message.id)
