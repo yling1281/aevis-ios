@@ -108,7 +108,7 @@ struct DouyinCard: View {
                     Spacer(minLength: 0)
                 }
 
-                Text("点赞和评论是在**这个浏览器里**完成的：第一次进去先登录一次（扫码或手机号），之后一直有效。抖音改版可能导致点不到按钮 —— 那种情况它会直接告诉你，不会假装成功。")
+                Text("点赞和评论是在这个浏览器里完成的：第一次进去先登录一次（扫码或手机号），之后一直有效。抖音改版可能导致点不到按钮 —— 那种情况它会直接告诉你，不会假装成功。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -120,7 +120,7 @@ struct DouyinCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text("这是逆向接入，没有官方接口 —— 抖音改协议就可能失效。Cookie 只存在这台手机的钥匙串里。**建议登录一个小号。**")
+                Text("这是逆向接入，没有官方接口 —— 抖音改协议就可能失效。Cookie 只存在这台手机的钥匙串里。建议登录一个小号。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

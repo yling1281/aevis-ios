@@ -813,16 +813,27 @@ def collect_localized_names(sources):
 
 
 def check_markdown_in_strings(path, source, localized):
-    r"""`**加粗**` 只在 `Text(LocalizedStringKey(…))` 或 `Text("字面量")` 里生效，
-    直接 `Text(变量)` 会把星号原样显示。
+    r"""String literal 里的 `**加粗**` 到底会不会被解析？**位置决定一切。**
 
-    真踩过：截图里出现「但**快捷指令可以**」—— 那句话是 `static let` 存好的
-    字符串，直接 `Text(那个变量)` 显示的，markdown 没被解析。
+    SwiftUI 只在两种拿法下解析 markdown：
+      · `Text(LocalizedStringKey("…**…**…"))`   → 解析（这是最保险的写法）
+      · `Text("…**…**…")`                        → **不解析**，星号原样显示
 
-    两个必须放过的，不然这条规则会天天误报然后被无视：
-    1. **喂给模型的工具描述**（`description:` / `instruction =`）——
-       提示词里写 markdown 不影响；
-    2. **只由星号组成的字符串**（`"**"`）—— 那是用来删星号的记号，不是文案。
+    ⚠️ 2026-10-01 修正：这条规则以前把 `Text("字面量")` 当成"安全"放过去了，
+    依据是"字面量会被当成 LocalizedStringKey"。**那个依据是错的** ——
+    `Text` 有一堆重载，**单行字符串字面量走的是 `Text(String)`，不做 markdown 解析**。
+    真踩了两次：
+      · 2026-09-29 钱包底部「这是**本机上的假钱包** …」（拼接，当次修了）
+      · 2026-10-01 用户截图投诉「app 登录界面串了」——
+        LoginView 里两条单行字面量「只发给**已经注册过**的邮箱」，星号明晃晃露着，
+        而这条规则当时正把它放过去了（"结果检查器说没问题，用户却看得见星号"）。
+    ⇒ 现在判据收紧成 `wrapped_key` 一种。历史上放过去过的 5 处已一并改成
+      `Text(LocalizedStringKey(…))`。
+
+    必须放过的（不然天天误报、规则就没人信了）：
+    1. **喂给模型的工具描述**（`description:` / `instruction =`）—— 提示词里 markdown 不影响；
+    2. **只由星号组成的字符串**（`"**"`）—— 那是用来删星号的记号，不是文案；
+    3. **`verbatim:` 和 `LocalizedStringKey(…)`** —— 前者本来就不解析、后者就是要解析的。
     """
     lines = source.splitlines()
     in_multiline = False
@@ -878,27 +889,24 @@ def check_markdown_in_strings(path, source, localized):
                 break
             literal = line[index + 1:scan]
             before = line[:index].rstrip()
-            # ⚠️ 只有**直接写在 `Text(` 里的那个字面量**才是 LocalizedStringKey、才解析
-            #    markdown。一旦后面接了 `+`（字符串拼接），`Text` 收到的是个 String
-            #    表达式，会走 `Text(String)` 那个重载 —— **星号照样原样显示**。
-            #    2026-09-29 真栽了：钱包底部那行
-            #    `Text("这是**本机上的假钱包** …" + "…")`，截图里星号明晃晃地露着，
-            #    而这条规则当时正因为"它紧跟 Text(" 把它放过去了。
-            #    `+` 可能写在下一行（拼接常这么断行），所以下一行也要看一眼。
             after = line[scan + 1:].strip()
             if not after and number < len(lines):
                 after = lines[number].strip()
-            # 三种拿法分开判：
-            #   Text(LocalizedStringKey("…**…**…"))  → 安全，拼接也没事（它就是要来解析的）
-            #   Text("…**…**…")                     → 安全，**前提是后面没接 `+`**
-            #   Text("…**…**…" + "…")               → 危险：成了 String 表达式，星号原样显示
+            # 只有 `Text(LocalizedStringKey("…"))` 真的解析 markdown。
+            # ⚠️ `verbatim:` 是**明确要求不解析**的，放过它（报了也没法"修"）。
             wrapped_key = bool(re.search(r"\bText\(\s*LocalizedStringKey\(\s*$", before))
-            plain_text = bool(re.search(r"\bText\(\s*$", before))
-            is_plain_literal = wrapped_key or (plain_text and not after.startswith("+"))
-            if _looks_like_prose(literal) and not is_plain_literal:
+            verbatim = bool(re.search(r"\bverbatim\s*:\s*$", before))
+            # 拼接（`+ "…"`）会让它变成 String 表达式 —— 星号同样原样显示。
+            # `+` 常写在下一行，所以 next-line 也要看。
+            if _looks_like_prose(literal) and not wrapped_key and not verbatim:
+                hint = ("拼接出来的要用 `Text(LocalizedStringKey(…))`，"
+                        if after.startswith("+") else
+                        "`Text(\"字面量\")` 走的是 `Text(String)`，不做 markdown 解析 —— "
+                        "包一层 `Text(LocalizedStringKey(…))`（或者干脆去掉星号，"
+                        "这两行本来就不值得加粗）")
                 report("R17", path, number,
-                       "这个字符串有 ** 加粗，但不是 Text 字面量，星号会原样显示"
-                       "（拼接出来的要用 Text(LocalizedStringKey(…))）")
+                       "这个字符串有 ** 加粗，但不是 `Text(LocalizedStringKey(…))`，"
+                       "星号会原样显示。" + hint)
                 break
             index = scan + 1
 

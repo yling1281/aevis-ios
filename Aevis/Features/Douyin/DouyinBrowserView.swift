@@ -79,7 +79,7 @@ struct DouyinBrowserView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("会填进抖音自己的评论框里。**发出去那一下你自己点**——撤不回来。")
+                Text("会填进抖音自己的评论框里。发出去那一下你自己点——撤不回来。")
             }
             .onAppear {
                 if !driver.isLoaded { driver.loadHome() }

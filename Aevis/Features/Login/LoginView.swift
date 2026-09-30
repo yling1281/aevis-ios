@@ -188,7 +188,7 @@ struct LoginView: View {
                 if working { ProgressView().controlSize(.small) }
             }
 
-            Text("验证码只发给**已经注册过**的邮箱。没注册过的话，用「我有注册码」那条路。")
+            Text("验证码只发给「已经注册过」的邮箱。没注册过的话，用「我有注册码」那条路。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

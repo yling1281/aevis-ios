@@ -45,8 +45,17 @@ settings:
     #    重载，`**加粗**` 不解析，**星号原样显示**（截图里明晃晃的，就是抓出来的）。
     #    改成 `Text(LocalizedStringKey(…))`；顺带给本地检查器补了 R17（以前它看到
     #    字面量紧跟 `Text(` 就放行，没注意后面接了 `+`）。
-    MARKETING_VERSION: "0.0.86"
-    CURRENT_PROJECT_VERSION: "86"
+    # ⚠️ 2026-10-01 0.0.87：
+    #    ① **修「app 登录界面串了」**（用户截图投诉）：`LoginView` 里两条
+    #       `Text("…**已经注册过**…")` 是**单行字面量** —— SwiftUI 只在
+    #       `Text(LocalizedStringKey(…))` 下解析 markdown，单行字面量走
+    #       `Text(String)`，**星号原样露着**。这轮把 R17 判据收紧（以前它把
+    #       "紧跟 Text( 的字面量"当安全放过 —— 那个依据是错的），一收紧又抓出
+    #       另外 4 处历史遗漏（抖音两处 / Bark 一处 / 抖音浏览器一处），一并修掉。
+    #        ⚠️ **教训**：检查器说"没问题"而用户看得见星号，比没有检查器更糟。
+    #    ② 聊天更真人、QQ 记忆互通等 11 项（详见下面的 0.0.87 段）。
+    MARKETING_VERSION: "0.0.87"
+    CURRENT_PROJECT_VERSION: "87"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
