@@ -39,10 +39,25 @@ import UIKit
 /// 两条都对上，结论才站得住。**只信静态会误判**（描述文件里可能有、
 /// 但系统运行时仍然拒绝；也可能是相反的奇怪情况）。
 ///
-/// ⚠️ 这个探针**不接任何媒体的真实通话**：`handleStart` 里只做最小动作
-/// （报告 connecting → 报告 connected → fulfill），然后 3 秒后自己挂断。
-/// 目的是看**系统界面弹不弹**，不是听声音。
-/// 这样用户点一下就能看到结论，也不会真的"打个没人的电话"。
+/// ⚠️ 这个探针**不接任何媒体的真实通话**：收到 start 动作后只做最小动作
+/// （报告 connecting → fulfill），然后自己挂断。目的是看**系统界面弹不弹**，
+/// 不是听声音。这样用户点一下就能看到结论，也不会真的"打个没人的电话"。
+///
+/// ## 🔧 API 用法更正（2026-10-01 第一次编译失败换来的）
+///
+/// 第一次写这个文件时，凭 CallKit 的旧印象**猜**了几处 API，全错，CI 报了一屏错。
+/// 对着 Apple 文档逐条改过，记在这里免得下次再猜：
+///
+/// | 我原来写的（错） | 真实 API |
+/// |---|---|
+/// | `manager.endConversation(uuid:)` | **不存在** → `try await manager.perform([EndConversationAction(conversationUUID: uuid)])` |
+/// | `action.capabilities = [.pausing]` | `StartConversationAction` **没有** `capabilities`，capabilities 只在 `Conversation.Update` 里 |
+/// | `reportConversationEvent(_:for: UUID)` | 要的是 `Conversation` **对象**，不是 UUID |
+/// | `start.fulfill()` / `end.fulfill()` | `fulfill(dateStarted:)` / `fulfill(dateEnded:)` |
+/// | `ConversationManagerDelegate` 只实现 `perform:` | 是 **7 个 required 方法**，一个都不能少（见文件末尾） |
+///
+/// ⚠️ 全部 LiveCommunicationKit 的类都是 **iOS 17.4+**，所以每处用法都要
+/// `if #available(iOS 17.4, *)`；`project.yml` 里 deploymentTarget 也提到了 17.4。
 ///
 /// ⚠️ 整个类是 `@MainActor` 的 —— 今天在音乐那个 bug 上栽过一次：
 /// `await` 一个 nonisolated 的 async 函数**会跳回后台线程**，
@@ -86,7 +101,6 @@ final class CallProbeModel: ObservableObject {
     private var conversationUUID = UUID()
 
     /// ⚠️ 必须**自己持有** manager（不能只放在局部变量里）。
-    /// WWDC 样例里 `manager.delegate = self` 是让 View 持有的；
     /// 真实 App 里 delegate 掉了就什么都不响应了 —— 这是常见翻车点。
     private var manager: ConversationManager?
 
@@ -95,7 +109,7 @@ final class CallProbeModel: ObservableObject {
 
     /// 这一轮是不是真的把系统界面调出来了。
     /// `StartConversationAction` 被 fulfill 只说明**我们**做完了，
-    /// 真正"界面弹出来了"的证据是 delegate 收到了 start 动作。
+    /// 真正"界面弹出来了"的证据是 delegate 收到了动作。
     private var sawSystemAction = false
 
     // MARK: - 体检报告（界面出来之后立刻打一份）
@@ -113,8 +127,15 @@ final class CallProbeModel: ObservableObject {
         say("系统       : iOS \(UIDevice.current.systemVersion) · \(machineName())")
         say(contentsOf: profileReport())
         say(contentsOf: backgroundReport())
+
+        if #available(iOS 17.4, *) {
+            say("系统版本   : ✅ 够（LiveCommunicationKit 要 17.4+）")
+        } else {
+            say("系统版本   : ❌ 低于 17.4 —— LiveCommunicationKit 整个用不了，这是死因")
+        }
+
         say("")
-        say("这个探针不接真实通话（3 秒自动挂断），只测「系统界面弹不弹」。")
+        say("这个探针不接真实通话（自己会挂断），只测「系统界面弹不弹」。")
         say("")
 
         // 麦克风权限先要下来 —— 不然系统在起会话那一步会拒，
@@ -187,6 +208,14 @@ final class CallProbeModel: ObservableObject {
     /// 拨一通"假的"电话 —— 只为了看系统界面弹不弹。
     func start() async {
         guard phase != .starting else { return }
+
+        // LiveCommunicationKit 全线 17.4+，低版本直接给结论，别让系统抛个看不懂的错。
+        guard #available(iOS 17.4, *) else {
+            phase = .failed
+            say("❌ 这台机器 iOS \(UIDevice.current.systemVersion) 低于 17.4，LiveCommunicationKit 用不了。")
+            return
+        }
+
         phase = .starting
         sawSystemAction = false
         justCopied = false
@@ -211,14 +240,11 @@ final class CallProbeModel: ObservableObject {
         conversationUUID = UUID()
         let handle = Handle(type: .generic, value: "aevis-probe", displayName: "Aevis 探针")
 
-        var action = StartConversationAction(
+        let action = StartConversationAction(
             conversationUUID: conversationUUID,
             handles: [handle],
             isVideo: false
         )
-        // ⚠️ 只留「静音」一个能力，别声明 video/merging —— 声明了系统会按那个
-        //    去要更多东西，探针没必要给自己加变量。
-        action.capabilities = [.pausing]
 
         say("调 StartConversationAction…（这一步最能说明问题）")
         do {
@@ -264,11 +290,14 @@ final class CallProbeModel: ObservableObject {
     /// 收尾：把这次会话从系统里摘干净。
     /// ⚠️ 不做这一步的话，系统里可能留一条"进行中"的通话，
     /// 下一次测试的状态会被它带偏（第二次测出来的是上一次的残留）。
+    ///
+    /// ⚠️ **没有** `endConversation(uuid:)` 这个方法（第一次就是这么写错的）。
+    /// 正解是再走一次 `perform`，把 `EndConversationAction` 派给系统。
     func hangUp() async {
-        guard let manager else { return }
-        say("挂断（endConversation）…")
+        guard #available(iOS 17.4, *), let manager else { return }
+        say("挂断（EndConversationAction）…")
         do {
-            try await manager.endConversation(uuid: conversationUUID)
+            try await manager.perform([EndConversationAction(conversationUUID: conversationUUID)])
             say("✅ 挂断成功")
         } catch {
             say("挂断报错（不影响结论）：\(describe(error))")
@@ -281,7 +310,11 @@ final class CallProbeModel: ObservableObject {
     func reset() {
         autoHangup?.cancel()
         autoHangup = nil
-        manager?.delegate = nil
+        if #available(iOS 17.4, *) {
+            manager?.delegate = nil
+            // `invalidate()` 会顺手把还挂着的会话全结束掉，比只置 nil 干净。
+            manager?.invalidate()
+        }
         manager = nil
         phase = .idle
         sawSystemAction = false
@@ -309,6 +342,12 @@ final class CallProbeModel: ObservableObject {
         say("⭐ 系统回调：\(name) —— 【这说明界面真的弹出来了】")
     }
 
+    /// 系统状态变了（接通/结束…）。这类回调本身也是"系统真在管我们"的证据。
+    func noteChanged(_ text: String) {
+        sawSystemAction = true
+        say("⭐ 会话状态：\(text)")
+    }
+
     // MARK: - 日志与复制
 
     func say(_ line: String) { lines.append(line) }
@@ -326,13 +365,51 @@ final class CallProbeModel: ObservableObject {
 }
 
 // MARK: - ConversationManagerDelegate
-
-/// ⚠️ **这个 extension 不能用 `@MainActor` 包**（协议方法不是主 actor 隔离的），
-/// 所以里面动 `@Published` 一律 `Task { @MainActor in … }` —— 这条今天刚踩过
-/// （音乐闪退就是"后台改 @Published"）。
+//
+// ⚠️⚠️ 这个协议一共 **7 个 required 方法**，少一个就编译不过，
+// 而且编译器的报错会指到"argument labels 不一样"上，很容易看歪
+// （第一次就栽在这：以为 `perform:` 名字写错了，其实是别的没实现）。
+// 必须全的：DidBegin / DidReset / conversationChanged / didActivate /
+// didDeactivate / perform / timedOutPerforming。
+//
+// ⚠️ **这个 extension 不能用 `@MainActor` 包**（协议方法不是主 actor 隔离的），
+// 所以里面动 `@Published` 一律 `Task { @MainActor in … }` —— 这条今天刚踩过
+// （音乐闪退就是"后台改 @Published"）。
 extension CallProbeModel: ConversationManagerDelegate {
 
-    /// 系统把"用户/system 发起的动作"派回来。
+    nonisolated func conversationManagerDidBegin(_ manager: ConversationManager) {
+        Task { @MainActor in self.say("· delegate：manager 开始了") }
+    }
+
+    nonisolated func conversationManagerDidReset(_ manager: ConversationManager) {
+        Task { @MainActor in self.say("· delegate：manager 被重置了") }
+    }
+
+    /// 会话状态变了。**这条是"系统真的在建这个通话"的硬证据**。
+    nonisolated func conversationManager(
+        _ manager: ConversationManager,
+        conversationChanged conversation: Conversation
+    ) {
+        let state = String(describing: conversation.state)
+        Task { @MainActor in self.noteChanged("conversationChanged → \(state)") }
+    }
+
+    /// 系统把音频会话交给 App 了 —— 说明通话**真的接通了**（界面已弹出）。
+    nonisolated func conversationManager(
+        _ manager: ConversationManager,
+        didActivate audioSession: AVAudioSession
+    ) {
+        Task { @MainActor in self.noteSystemAction("didActivate（音频会话激活了，通话真的接上了）") }
+    }
+
+    nonisolated func conversationManager(
+        _ manager: ConversationManager,
+        didDeactivate audioSession: AVAudioSession
+    ) {
+        Task { @MainActor in self.say("· delegate：音频会话放开了") }
+    }
+
+    /// 系统把"用户/系统发起的动作"派回来。
     /// 我们主动拨出时，**系统界面弹出来那一下就会回调这里**（`.start`）。
     /// 所以「收到这个回调」= 「界面真的弹了」。
     nonisolated func conversationManager(
@@ -347,27 +424,46 @@ extension CallProbeModel: ConversationManagerDelegate {
 
         // ⚠️ 必须 fulfill（或 fail），否则系统会一直等我们，
         //    那个"通话"卡在半空中，用户会看到一个转不出去的界面。
-        switch action {
-        case let start as StartConversationAction:
-            // 真实通话是在这里接上媒体流；探针只要"接通"这个状态。
-            Task { @MainActor in
-                let uuid = self.conversationUUID
-                manager.reportConversationEvent(.conversationStartedConnecting(.now),
-                                                for: self.manager?.conversations
-                                                    .first { $0.uuid == uuid } ?? start.conversationUUID)
+        if #available(iOS 17.4, *) {
+            switch action {
+            case let start as StartConversationAction:
+                // 真实通话是在这里接上媒体流；探针只要"接通"这个状态。
+                // ⚠️ reportConversationEvent 要的是 Conversation 对象（不是 uuid），
+                //    系统刚派 action 时 conversations 里一般已经有它了。
+                if let conversation = manager.conversations.first(where: { $0.uuid == start.conversationUUID }) {
+                    manager.reportConversationEvent(
+                        .conversationStartedConnecting(.now),
+                        for: conversation
+                    )
+                    manager.reportConversationEvent(
+                        .conversationConnected(.now),
+                        for: conversation
+                    )
+                }
+                start.fulfill(dateStarted: .now)
+
+            case let end as EndConversationAction:
+                Task { @MainActor in self.say("系统要求挂断 —— 已照做") }
+                end.fulfill(dateEnded: .now)
+
+            case let mute as MuteConversationAction:
+                Task { @MainActor in self.say("系统要求静音切换 —— 已照做") }
+                mute.fulfill()
+
+            default:
+                action.fulfill()
             }
-            start.fulfill()
-
-        case let end as EndConversationAction:
-            Task { @MainActor in self.say("系统要求挂断 —— 已照做") }
-            end.fulfill()
-
-        case let mute as MuteConversationAction:
-            Task { @MainActor in self.say("系统要求静音切换 —— 已照做") }
-            mute.fulfill()
-
-        default:
+        } else {
             action.fulfill()
         }
+    }
+
+    /// 系统等我们 fulfill 等到超时了 —— 这个也要报出来，是"卡住"的信号。
+    nonisolated func conversationManager(
+        _ manager: ConversationManager,
+        timedOutPerforming action: ConversationAction
+    ) {
+        let name = String(describing: type(of: action))
+        Task { @MainActor in self.say("⚠️ 动作超时了：\(name)（系统没等到我们回话）") }
     }
 }

@@ -322,7 +322,10 @@ targets:
   AevisCallProbe:
     type: application
     platform: iOS
-    deploymentTarget: "17.0"
+    # ⚠️ **17.4 不是 17.0** —— LiveCommunicationKit 整个框架都是 17.4 起步的。
+    # 第一次写 17.0，CI 报了一屏 "is only available in iOS 17.4 or newer"。
+    # 探针只在一台 iOS 26 的机器上跑，条件放宽没意义，索性按框架要求来。
+    deploymentTarget: "17.4"
     sources:
       - path: AevisCallProbe/App
         excludes:
