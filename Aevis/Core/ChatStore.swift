@@ -307,9 +307,21 @@ final class ChatStore: ObservableObject {
     }
 
     /// 流式回复期间只改内存，不每次落盘。
+    ///
+    /// ⚠️ **必须 trim 首尾空白** —— 2026-10-01 修的，症状是「她每句话开头多一个空格」：
+    ///
+    /// 模型经常会吐成 `" 我这 儿还看不到日期呢宝宝。"`（行首一个空格）。
+    /// 这个半句先经这里上屏（带空格），等换行真到了，`finishStreamingLine`
+    /// 会 trim 一次再定稿 —— 看着应该能盖掉。但**盖不掉**，因为
+    /// `isSameLine` 比较前会把两边的空白/标点全洗掉（见它自己的注释），
+    /// 于是带空格的那版和定稿版被判成"同一条"→ 走"跳过定稿"那条分支 →
+    /// **留在屏幕上的还是带空格的那版**。
+    ///
+    /// 治本就在这一行：这里显示的本来就只是"还没定稿的半句"，
+    /// 首尾空白没有任何意义，trim 掉之后两条路径就完全一致了。
     func replaceLast(with text: String) {
         guard let index = messages.indices.last else { return }
-        messages[index].text = text
+        messages[index].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 流式结束后落盘。
@@ -339,6 +351,12 @@ final class ChatStore: ObservableObject {
         if let index = messages.indices.last,
            messages[index].role == .assistant,
            Self.isSameLine(messages[index].text, trimmed) {
+            // ⚠️ **顺手把最后一条换成定稿版**（2026-10-01 加）。
+            // 屏幕上那半句可能带着首尾空白（模型爱在行首留空格），
+            // 而 `isSameLine` 洗掉空白之后照样判成"同一条"。
+            // 只补空占位、不覆盖的话，带空格的那版就永久留在聊天气泡里了。
+            // 覆盖成 `trimmed` 是安全的 —— 两边去空白后本来就相等。
+            messages[index].text = trimmed
             // 定稿的动作跳过，但**空占位必须补上** —— 不补的话下一条
             // 半句会直接覆盖掉刚定稿的这一条。
             messages.append(ChatMessage(role: .assistant, text: ""))
@@ -410,6 +428,25 @@ final class ChatStore: ObservableObject {
             guard let id = UUID(uuidString: item.key) else { return }
             result[id] = item.value
         }
+        // ⚠️ 顺手洗一遍**已经存下来**的首尾空白（2026-10-01）。
+        //
+        // 0.0.92 之前有个 bug：模型的半句带着行首空格先上屏，定稿时因为
+        // `isSameLine` 洗掉空白后判成"同一条"而跳过，于是那条带空格的消息
+        // **被写进了历史**。上面那两处修的是"以后不再产生"，
+        // 这里修的是"已经躺在记录里的那些" —— 不然用户升级之后
+        // 照样能看到「 我这 儿还看不到日期呢宝宝。」这种开头顶一格的消息。
+        //
+        // ⚠️ **先收集、再赋值** —— 不能边遍历 `byContact` 边写它，
+        // Swift 的独占内存访问会当场报 "overlapping accesses"。
+        var cleaned: [UUID: [ChatMessage]] = [:]
+        for (id, list) in byContact {
+            cleaned[id] = list.map { message in
+                var copy = message
+                copy.text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return copy
+            }
+        }
+        byContact = cleaned
         // 注意：这里**不**去读老文件 —— 老的对话该认到哪个联系人名下，
         // 只有 PersonaStore 知道，等它调 adoptLegacyMessages(for:) 再说。
     }
