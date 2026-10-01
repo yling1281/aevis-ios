@@ -14,6 +14,7 @@
 #   -aevisNoGlass / -aevisSimple / -aevisCustomBackground
 #   -aevisOpenMoments / -aevisOpenTogether / -aevisOpenMemoryList
 #   -aevisOpenPlayer        打开全屏播放器（会顺手塞一首假歌）
+#   -aevisOpenCall          打开通话页并摆成"正在通话"（模拟器起不了真电话）
 #   -aevisTogetherDemo      假装一起听开着（两个头像那一行才会出现）
 #   -aevisSelfCheck         自检页
 #   -aevisShowGate          强制显示「未授权」门禁页（本机存过授权也照样显示）
@@ -88,3 +89,17 @@
 
 # 假钱包那张（转账 / 红包）—— 必须带 -aevisOpenWallet，不然截到的是聊天页。
 38-wallet      -aevisDemo -aevisOpenTab=chats -aevisOpenChat -aevisOpenWallet
+
+# 一起听里那个「打字聊」输入框（用户 2026-09-30 要的）。
+# ⚠️ 必须带 -aevisOpenListenChat：模拟器里没有 API Key，正常路径打不开这一层。
+39-listen-chat -aevisDemo -aevisOpenPlayer -aevisTogetherDemo -aevisOpenListenChat
+
+# 「AI 权限」那张卡（总开关 + 13 类分闸）—— 上一轮漏了，补上。
+40-aitools     -aevisDemo -aevisOpenSettings -aevisSettingsFocus=aitools
+
+# 通话页（用户 2026-10-01：「第三个的话呢，可以加点功能」）。
+# 这一张盯的是两个新东西：**免提按钮**（静音 / 免提 / 挂断 三个一排）
+# 和底下的**打字输入框**。
+# ⚠️ 必须带 -aevisOpenCall：模拟器里没有麦克风权限也没有 API Key，
+#    真起一通电话必然失败 → `state` 回 `.idle` → 那一层根本不显示，等于白截。
+41-call        -aevisDemo -aevisOpenCall
