@@ -147,8 +147,8 @@ settings:
     #      （手机上就能办，不用开电脑）—— 这条链**本来就通**，已线上核验。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
     #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.93"
-    CURRENT_PROJECT_VERSION: "93"
+    MARKETING_VERSION: "0.0.94"
+    CURRENT_PROJECT_VERSION: "94"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
@@ -260,11 +260,9 @@ targets:
   #    实时活动不依赖 App Group / 特殊权限，侧载重签比录屏扩展好过得多，
   #    所以「摘掉它」本来也不是我们需要的那条应急路。
   #
-  # ⚠️ 版本号必须跟**父 App `Aevis` 一模一样**（`0.0.93 / 93`）。
-  #    不写就会继承根工程的 `0.0.93 / 93`（也一样），但**显式写出来**是为了
-  #    以后根工程版本号动了、这里不会被忘记 —— 一旦父子版本不一致，
-  #    `ValidateEmbeddedBinary` 会当场报 CFBundleVersion 不匹配、CI 挂掉。
-  #    （这个坑在 AevisCallProbe2Ext 那边真踩过。）
+  # ⚠️ 版本号**不在这里写** —— 跟 `AevisBroadcast` 一样完全继承根工程那一份
+  #    （见下面 target 里那段注释）。父子不一致会让 `ValidateEmbeddedBinary`
+  #    当场报 CFBundleVersion 不匹配、CI 直接挂（`AevisCallProbe2Ext` 真踩过）。
   AevisLive:
     type: app-extension
     platform: iOS
@@ -284,8 +282,16 @@ targets:
         GENERATE_INFOPLIST_FILE: "NO"
         SKIP_INSTALL: "YES"
         TARGETED_DEVICE_FAMILY: "1,2"
-        MARKETING_VERSION: "0.0.93"
-        CURRENT_PROJECT_VERSION: "93"
+        # ⚠️ 这里**故意不写** `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`。
+        #
+        # 父 App `Aevis` 也一样不写（它俩都继承根工程那一份）—— 这是**刻意的**：
+        # 一旦父子版本不一致，`ValidateEmbeddedBinary` 会当场报 CFBundleVersion
+        # 不匹配、CI 直接挂（这个坑在 `AevisCallProbe2Ext` 那边真踩过）。
+        #
+        # 而"两边都手写、要求人记得同时改"**正是会忘的那种事** ——
+        # 本轮就现成撞了一次：根工程升 0.0.94，这里还留着 0.0.93。
+        # 所以改成**跟 `AevisBroadcast` 一样完全继承根工程**：
+        # 版本号只有一处（project.yml 顶部），父子想不一致都不行。
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
       configs:
         Debug:
@@ -557,12 +563,14 @@ targets:
         SKIP_INSTALL: "YES"
         TARGETED_DEVICE_FAMILY: "1,2"
         # ⚠️ 这两个必须跟**父 App 一模一样**（2026-10-01 CI 报过警告）。
-        #    根工程那边是 `0.0.93 / 93`，扩展不写就继承那个 —— 于是
-        #    `ValidateEmbeddedBinary` 当场报：
+        #    这里**故意**不学 `AevisLive` / `AevisBroadcast` 那样"啥都不写靠继承" ——
+        #    因为二探针的父 App（`AevisCallProbe2`）自己就写了 `1.0.0 / 1`，
+        #    不跟它对齐的话，`ValidateEmbeddedBinary` 当场报：
         #      "The CFBundleVersion of an app extension ('93') must match
         #       that of its containing parent app ('1')."
         #    这是**真会被系统较真**的一条：父子版本不一致的嵌套包，
-        #    安装/校验时可能直接拒。父 App 用的是 `1.0.0 / 1`，这里就得跟。
+        #    安装/校验时可能直接拒。
+        #    （注意别照抄根工程那个号 —— 根工程是 `0.0.9x`，跟探针不是一套。）
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"

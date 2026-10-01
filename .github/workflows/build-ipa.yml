@@ -316,22 +316,28 @@ jobs:
           codesign -f -s - --deep Payload/Aevis.app || true
           /usr/bin/zip -qry -X Aevis-adhoc.ipa Payload
 
-          # 录屏扩展是不是真的被嵌进去了。
+          # 扩展是不是真的被嵌进去了。
           #
-          # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**，
-          # 而界面不会报任何错 —— 用户只会觉得"点了没反应"。
-          # 所以这里明确打出来，出问题时一眼就能定位。
+          # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**（灵动岛那个同理：
+          # 扩件不在，实时活动永远不会显示），而界面不会报任何错 ——
+          # 用户只会觉得"点了没反应"。所以这里明确打出来，出问题时一眼能定位。
+          #
+          # ⚠️ 要**逐个**打注册点。现在 PlugIns 里有**两个** appex
+          #    （`AevisBroadcast` + `AevisLive`），原来那句 `... | head -1`
+          #    只会打第一个 —— 于是靠这行日志判断"灵动岛扩件嵌进去没有"会看不全。
           if [ -d Payload/Aevis.app/PlugIns ]; then
             echo "内嵌扩展："
             ls -1 Payload/Aevis.app/PlugIns/
-            APPEX=$(ls -d Payload/Aevis.app/PlugIns/*.appex 2>/dev/null | head -1)
-            if [ -n "$APPEX" ]; then
-              echo "扩展注册点："
-              /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" \
-                "$APPEX/Info.plist" 2>/dev/null || echo "  （读不到，Info.plist 可能有问题）"
+            APPEXES=$(ls -d Payload/Aevis.app/PlugIns/*.appex 2>/dev/null || true)
+            if [ -n "$APPEXES" ]; then
+              for APPEX in $APPEXES; do
+                echo "扩展注册点（$(basename "$APPEX")）："
+                /usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPointIdentifier" \
+                  "$APPEX/Info.plist" 2>/dev/null || echo "  （读不到，Info.plist 可能有问题）"
+              done
             fi
           else
-            echo "没有 PlugIns 目录 —— 这次没有嵌录屏扩展"
+            echo "没有 PlugIns 目录 —— 这次没有嵌任何扩展"
           fi
 
           ls -lh Aevis-unsigned.ipa Aevis-adhoc.ipa
