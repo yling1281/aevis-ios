@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  ⚠️ 这个扩展**故意什么权限都不申请**，连 `aps-environment` 都不写。
+
+	  为什么：这颗探针要测的假设是「**因为包里嵌了扩展，重签时资格没传下去**」。
+	  如果给扩展也写一条 `aps-environment`，那测出来的就变成了
+	  "扩展也声明了资格会怎样"—— 那是另一个问题，会把水搅浑。
+
+	  保持成这样：扩展是一个**纯粹的负担**（重签时必须单独给它签一份），
+	  这正好复现主 App 那个 `AevisBroadcast.appex` 的处境。
+	-->
+</dict>
+</plist>

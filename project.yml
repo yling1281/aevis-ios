@@ -421,6 +421,96 @@ targets:
         Release:
           SWIFT_COMPILATION_MODE: "wholemodule"
 
+  # ——— 通话**二**探针（2026-10-01 下午补）———
+  #
+  # 第一颗探针（`AevisCallProbe`）只证明了：**一个干净的小包也弹不出系统界面**。
+  # 它**没能**排除的是「主 App 和它结构不一样」这条路 —— 对照下来有三处差异：
+  #
+  #   | # | 主 App                  | 第一颗探针      | 嫌疑 |
+  #   |---|-------------------------|-----------------|------|
+  #   | 1 | **嵌了 AevisBroadcast** | 一个可执行文件  | 🔴 最大 |
+  #   | 2 | deploymentTarget 17.0   | 17.4            | ⚠️ 存疑 |
+  #   | 3 | 一起床就占着音频会话    | 干净启动        | ⚠️ 存疑 |
+  #
+  # 这颗探针把 #2、#3 **按主 App 的方式对齐**（17.4 + 启动先占音频会话），
+  # 好让比较只剩 #1 这一条。而 #1 靠 **`.release/no-extension` 开关**来测：
+  #   · 摘掉扩展还**不**弹 ⇒ 跟结构无关，**就是描述文件没资格**（回到原结论）
+  #   · 摘掉扩展**就弹了**   ⇒ 元凶锁定「扩展的签名」，主 App 也能照做
+  #
+  # ⚠️ 它**故意嵌一个假扩展**（`AevisCallProbe2Ext`）—— 这就是 #1 的对照组。
+  #    那个扩展什么都不做，只是让包里多一个 `PlugIns/*.appex`，
+  #    复现"重签时要管两个 bundle"这个局面。
+  #
+  # ⚠️ 别的照抄第一颗探针：
+  #   · 在 `extension` 标记块**外面**（走应急路时不被连带摘掉）
+  #   · 主 App **不依赖**它
+  #   · 不接真实通话（3 秒自动挂断）
+  #   · 要出包：把 `.release/callprobe2` 改成 1 再推。出完**人工**改回 0。
+  AevisCallProbe2:
+    type: application
+    platform: iOS
+    # 跟主 App 的运行时行为对齐（主 App 是 17.0 + #available，
+    # 在 iOS 26 上跑出来的效果和 17.4 一样）—— 目的是让两颗探针的差异只剩"嵌不嵌扩展"。
+    deploymentTarget: "17.4"
+    sources:
+      - path: AevisCallProbe2/App
+        excludes:
+          - "Info.plist"
+          - "AevisCallProbe2.entitlements"
+    # >>> probe2-ext-dep:start
+    # ⭐ 这一句就是**要做实验的那一项**。
+    #    摘掉它（连带下面那个 target）= 一个不嵌扩展的二探针。
+    dependencies:
+      - target: AevisCallProbe2Ext
+        embed: true
+    # <<< probe2-ext-dep:end
+    settings:
+      base:
+        PRODUCT_NAME: AevisCallProbe2
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.callprobe2
+        INFOPLIST_FILE: AevisCallProbe2/App/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: AevisCallProbe2/App/AevisCallProbe2.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+
+  # >>> probe2-ext:start
+  # 二探针里那个**假扩展** —— 什么都不做，只是让包里多一个 `.appex`。
+  # 它存在的唯一理由是复现「重签时要管两个可执行文件」这个局面。
+  AevisCallProbe2Ext:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.4"
+    sources:
+      - path: AevisCallProbe2Ext
+        excludes:
+          - "Info.plist"
+          - "AevisCallProbe2Ext.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: AevisCallProbe2Ext
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.callprobe2.ext
+        INFOPLIST_FILE: AevisCallProbe2Ext/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: AevisCallProbe2Ext/AevisCallProbe2Ext.entitlements
+        SKIP_INSTALL: "YES"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+  # <<< probe2-ext:end
+
 schemes:
   Aevis:
     build:
@@ -454,3 +544,16 @@ schemes:
       config: Debug
     archive:
       config: Release
+
+  # 二探针的 scheme。
+  # >>> probe2-ext-scheme:start
+  AevisCallProbe2:
+    build:
+      targets:
+        AevisCallProbe2: all
+        AevisCallProbe2Ext: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  # <<< probe2-ext-scheme:end

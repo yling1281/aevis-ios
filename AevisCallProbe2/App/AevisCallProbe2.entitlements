@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  ⭐ 跟 `AevisCallProbe`（第一颗探针）**一字不差** —— 这是故意的。
+
+	  两颗探针的差别**只允许**在「包的结构」上（嵌不嵌扩展），
+	  权限这半边必须完全对齐，否则测出来的差异分不清是哪一条造成的。
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>
