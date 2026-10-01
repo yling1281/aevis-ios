@@ -183,35 +183,38 @@ struct ChatView: View {
                 .environmentObject(personaStore)
                 .environmentObject(settings)
         }
-        // 顶栏那个电话按钮 —— 先问一句"打给谁 / 怎么打"，再进通话页。
+        // 顶栏那个电话按钮 —— 直接进通话页。
         //
-        // ⚠️ 为什么不当场 `router.startCall()`：用户原话是
-        //    「点了让他打电话，就自动手机退出去……灵动岛就直接来了个电话」，
-        //    也就是**他要的是苹果那套来电**，而不是我们自己的全屏页。
-        //    这个弹窗把两条路的区别（还有"退到主界面"那一步 iOS 做不了）讲清楚，
-        //    免得他以为按钮坏了。
-        .confirmationDialog(
-            "打电话给\(persona.name.isEmpty ? "TA" : persona.name)",
-            isPresented: $showDialer,
-            titleVisibility: .visible
+        // 🔴 **2026-10-01 真机实测之后改的**：以前这里弹一个两选项的对话框
+        //    （「打给她（用苹果的来电界面）」/「直接打」）。但**探针实测的结论是
+        //    「苹果那套界面弹不出来」** —— 全能签重签用的描述文件里没有
+        //    `aps-environment`，`LiveCommunicationKit` 要的正是它。
+        //
+        //    留着一个**明知不通**的选项是骗人：老板点了它，看到的是
+        //    "进了自己的通话页、灵动岛什么也没发生" —— 还以为是我们写坏了。
+        //    所以那个选项**删掉**，对话框也一并删掉（只剩一条路，没得选）。
+        //
+        // ⚠️ 想恢复那个选项的唯一前提：**换一份带通话资格的描述文件**
+        //    （要么买了开发者账号自己签，要么全能签那边认了这条）。
+        //    在那之前，这里不再显示任何"苹果来电界面"的字样。
+        //
+        // ⚠️ 那句解释**只在真的失败之后**弹 —— 判据是 `SystemCall.lastFailure`。
+        //    顺序是：点按钮 → 直接进通话页 → `CallService.start()` 去调系统界面
+        //    → 成功就什么都不弹，失败才把原因摆出来，**不预先下结论**。
+        .onChange(of: SystemCall.callFailureTick) { _, _ in
+            if SystemCall.lastFailure != nil { showDialer = true }
+        }
+        .alert(
+            "苹果那套来电界面用不了",
+            isPresented: $showDialer
         ) {
-            Button("打给她（用苹果的来电界面）") {
-                // 先把「用系统的通话界面」打开 —— 关着的话点下去只会进我们自己的页，
-                // 用户会以为"灵动岛怎么还是不响"。
-                settings.systemCallUI = true
-                router.startCall()
-            }
-            Button("直接打（Aevis 自己的通话页）") {
-                settings.systemCallUI = false
-                router.startCall()
-            }
-            Button("取消", role: .cancel) {}
+            Button("知道了", role: .cancel) {}
         } message: {
-            Text(settings.systemCallUI
-                 ? "接通后苹果会弹出它自己那套界面（灵动岛上能接能挂）。"
-                     + "想让它只挂在灵动岛上，接通之后按一下 Home 把 Aevis 收到后台就行 —— "
-                     + "iOS 不允许 App 自己退回主界面，这一步只能你按。"
-                 : "现在「用系统的通话界面」是关着的，只会进 Aevis 自己这一页。")
+            Text(SystemCall.lastFailure
+                 ?? "这台手机上，签名没给通话资格（全能签重签时"
+                     + "「通话」那条权限没带过来），所以灵动岛/锁屏上的"
+                     + "苹果来电界面调不出来。\n\n"
+                     + "声音、计时、免提、打字都正常，只差灵动岛上那张卡。")
         }
     }
 
@@ -311,16 +314,22 @@ struct ChatView: View {
             //   你就自动手机退出去，就自动回到主界面，然后他就灵动岛就直接来了个电话」。
             //
             // ⚠️ 能做的和不能做的（别在别处再写一遍，就记这儿）：
-            //    · **能**：点它 → 进通话页 → `CallService.start()` 让苹果弹它自己那套
-            //      来电界面（灵动岛 / 锁屏上能接能挂）→ 你按一下 Home，App 退到后台，
-            //      那张卡**继续挂在灵动岛上**，通话不断。
             //    · **不能**：App 自己退回主界面。iOS 没有公开 API
             //      （`ShortcutBridge.goHome()` 那条是系统内部选择器，不敢在这条路上用 ——
             //       万一下一版系统把它摘了，用户点"打电话"就是两个 App 一起卡住）。
             //      所以这里不替用户按 Home，字面意思那一步做不到，就没做。
+            //
+            // 🔴 **2026-10-01 改法**：原来点它先弹一个"用苹果界面 / 用自己界面"的
+            //    对话框。探针真机测出**苹果那套界面在侧载包上弹不出来**（签名没带
+            //    通话资格）之后，那个选项就是**明知不通还摆着** —— 老板点了它只会
+            //    看到"进了自己的通话页、灵动岛没动静"，还以为坏了。
+            //
+            //    现在**直接进通话页**，一条路。要不要弹那句解释，交给
+            //    `CallService.start()` 里的结果说话（见 `showDialer` 的 alert）。
             Button {
                 composerFocused = false
-                showDialer = true
+                settings.systemCallUI = true
+                router.startCall()
             } label: {
                 Image(systemName: "phone.fill")
                     .font(.aevis(15, weight: .medium))

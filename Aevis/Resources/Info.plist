@@ -120,14 +120,27 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- 后台放音频。
-	     ⚠️ 这**不是**"我们要放音乐"，是**让 App 能一直活着**：
+	<!-- 后台放音频 + VoIP。
+	     ⚠️ `audio` **不是**"我们要放音乐"，是**让 App 能一直活着**：
 	     QQ 机器人的长连接必须在后台维持，而 iOS 只给"正在放音频"的 App 这个待遇。
 	     后台跑的那段是**完全静音**的（见 SilentKeeper）—— 听不见，也不影响别人放歌。
-	     设置里可以关掉（它费电）；关掉之后切到后台她就会掉线，这是用户自己的取舍。 -->
+	     设置里可以关掉（它费电）；关掉之后切到后台她就会掉线，这是用户自己的取舍。
+
+	     ⭐ `voip` 是 **2026-10-01 补的**，跟 `aps-environment` 是同一件事的两半：
+	     `LiveCommunicationKit` 要求 App 声明自己有通话能力，声明的形式就是
+	     这条权限 + `aps-environment`。探针（`AevisCallProbe`）里这两条是**成对**的，
+	     主 App 之前只搬了 entitlements 那一半、**漏了这里** —— 两条缺一条，
+	     系统照样不给界面。补上，至少别让"缺配置"变成失败的理由。
+
+	     ⚠️ 但把话说清楚：**探针真机实测的结论是「不行」** ——
+	     全能签重签用的那份描述文件里**没有** `aps-environment`，
+	     所以苹果那套来电界面在侧载包上**弹不出来**，这是签名的限制，不是代码问题。
+	     补这一条只是"把该做的做全"，不改变那个结论。
+	     真正的通话体验走 `CallView`（我们自己的全屏通话页），那条**不受影响、一直是好的**。 -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>voip</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

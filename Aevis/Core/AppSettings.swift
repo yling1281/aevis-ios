@@ -920,9 +920,21 @@ final class AppSettings: ObservableObject {
 
     /// 通话时用苹果那套系统界面（灵动岛 / 锁屏上那张通话卡）。
     ///
-    /// ⚠️ 侧载重签**未必**给得了这个资格 —— 给不了时系统会直接拒绝，
-    ///    我们安静地退回自己的通话页面（用户那边完全看不出来）。
-    ///    所以默认**开**：调不通的代价是零，调通了是白赚的。
+    /// 🔴 **默认已改成「关」（2026-10-01 探针真机实测之后）。**
+    ///
+    /// 之前默认开，理由是"调不通的代价是零，调通了是白赚的"。探针
+    /// （`AevisCallProbe`，真机装过、点过）给出的结论是**不通**：
+    /// 全能签重签用的那份描述文件里**没有** `aps-environment`，
+    /// 所以 `ConversationManager.perform([StartConversationAction])` 必然抛错，
+    /// 苹果那张卡永远弹不出来。
+    ///
+    /// ⚠️ 那"代价是零"还成立吗？**不完全**：
+    /// 开着它，每次打电话都会先去调一次系统界面 → 必然报错 → 用户在通话页上
+    /// 看到一行"苹果那套来电界面调不出来"的说明。**通话本身没坏**，
+    /// 但那条提示是白白吓人的 —— 而且老板为此跑来问过三次。
+    ///
+    /// 所以默认关掉，设置项也改成**如实说明**（见 `CompanionCard`）：
+    /// 想要它的前提是换一份带通话资格的描述文件，否则开了也只是多一行错误。
     @Published var systemCallUI: Bool {
         didSet { UserDefaults.standard.set(systemCallUI, forKey: Key.systemCallUI) }
     }
@@ -1500,8 +1512,9 @@ final class AppSettings: ObservableObject {
         proactiveLines = defaults.stringArray(forKey: Key.proactiveLines) ?? []
         // 「她打给你」默认**关**：一条会响的来电通知，不该在用户没要求时就排上。
         callEnabled = defaults.object(forKey: Key.callEnabled) as? Bool ?? false
-        // 系统通话界面默认**开**：调不通会自己退回我们的界面，代价是零。
-        systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? true
+        // 系统通话界面默认**关**（2026-10-01 探针真机实测：侧载签名不给通话资格，
+        // 苹果那张卡弹不出来）。开了也只是每次多一行"调不出来"的提示 —— 见属性注释。
+        systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? false
         // 她可以主动拨过来：默认**开**（接不接永远是你点一下说了算）。
         callProactive = defaults.object(forKey: Key.callProactive) as? Bool ?? true
         barkEnabled = defaults.object(forKey: Key.barkEnabled) as? Bool ?? false

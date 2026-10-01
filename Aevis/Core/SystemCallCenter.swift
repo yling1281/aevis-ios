@@ -94,6 +94,30 @@ enum SystemCall {
         #endif
         return nil
     }
+
+    /// ⭐ **「失败刚刚发生」的信号灯**，给 SwiftUI 的 `onChange` 用。
+    ///
+    /// 为什么不能直接 `onChange(of: SystemCall.lastFailure)`：
+    /// `lastFailure` 是**计算属性**，它自己不持有状态，`onChange` 观察一个
+    /// 每次求值都可能变化的计算属性，行为不确定（而且这里还包着
+    /// `#available` / `#if canImport`，编译器看它永远是同一个表达式）。
+    ///
+    /// 所以改成一个**只增不减的计数器**：每失败一次 +1。`onChange` 看到值变了
+    /// 就知道"刚刚又失败了一次"，再去读 `lastFailure` 拿具体原因。
+    ///
+    /// ⚠️ 为什么不用 `@Published` / `ObservableObject`：这个类型是 `enum`（静态
+    /// 命名空间），塞不进 SwiftUI 的观察体系。`enum` + `static var` 在这里最省事，
+    /// 而且调用点只有一个（`ChatView`），不存在谁忘了订阅的问题。
+    ///
+    /// ⚠️ 只 `@MainActor`：写它的地方（`SystemCallCenter.start` 的 catch）
+    /// 已经在主 actor 上，读它的是 SwiftUI body（也在主线程）。
+    @MainActor
+    static var callFailureTick: Int {
+        #if canImport(LiveCommunicationKit)
+        if #available(iOS 17.4, *) { return SystemCallCenter.shared.failureTick }
+        #endif
+        return 0
+    }
 }
 
 #if canImport(LiveCommunicationKit)
@@ -134,6 +158,10 @@ final class SystemCallCenter {
     ///    "点了打电话，然后什么都没有"，只能猜。现在失败原因挂出来，
     ///    在通话页上显示一行小字，一眼就知道是签名没资格、还是系统版本不够。
     private(set) var lastFailure: String?
+
+    /// 失败了几次。**只增不减** —— 给 SwiftUI 当"刚刚又失败了"的信号灯用。
+    /// 见 `SystemCall.callFailureTick` 那段注释（为什么不能用 `lastFailure` 观察）。
+    private(set) var failureTick = 0
 
     // MARK: - 拨出
 
@@ -191,6 +219,7 @@ final class SystemCallCenter {
                 // 用户点了打电话什么都没有，只能猜"是不是坏了"。
                 let detail = Self.describe(error)
                 lastFailure = Self.friendlyFailure(error)
+                failureTick += 1
                 BlackBox.failure("📞 系统通话界面不可用（退回自己的界面）", detail: detail)
                 self.teardown()
             }
