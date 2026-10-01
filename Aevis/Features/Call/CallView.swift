@@ -12,6 +12,14 @@ struct CallView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// 通话里**打**的那句话。
+    ///
+    /// 用户 2026-10-01：「第三个的话呢，可以加点功能」。
+    /// 麦克风在吵的地方根本不好使（地铁、风大、旁边有人），
+    /// 而「电话里说不出话」会让她显得很笨 —— 留一个能打字的入口。
+    @State private var draft = ""
+    @FocusState private var typing: Bool
+
     private var persona: Persona { personaStore.persona }
 
     var body: some View {
@@ -29,6 +37,8 @@ struct CallView: View {
 
                 statusBlock
 
+                if call.state == .active { inputBar }
+
                 controls
             }
             .padding(.horizontal, 22)
@@ -36,6 +46,16 @@ struct CallView: View {
             .padding(.bottom, 30)
         }
         .task {
+            #if DEBUG
+            // 截图自检专用（`-aevisOpenCall`）。
+            // ⚠️ 模拟器里没有麦克风权限、也没有 API Key，真起一通电话必然失败，
+            //    失败之后 `state` 回到 `.idle` —— 免提按钮和打字框**根本不显示**，
+            //    截出来的还是老样子。所以这条路上只造状态，不碰任何音频设备。
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenCall") {
+                call.previewStart()
+                return
+            }
+            #endif
             await call.start(
                 persona: persona,
                 config: settings.llm,
@@ -129,14 +149,11 @@ struct CallView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if call.thinking {
-                HStack(spacing: 7) {
-                    ProgressView().controlSize(.small)
-                    Text("\(Pronoun.current)正在想…")
-                        .font(.aevis(13))
-                        .foregroundStyle(.secondary)
-                }
-            } else if !call.lastSaid.isEmpty {
+            // ⚠️ 顺序很重要：**先看 `lastSaid`，再看 `thinking`**。
+            //    她的话现在（2026-10-01）是**边收边显示**的 —— 流式的第一个字一到，
+            //    `lastSaid` 就不空了。这时候再显示「正在想…」的转圈，
+            //    等于把她刚开始说的字盖掉，那几秒看起来还是"卡住"。
+            if !call.lastSaid.isEmpty {
                 Text(call.lastSaid)
                     .font(.aevis(14))
                     .foregroundStyle(.primary)
@@ -145,6 +162,13 @@ struct CallView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .aevisGlass(cornerRadius: 16)
+            } else if call.thinking {
+                HStack(spacing: 7) {
+                    ProgressView().controlSize(.small)
+                    Text("\(Pronoun.current)正在想…")
+                        .font(.aevis(13))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // 你正在说的 —— 让她听到了什么，你看得见
@@ -165,16 +189,75 @@ struct CallView: View {
         .padding(.horizontal, 4)
     }
 
+    // MARK: - 打字发言
+
+    /// 通话里那个输入框 —— 说不出口的可以打出来。
+    ///
+    /// 和说话**走的是同一条路**（`CallService.send` → 同一个 `respond`），
+    /// 所以她该记得的照样记得、该落进聊天记录的照样落。
+    private var inputBar: some View {
+        HStack(spacing: 10) {
+            TextField("打字说…", text: $draft, axis: .vertical)
+                .font(.aevis(14.5))
+                .foregroundStyle(.primary)
+                .lineLimit(1...3)
+                .textFieldStyle(.plain)
+                .submitLabel(.send)
+                .focused($typing)
+                .onSubmit(sendTyped)
+
+            Button(action: sendTyped) {
+                Image(systemName: "arrow.up")
+                    .font(.aevis(15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(canSend ? settings.accentColor : Color.primary.opacity(0.15)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .animation(.easeOut(duration: 0.15), value: canSend)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 7)
+        .padding(.vertical, 7)
+        .aevisGlass(cornerRadius: 20)
+        .padding(.top, 12)
+    }
+
+    private var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func sendTyped() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        draft = ""
+        Task { await call.send(text: text) }
+    }
+
     // MARK: - 按钮
 
     private var controls: some View {
-        HStack(spacing: 40) {
+        // ⚠️ 三个按钮的间距从 40 收到 26 —— 62 pt 一个圆钮，40 的间距在
+        //    iPhone 上会把「挂断」顶到屏幕边上（还挤掉了呼吸感）。
+        HStack(spacing: 26) {
             roundButton(
                 symbol: call.muted ? "mic.slash.fill" : "mic.fill",
                 label: call.muted ? "已静音" : "静音",
                 tint: call.muted ? Color.orange : Color.primary
             ) {
                 call.toggleMute()
+            }
+
+            // 免提（用户 2026-10-01：「加点功能」）。
+            // ⚠️ 只改意图，路由由 `AudioSession` 落 —— 会话是全进程唯一的。
+            roundButton(
+                symbol: "speaker.wave.3.fill",
+                label: call.speakerOn ? "免提" : "听筒",
+                tint: call.speakerOn ? settings.accentColor : Color.primary
+            ) {
+                call.toggleSpeaker()
             }
 
             roundButton(

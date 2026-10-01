@@ -2,6 +2,10 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// 独立播放器。
 ///
 /// 用 AVPlayer 直接播网易给的临时地址 ——
@@ -64,6 +68,19 @@ final class MusicPlayer: NSObject, ObservableObject {
     private var observedPlayer: AVPlayer?
     private var loadingTask: Task<Void, Never>?
 
+    /// 锁屏 / 灵动岛上那张封面图。`[曲目 id: 画好的图]`。
+    ///
+    /// 缓存是必要的：它每次发布都得**现算一遍**（`MPMediaItemArtwork` 是按
+    /// 请求的尺寸回图的），一首歌来回暂停几次就重复下载，纯浪费。
+    private var artworkCache: [String: MPMediaItemArtwork] = [:]
+    private var artworkTask: Task<Void, Never>?
+
+    /// 上一次发布出去的时长。用来判断"时长从 0 变成真值了没有" ——
+    /// 变了就必须重发一次，否则锁屏上那条进度条**永远拖不动**。
+    private var publishedDuration: Double = -1
+    /// 上一次发布出去的时间点，配合上面那个判断"差得够不够多"。
+    private var lastElapsed: Double = -1
+
     var current: MusicTrack? {
         guard queue.indices.contains(index) else { return nil }
         return queue[index]
@@ -71,18 +88,19 @@ final class MusicPlayer: NSObject, ObservableObject {
 
     private override init() {
         super.init()
-        configureSession()
+        // ⚠️ **这里刻意不碰音频会话。**
+        //
+        // 以前 `init` 里就 `setCategory` + `setActive(true)`，等于 App 一启动
+        // 就把音频通道抢过来 —— 而用户此刻很可能正在听**别的 App** 的歌。
+        // （老代码带着 `.mixWithOthers` 所以不打断别人，但那个选项正是
+        //  「锁屏上没有播放控件」的根因，见 `AudioSession` 开头，不能留。）
+        //
+        // 所以会话的配置全部挪到"真的要放了"的那一刻：`loadCurrent` / `resume`
+        // 里各调一次 `AudioSession.activateForPlayback()`。
         configureRemoteCommands()
     }
 
     // MARK: - 音频会话与远程控制
-
-    private func configureSession() {
-        let session = AVAudioSession.sharedInstance()
-        // .playback：后台也能播。mixWithOthers 让别人说话时不用暂停音乐
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setActive(true)
-    }
 
     private func configureRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
@@ -90,22 +108,49 @@ final class MusicPlayer: NSObject, ObservableObject {
         // ⚠️ 锁屏/耳机线控的回调**不在主线程**上 ——
         // 直接 `self?.resume()` 就是从后台线程改 `@Published`（跟上面说的同一个坑）。
         // 每个都得跳回主线程。
+        //
+        // ⚠️ `isEnabled = true` 不是多余的：命令默认是关的，虽然"加一个 target"
+        //    通常顺手把它打开，但**只是通常** —— 显式写一句，锁屏上的按钮
+        //    才不会时灰时亮。
         center.playCommand.addTarget { [weak self] _ in
             Task { @MainActor in self?.resume() }
             return .success
         }
+        center.playCommand.isEnabled = true
+
         center.pauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in self?.pause() }
             return .success
         }
+        center.pauseCommand.isEnabled = true
+
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.toggle() }
+            return .success
+        }
+        center.togglePlayPauseCommand.isEnabled = true
+
         center.nextTrackCommand.addTarget { [weak self] _ in
             Task { @MainActor in await self?.next() }
             return .success
         }
+        center.nextTrackCommand.isEnabled = true
+
         center.previousTrackCommand.addTarget { [weak self] _ in
             Task { @MainActor in await self?.previous() }
             return .success
         }
+        center.previousTrackCommand.isEnabled = true
+
+        // 锁屏上那条进度条能拖 —— 不接这个回调的话，拖了没反应（还会弹回去）。
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let position = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
+            }
+            Task { @MainActor in self?.seek(toSeconds: position.positionTime) }
+            return .success
+        }
+        center.changePlaybackPositionCommand.isEnabled = true
     }
 
     // MARK: - 播放控制
@@ -129,14 +174,21 @@ final class MusicPlayer: NSObject, ObservableObject {
     }
 
     func resume() {
+        // ⚠️ 先抢回会话**再**播。中间被 TTS / 录音借走过（它们换了类别），
+        //    不还回来系统就不认这台 App 在放声音 —— 歌在响、锁屏却是空的。
+        AudioSession.activateForPlayback()
         player?.play()
         isPlaying = true
+        AudioSession.setMusicPlaying(true)
         updateNowPlaying()
     }
 
     func pause() {
         player?.pause()
         isPlaying = false
+        // ⚠️ 这里只改"谁在借用"的账本，**不动类别**：
+        //    锁屏上的暂停态控件还得留着（那是正常的，整条歌不会因此消失）。
+        AudioSession.setMusicPlaying(false)
         updateNowPlaying()
     }
 
@@ -160,6 +212,18 @@ final class MusicPlayer: NSObject, ObservableObject {
         guard let player, duration > 0 else { return }
         let target = CMTime(seconds: ratio * duration, preferredTimescale: 600)
         player.seek(to: target)
+        // 拖完进度条要把新位置发布出去 —— 不然后台那条进度条还停在上一次的值上
+        progress = min(max(ratio * duration, 0), duration)
+        updateNowPlaying()
+    }
+
+    /// 锁屏上拖进度条走的是这个（`changePlaybackPositionCommand`）。
+    func seek(toSeconds seconds: Double) {
+        guard let player, duration > 0, seconds.isFinite else { return }
+        let clamped = min(max(seconds, 0), duration)
+        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
+        progress = clamped
+        updateNowPlaying()
     }
 
     func stop() {
@@ -179,6 +243,8 @@ final class MusicPlayer: NSObject, ObservableObject {
         progress = 0
         duration = 0
         lyric = ""
+        AudioSession.setMusicPlaying(false)
+        artworkTask?.cancel()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -217,9 +283,15 @@ final class MusicPlayer: NSObject, ObservableObject {
             let newPlayer = AVPlayer(playerItem: item)
             player = newPlayer
             observeProgress(of: newPlayer)
+            // ⚠️ **激活会话要在 `play()` 之前。** 反过来写的话，那句 `play()`
+            //    有可能落在"会话还没准备好"的空档里，系统就不认这次播放 ——
+            //    表现同样是"歌在响、锁屏上没有控件"。
+            AudioSession.activateForPlayback()
             newPlayer.play()
             isPlaying = true
+            AudioSession.setMusicPlaying(true)
             updateNowPlaying()
+            loadArtwork(for: track)
             BlackBox.step("已经在放了")
         } catch {
             BlackBox.failure("放歌失败", detail: error.localizedDescription)
@@ -274,6 +346,10 @@ final class MusicPlayer: NSObject, ObservableObject {
                 if total.isFinite, total > 0 {
                     self.duration = total
                 }
+                // 锁屏那条进度得跟着走。**不是每个 tick 都发** ——
+                // 系统已经按 `MPNowPlayingInfoPropertyPlaybackRate` 自己往前推了，
+                // 每 0.5 秒再喂一次纯属白烧电。只在"差得多"或"时长刚变"时补一次。
+                self.syncNowPlayingProgress()
                 // 放完了自动下一首
                 if let item = player.currentItem, item.status == .readyToPlay,
                    self.duration > 0, self.progress >= self.duration - 0.4 {
@@ -284,25 +360,95 @@ final class MusicPlayer: NSObject, ObservableObject {
         observedPlayer = player
     }
 
+    /// 把「现在在放什么」发布给系统 —— 锁屏、控制中心、灵动岛那圈控件全靠它。
+    ///
+    /// ## ⚠️ 这里有三个"少了就看不见控件"的坑
+    /// 1. **时长不能是 0。** 网易偶尔不给时长，而 `0` 会被系统当成
+    ///    "这是段流、没有进度" —— 控件上那条进度条就没了。拿接口给的
+    ///    `track.duration` 兜一下。
+    /// 2. **`MPNowPlayingInfoPropertyMediaType` 要说是音频。**
+    ///    不写这一句，系统有时候把它当"别的东西"，对我们的占位就没那么硬。
+    /// 3. **封面要给。** 锁屏那块最显眼的位置就是它，空着会显得像坏了。
     private func updateNowPlaying() {
         guard let track = current else { return }
 
         // ⚠️ 锁屏 / 控制中心那套只认「正常的数」。
         // 把 NaN 或者无穷大塞进去是**没有意义的**，所以先夹一下 ——
         // 上一处 NaN 已经在进度回调里挡掉了，这里是同一路的第二道。
-        let safeDuration = duration.isFinite && duration > 0 ? duration : 0
+        let total = resolvedDuration
         let safeProgress = progress.isFinite && progress >= 0 ? progress : 0
+        publishedDuration = total
+        lastElapsed = safeProgress
 
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist,
             MPMediaItemPropertyAlbumTitle: track.album,
-            MPMediaItemPropertyPlaybackDuration: safeDuration,
+            MPMediaItemPropertyPlaybackDuration: total,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: safeProgress,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            // ⚠️ 包成 `NSNumber` 而不是直接塞 `UInt`：这本字典最终要过
+            //    ObjC 那一层，值类型得是能桥过去的 —— 显式写出来省得踩桥接的坑。
+            MPNowPlayingInfoPropertyMediaType: NSNumber(
+                value: MPNowPlayingInfoMediaType.audio.rawValue
+            )
         ]
-        info[MPMediaItemPropertyAlbumTitle] = track.album
+        if let artwork = artworkCache[track.id] {
+            info[MPMediaItemPropertyArtwork] = artwork
+        }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// 发布给系统用的时长。
+    ///
+    /// 优先用**播放器实测**的（更准），拿不到才退回接口给的
+    /// —— 网易那边偶尔就是不给时长，而 `0` 会被系统当成"这是段流、没有进度"。
+    private var resolvedDuration: Double {
+        if duration.isFinite, duration > 0 { return duration }
+        if let track = current, track.duration.isFinite, track.duration > 0 {
+            return track.duration
+        }
+        return 0
+    }
+
+    /// 进度回调里的"顺手对一下时间"。
+    ///
+    /// 只在**差得明显**的时候才重发：系统按 `playbackRate` 自己往前推，
+    /// 每 0.5 秒喂一次纯属白烧电；但**时长刚拿到真值**那一次必须发，
+    /// 否则锁屏上那条进度条永远拖不动（用户拖了会弹回去）。
+    private func syncNowPlayingProgress() {
+        guard MPNowPlayingInfoCenter.default().nowPlayingInfo != nil else { return }
+        // ⚠️ 这里的时长必须和 `updateNowPlaying` **用同一个算法**
+        //    （`resolvedDuration`）。不然"退回接口时长"那条路上，
+        //    两边永远对不上，就会变成每 0.5 秒重发一次，白烧电。
+        if abs(publishedDuration - resolvedDuration) > 0.5 { updateNowPlaying(); return }
+        // 5 秒兜一次底：卡顿（缓冲）时播放器其实停了，而系统还在按
+        // `playbackRate` 往前推时间 —— 不兜这一下，锁屏上那条就走了。
+        if abs(progress - lastElapsed) > 5 { updateNowPlaying() }
+    }
+
+    /// 把封面取回来塞进锁屏。
+    ///
+    /// ⚠️ 这里**不能用 `AsyncImage`** —— 那个只在 SwiftUI 的界面里活，
+    ///    锁屏那块是系统画的，只认 `MPMediaItemArtwork`。
+    ///    取不到（没封面 / 断网）就静默跳过，界面那边本来就有渐变圆盘兜底。
+    private func loadArtwork(for track: MusicTrack) {
+        artworkTask?.cancel()
+        guard artworkCache[track.id] == nil, let url = track.coverURL else { return }
+
+        artworkTask = Task { [id = track.id] in
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+            // 换歌了 —— 这张图已经过期，别把它贴到新歌上
+            guard !Task.isCancelled, self.current?.id == id else { return }
+            #if canImport(UIKit)
+            guard let image = UIImage(data: data) else { return }
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            self.artworkCache[id] = artwork
+            self.updateNowPlaying()
+            #else
+            _ = data
+            #endif
+        }
     }
 
     // MARK: - 截图自检

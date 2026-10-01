@@ -58,6 +58,24 @@ final class ProactiveService {
     /// 「直接回复」那个动作的 id。代理里靠它认出"用户是打字回的"。
     static let replyAction = "aevis.reply.send"
 
+    // MARK: - 「她趁你不在时打给你」
+    //
+    // 用户 2026-10-01：问「通话哪一块」时答「苹果系统来电界面，然后**第一个也要**」。
+    // 「第一个」就是「她趁你不在时打给我」—— 一条像来电的通知，上面有「接听」。
+    //
+    // ⚠️ 这条**走本地通知，不是 LiveCommunicationKit 的收来电那条路**。
+    //    那一条（`reportNewIncomingConversation`）**必须**有 PushKit VoIP 推送
+    //    （文档原话：不报告系统会杀掉 App），而侧载包没有 APNs 付费账号，
+    //    根本喂不到我们手上。所以「她打给你」只能是我们自己弹的一条通知 ——
+    //    点「接听」之后**进我们自己的通话界面**（那时可以再调系统界面，见 `SystemCall`）。
+
+    /// 「她打给你」那条通知的分类 id。
+    static let callCategory = "aevis.call"
+
+    /// 通知上那两个按钮。
+    static let callAcceptAction = "aevis.call.accept"
+    static let callDeclineAction = "aevis.call.decline"
+
     /// 注册通知分类。幂等，重复调没有副作用。
     ///
     /// 时机：**App 启动时**（`AevisApp.init`）+ 每次重排时都调一次。
@@ -69,15 +87,41 @@ final class ProactiveService {
             textInputButtonTitle: "发出去",
             textInputPlaceholder: "说点什么…"
         )
-        let category = UNNotificationCategory(
-            identifier: replyCategory,
+        let replyCategory = UNNotificationCategory(
+            identifier: Self.replyCategory,
             actions: [reply],
             // ⚠️ 别删这一行：把分类和 `INSendMessageIntent` 绑在一起，
             //    系统才会把这条通知当成"和这个人的会话"。
             intentIdentifiers: ["INSendMessageIntent"],
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
+
+        // 「接听」要 `.foreground` —— 用户点它的意思就是"我要进通话页面"，
+        // 不该只把通知清掉然后什么都不发生。
+        let accept = UNNotificationAction(
+            identifier: callAcceptAction,
+            title: "接听",
+            options: [.foreground]
+        )
+        let decline = UNNotificationAction(
+            identifier: callDeclineAction,
+            title: "不用了",
+            options: [.destructive]
+        )
+        let callCategory = UNNotificationCategory(
+            identifier: Self.callCategory,
+            actions: [accept, decline],
+            intentIdentifiers: ["INSendMessageIntent"],
+            options: []
+        )
+
+        // ⚠️⚠️ `setNotificationCategories` 是**整份替换**，不是追加。
+        //      这里少写一个分类，那个分类就会从系统里消失 ——
+        //      而且是**静默**的（通知照弹，只是按钮和输入框没了）。
+        UNUserNotificationCenter.current().setNotificationCategories([
+            replyCategory,
+            callCategory
+        ])
     }
 
     private init() {}
@@ -129,7 +173,13 @@ final class ProactiveService {
             withIdentifiers: await pendingProactiveIdentifiers()
         )
 
-        guard settings.proactiveEnabled else { return }
+        // ⚠️ 两个开关在这里是**并列**的，不是父子。
+        //
+        // 原来这一句是 `guard settings.proactiveEnabled else { return }` ——
+        // 加了「她打给你」之后那样就不对了：一个"只想接她电话、不想收她消息"
+        // 的人永远排不上来电。所以总开关只管文字消息那两块（见下面各自的 `if`），
+        // 来电由 `callEnabled` 单独管。
+        guard settings.proactiveEnabled || settings.callEnabled else { return }
 
         // ⚠️ 这里**不再请求权限**，只检查有没有。
         //
@@ -151,17 +201,17 @@ final class ProactiveService {
         Self.clearAvatarCache()
 
         let lines = await linePool(persona: persona, settings: settings)
-        guard !lines.isEmpty else { return }
 
         var cursor = 0
         func nextLine() -> String {
+            guard !lines.isEmpty else { return Self.fallbackLines[0] }
             let text = lines[cursor % lines.count]
             cursor += 1
             return text
         }
 
         // 定时：每天固定几个点，用重复触发器
-        if settings.fixedTimesEnabled {
+        if settings.proactiveEnabled, settings.fixedTimesEnabled {
             for (index, time) in settings.fixedTimes.enumerated() {
                 guard let (hour, minute) = Self.parse(time) else { continue }
                 let content = makeContent(
@@ -184,7 +234,7 @@ final class ProactiveService {
         }
 
         // 不定时：为接下来 24 小时随机排几条，一次性触发
-        if settings.randomEnabled {
+        if settings.proactiveEnabled, settings.randomEnabled {
             let count = max(1, min(settings.randomPerDay, 6))
             let now = Date()
             for slot in 0..<count {
@@ -213,7 +263,65 @@ final class ProactiveService {
                 try? await center.add(request)
             }
         }
+
+        // ⭐ 「她趁你不在时打给你」（用户 2026-10-01 点名的「第一个也要」）。
+        //
+        // 一天 1~3 通，最晚也是"接下来 24 小时内"——
+        // 本地通知只能在排程时把时间定下来，做不到真正的实时随机（跟上面一样）。
+        // 每次回前台都会整批重排，所以它对人来说是"不知道什么时候会来"。
+        if settings.callEnabled {
+            let count = Int.random(in: 1...3)
+            let now = Date()
+            for slot in 0..<count {
+                let windowLength = 24.0 * 3600.0 / Double(count)
+                let offset = windowLength * Double(slot) + Double.random(in: 0..<windowLength)
+                // ⚠️ 至少 20 分钟后：刚打开 App 就"她来电"太假了，
+                //    而且会跟用户手上正在做的事撞上。
+                let fireAt = now.addingTimeInterval(max(offset, 1200))
+                let content = makeContent(
+                    title: persona.name.isEmpty ? "Aevis" : persona.name,
+                    body: callLine(settings: settings),
+                    owner: owner,
+                    avatarData: avatarData,
+                    category: Self.callCategory
+                )
+                let trigger = UNCalendarNotificationTrigger(
+                    dateMatching: Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute, .second],
+                        from: fireAt
+                    ),
+                    repeats: false
+                )
+                let request = UNNotificationRequest(
+                    identifier: Self.idPrefix + "call." + String(slot),
+                    content: content,
+                    trigger: trigger
+                )
+                try? await center.add(request)
+            }
+        }
     }
+
+    /// 「她打给你」那条通知上写什么。
+    ///
+    /// 复用「主动消息」那批话术（本来就是"她会突然想对你说的话"），
+    /// 一句都没准备的时候用专门的兜底 —— 兜底那几句是**暗示"接一下"**的，
+    /// 因为这条通知上有「接听」按钮，正文得配得上。
+    private func callLine(settings: AppSettings) -> String {
+        if let line = settings.proactiveLines.randomElement(),
+           !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return line
+        }
+        return Self.fallbackCallLines.randomElement() ?? "想给你打个电话"
+    }
+
+    /// 没填 API Key、或一句都没准备时，「她打给你」用的兜底。
+    static let fallbackCallLines: [String] = [
+        "想给你打个电话，接一下嘛",
+        "突然想听听你的声音",
+        "有空吗，想跟你说说话",
+        "想你了，方便接一下吗"
+    ]
 
     private func pendingProactiveIdentifiers() async -> [String] {
         await withCheckedContinuation { continuation in
@@ -227,7 +335,8 @@ final class ProactiveService {
 
     private func makeContent(title: String, body: String,
                              owner: String? = nil,
-                             avatarData: Data? = nil) -> UNMutableNotificationContent {
+                             avatarData: Data? = nil,
+                             category: String = ProactiveService.replyCategory) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -235,7 +344,8 @@ final class ProactiveService {
         // 她的话应该能穿透专注模式
         content.interruptionLevel = .timeSensitive
         // ⭐ 横幅上那个「回一句」的打字框 —— **不打开 App 就能跟她说话**。
-        content.categoryIdentifier = Self.replyCategory
+        //    「她打给你」那一类挂的是另一个分类（上面有「接听 / 不用了」）。
+        content.categoryIdentifier = category
         // ⚠️⚠️ **把正文塞进通知里带着走** —— 这是「弹窗消息要落进聊天记录」
         //    （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的，像微信那样」）
         //    唯一可行的做法：本地通知在 App **没运行**的时候也在弹，那时候我们
@@ -243,6 +353,9 @@ final class ProactiveService {
         //    等 App 一起来再补进聊天记录（见 `deliverPendingToChat`）。
         var info: [String: Any] = ["text": body]
         if let owner, !owner.isEmpty { info["persona"] = owner }
+        // 标一下"这条是来电不是消息"。下面 `payload(fromRequest:)` 靠它
+        // 把这一类挡在聊天记录外面 —— 来电不该变成聊天里的一行字。
+        if category == Self.callCategory { info["kind"] = "call" }
         content.userInfo = info
 
         // 她的话得**看起来是她说的**，而不是"某个 App 推了条消息"。
@@ -403,6 +516,11 @@ final class ProactiveService {
     /// `UNNotificationResponse`（里面只有 `request`），而不是 `UNNotification`。
     static func payload(fromRequest request: UNNotificationRequest) -> (text: String, owner: UUID?)? {
         guard request.identifier.hasPrefix(idPrefix) else { return nil }
+        // ⚠️ 「她打给你」那条**不是消息**，绝不能进聊天记录 ——
+        //    它有自己的路（`absorbForegroundCall` / `acceptCall`）。
+        //    少了这一句，"她来电"的话会变成聊天里孤零零的一行，
+        //    而且用户点「接听」之后回到聊天还能看到它，莫名其妙。
+        if request.content.categoryIdentifier == callCategory { return nil }
         let info = request.content.userInfo
         let text = (info["text"] as? String) ?? request.content.body
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
@@ -436,6 +554,48 @@ final class ProactiveService {
         ChatStore.shared.appendProactive(payload.text, for: payload.owner)
         // 从"已送达"里删掉：不然回前台那次扫描会把它再补一遍。
         center.removeDeliveredNotifications(withIdentifiers: [notification.request.identifier])
+    }
+
+    // MARK: - 「她打给你」：前台 / 点「接听」/ 点「不用了」
+
+    /// 前台收到「她打给你」。
+    ///
+    /// ⚠️ **不弹横幅**，改成在我们自己的界面上浮一条申请条
+    /// （就是她在聊天里主动申请打电话时那条一模一样的）——
+    /// 用户正开着 App 看着屏幕，再弹一条系统横幅纯属噪音，而且点它还要多一次跳转。
+    ///
+    /// 返回 true 表示"这条我处理了"，代理那边就不用再走落聊天那条路。
+    @MainActor
+    func absorbForegroundCall(_ notification: UNNotification) -> Bool {
+        guard notification.request.content.categoryIdentifier == Self.callCategory else {
+            return false
+        }
+        center.removeDeliveredNotifications(withIdentifiers: [notification.request.identifier])
+        CompanionRequest.shared.ask(.call, reason: notification.request.content.body)
+        BlackBox.log("📞 她在前台打给你 —— 改成界面上那条申请")
+        return true
+    }
+
+    /// 用户点了「接听」（或直接点了通知本体）→ 进通话。
+    ///
+    /// ⚠️ 这里**只发一个跳转信号**，不自己去起通话：真正的 `CallService.start`
+    ///    要麦克风权限、要主界面在，这些都不该在通知回调那几十秒里做。
+    ///    冷启动也走这条 —— `AppRouter.showCall` 是状态，主界面一出现就消费它。
+    @MainActor
+    func acceptCall(from request: UNNotificationRequest) async {
+        center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+        BlackBox.log("📞 接了她在后台打来的那通电话")
+        AppRouter.shared.startCall()
+    }
+
+    /// 用户点了「不用了」。
+    ///
+    /// 只把这条通知收掉 —— **不写进聊天记录**（她"想打给你"这件事不是一条消息），
+    /// 也不给她发什么。用户说的"不用了"就是不用了。
+    @MainActor
+    func dismissCallNotification(_ request: UNNotificationRequest) {
+        center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+        BlackBox.log("📞 她打来的那通被拒了")
     }
 
     // MARK: - 用户在通知上直接回复
@@ -701,6 +861,9 @@ final class ProactiveNotificationDelegate: NSObject, UNUserNotificationCenterDel
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
+        // ⭐ 「她打给你」那条：**不弹横幅** —— 用户正开着 App 看屏幕，
+        //    改成在我们自己的界面上浮一条「接听 / 不用了」的申请条。
+        if await ProactiveService.shared.absorbForegroundCall(notification) { return [] }
         await ProactiveService.shared.absorbForegroundNotification(notification)
         return []
     }
@@ -709,6 +872,22 @@ final class ProactiveNotificationDelegate: NSObject, UNUserNotificationCenterDel
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        // ⭐ 「她打给你」（用户 2026-10-01 要的「第一个」）。
+        //
+        // ⚠️ 这一段要排在下面「直接打字回复」那条**前面**。
+        //    来电挂的是另一个分类，本来撞不上，但顺序写死更稳 ——
+        //    探针那一轮的教训：回调的顺序错了，掉进兜底分支是**静默**的。
+        if response.notification.request.content.categoryIdentifier == ProactiveService.callCategory {
+            if response.actionIdentifier == ProactiveService.callDeclineAction {
+                await ProactiveService.shared.dismissCallNotification(response.notification.request)
+            } else {
+                // 「接听」和"直接点通知"都算接 —— 用户点它的意思就是"我要接这通"。
+                // 冷启动也走这条：`AppRouter.showCall` 是状态，主界面一出现就消费它。
+                await ProactiveService.shared.acceptCall(from: response.notification.request)
+            }
+            return
+        }
+
         // ⭐ 用户在通知上**直接打字**回的那一句 —— 不打开 App 也能跟她说话。
         //    这是通知这一块最像真人的地方（用户 2026-09-30 想要的那个"好玩"）。
         if response.actionIdentifier == ProactiveService.replyAction,

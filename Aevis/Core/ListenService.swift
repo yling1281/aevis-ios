@@ -89,18 +89,33 @@ final class ListenService: ObservableObject {
 
         let session = AVAudioSession.sharedInstance()
         // 和音乐共存：一起听的时候她还要能听见你说话
+        //
+        // ⚠️ 选项**不能在这儿写死** —— 通话中「免提 / 听筒」那一档要换掉它。
+        //    会话的唯一主人是 `AudioSession`，选项从它那儿取。
         try session.setCategory(
             .playAndRecord,
             mode: .measurement,
-            options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP]
+            options: AudioSession.callRecordOptions
         )
         try session.setActive(true, options: .notifyOthersOnDeactivation)
+        // 类别刚重设过，有些系统版本会把 `overrideOutputAudioPort` 一起清掉 —— 补一次。
+        // （不在通话里的时候，它只是把上一次的"强制外放"撤掉，交还给系统自己挑。）
+        AudioSession.applyCallOutputPort()
+        // 开麦克风必须换成 `.playAndRecord`，一换系统就不认音乐是"当前在放声音的" ——
+        // 所以这一笔要记在 `AudioSession` 上，等下停了才知道该还给谁。
+        AudioSession.beginRecord()
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         // 采样率为 0 时装 tap 会崩（模拟器就是这样）
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            // 音乐在放就别关会话（同上：会把歌和锁屏控件一起带走）
+            if !AudioSession.musicPlaying {
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            }
+            // ⚠️ 这条早退路上也要把账还掉 —— 漏了它，`recordActive` 就永远挂着，
+            //    之后音乐再放也不会去要回类别（锁屏控件一直缺）。
+            AudioSession.endRecord()
             throw ListenError.noInput
         }
 
@@ -162,6 +177,11 @@ final class ListenService: ObservableObject {
     }
 
     private func stopEngine() {
+        // ⚠️ 这一句要放在最前面那个 `guard` **之前**：录音的账必须无条件还掉，
+        //    否则 `recordActive` 挂着不放，音乐那边就再也拿不回音频类别。
+        //    （`endRecord()` 本身是幂等的，没借过的时候调它只会顺手把播放要回来。）
+        AudioSession.endRecord()
+
         guard isListening || tapInstalled else { return }
         isListening = false
 
@@ -179,10 +199,16 @@ final class ListenService: ObservableObject {
         task = nil
         request = nil
 
-        try? AVAudioSession.sharedInstance().setActive(
-            false,
-            options: .notifyOthersOnDeactivation
-        )
+        // ⚠️ 音乐在放的时候**不能**把会话整个关掉。
+        //    `setActive(false)` 会顺手把正在播的 AVPlayer 也停住，
+        //    锁屏那圈控件跟着一起消失 —— 而这一切只是想"收起麦克风"。
+        //    类别该还给音乐的那一下由上面的 `AudioSession.endRecord()` 负责。
+        if !AudioSession.musicPlaying {
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
 
         transcript = ""
         level = 0

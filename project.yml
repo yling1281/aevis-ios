@@ -75,11 +75,38 @@ settings:
     #       `aevis.lastBackupName`。
     #    ③ 恢复收尾补 `syncActive()`：把 `currentID` 摆到搬过来的 `activeID` 上
     #       （导入期间只是没落盘，没重切的话界面还停在旧会话）。
-    # 0.0.89 = 下一批 5 条：音乐/一起听、情侣空间、银行卡、通知「像她」、AI 权限。
+    # 0.0.89 = 上一批 5 条：音乐/一起听、情侣空间、银行卡、通知「像她」、AI 权限。
+    # ⚠️ 0.0.90（2026-09-30 晚）：
+    #    ① **修「进后台锁屏 / 灵动岛上没有播放控件」**（用户实测报的
+    #       「我去后台的时候系统的灵动岛上面和播放音乐圈没有」）。
+    #       根因**不在界面**：`AVAudioSession` 全进程只有一个，而我们在
+    #       三处都带了 `.mixWithOthers`（音乐 / TTS / QQ 静音保活）。
+    #       只要带"可混音"，系统就认为你没打算独占音频通道 ——
+    #       `MPNowPlayingInfoCenter` 全系统只有一个，它不知道该显示谁，
+    #       于是**永远不会**把锁屏那套控件让给你。`duckOthers` 同理。
+    #       修法：新增 `Core/AudioSession.swift` 统一管会话 ——
+    #       音乐这一类是 `.playback` + `options: []`（**故意不带任何选项**）；
+    #       TTS / 录音"谁借走谁还回来"（说话必须换 `.spokenAudio`、
+    #       录音必须换 `.playAndRecord`，还的时候只要音乐还在放就还原）；
+    #       QQ 保活在音乐播放时**一个字节都不动类别**；
+    #       回到前台（`RootView.scenePhase == .active`）补一次。
+    #       顺带补齐 `nowPlayingInfo`：封面（`MPMediaItemArtwork`，不能用
+    #       `AsyncImage`）、`MediaType = audio`、时长不许为 0、
+    #       锁屏进度条能拖（`changePlaybackPositionCommand`）、
+    #       各命令显式 `isEnabled = true`。
+    #       ⚠️ 也**不再**在 `MusicPlayer.init` 里抢会话了 —— 那等于 App 一启动
+    #       就打断用户正在听的别的 App（旧的 `.mixWithOthers` 顺带掩盖了这件事）。
+    #    ② **一起听里能互相打字**（用户原话：「我们不能两个人互相打字聊天，
+    #       要加一个输入框，能互相打字聊天的」）。
+    #       `PlayerView` 底部新增「打字聊」，弹一层 `ListenChatSheet`：
+    #       气泡流式长字、输入框、点她的话就念出来。
+    #       她那边由 `ListenTogetherService.send()` 走完整人设 + 工具 + 记忆，
+    #       而且**两边的话都同步进正式聊天记录** —— 关掉播放器不会凭空消失。
+    #    ③ 「AI 权限」那张卡补进截图清单（上一轮漏了）。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
-    #    必须在这里手改，否则出的包还叫 0.0.88，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.89"
-    CURRENT_PROJECT_VERSION: "89"
+    #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
+    MARKETING_VERSION: "0.0.90"
+    CURRENT_PROJECT_VERSION: "90"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

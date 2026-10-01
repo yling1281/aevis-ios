@@ -18,6 +18,21 @@ struct ProactiveSettingsCard: View {
 
             toggleRow("让 TA 主动找你", subtitle: "打开后会用系统通知，App 没开也照样到点弹出来", isOn: $settings.proactiveEnabled)
 
+            // ⭐ 「她趁你不在时打给你」（用户 2026-10-01：「苹果系统来电界面，
+            //    然后第一个也要」）。
+            //
+            // ⚠️ 它**不在下面那个 `if` 里面** —— 和总开关是**并列**的两个开关。
+            //    有人只想接她电话、不想收她消息；也有人反过来。
+            //    藏进总开关里的话，"只想来电"那拨人永远打不开它，
+            //    而总开关关着的时候这一条也关不掉（那更糟）。
+            rule
+
+            toggleRow(
+                "\(Pronoun.current)会打电话给你",
+                subtitle: "一天里挑一两个时刻，弹一条像来电的通知，上面有「接听」和「不用了」",
+                isOn: $settings.callEnabled
+            )
+
             if settings.proactiveEnabled {
                 rule
                 fixedSection
@@ -43,6 +58,16 @@ struct ProactiveSettingsCard: View {
         .onChange(of: settings.proactiveEnabled) { _, on in
             guard on else { return }
             Task { await reschedule(regenerate: true) }
+        }
+        // 「她打给你」单独一条 —— **和上面那个总开关分开两处**，
+        // 因为它是独立的开关（关掉总开关不该把它一起关掉，反过来也一样）。
+        .onChange(of: settings.callEnabled) { _, on in
+            note = nil
+            guard on else {
+                Task { await ProactiveService.shared.reschedule() }
+                return
+            }
+            Task { await reschedule(regenerate: false) }
         }
     }
 

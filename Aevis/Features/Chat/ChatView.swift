@@ -662,7 +662,7 @@ struct ChatView: View {
 
                 Button {
                     closeMorePanel()
-                    router.showCall = true
+                    router.startCall()
                 } label: {
                     moreTile("通话", "phone.arrow.up.right")
                 }
@@ -769,7 +769,7 @@ struct ChatView: View {
         }
         if bridge.openCall {
             bridge.openCall = false
-            router.showCall = true
+            router.startCall()
         }
         if bridge.openListen {
             bridge.openListen = false

@@ -238,7 +238,7 @@ struct MainTabView: View {
     private func accept(_ kind: CompanionRequest.Kind) {
         switch kind {
         case .call:
-            router.showCall = true
+            router.startCall()
         case .listenTogether:
             router.showPlayer = true
         case .screenShare:
@@ -264,6 +264,9 @@ struct MainTabView: View {
         if args.contains("-aevisOpenMoments") { router.showMoments = true }
         if args.contains("-aevisOpenTogether") { router.showPlayer = true }
         if args.contains("-aevisOpenPlayer") { router.showPlayer = true }
+        // 通话页那一张（免提按钮 + 打字输入框）。配合 `CallService.previewStart()`
+        // —— 模拟器里真起电话必然失败，失败就没有那一层，截图等于白截。
+        if args.contains("-aevisOpenCall") { router.startCall() }
         #endif
     }
 }

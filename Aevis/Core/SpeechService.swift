@@ -39,13 +39,30 @@ enum TTSError: LocalizedError {
 /// - 外部 API：任何 OpenAI 兼容的 `/audio/speech`，音色更自然，按量计费
 ///
 /// 外接失败会自动退回系统音色，不会让 TA 突然哑掉。
-final class SpeechService {
+///
+/// ## ⚠️ 为什么是 `NSObject`、为什么实现了两个 delegate
+/// 说话**必须**换音频类别（`.spokenAudio`），一换，系统就不认音乐是
+/// "当前在放声音的那个" —— 锁屏那圈控件会消失。所以"说完"这件事
+/// **必须能被收到**，收到之后把类别还给音乐。
+/// 而"说完了"只有 delegate 会告诉你：
+/// `AVSpeechSynthesizerDelegate.speechSynthesizer(_:didFinish:)`
+/// 和 `AVAudioPlayerDelegate.audioPlayerDidFinishPlaying(_:successfully:)`。
+/// 猜时长（`sleep(字数/速度)`）在被打断、语速被调、外接音频长短不一时全会错。
+final class SpeechService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     static let shared = SpeechService()
 
     private let synthesizer = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
 
-    private init() {}
+    /// 这一段话是不是正占着音频会话。
+    /// 用布尔而不是无脑 `endSpeech()`：`stop()` 会被反复调，
+    /// 无脑配对的话账很快就对不上（详见 `AudioSession` 里那段）。
+    private var holdsSession = false
+
+    private override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
 
     // MARK: - 系统音色
 
@@ -113,6 +130,7 @@ final class SpeechService {
             player.stop()
         }
         player = nil
+        releaseSession()
     }
 
     /// ⭐ 语音消息用（2026-09-30）：读一条音频的时长（秒）。
@@ -175,7 +193,7 @@ final class SpeechService {
             self.player = nil
         }
 
-        Self.activateSession()
+        holdSession()
 
         let utterance = AVSpeechUtterance(string: text)
         if !voiceIdentifier.isEmpty,
@@ -254,21 +272,50 @@ final class SpeechService {
 
     private func play(_ audio: Data) throws {
         stop()
-        Self.activateSession()
+        holdSession()
         let newPlayer = try AVAudioPlayer(data: audio)
+        newPlayer.delegate = self
         newPlayer.prepareToPlay()
         newPlayer.play()
         player = newPlayer
     }
 
-    // MARK: - 公共零件
+    // MARK: - 说完了：把音频会话还给音乐
 
-    private static func activateSession() {
-        let session = AVAudioSession.sharedInstance()
-        // .duckOthers：TA 说话时把音乐自动压低，说完恢复。为以后「一起听」做准备。
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        try? session.setActive(true)
+    /// 借走会话。**幂等** —— 连着借两次也只算一次，不然账对不上就永远还不回去。
+    private func holdSession() {
+        guard !holdsSession else { return }
+        holdsSession = true
+        AudioSession.beginSpeech()
     }
+
+    private func releaseSession() {
+        guard holdsSession else { return }
+        holdsSession = false
+        AudioSession.endSpeech()
+    }
+
+    /// ⚠️ delegate 回调**不保证在主线程**上 —— 但下面两句只是写两个静态布尔
+    /// 加一次 `AVAudioSession` 配置，不碰任何 `@Published`，所以不跳主线程也是安全的。
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                           didFinish utterance: AVSpeechUtterance) {
+        releaseSession()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                           didCancel utterance: AVSpeechUtterance) {
+        releaseSession()
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        releaseSession()
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        releaseSession()
+    }
+
+    // MARK: - 公共零件
 
     /// 去掉 markdown 记号，免得朗读时把星号井号都念出来。
     private static func plainText(_ text: String) -> String {

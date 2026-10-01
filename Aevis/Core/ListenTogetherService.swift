@@ -103,6 +103,10 @@ final class ListenTogetherService: ObservableObject {
         cancellable?.cancel()
         cancellable = nil
         lyricCount = 0
+        // 「结束一起听」= 这一场散了，口头聊的那些也清掉。
+        // ⚠️ 只是**界面上**清掉 —— 两边的话都已经进了正式聊天记录
+        //    （见 `send`），所以什么都不会丢。
+        chatLines = []
     }
 
     /// 她说的话要不要顺带念出来。只有用户主动点才念。
@@ -198,6 +202,115 @@ final class ListenTogetherService: ObservableObject {
         await react(to: line)
     }
 
+    // MARK: - 打字聊天（用户 2026-09-30 要的）
+
+    /// 一起听时你们打出来的字。
+    ///
+    /// 用户原话：「我们不能两个人互相打字聊天，要加一个输入框，能互相打字聊天的」。
+    ///
+    /// 为什么单独一份、不直接读 `ChatStore`：她跟着歌词插的话（`herLines`）
+    /// 是**播放器里才看得到**的碎碎念，不该塞进正式聊天记录；而这里打出来的字
+    /// 是正经对话，要两边都留（见 `send` 里那段镜像）。
+    struct Line: Identifiable, Equatable {
+        let id = UUID()
+        var mine: Bool
+        var text: String
+    }
+
+    @Published private(set) var chatLines: [Line] = []
+    @Published private(set) var replying = false
+
+    /// 打一句话给她，等她回。
+    ///
+    /// ## 三条口径
+    /// 1. **两边都落进正式聊天记录**（`ChatStore`）—— 关掉播放器之后这段
+    ///    不该凭空消失。她下次在聊天页里也该记得刚才聊过什么。
+    ///    这跟 QQ 机器人那条是同一条规矩（见 `QQBotService.replyText`）。
+    /// 2. **工具照给**（`DeviceTools.all()`）—— 她说"给你放首安静的"、
+    ///    "现在几点了"，在这儿也得能做。少给一份工具就是"假装完成"的温床。
+    /// 3. **带上"正在听什么"**。不然她不知道自己在什么场景里说话，
+    ///    回出来的话跟歌完全没关系，那就不叫一起听了。
+    func send(_ raw: String) async {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        // 上一条还在吐字 —— 不排队，直接说要等（排队会把她的话憋成两段）
+        guard !replying else { return }
+
+        // 先把"之前聊过什么"抓下来，再把自己这句放进去 —— 顺序反了
+        // 这句会在历史里出现两次（一次作为上下文、一次作为临时指令）。
+        let prior = chatLines.filter { !$0.text.isEmpty }
+
+        chatLines.append(Line(mine: true, text: text))
+        ChatStore.shared.append(ChatMessage(role: .user, text: text))
+        trimChat()
+
+        guard !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            statusLine = "还没填 API Key，她没法回你。"
+            return
+        }
+
+        replying = true
+        defer { replying = false }
+
+        // 先占一条空位，她的字**流式**长在这条上 —— 不然要等整段生成完才出现
+        let placeholder = Line(mine: false, text: "")
+        chatLines.append(placeholder)
+        let slot = chatLines.count - 1
+
+        let trackLine = MusicPlayer.shared.current.map { $0.display } ?? "一首歌"
+        let lyric = MusicPlayer.shared.currentLyricLine ?? "（还没到歌词）"
+
+        var history = prior.map {
+            ChatMessage(role: $0.mine ? .user : .assistant, text: $0.text)
+        }
+        history.append(ChatMessage(role: .user, text: """
+        你们正在一起听歌，歌是「\(trackLine)」，刚唱到「\(lyric)」。
+        对方刚跟你说：「\(text)」
+
+        就像面对面聊天那样回他一句。短一点（15 个字以内），
+        直接说内容，不要引号，不要解释，不要加动作描写。
+        """))
+
+        var collected = ""
+        do {
+            for try await piece in LLMService.streamReply(
+                config: config,
+                systemPrompt: persona.systemPrompt,
+                history: history,
+                memory: memory,
+                tools: DeviceTools.all()
+            ) {
+                collected += piece
+                if chatLines.indices.contains(slot) {
+                    chatLines[slot].text = collected
+                }
+                if collected.count > 200 { break }
+            }
+        } catch {
+            if chatLines.indices.contains(slot) { chatLines.remove(at: slot) }
+            statusLine = "她这次没接上话：\(error.localizedDescription)"
+            return
+        }
+
+        let reply = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else {
+            if chatLines.indices.contains(slot) { chatLines.remove(at: slot) }
+            return
+        }
+
+        chatLines[slot].text = reply
+        herLines.insert(reply, at: 0)
+        if herLines.count > 30 { herLines.removeLast() }
+        ChatStore.shared.append(ChatMessage(role: .assistant, text: reply))
+        trimChat()
+        statusLine = nil
+    }
+
+    /// 聊得再久也不留一长串在内存里 —— 播放器上那个列表不是聊天页。
+    private func trimChat() {
+        if chatLines.count > 60 { chatLines.removeFirst(chatLines.count - 60) }
+    }
+
     #if DEBUG
     /// 截图自检用：假装一起听开着，而且她已经说过两句。
     ///
@@ -213,6 +326,14 @@ final class ListenTogetherService: ObservableObject {
             "这句我从初中听到现在",
             "副歌前面那四小节最好听"
         ]
+        // 「打字聊」那一层也要能截到 —— 空着进去只有一句提示，看不出界面长什么样。
+        chatLines = [
+            Line(mine: true, text: "你还记得第一次听这首歌是什么时候吗"),
+            Line(mine: false, text: "记得，你上次在车里放过"),
+            Line(mine: true, text: "那时候你还没理我呢"),
+            Line(mine: false, text: "现在理你了，够不够")
+        ]
+        replying = false
     }
     #endif
 }

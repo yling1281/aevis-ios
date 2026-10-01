@@ -33,6 +33,8 @@ final class CallService: ObservableObject {
     @Published private(set) var lastSaid = ""
     @Published private(set) var thinking = false
     @Published private(set) var muted = false
+    /// 免提（外放）开着没有。默认开 —— 和原来 `.defaultToSpeaker` 的行为一致。
+    @Published private(set) var speakerOn = true
     @Published var errorText: String?
 
     private var persona = Persona()
@@ -77,6 +79,7 @@ final class CallService: ObservableObject {
         lastSaid = ""
         listeningText = ""
         muted = false
+        speakerOn = true
         state = .connecting
 
         // 把对话切到这个人，这一通电话的上下文和落库都算在他头上。
@@ -125,6 +128,21 @@ final class CallService: ObservableObject {
 
         startedAt = Date()
         state = .active
+
+        // 通话开始 —— 告诉 `AudioSession` 这条通道现在是通话在用：
+        // 它据此决定"说话 / 录音借完之后把类别还给谁"，以及免提还是听筒。
+        AudioSession.inCall = true
+        AudioSession.callSpeakerOn = speakerOn
+        AudioSession.applyCallOutputPort()
+
+        // ⭐ 让系统弹它自己那套通话界面（灵动岛 / 锁屏上那张卡）。
+        //
+        // ⚠️ **失败是允许的**：侧载重签之后系统可能不给（资格没继承过来）。
+        //    那时候我们自己的通话界面还在跑，用户完全无感 —— 见 `SystemCall`。
+        if AppSettings.shared.systemCallUI {
+            SystemCall.start(displayName: persona.name)
+        }
+
         BlackBox.log("☎️ 接通了")
     }
 
@@ -133,6 +151,21 @@ final class CallService: ObservableObject {
         let seconds = elapsed
         let wasActive = state == .active
         BlackBox.log(String(format: "☎️ 挂断（%.0f 秒）", seconds))
+
+        // 系统那边那通也要收掉。
+        //
+        // 两种来路都会走到这儿，而这一句对两边都是对的：
+        //  · **我们挂的**（通话页那个红按钮 / `onDisappear`）→ 得告诉系统一声，
+        //    不然灵动岛上那张卡会一直挂着"正在通话"；
+        //  · **系统挂的**（用户在锁屏上按了结束）→ `SystemCallCenter` 已经把自己
+        //    清干净了，这一句是幂等收尾（那边 `guard let manager` 直接收住，不会转圈）。
+        SystemCall.hangUp()
+
+        // 通话结束 —— 通道的主人换回去了。
+        // ⚠️ 别忘了撤掉"强制外放"：不撤的话，下一次一起听 / 语音消息
+        //    会莫名其妙从喇叭里出来，而且耳机插着也不走耳机。
+        AudioSession.inCall = false
+        AudioSession.applyCallOutputPort()
 
         // 先换掉通话编号：在途的那一轮立刻能认出「电话已经挂了」——
         // 她的话照样进聊天记录（用户挂断后回到聊天能看到），
@@ -180,10 +213,59 @@ final class CallService: ObservableObject {
         }
     }
 
+    /// 免提开关（用户 2026-10-01：「第三个的话呢，可以加点功能」）。
+    ///
+    /// ⚠️ 这里**一个字节都不碰 `AVAudioSession`** —— 只改 `AudioSession` 上的意图。
+    ///    会话是全进程唯一的，音乐、TTS、静音保活都在用；谁都能随手 `setCategory`
+    ///    就意味着互相打架（锁屏播放控件就是这么弄丢的）。路由由那个文件统一落。
+    func toggleSpeaker() {
+        guard state == .active else { return }
+        speakerOn.toggle()
+        AudioSession.callSpeakerOn = speakerOn
+        // 立刻生效 —— **不重开会话**。重开会让麦克风断一下，通话里听得很明显。
+        AudioSession.applyCallOutputPort()
+        BlackBox.tap("通话 · 免提\(speakerOn ? "开" : "关")")
+    }
+
+    /// 会话被别的东西动过之后补一次 —— **只在通话进行中生效**。
+    ///
+    /// 谁会动它：系统自己那套通话界面接通的那一下、来电、Siri、插拔耳机。
+    /// 被改掉之后我们这边的麦克风就哑了，而用户看到的是
+    /// 「她突然听不见我说话了」——这种最难查，因为界面一切正常。
+    func reassertAudioIfActive() {
+        guard state == .active, !muted else { return }
+        // `ListenService.start()` 在"已经听着"的时候会直接返回（不重设类别），
+        // 所以先停一下再起 —— 要的正是那一次 `setCategory`。
+        _ = listen.stop()
+        resumeListening()
+    }
+
     // MARK: - 一轮对话
 
     @MainActor
     private func handle(_ utterance: String) async {
+        await respond(to: utterance)
+    }
+
+    /// 你自己**打字**发的一句（通话页那个输入框）。
+    ///
+    /// 用户 2026-10-01：「第三个的话呢，可以加点功能」。
+    ///
+    /// 为什么要有它：麦克风在吵的地方根本不好使（地铁、风大、旁边有人），
+    /// 而「电话里说不出话」会让她显得很笨。留一个能打字的入口，
+    /// 这通电话就不会因为环境断掉 —— 而且**走的是和说话完全同一条路**。
+    @MainActor
+    func send(text raw: String) async {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        BlackBox.log("🎹 通话里打字：\(text.count) 字")
+        await respond(to: text)
+    }
+
+    /// 一轮对话。**说出来的和打出来的都走这里** —— 两条路必须完全一样，
+    /// 不然"打字那条"迟早会漏掉某一步（落库、挂断识别、念出来）。
+    @MainActor
+    private func respond(to utterance: String) async {
         guard state == .active else { return }
         // 记下这一轮属于哪通电话。挂断会换掉 session，下面就能认出来。
         let token = session
@@ -206,6 +288,11 @@ final class CallService: ObservableObject {
                 tools: DeviceTools.all()
             ) {
                 collected += piece
+                // 一边收一边往屏幕上放。
+                // 原来要等她整段写完才"啪"地蹦出来，那几秒在通话里就是死机 ——
+                // 屏幕上滚字，感觉就像她正在说（AI 权限那张卡那条产品原则：
+                // 「不要让她看起来像卡住了」）。
+                lastSaid = collected
             }
         } catch {
             thinking = false
@@ -282,4 +369,19 @@ final class CallService: ObservableObject {
         let total = Int(seconds)
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
+
+    #if DEBUG
+    /// 只给截图自检用（`-aevisOpenCall`）：把界面摆成"正在通话中"。
+    ///
+    /// 为什么要它：模拟器里没有麦克风权限、也没有 API Key，真起一通电话
+    /// 必然失败 —— 失败之后 `state` 回到 `.idle`，通话页那一层（免提按钮、
+    /// 打字输入框）**根本不显示**，截出来的还是老样子，等于白截。
+    /// 所以这里只造状态，不碰任何音频设备。
+    func previewStart() {
+        state = .active
+        startedAt = Date()
+        lastSaid = "嗯，我在呢。今天累不累？"
+        listeningText = "今天还好，就是有点想你"
+    }
+    #endif
 }

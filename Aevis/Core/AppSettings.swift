@@ -382,6 +382,10 @@ final class AppSettings: ObservableObject {
         static let randomEnabled = "aevis.randomEnabled"
         static let randomPerDay = "aevis.randomPerDay"
         static let proactiveLines = "aevis.proactiveLines"
+        /// 「她趁你不在时打给你」—— 一条带「接听」按钮的本地通知。默认关。
+        static let callEnabled = "aevis.callEnabled"
+        /// 通话时用苹果那套系统界面（灵动岛 / 锁屏上那张通话卡）。默认开。
+        static let systemCallUI = "aevis.systemCallUI"
         static let barkEnabled = "aevis.barkEnabled"
         static let barkURL = "aevis.barkURL"
         static let memoryEnabled = "aevis.memoryEnabled"
@@ -902,6 +906,24 @@ final class AppSettings: ObservableObject {
     /// 提前写好的一批「她会主动说的话」。
     @Published var proactiveLines: [String] {
         didSet { UserDefaults.standard.set(proactiveLines, forKey: Key.proactiveLines) }
+    }
+
+    /// 「她趁你不在时打给你」—— 一条带「接听」按钮的通知（用户 2026-10-01 要的）。
+    ///
+    /// ⚠️ **和 `proactiveEnabled` 是两个开关，不是父子**。
+    ///    有人只想收她的文字消息、不想被"来电"打断；也有人反过来。
+    ///    用户点名要这一个，就不该被藏在总开关后面。
+    @Published var callEnabled: Bool {
+        didSet { UserDefaults.standard.set(callEnabled, forKey: Key.callEnabled) }
+    }
+
+    /// 通话时用苹果那套系统界面（灵动岛 / 锁屏上那张通话卡）。
+    ///
+    /// ⚠️ 侧载重签**未必**给得了这个资格 —— 给不了时系统会直接拒绝，
+    ///    我们安静地退回自己的通话页面（用户那边完全看不出来）。
+    ///    所以默认**开**：调不通的代价是零，调通了是白赚的。
+    @Published var systemCallUI: Bool {
+        didSet { UserDefaults.standard.set(systemCallUI, forKey: Key.systemCallUI) }
     }
 
     @Published var barkEnabled: Bool {
@@ -1462,6 +1484,10 @@ final class AppSettings: ObservableObject {
         randomEnabled = defaults.object(forKey: Key.randomEnabled) as? Bool ?? false
         randomPerDay = defaults.object(forKey: Key.randomPerDay) as? Int ?? 2
         proactiveLines = defaults.stringArray(forKey: Key.proactiveLines) ?? []
+        // 「她打给你」默认**关**：一条会响的来电通知，不该在用户没要求时就排上。
+        callEnabled = defaults.object(forKey: Key.callEnabled) as? Bool ?? false
+        // 系统通话界面默认**开**：调不通会自己退回我们的界面，代价是零。
+        systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? true
         barkEnabled = defaults.object(forKey: Key.barkEnabled) as? Bool ?? false
         barkURL = defaults.string(forKey: Key.barkURL) ?? ""
         memoryEnabled = defaults.object(forKey: Key.memoryEnabled) as? Bool ?? true

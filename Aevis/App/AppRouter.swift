@@ -46,5 +46,19 @@ final class AppRouter: ObservableObject {
         BlackBox.log(opened ? "⇢ 打开 \(name)" : "⇠ 关掉 \(name)")
     }
 
+    // MARK: - 打通话
+
+    /// **所有"要打电话"的入口都走这里。**
+    ///
+    /// 通话能从五个地方拉起来：聊天加号、发现页、她主动提的申请条、
+    /// `aevis://call` 快捷指令、通知上的「接听」。
+    /// 加了「系统来电界面」之后，这几处的行为必须**一模一样** ——
+    /// 系统界面那一步在 `CallService.start()` 里（那是唯一真正开始通话的地方），
+    /// 所以这里只负责"把那一屏调出来"，但它同时是**唯一的说明处**：
+    /// 想确认"打一通电话会发生什么"，看这一行就够。
+    func startCall() {
+        showCall = true
+    }
+
     private init() {}
 }

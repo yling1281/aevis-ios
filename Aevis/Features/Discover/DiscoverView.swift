@@ -50,7 +50,7 @@ struct DiscoverView: View {
                     if Experimental.enabled {
                         card {
                             entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
-                                router.showCall = true
+                                router.startCall()
                             }
                         }
                     }

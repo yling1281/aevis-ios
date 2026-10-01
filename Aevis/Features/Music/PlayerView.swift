@@ -39,6 +39,14 @@ struct PlayerView: View {
     /// 找歌面板。没歌在放时进来会自动弹 —— 不然这个界面是一片空白。
     @State private var showSearch = false
 
+    /// 「打字聊」那一层（用户 2026-09-30 要的输入框）。
+    ///
+    /// ⚠️ 它和 `showSearch` 是**挂在两个不同的视图上**的（一个挂在 `content`、
+    ///    一个挂在最外层的 `ZStack`）。同一个视图上叠两个 `.sheet` 时，
+    ///    SwiftUI 只认最后一个，另一个会"点了没反应" —— 这是老坑，
+    ///    靠着分开放才不用去写一层枚举来管。
+    @State private var showChat = false
+
     private var persona: Persona { personaStore.persona }
 
     /// 唱片直径。跟屏幕宽度挂钩，但别大得离谱。
@@ -53,7 +61,11 @@ struct PlayerView: View {
     var body: some View {
         ZStack {
             backdrop
+            // 打字聊那一层挂在这里；找歌那一层挂在下面（见 `showChat` 的说明）。
             content
+                .sheet(isPresented: $showChat) {
+                    ListenChatSheet()
+                }
         }
         .onAppear {
             // 空着进来就先让他找首歌 —— 否则界面上一句「还没在放歌」，
@@ -63,6 +75,13 @@ struct PlayerView: View {
             } else {
                 autoStartTogether()
             }
+            #if DEBUG
+            // 截图自检用：直接把「打字聊」那一层掀开
+            //（模拟器里没 API Key，正常路径永远打不开它）。
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenListenChat") {
+                showChat = true
+            }
+            #endif
         }
         // ⚠️ `onDismiss` 里那个 `autoStartTogether()` 不能省：
         // 空着进来时 `onAppear` 只把找歌面板打开了、没启动一起听；
@@ -450,14 +469,37 @@ struct PlayerView: View {
             if together.active {
                 togetherRow
 
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    // 「打字聊」—— 用户 2026-09-30 点名的那个输入框。
+                    // 摆在这一排的**第一个**：他说的是"不能互相打字聊天"，
+                    // 那这就是这一排里最该先被看到的。
+                    Button {
+                        BlackBox.tap("播放器 · 打字聊")
+                        showChat = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "keyboard")
+                                .font(.aevis(12.5, weight: .medium))
+                            Text("打字聊")
+                                .font(.aevis(13, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(settings.accentColor.opacity(0.55)))
+                    }
+                    .buttonStyle(.plain)
+
                     Button {
                         Task { await together.pokeHer() }
                     } label: {
                         Text(together.thinking ? "\(Pronoun.current)在想…" : "让\(Pronoun.current)说一句")
                             .font(.aevis(13, weight: .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                             .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 15)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(Capsule().fill(.white.opacity(0.14)))
                     }
@@ -467,10 +509,11 @@ struct PlayerView: View {
                     Button {
                         together.stop()
                     } label: {
-                        Text("结束一起听")
+                        Text("结束")
                             .font(.aevis(13))
+                            .lineLimit(1)
                             .foregroundStyle(.white.opacity(0.65))
-                            .padding(.horizontal, 15)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(Capsule().fill(.white.opacity(0.08)))
                     }
@@ -572,8 +615,24 @@ struct PlayerView: View {
             mode: mode,
             persona: persona,
             config: settings.llm,
-            memory: settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
+            memory: backgroundKnowledge()
         )
+    }
+
+    /// 给她的背景资料 —— **和聊天页同一套口径**（她那边有详细注释）。
+    ///
+    /// 以前这里只给长期记忆，于是"一起听"时她不知道你们的纪念日、
+    /// 不知道现在几点、在哪儿 —— 说话就比聊天页里那个她**笨一截**。
+    /// 同一个人不该因为换了个页面就变得不认得你。
+    private func backgroundKnowledge() -> [String] {
+        var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
+        // 情侣空间（在一起多少天 / 倒数日）**不挂记忆开关** ——
+        // 那是用户手填的硬事实，关掉记忆不等于让她忘了纪念日。
+        context.append(contentsOf: CoupleStore.shared.injectedLines())
+        let screenTime = ScreenTimeInsight.shared.digest()
+        if !screenTime.isEmpty { context.append(screenTime) }
+        context.append(contentsOf: AmbientContext.shared.digest())
+        return context
     }
 
     // MARK: - 零件

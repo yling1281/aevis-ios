@@ -30,9 +30,17 @@ final class SilentKeeper {
         guard !isRunning else { return }
         do {
             let session = AVAudioSession.sharedInstance()
-            // 和别人共存：用户真在放歌、打电话都不受影响（.mixWithOthers）
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
+            // ⚠️ **音乐在放的时候一个字节都不能动类别。**
+            //
+            // 保活要的是 `.mixWithOthers`（不过是一段静音，不该抢别人的音频通道），
+            // 而那个选项恰好会让系统**不认我们这台 App 是"当前在放声音的那个"** ——
+            // 于是锁屏 / 灵动岛上那圈播放控件当场消失。
+            // 静音播放本身不需要额外配置：会话已经是 `.playback` 而且活着，
+            // 下面那个 `AVAudioPlayer` 照放不误。
+            if AudioSession.silenceNeedsOwnCategory {
+                try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+                try session.setActive(true)
+            }
 
             let player = try AVAudioPlayer(data: Self.silence())
             player.numberOfLoops = -1      // 一直循环
