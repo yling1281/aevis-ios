@@ -171,11 +171,19 @@ targets:
           - "Resources/Info.plist"
           # 权限声明文件是给签名用的，不该被当成资源打进包里
           - "Aevis.entitlements"
+    # ⚠️ 依赖清单**整体留在标记之外**（`dependencies:` 这个键 + AevisLive 那一项）。
+    #
+    # 为什么：`AevisLive`（实时活动扩件）**不能**被 strip_extension.py 摘掉 ——
+    # 主 App 依赖它，摘了主 App 就缺一个扩件、构建直接失败。所以它的依赖项
+    # 必须在标记之外、永远留着；同理末尾那个 AevisLive target 也不在标记块里。
+    # 而 AevisBroadcast 的依赖项在下面的 extension-dep 标记块里（会被一起摘掉）。
+    dependencies:
+      - target: AevisLive
+        embed: true
     # >>> extension-dep:start
     # 这一段和下面的 AevisBroadcast target 是**成对**的：
     # scripts/strip_extension.py 会按标记一起摘掉，用来在
     # 「嵌套扩展签不过、整个 App 装不上」时快速退回到纯 App。
-    dependencies:
       - target: AevisBroadcast
         embed: true
     # <<< extension-dep:end
@@ -239,6 +247,52 @@ targets:
         Release:
           SWIFT_COMPILATION_MODE: "wholemodule"
   # <<< extension:end
+
+  # ——— 实时活动（灵动岛）扩展 ———
+  #
+  # 她回消息 → 灵动岛展开 + 出声（＝老板要的「弹窗」）。锁屏 / 灵动岛上那张
+  # 卡片就是这个扩展画的；主 App 负责「起活动 / 更新活动」。
+  #
+  # ⚠️ 它**故意不在** `# >>> extension` 标记块里 —— 和录屏扩展**相反**。
+  #    理由：主 App **依赖**它（依赖项也在标记之外，见上面 Aevis 的 dependencies）。
+  #    要是把它放进去，`scripts/strip_extension.py` 生成「不嵌扩展」的对照组时
+  #    会把目标摘掉、可主 App 还在依赖它 → xcodegen 报「target 不存在」、构建失败。
+  #    实时活动不依赖 App Group / 特殊权限，侧载重签比录屏扩展好过得多，
+  #    所以「摘掉它」本来也不是我们需要的那条应急路。
+  #
+  # ⚠️ 版本号必须跟**父 App `Aevis` 一模一样**（`0.0.93 / 93`）。
+  #    不写就会继承根工程的 `0.0.93 / 93`（也一样），但**显式写出来**是为了
+  #    以后根工程版本号动了、这里不会被忘记 —— 一旦父子版本不一致，
+  #    `ValidateEmbeddedBinary` 会当场报 CFBundleVersion 不匹配、CI 挂掉。
+  #    （这个坑在 AevisCallProbe2Ext 那边真踩过。）
+  AevisLive:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AevisLive
+        excludes:
+          - "Info.plist"
+      # 数据契约两个 target 都要编，只此一份
+      #（照 AevisBroadcast 收 ScreenShareStore.swift 的做法）。
+      - path: Aevis/Core/MessageActivity.swift
+    settings:
+      base:
+        PRODUCT_NAME: AevisLive
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.ios.live
+        INFOPLIST_FILE: AevisLive/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        SKIP_INSTALL: "YES"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "0.0.93"
+        CURRENT_PROJECT_VERSION: "93"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
 
   # ——— 管理端 App（**独立的包**，不塞进主 App）———
   #
@@ -525,6 +579,9 @@ schemes:
     build:
       targets:
         Aevis: all
+        # 实时活动扩件**留在标记之外**（跟它的依赖项一致）：
+        # 它不能被 strip_extension.py 摘掉，否则主 App 依赖的 target 会消失。
+        AevisLive: all
         # >>> extension-scheme:start
         AevisBroadcast: all
         # <<< extension-scheme:end
@@ -566,3 +623,15 @@ schemes:
     archive:
       config: Release
   # <<< probe2-ext-scheme:end
+
+  # 实时活动扩件单独的 scheme —— CI 平时用 `-target` 编，这个是为了
+  # 以后谁拿 Xcode 打开也能直接选中它跑（照探针那几个 scheme 的写法）。
+  # ⚠️ 不在任何标记块里（它不能被 strip_extension.py 摘掉）。
+  AevisLive:
+    build:
+      targets:
+        AevisLive: all
+    run:
+      config: Debug
+    archive:
+      config: Release

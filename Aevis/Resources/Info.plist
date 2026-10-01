@@ -142,6 +142,16 @@
 		<string>audio</string>
 		<string>voip</string>
 	</array>
+	<!-- ⭐ 实时活动（灵动岛）。2026-10-01 老板要的「她回消息弹到灵动岛上」。
+	     没有这个键，主 App 连 `Activity.request(...)` 都起不来 ——
+	     表现是「什么都没发生」，日志里只有一行看不见的 error。
+	     `NSSupportsLiveActivitiesFrequentUpdates` 允许更频繁地更新（她连发几句时
+	     灵动岛跟得上）。两者都要跟 AevisLive 扩件配套：
+	     扩件负责画卡片（见 AevisLive/AevisLiveWidget.swift），这里负责允许起活动。 -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

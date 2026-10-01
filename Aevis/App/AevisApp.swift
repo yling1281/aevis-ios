@@ -7,6 +7,9 @@ struct AevisApp: App {
     @StateObject private var settings = AppSettings.shared
     @StateObject private var chat = ChatStore.shared
 
+    /// App 在前台 / 后台的状态 —— 回到前台时要把灵动岛的活动接上。
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         // 提前把用户导入过的字体注册好，免得第一帧找不到字体而回退成系统字体。
         _ = FontStore.shared
@@ -57,6 +60,14 @@ struct AevisApp: App {
             let base = await AccountEndpoint.refresh()
             await MainActor.run { AppSettings.shared.accountServerURL = base }
         }
+
+        // 远端配置：开机拉一次（**不 await、不挡启动**，失败就安静用缓存）。
+        // 这是「不出新包也能改开关」那条路 —— 详见 `RemoteConfig`。
+        Task { await RemoteConfig.shared.refresh() }
+
+        // 冷启动补一次灵动岛（Live Activity）同步 —— 第一次 `scenePhase` 变 active
+        // 不一定触发 onChange，所以这里主动补一次，别让挂机态等到切后台才起来。
+        Task { @MainActor in LiveIslandCenter.shared.sync() }
     }
 
     var body: some Scene {
@@ -65,6 +76,12 @@ struct AevisApp: App {
                 .environmentObject(personaStore)
                 .environmentObject(settings)
                 .environmentObject(chat)
+                .onChange(of: scenePhase) { _, phase in
+                    // 回到前台：把灵动岛的活动接上（挂了超过 8 小时就被系统收了，
+                    // 得重开一个挂机态）。详见 `LiveIslandCenter.sync()`。
+                    guard phase == .active else { return }
+                    LiveIslandCenter.shared.sync()
+                }
         }
     }
 }

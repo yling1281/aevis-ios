@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 这个扩展**不是**给用户点的界面，是给系统的：
+	     她回消息之后，灵动岛 / 锁屏上那张卡片由它来画。
+	     主 App 负责「起活动 / 更新活动」，真正的界面在这里。
+	     ⚠️ 它进不了 `# >>> extension` 标记块（主 App 依赖它），
+	        所以 `strip_extension.py` 不会摘它。 -->
+	<key>CFBundleDisplayName</key>
+	<string>Aevis 实时活动</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSExtension</key>
+	<dict>
+		<!-- 这个注册点写错，系统就当它不是 WidgetKit 扩展 —— -->
+		<!-- 编译能过、也装得上，但灵动岛上永远不出现，且不报任何错。 -->
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.widgetkit-extension</string>
+	</dict>
+</dict>
+</plist>

@@ -909,6 +909,9 @@ struct ChatView: View {
         let shouldSpeak = settings.speakerEnabled
         let ttsConfig = settings.tts
         let systemVoice = persona.voiceIdentifier
+        // 她叫什么 —— 送灵动岛（Live Activity）时要显示的名字。
+        // 在这算好、传进闭包，闭包里就别再读 `persona`（那是主线程隔离的计算属性）。
+        let herName = persona.name.isEmpty ? "TA" : persona.name
 
         isSending = true
         sendTask = Task { @MainActor in
@@ -968,6 +971,16 @@ struct ChatView: View {
                 // 多余的空占位就行 —— **不要再定稿一次**（见上面那段注释）。
                 chat.removeLastIfEmpty()
                 chat.commit()
+
+                // ⭐ 她这一整段话说完 → 送上**灵动岛**（Live Activity）。
+                // ⚠️ 每次回复**只调一次**（不是每行一次，所以挂在这里、不挂在
+                //    `flushLines` 里）。`accumulated` 是整段、可能很长 ——
+                //    `LiveIslandCenter` 会**在意层截断**，别把整段塞进活动状态。
+                // ⚠️ 只在真有内容时调；空回复不打扰灵动岛。
+                let said = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !said.isEmpty {
+                    LiveIslandCenter.shared.push(name: herName, text: said)
+                }
             } catch {
                 chat.removeLastIfEmpty()
                 if (error as? CancellationError) == nil {

@@ -387,6 +387,8 @@ final class AppSettings: ObservableObject {
         static let callProactive = "aevis.callProactive"
         /// 通话时用苹果那套系统界面（灵动岛 / 锁屏上那张通话卡）。默认开。
         static let systemCallUI = "aevis.systemCallUI"
+        /// 她的消息上**灵动岛**（Live Activity）。默认开。
+        static let liveIsland = "aevis.liveIsland"
         static let barkEnabled = "aevis.barkEnabled"
         static let barkURL = "aevis.barkURL"
         static let memoryEnabled = "aevis.memoryEnabled"
@@ -950,6 +952,17 @@ final class AppSettings: ObservableObject {
     /// 但她终于有了主动找你的手，而不是只能等你说"打个电话吧"。
     @Published var callProactive: Bool {
         didSet { UserDefaults.standard.set(callProactive, forKey: Key.callProactive) }
+    }
+
+    /// 她回消息时，把这句话送上**灵动岛**（Live Activity）—— 老板要的「弹窗」。
+    ///
+    /// ⚠️ 说清代价：开着的时候，挂机态的活动会一直挂着，**灵动岛角落会一直有
+    ///    一个不起眼的小标记**（表示「她在」）。关掉之后就完全不上岛。
+    ///
+    /// 默认**开**（老板拍板："默认挂机"）。另外远端配置还能在它之上**再加一道
+    /// kill switch**：本地开着、远端没关，才真的干活（见 `LiveIslandCenter.enabled`）。
+    @Published var liveIsland: Bool {
+        didSet { UserDefaults.standard.set(liveIsland, forKey: Key.liveIsland) }
     }
 
     @Published var barkEnabled: Bool {
@@ -1517,6 +1530,8 @@ final class AppSettings: ObservableObject {
         systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? false
         // 她可以主动拨过来：默认**开**（接不接永远是你点一下说了算）。
         callProactive = defaults.object(forKey: Key.callProactive) as? Bool ?? true
+        // 她的消息上灵动岛：默认**开**（挂机态在灵动岛角落留一个不起眼的小标记）。
+        liveIsland = defaults.object(forKey: Key.liveIsland) as? Bool ?? true
         barkEnabled = defaults.object(forKey: Key.barkEnabled) as? Bool ?? false
         barkURL = defaults.string(forKey: Key.barkURL) ?? ""
         memoryEnabled = defaults.object(forKey: Key.memoryEnabled) as? Bool ?? true
