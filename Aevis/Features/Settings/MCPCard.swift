@@ -43,6 +43,14 @@ struct MCPCard: View {
     @State private var addError = ""
     @State private var addStep = ""
 
+    /// 「查找附近的设备」扫到的结果（局域网里跑着 Aevis 电脑助手的机器）。
+    ///
+    /// 用户 2026-10-01 要的：「查找附近的设备，这里可以找到它，然后直接连接」。
+    /// 扫到一条你点一下，地址就填好了 —— 不用手打 IP。
+    @State private var found: [PCAgent.Machine] = []
+    @State private var scanning = false
+    @State private var scanNote = ""
+
     // 手动添加的草稿
     @State private var draftURL = ""
     @State private var draftHeaders = ""
@@ -305,6 +313,34 @@ struct MCPCard: View {
             .foregroundStyle(settings.accentColor)
         } else {
             pairRow(server, panel: panel)
+
+            // ——— 手机上要做的那两步 ———
+            //
+            // ⚠️ 这段**必须写出来**：用户 2026-10-01 要的「苹果对安卓直接连」，
+            //    卡住他的从来不是 App 这边，而是**他不知道安卓那边要开什么**。
+            //    光给一个"6 位配对码"输入框，他只会问"码在哪"。
+            //    顺序也不能反：先开弹窗 → 再扫（弹窗一关，mDNS 里就只剩连接端口了）。
+            VStack(alignment: .leading, spacing: 5) {
+                Text("手机上要做的两步")
+                    .font(.aevis(11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("① 安卓手机：设置 → 开发者选项 → 无线调试 → 打开开关，"
+                     + "然后点「使用配对码配对设备」。那个弹窗先别关。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("② 弹窗里会写一个 6 位码和一个 192.168 开头的地址 —— "
+                     + "码填在上面那个框里，地址不用管，电脑会自己找到它。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("配一次就够了，以后手机开着无线调试就能直接连。"
+                     + "手机重启之后无线调试会自动关，回去把开关打开就行。")
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 2)
         }
 
         if !panel.message.isEmpty {
@@ -460,6 +496,103 @@ struct MCPCard: View {
 
     // MARK: - 添加电脑
 
+    /// 「查找附近的设备」那一段。
+    ///
+    /// 干什么：在局域网里挨个探一遍常见网段，认得出「Aevis 电脑助手」的列出来。
+    /// 点一条 → 地址自动填好 → 你只管填配对码。
+    @ViewBuilder
+    private var foundComputers: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("查找附近的设备")
+                    .font(.aevis(12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                if scanning {
+                    ProgressView().controlSize(.small)
+                    Text("正在找…")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button(found.isEmpty ? "开始查找" : "重新找") {
+                        Task { await scanNearby() }
+                    }
+                    .font(.aevis(12.5))
+                    .foregroundStyle(settings.accentColor)
+                }
+            }
+
+            if !found.isEmpty {
+                ForEach(found, id: \.host) { machine in
+                    Button {
+                        draftAddress = "\(machine.host):\(machine.port)"
+                        if draftName.isEmpty { draftName = machine.device }
+                        addError = ""
+                    } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: "desktopcomputer")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(settings.accentColor)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(machine.device)
+                                    .font(.aevis(13, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                Text("\(machine.host):\(machine.port)")
+                                    .font(.aevisMono(11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 6)
+                            Image(systemName: "arrow.up.left")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if !scanNote.isEmpty {
+                Text(scanNote)
+                    .font(.aevis(11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 在局域网里把跑着「Aevis 电脑助手」的机器找出来。
+    ///
+    /// ## 为什么不是 Bonjour
+    /// 助手那个 EXE 是**普通 Windows 程序**，没注册 mDNS 服务 —— 扫 `_http._tcp`
+    /// 又太脏（打印机、路由器、电视全在里头）。所以走**并发探测**：
+    /// 本机 /24 网段 + 默认端口，200 多个地址一起发，1 秒多钟出结果。
+    /// 认的标准是 `/pair.json` 里有 `device` 字段（见 `PCAgent.probe`）——
+    /// 光"端口开着"不算，同一端口上可能是路由器后台。
+    private func scanNearby() async {
+        guard !scanning else { return }
+        scanning = true
+        found = []
+        scanNote = ""
+
+        let hits = await PCAgent.scanLocalNetwork()
+
+        scanning = false
+        found = hits
+        if hits.isEmpty {
+            scanNote = "没找到。检查一下：① 电脑上那个助手窗口开着吗；"
+                + "② 手机和电脑在不在同一个 WiFi；"
+                + "③ iPhone 设置 → 隐私与安全性 → 本地网络里的 Aevis 开着吗。"
+        } else {
+            scanNote = "点一条就把地址填好了，剩下的只要填配对码。"
+        }
+    }
+
     private var addComputerSheet: some View {
         NavigationStack {
             ScrollView {
@@ -469,14 +602,60 @@ struct MCPCard: View {
                             .font(.aevis(12.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         Text("把「局域网地址」和「配对码」照抄进来就行。"
-                             + "也可以点下面的「扫码」，直接扫电脑屏幕上那个二维码。")
+                             + "也可以点下面的「扫码」，直接扫电脑屏幕上那个二维码 —— "
+                             + "扫码最快，码和地址一起带进来，不用手打。")
                             .font(.aevis(11.5))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
+                    // ⭐ **扫码放最前面**（用户 2026-10-01：「查找附近的设备…直接连接」）。
+                    //
+                    // 为什么把它提到最上面：扫码是**唯一一步到位**的那条路 ——
+                    // 电脑屏幕上那个二维码里装的是 `aevis://pc?host=…&port=…&code=…`，
+                    // 扫完地址和配对码全填好了，连"确认"都不用点（见 `applyScanned`）。
+                    // 手动填 IP 那条路要抄两样东西、还容易抄错，放后面当备胎。
+                    if QRScannerView.isAvailable {
+                        Button {
+                            sheet = nil
+                            scanMode = .addComputer
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.system(size: 15, weight: .medium))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("扫一扫，直接连")
+                                        .font(.aevis(14, weight: .medium))
+                                    Text("对着电脑屏幕上那个二维码")
+                                        .font(.aevis(11))
+                                        .opacity(0.8)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .fill(settings.accentColor)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     field("电脑地址", hint: "比如 192.168.1.10:\(PCAgent.defaultPort)",
                           text: $draftAddress, mono: true)
+
+                    // 附近设备 —— 用户 2026-10-01：
+                    // 「苹果的话，那边可以填入配对码和 IP，懂吗？就是查找附近的设备，
+                    //   这里可以找到它，然后直接连接」。
+                    //
+                    // ⚠️ 这里扫的是**网里的 Aevis 电脑助手**，不是 iPhone 之间的
+                    //    Bonjour 发现。iPhone 自己不会说安卓那套无线调试协议，
+                    //    安卓也没有 iOS 的 Bonjour 服务可发 —— 两台手机**不可能**
+                    //    互相发现。所以「附近」这一层能做的、也是唯一有意义的一件事，
+                    //    就是把局域网里跑着助手的机器列出来给你点。
+                    foundComputers
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("配对码")
@@ -499,26 +678,8 @@ struct MCPCard: View {
                     field("给它起个名（可选）", hint: "不填就用电脑自己的名字",
                           text: $draftName)
 
-                    if QRScannerView.isAvailable {
-                        Button {
-                            sheet = nil
-                            scanMode = .addComputer
-                        } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: "qrcode.viewfinder")
-                                Text("扫码（扫电脑屏幕上那个）")
-                            }
-                            .font(.aevis(13.5, weight: .medium))
-                            .foregroundStyle(settings.accentColor)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .fill(settings.accentColor.opacity(0.12))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    // ⚠️ 扫码按钮搬到最上面去了（`sheet = nil` 之后就没它了，
+                    //    重复放一个只会让用户犹豫点哪个）。
 
                     if !addError.isEmpty {
                         Text(addError)

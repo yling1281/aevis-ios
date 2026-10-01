@@ -186,6 +186,91 @@ enum PCAgent {
                        code: (json["code"] as? String) ?? "")
     }
 
+    // MARK: - 查找附近的设备
+
+    /// 在同一个局域网里把跑着「Aevis 电脑助手」的机器全找出来。
+    ///
+    /// ## 用户 2026-10-01 要的
+    /// 「查找附近的设备，这里可以找到它，然后直接连接」—— 不想手打 IP。
+    ///
+    /// ## 为什么不用 Bonjour
+    /// 助手那个 EXE 是**普通 Windows 程序**，没注册 mDNS 服务。扫 `_http._tcp`
+    /// 又太脏：打印机、路由器、电视、别家的 NAS 全在里头，用户面对一长串莫名其妙的
+    /// 设备名根本认不出哪个是自己的电脑。
+    ///
+    /// 所以走**并发探测**：拿本机地址推出 /24 网段，254 个地址**同时**发
+    /// `GET /pair.json`（超时压到 0.6 秒），认 `device` 字段。
+    /// 一个都收不回也就是 1 秒出头 —— 用户等得起。
+    ///
+    /// ## ⚠️ 为什么超时必须这么短
+    /// 不在这网段的地址，系统会在**连接阶段**就返回「不可达」，不用等满超时；
+    /// 但防火墙丢包的地址会一直挂到超时。254 个并发 × 0.6 秒 = 一秒多出结果，
+    /// 这是用户能接受的上限。**别调大**，调大就是"点一下转半天"。
+    static func scanLocalNetwork(timeout: TimeInterval = 0.6) async -> [Machine] {
+        let subnets = localSubnets()
+        guard !subnets.isEmpty else { return [] }
+
+        var addresses: [Address] = []
+        for base in subnets {
+            for last in 1...254 {
+                addresses.append(Address(host: "\(base).\(last)", port: defaultPort, code: ""))
+            }
+        }
+
+        return await withTaskGroup(of: Machine?.self) { group in
+            for address in addresses {
+                group.addTask {
+                    // 探不到就是 nil，**不抛** —— 254 个任务里有 253 个必然失败，
+                    // 让异常穿出来只会把整个扫描打断。
+                    try? await probe(address, timeout: timeout)
+                }
+            }
+
+            var hits: [Machine] = []
+            for await hit in group {
+                if let hit { hits.append(hit) }
+            }
+            // 按地址排一下，不然顺序是任务完成的随机顺序，每次刷新都在跳
+            return hits.sorted { ($0.host, $0.port) < ($1.host, $1.port) }
+        }
+    }
+
+    /// 本机所在的 /24 网段（`192.168.1.10` → `["192.168.1"]`）。
+    ///
+    /// 只看 `en0`（WiFi）—— 蜂窝、utun（VPN）、awdl（隔空投送）那些扫了也没意义，
+    /// 而且 utun 的地址扫一圈纯属浪费时间。
+    private static func localSubnets() -> [String] {
+        var subnets: [String] = []
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let current = cursor {
+            defer { cursor = current.pointee.ifa_next }
+            let flags = Int32(current.pointee.ifa_flags)
+            // 要「跑起来了」而且「不是回环」
+            guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0 else { continue }
+            guard current.pointee.ifa_addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+
+            var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let result = getnameinfo(
+                current.pointee.ifa_addr, socklen_t(current.pointee.ifa_addr.pointee.sa_len),
+                &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST
+            )
+            guard result == 0 else { continue }
+
+            let ip = String(cString: buffer)
+            let parts = ip.split(separator: ".")
+            guard parts.count == 4 else { continue }
+            let base = parts.prefix(3).joined(separator: ".")
+            // `169.254.x.x` 是 DHCP 没拿到地址时的自分配地址，那上面什么都不会有
+            guard !ip.hasPrefix("169.254.") else { continue }
+            if !subnets.contains(base) { subnets.append(base) }
+        }
+        return subnets
+    }
+
     // MARK: - 用配对码换令牌
 
     /// 拿 6 位码换一个长期令牌。换不到就是码不对/被限速。

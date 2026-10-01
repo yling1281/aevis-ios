@@ -108,17 +108,34 @@ struct MainTabView: View {
         }
         // 她主动提的申请 —— 从顶上滑进来一条，但**不挡你手上的事**
         //（不点它照样能继续打字、翻朋友圈）。
+        //
+        // ⚠️ 打电话**单独走一张更大的「来电卡」**（见 `IncomingCallCard`）：
+        //    它在任何页面都会盖上来，因为"她打过来"这件事不该因为你正好不在
+        //    聊天页就消失。另外两种（看屏幕 / 一起听）还是用这条小条 ——
+        //    它们本来就是"顺手提一下"，不需要那么大张旗鼓。
         .overlay(alignment: .top) {
             if let request = companionRequest.pending {
-                CompanionRequestBar(
-                    item: request,
-                    onAccept: { accept(request.kind) },
-                    onDecline: { companionRequest.decline() }
-                )
-                .padding(.horizontal, 14)
-                .padding(.top, 6)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(40)
+                if request.kind == .call {
+                    IncomingCallCard(
+                        reason: request.reason,
+                        persona: personaStore.persona,
+                        onAccept: { accept(request.kind) },
+                        onDecline: { companionRequest.decline() }
+                    )
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(45)
+                } else {
+                    CompanionRequestBar(
+                        item: request,
+                        onAccept: { accept(request.kind) },
+                        onDecline: { companionRequest.decline() }
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(40)
+                }
             }
         }
         .animation(.easeOut(duration: 0.26), value: companionRequest.pending)

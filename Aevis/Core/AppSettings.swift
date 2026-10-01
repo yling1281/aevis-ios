@@ -384,6 +384,7 @@ final class AppSettings: ObservableObject {
         static let proactiveLines = "aevis.proactiveLines"
         /// 「她趁你不在时打给你」—— 一条带「接听」按钮的本地通知。默认关。
         static let callEnabled = "aevis.callEnabled"
+        static let callProactive = "aevis.callProactive"
         /// 通话时用苹果那套系统界面（灵动岛 / 锁屏上那张通话卡）。默认开。
         static let systemCallUI = "aevis.systemCallUI"
         static let barkEnabled = "aevis.barkEnabled"
@@ -924,6 +925,19 @@ final class AppSettings: ObservableObject {
     ///    所以默认**开**：调不通的代价是零，调通了是白赚的。
     @Published var systemCallUI: Bool {
         didSet { UserDefaults.standard.set(systemCallUI, forKey: Key.systemCallUI) }
+    }
+
+    /// 她可以**主动打给你**（不经过你先点一下）。
+    ///
+    /// ⚠️ 和 `callEnabled` 完全是两件事，别合并：
+    ///    · `callEnabled` = 「她趁你不在时打给你」的**通知**（你不在 App 里时收得到）；
+    ///    · 这个 = 你**正在聊天**时，她可以不问一句直接拨过来 —— 聊天页顶上会弹一条
+    ///      「她想打个电话 / 接 · 先不了」，你点了「接」才真的接通。
+    /// 用户 2026-10-01：「不要让他束手束脚的……你要让他真的能动起来」。
+    /// 所以默认**开**：控制权还在你手上（永远要你点一下接听），
+    /// 但她终于有了主动找你的手，而不是只能等你说"打个电话吧"。
+    @Published var callProactive: Bool {
+        didSet { UserDefaults.standard.set(callProactive, forKey: Key.callProactive) }
     }
 
     @Published var barkEnabled: Bool {
@@ -1488,6 +1502,8 @@ final class AppSettings: ObservableObject {
         callEnabled = defaults.object(forKey: Key.callEnabled) as? Bool ?? false
         // 系统通话界面默认**开**：调不通会自己退回我们的界面，代价是零。
         systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? true
+        // 她可以主动拨过来：默认**开**（接不接永远是你点一下说了算）。
+        callProactive = defaults.object(forKey: Key.callProactive) as? Bool ?? true
         barkEnabled = defaults.object(forKey: Key.barkEnabled) as? Bool ?? false
         barkURL = defaults.string(forKey: Key.barkURL) ?? ""
         memoryEnabled = defaults.object(forKey: Key.memoryEnabled) as? Bool ?? true

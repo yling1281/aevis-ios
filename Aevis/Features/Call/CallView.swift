@@ -75,7 +75,26 @@ struct CallView: View {
                 .font(.aevis(22, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
+            // ⚠️ 只在**通话中**才开这个每秒的计时器。
+            //
+            // 用户 2026-10-01：「你 UI 做的流畅一点」。
+            // 原来这里是不加条件的 `TimelineView(.periodic(by: 1))` ——
+            // 于是**接通前那几秒**（正在起麦克风、正在要权限）也在每秒唤醒一次
+            // 主线程刷这一整块，跟正在做的重活儿抢那一帧。`.connecting` 那几秒
+            // 恰恰是「卡不卡」最容易被看出来的地方。
+            //
+            // ⚠️ 别把这个 `if` 挪到 `TimelineView` 里面 —— 那样视图树深度不变，
+            //    该醒还是每秒醒。要在**外层**决定建不建它。
+            if call.state == .active {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text(CallService.clock(call.elapsed))
+                        .font(.aevis(13))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        // 数字宽度固定，跳秒时不会把左右挤得抖一下
+                        .contentTransition(.numericText(countsDown: false))
+                }
+            } else {
                 Text(clockText)
                     .font(.aevis(13))
                     .foregroundStyle(.secondary)
@@ -147,6 +166,27 @@ struct CallView: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // 苹果那套来电界面没弹出来时，把她为什么没弹**说出来**。
+            //
+            // 用户 2026-10-01 报「电话弹窗不知道为什么弹不了」—— 以前这里失败
+            // 只在黑匣子里留一行，他点了打电话看到的就是"什么都没发生"。
+            // 现在摆在这儿：一眼知道是签名没资格还是系统版本不够，
+            // 而且下面那句要让他放心（通话本身没坏）。
+            if settings.systemCallUI, let why = SystemCall.lastFailure {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 11.5, weight: .medium))
+                    Text(why)
+                        .font(.aevis(11.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .aevisGlass(cornerRadius: 12)
             }
 
             // ⚠️ 顺序很重要：**先看 `lastSaid`，再看 `thinking`**。

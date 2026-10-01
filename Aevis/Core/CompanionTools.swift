@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// 她**主动发起**陪伴申请的那几个工具。
 ///
@@ -55,8 +56,17 @@ enum CompanionTools {
             parameters: reasonParameter
         ) { args in
             let reason = (args["reason"] as? String) ?? ""
-            await MainActor.run { CompanionRequest.shared.ask(.call, reason: reason) }
-            return "通话申请已经发出去了 —— 界面上出现了「想给你打个电话」，正在等他点接听。"
+            let shown = await MainActor.run { () -> Bool in
+                guard AppSettings.shared.callProactive else { return false }
+                CompanionRequest.shared.ask(.call, reason: reason)
+                return true
+            }
+            // ⚠️ 开关关掉时必须**明说没发出去**（见 `Persona.systemPrompt` 里那段
+            //    「不许假装完成」的说明）。不这么说，她会顺口"我打给你了哦"，
+            //    而用户屏幕上什么都不会出现 —— 那正是他最不能接受的一种。
+            return shown
+                ? "通话申请已经发出去了 —— 界面上出现了「想给你打个电话」，正在等他点接听。"
+                : "没发出去：对方把「她可以主动打给你」关掉了。照实跟他说这个开关关着，别假装打了。"
         }
     }
 

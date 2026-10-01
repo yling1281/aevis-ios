@@ -13,5 +13,31 @@
 	<array>
 		<string>group.com.aevis.ios</string>
 	</array>
+
+	<!--
+	  ⭐ 通话资格。**2026-10-01 从探针那边搬过来的。**
+
+	  用户报「电话弹窗弹不了」，根因就在这一条缺失：
+
+	      `LiveCommunicationKit` 的 `ConversationManager` 要求 App 具备通话资格，
+	      而资格就写在 `aps-environment` 里。主 App 以前**一条都没有**，
+	      所以 `SystemCall.start()` 里那个 `try await manager.perform([action])`
+	      必然抛错 —— 然后被 `catch` 悄悄接住，只在黑匣子里留一行
+	      「📞 系统通话界面不可用」。用户那边看起来就是"啥也没发生"。
+
+	  ⚠️ 探针（`AevisCallProbe`）里这一条是**真机验证过能编过、能装**的，
+	  所以主 App 照搬 —— 现在两个 target 的这条值保持一致，别再分叉。
+
+	  ⚠️ 值只能是 `development`：我们**没有钱买开发者账号**，也不上架。
+	  `production` 那条要走 WWDR 签发的推送证书，侧载这条路拿不到。
+
+	  ⚠️ 侧载最大的疑点仍然在：全能签重签时用的是**它自己的**证书和描述文件，
+	  这一条到底有没有被继承过去，谁也说不准 —— 只能装上去真跑一次。
+	  如果没继承，系统会在 `perform` 那一步拒掉；`SystemCallCenter` 里
+	  那个 catch 会让它安静地退回 Aevis 自己的通话页，不会有崩溃。见 `project.yml`
+	  里 AevisCallProbe 那段注释（同一个疑点）。
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

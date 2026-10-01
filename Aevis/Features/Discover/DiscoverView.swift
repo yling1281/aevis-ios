@@ -45,13 +45,15 @@ struct DiscoverView: View {
                         }
                     }
                     // ⚠️ 抖音**永远不显示**（用户 2026-09-28：「抖音关掉」）。
-                    //    这里只保留「实时通话」—— 它和那四块一起放开（见 Experimental #22）。
-                    //    抖音的代码没删：哪天想放开，把下面这段 entry 加回来即可。
-                    if Experimental.enabled {
-                        card {
-                            entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
-                                router.startCall()
-                            }
+                    //    抖音的代码没删：哪天想放开，把那段 entry 加回来即可。
+                    //
+                    // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
+                    //（现在恒为 true），所以它一直都在。用户 2026-10-01 要
+                    //「让他真的能动起来」→ 这一条也从「更多」面板里提出来了，
+                    // 现在发现页、聊天页右上角、陪伴卡三处都能直接开。
+                    card {
+                        entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
+                            router.startCall()
                         }
                     }
                 }

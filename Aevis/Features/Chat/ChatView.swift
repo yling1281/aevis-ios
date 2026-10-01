@@ -30,6 +30,11 @@ struct ChatView: View {
     @State private var showEmojiPanel = false
     /// 右上角「TA 的资料」开没开。
     @State private var showPersona = false
+    /// 顶栏那个「打电话」按钮 —— 用户 2026-10-01：
+    /// 「就是右上角，你要就是有一个让他打电话」。
+    /// 点下去直接进通话页（`router.startCall()`），系统来电界面那一步在
+    /// `CallService.start()` 里自己做，界面这边不用管。
+    @State private var showDialer = false
     @State private var sendTask: Task<Void, Never>?
     @State private var didLaunchTest = false
 
@@ -178,6 +183,36 @@ struct ChatView: View {
                 .environmentObject(personaStore)
                 .environmentObject(settings)
         }
+        // 顶栏那个电话按钮 —— 先问一句"打给谁 / 怎么打"，再进通话页。
+        //
+        // ⚠️ 为什么不当场 `router.startCall()`：用户原话是
+        //    「点了让他打电话，就自动手机退出去……灵动岛就直接来了个电话」，
+        //    也就是**他要的是苹果那套来电**，而不是我们自己的全屏页。
+        //    这个弹窗把两条路的区别（还有"退到主界面"那一步 iOS 做不了）讲清楚，
+        //    免得他以为按钮坏了。
+        .confirmationDialog(
+            "打电话给\(persona.name.isEmpty ? "TA" : persona.name)",
+            isPresented: $showDialer,
+            titleVisibility: .visible
+        ) {
+            Button("打给她（用苹果的来电界面）") {
+                // 先把「用系统的通话界面」打开 —— 关着的话点下去只会进我们自己的页，
+                // 用户会以为"灵动岛怎么还是不响"。
+                settings.systemCallUI = true
+                router.startCall()
+            }
+            Button("直接打（Aevis 自己的通话页）") {
+                settings.systemCallUI = false
+                router.startCall()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(settings.systemCallUI
+                 ? "接通后苹果会弹出它自己那套界面（灵动岛上能接能挂）。"
+                     + "想让它只挂在灵动岛上，接通之后按一下 Home 把 Aevis 收到后台就行 —— "
+                     + "iOS 不允许 App 自己退回主界面，这一步只能你按。"
+                 : "现在「用系统的通话界面」是关着的，只会进 Aevis 自己这一页。")
+        }
     }
 
     // MARK: - 附件
@@ -270,6 +305,31 @@ struct ChatView: View {
             }
 
             Spacer(minLength: 8)
+
+            // 打电话 —— 用户 2026-10-01：
+            // 「就是右上角，你要就是有一个让他打电话。如果点了让他打电话，
+            //   你就自动手机退出去，就自动回到主界面，然后他就灵动岛就直接来了个电话」。
+            //
+            // ⚠️ 能做的和不能做的（别在别处再写一遍，就记这儿）：
+            //    · **能**：点它 → 进通话页 → `CallService.start()` 让苹果弹它自己那套
+            //      来电界面（灵动岛 / 锁屏上能接能挂）→ 你按一下 Home，App 退到后台，
+            //      那张卡**继续挂在灵动岛上**，通话不断。
+            //    · **不能**：App 自己退回主界面。iOS 没有公开 API
+            //      （`ShortcutBridge.goHome()` 那条是系统内部选择器，不敢在这条路上用 ——
+            //       万一下一版系统把它摘了，用户点"打电话"就是两个 App 一起卡住）。
+            //      所以这里不替用户按 Home，字面意思那一步做不到，就没做。
+            Button {
+                composerFocused = false
+                showDialer = true
+            } label: {
+                Image(systemName: "phone.fill")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(settings.accentColor)
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .aevisGlass(cornerRadius: 20)
+            .accessibilityLabel("打电话给\(persona.name.isEmpty ? "TA" : persona.name)")
 
             // ⚠️ 这里以前是**全局设置**按钮 —— 用户明确说过不对：
             // 「打开这个人的右上角，为什么跟设置一样的？联系人右上角应该是给对方

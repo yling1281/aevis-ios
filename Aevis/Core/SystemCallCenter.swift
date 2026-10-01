@@ -76,6 +76,17 @@ enum SystemCall {
         }
         #endif
     }
+
+    /// 上一次「让系统弹电话界面」为什么没成（成功就是空）。
+    ///
+    /// 给通话页显示用 —— 用户报「电话弹窗弹不了」，就得让他**看得见**原因，
+    /// 而不是去黑匣子里翻。
+    static var lastFailure: String? {
+        #if canImport(LiveCommunicationKit)
+        if #available(iOS 17.4, *) { return SystemCallCenter.shared.lastFailure }
+        #endif
+        return nil
+    }
 }
 
 #if canImport(LiveCommunicationKit)
@@ -109,10 +120,19 @@ final class SystemCallCenter {
     /// 系统界面里显示的"对方名字"（人设名），拨号时记下来给 `Handle` 用。
     private var displayName = "TA"
 
+    /// 上一次调出系统界面**失败**的原因（成功就是 nil）。
+    ///
+    /// ⚠️ 为什么要把它摆到台面上：用户 2026-10-01 报「电话弹窗不知道为什么弹不了」。
+    ///    以前这里失败只写黑匣子，界面上**一点动静都没有** —— 用户看到的就是
+    ///    "点了打电话，然后什么都没有"，只能猜。现在失败原因挂出来，
+    ///    在通话页上显示一行小字，一眼就知道是签名没资格、还是系统版本不够。
+    private(set) var lastFailure: String?
+
     // MARK: - 拨出
 
     func start(displayName: String) {
         self.displayName = displayName.isEmpty ? "TA" : displayName
+        lastFailure = nil
         BlackBox.log("📞 系统通话界面：请求调出（\(self.displayName)）")
 
         // 上一通还在就先清干净。系统里留着一条"进行中"的通话，
@@ -151,19 +171,40 @@ final class SystemCallCenter {
         Task {
             do {
                 try await manager.perform([action])
+                lastFailure = nil
                 BlackBox.log("📞 系统通话界面：请求已发出（等系统回话）")
             } catch {
-                // ⚠️ 这里**只记一笔**，不弹任何提示、不打断通话。
+                // ⚠️ 这里**不打断通话** —— 我们自己的通话界面还在跑。
                 //
                 // 系统不给界面（这套侧载签名没继承通话资格 / 描述文件里没有
-                // `aps-environment`）是**预期内**的结果之一。
-                // 我们自己的通话界面还在正常跑，用户那边完全无感 ——
-                // 为了"灵动岛上没出那张卡"去打断一通正在进行的电话，那是本末倒置。
-                BlackBox.failure("📞 系统通话界面不可用（退回自己的界面）",
-                                 detail: Self.describe(error))
+                // `aps-environment`）是**预期内**的结果之一，为了"灵动岛上没出那张卡"
+                // 去中断一通正在进行的电话，那是本末倒置。
+                //
+                // 但**必须记下来并让用户看得到**：以前只在黑匣子里留一行，
+                // 用户点了打电话什么都没有，只能猜"是不是坏了"。
+                let detail = Self.describe(error)
+                lastFailure = Self.friendlyFailure(error)
+                BlackBox.failure("📞 系统通话界面不可用（退回自己的界面）", detail: detail)
                 self.teardown()
             }
         }
+    }
+
+    /// 把那一串 `NSError` 翻成用户看得懂的一句话。
+    ///
+    /// 通话页上那行小字就是它 —— 所以别写成 `CallKit error 4`，
+    /// 要写成"这台签名没给通话资格，所以苹果那套界面调不出来"。
+    private static func friendlyFailure(_ error: Error) -> String {
+        let ns = error as NSError
+        // `com.apple.CallKit.error.requesttransaction` 那一族的 code：
+        // 1 = 未授权，4 = 资格/权限不足（探针真机上就是这个 4）。
+        // ⚠️ 别把 code 写死成判断依据 —— 只用来挑一句更贴切的话，
+        //    认不出来就退回通用那句，照样把原始信息带上。
+        if ns.domain.contains("CallKit") {
+            return "苹果那套来电界面调不出来（这台签名没给通话资格，code \(ns.code)）。"
+                + "现在用的是 Aevis 自己的通话页，通话本身是好的。"
+        }
+        return "苹果那套来电界面调不出来。现在用的是 Aevis 自己的通话页，通话本身是好的。"
     }
 
     // MARK: - 挂断
