@@ -502,6 +502,15 @@ targets:
         CODE_SIGN_ENTITLEMENTS: AevisCallProbe2Ext/AevisCallProbe2Ext.entitlements
         SKIP_INSTALL: "YES"
         TARGETED_DEVICE_FAMILY: "1,2"
+        # ⚠️ 这两个必须跟**父 App 一模一样**（2026-10-01 CI 报过警告）。
+        #    根工程那边是 `0.0.93 / 93`，扩展不写就继承那个 —— 于是
+        #    `ValidateEmbeddedBinary` 当场报：
+        #      "The CFBundleVersion of an app extension ('93') must match
+        #       that of its containing parent app ('1')."
+        #    这是**真会被系统较真**的一条：父子版本不一致的嵌套包，
+        #    安装/校验时可能直接拒。父 App 用的是 `1.0.0 / 1`，这里就得跟。
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
       configs:
         Debug:
