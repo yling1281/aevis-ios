@@ -59,6 +59,35 @@ final class MCPStore: ObservableObject {
         }
     }
 
+    /// 加一台「电脑」（Aevis 电脑助手）。
+    ///
+    /// 和 `add` 的区别：**同一台电脑只留一条**。用户可以随时换配对码再连一次，
+    /// 那时候令牌变了、地址没变 —— 用 `add` 会留两条一模一样的，
+    /// 界面上看着像「加了两台电脑」，实际上有一条的令牌已经废了。
+    @discardableResult
+    func addComputer(_ server: MCPServerConfig) -> MCPServerConfig {
+        if let index = servers.firstIndex(where: {
+            $0.looksLikePC && $0.pcHost == server.pcHost && $0.pcPort == server.pcPort
+        }) {
+            var merged = server
+            merged.id = servers[index].id
+            merged.enabled = true
+            servers[index] = merged
+            persist()
+
+            clients[merged.id] = nil
+            tools.removeAll { $0.serverID == merged.id }
+            status[merged.id] = "配置更新了，正在重连…"
+            Task { await connect(merged) }
+            return merged
+        }
+
+        servers.append(server)
+        persist()
+        Task { await connect(server) }
+        return server
+    }
+
     func remove(_ server: MCPServerConfig) {
         servers.removeAll { $0.id == server.id }
         clients[server.id] = nil

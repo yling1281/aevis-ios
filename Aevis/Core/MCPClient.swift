@@ -14,6 +14,20 @@ struct MCPServerConfig: Codable, Identifiable, Equatable {
     var headerLines: String = ""
     var enabled: Bool = true
 
+    /// 如果是「Aevis 电脑助手」带进来的，顺手记下它的主机和端口。
+    ///
+    /// 「配对手机」那一段要拿这两个值去调 `/phone.json`。从 `url` 反解也能做，
+    /// 但用户手改过地址（加了路径、换了写法）之后就会解错，不如存下来。
+    /// 手动添加的普通 MCP 服务这里就是空的 —— 界面上靠它决定要不要显示手机那一段。
+    var pcHost: String = ""
+    var pcPort: Int = 0
+
+    /// 这条是不是电脑助手带进来的（能不能显示「配对手机」）。
+    var looksLikePC: Bool { !pcHost.isEmpty && pcPort > 0 }
+
+    /// 拿去问电脑用。
+    var pcAddress: PCAgent.Address { PCAgent.Address(host: pcHost, port: pcPort, code: "") }
+
     var trimmedURL: String {
         url.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -37,6 +51,36 @@ struct MCPServerConfig: Codable, Identifiable, Equatable {
         let text = trimmedURL.lowercased()
         return (text.hasPrefix("http://") || text.hasPrefix("https://"))
             && URL(string: trimmedURL)?.host != nil
+    }
+}
+
+// ⚠️ 这个 `init(from:)` 是**故意的**，不是啰嗦。
+//
+// 用编译器自动合成的那个解码器时，**任何**一个字段在老数据里缺失，整个数组就解不出来；
+// 而 `MCPStore.load()` 写的是 `try?` —— 解失败就直接 return，
+// 结果是**用户已经配好的服务器全部静默消失**，界面上看着就像「从来没加过」。
+// 每加一个新字段都会再踩一次（`pcHost`/`pcPort` 就是这么加进来的）。
+//
+// 放在 extension 里是为了保留逐成员初始化器 `MCPServerConfig(name:url:headerLines:)`。
+extension MCPServerConfig {
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+
+        // 缺字段 → 默认值；字段类型不对（手改过 JSON）→ 也走默认值，不抛。
+        // 一条配置坏了不该连累另外几条。
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            let decoded = (try? box.decodeIfPresent(T.self, forKey: key)) ?? nil
+            return decoded ?? fallback
+        }
+
+        id = value(.id, UUID().uuidString)
+        name = value(.name, "MCP 服务器")
+        url = value(.url, "")
+        headerLines = value(.headerLines, "")
+        enabled = value(.enabled, true)
+        pcHost = value(.pcHost, "")
+        pcPort = value(.pcPort, 0)
     }
 }
 
