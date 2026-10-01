@@ -105,8 +105,8 @@ settings:
     #    ③ 「AI 权限」那张卡补进截图清单（上一轮漏了）。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
     #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.90"
-    CURRENT_PROJECT_VERSION: "90"
+    MARKETING_VERSION: "0.0.91"
+    CURRENT_PROJECT_VERSION: "91"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
