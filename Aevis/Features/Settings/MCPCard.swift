@@ -79,11 +79,25 @@ struct MCPCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            title("外接能力（电脑）")
+            title("外接能力（电脑 / 手机）")
 
-            Text("电脑上双击「Aevis 电脑助手」，屏幕上会出现一个 6 位配对码。"
-                 + "把它填进来，她的手上就多了一台电脑 —— 能开程序、敲键盘、看屏幕，"
-                 + "也能操控那台电脑上用无线调试连着的安卓手机。")
+            // ⚠️ 这一段要**把两件事分开说**：连电脑、连安卓手机。
+            //    以前只写"多了一台电脑……也能操控那台电脑上连着的安卓手机"，
+            //    用户 2026-10-01 读到的就是"我要的是手机对手机，你怎么老让我连电脑"——
+            //    他以为**电脑**是最终目标，其实电脑只是那个会说安卓协议的角色
+            //    （iPhone 上没有 adb，这一步绕不过去，见 `PCAgent.scanLocalNetwork`
+            //      上面那段注释）。所以这里明写"为了连手机"，别让他以为走错了。
+            Text("想让她操控安卓手机：让安卓手机和这台 iPhone 连同一个 WiFi，"
+                 + "然后按下面「添加电脑」的步骤走一遍 —— "
+                 + "连上之后，那台安卓手机就会出现在这台电脑下面，配对一次就行。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+            Text("想让她操控电脑：电脑上双击「Aevis 电脑助手」，"
+                 + "屏幕上会出现一个二维码和一个 6 位配对码 —— 扫一下就行。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -93,7 +107,7 @@ struct MCPCard: View {
             rule
 
             if store.servers.isEmpty {
-                Text("还没加过。先在这台电脑上双击「Aevis 电脑助手」，"
+                Text("还没加过。先在电脑上双击「Aevis 电脑助手」，"
                      + "再点下面的「添加电脑」。")
                     .font(.aevis(12))
                     .foregroundStyle(.secondary)

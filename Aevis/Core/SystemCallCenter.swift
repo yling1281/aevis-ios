@@ -81,6 +81,13 @@ enum SystemCall {
     ///
     /// 给通话页显示用 —— 用户报「电话弹窗弹不了」，就得让他**看得见**原因，
     /// 而不是去黑匣子里翻。
+    ///
+    /// ⚠️ `SystemCallCenter` 是 `@MainActor` 的，`lastFailure` 也挂在它身上 ——
+    ///    所以这个转发**必须 `@MainActor`**。去掉它 CI 就会报
+    ///    「main actor-isolated property 'lastFailure' can not be referenced
+    ///      from a nonisolated context」（真挂过）。
+    ///    调用处（`CallView.statusBlock`）本来就在主线程上求值，所以不影响谁。
+    @MainActor
     static var lastFailure: String? {
         #if canImport(LiveCommunicationKit)
         if #available(iOS 17.4, *) { return SystemCallCenter.shared.lastFailure }

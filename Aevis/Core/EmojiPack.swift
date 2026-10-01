@@ -474,7 +474,10 @@ final class EmojiPack: ObservableObject {
     ///    以前这里只举了「[微笑]、[呲牙]」两个例子，于是她只会发这两个 ——
     ///    库里明明有一百多个，她一个都不会用。而且她**不知道什么名字是没有的**，
     ///    会现编一个「[无语]」「[汗]」出来，渲染时匹配不到，方括号就原样显示在气泡里。
-    static var promptNote: String {
+    ///
+    /// ⚠️ 同样是**实例**属性（要读 `items`）。调用处是
+    ///    `EmojiPack.shared.promptNote` —— 别改回 static。
+    var promptNote: String {
         let list = inventory
         let lead: String
         switch AppSettings.shared.emojiFrequency {
@@ -510,7 +513,10 @@ final class EmojiPack: ObservableObject {
     /// 内置的 148 个加上用户自己导入的，一份给模型看的清单。
     /// 注意这里读的是 `items`（已经过 `rebuild()`），所以用户删掉的内置表情
     /// 不会出现在清单里 —— 她不会去发一个发不出来的名字。
-    static var inventory: String {
+    ///
+    /// ⚠️ 是**实例**属性不是 `static` —— `items` 挂在单例上，写成 static 取不到它
+    ///    （CI 上就是这么挂的：`instance member 'items' cannot be used on type`）。
+    var inventory: String {
         items
             .map { "\($0.name)（\(Self.packName($0.packID))）" }
             .sorted()

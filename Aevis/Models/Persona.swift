@@ -130,8 +130,11 @@ struct Persona: Codable, Equatable {
 
         // 表情怎么发，让表情包自己说 —— 用户关掉表情开关时提示词里也就不提了，
         // 免得她发一堆没人认得出的方括号。
+        //
+        // ⚠️ `promptNote` 是**实例**属性（它要读单例上的 `items` 才能列出库存清单），
+        //    所以必须走 `.shared.` —— 写成 `EmojiPack.promptNote` 编不过。
         if EmojiPack.shared.enabled {
-            lines.append(EmojiPack.promptNote)
+            lines.append(EmojiPack.shared.promptNote)
         }
 
         // 「AI 权限」被关掉的能力，必须**明说**。
