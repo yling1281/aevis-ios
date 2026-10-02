@@ -12,6 +12,8 @@ struct ChatListView: View {
 
     @State private var path: [UUID] = []
     @State private var adding = false
+    /// 加号菜单里的「扫一扫 · 配对电脑版」。
+    @State private var pairing = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -26,8 +28,21 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        adding = true
+                    // 加号从「直接建联系人」变成**菜单** —— 跟微信同一个位置、
+                    // 同一个手感（老板 2026-10-02 要求的「移动端加号扫码登录」）。
+                    Menu {
+                        Button {
+                            pairing = true
+                        } label: {
+                            Label("扫一扫 · 配对电脑版", systemImage: "qrcode.viewfinder")
+                        }
+                        .disabled(!QRScannerView.isAvailable)
+
+                        Button {
+                            adding = true
+                        } label: {
+                            Label("新建联系人", systemImage: "person.badge.plus")
+                        }
                     } label: {
                         Image(systemName: "plus")
                             .font(.aevis(16, weight: .semibold))
@@ -44,6 +59,11 @@ struct ChatListView: View {
                 PersonaEditorView(adding: true)
                     .environmentObject(personaStore)
             }
+        }
+        .sheet(isPresented: $pairing) {
+            // ⚠️ 用**同一个** `PairScanView` —— 授权的逻辑只此一份。
+            //    这里再写一遍"扫到之后怎么办"，改口径时一定会漏一个入口。
+            PairScanView()
         }
         // 截图自检：直接进第一个联系人的对话（否则截不到聊天页本身）
         .onAppear {

@@ -85,7 +85,7 @@
 	<key>NSHealthShareUsageDescription</key>
 	<string>Aevis 需要读取你的步数、心率和睡眠，这样你问「今天走了多少」「昨晚睡得怎么样」时 TA 答得出来。数据不会离开这台手机。</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Aevis 需要使用相机，这样你可以拍一张照片，让 TA 把上面的字读出来。</string>
+	<string>Aevis 需要使用相机：拍一张照片让 TA 把上面的字读出来，以及扫二维码（扫电脑版的配对码、扫别人分享的配置码）。</string>
 	<!-- 允许明文 http。
 	     实测：网易云给的播放地址是 http://m701.music.126.net/... —— 
 	     不放开这条，歌能搜到也放不出来（ATS 会直接掐掉请求）。

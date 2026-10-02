@@ -115,4 +115,32 @@ enum AevisHosts {
     static func lineName(for base: String) -> String? {
         accountLines.first { $0.base == base }?.name
     }
+
+    // MARK: - 配对 / 信令（生态第一期，2026-10-02）
+
+    /// 配对服务跑在**腾讯云**那台（不是阿里云这两台）—— 老板定的「私服走腾讯云」。
+    ///
+    /// ⚠️ **这台没有域名**，所以就是 IP + 端口。**这不是缺陷，是设计**：
+    ///   · 二维码里放的是我们自己的 `aevis://pair?...` 串 —— App 自己解析，
+    ///     不需要浏览器能打开，所以不需要域名也不需要证书；
+    ///   · 明文 HTTP 已经在 `Info.plist` 里放开（`NSAllowsArbitraryLoads`，`:94`）。
+    /// ⚠️ 但**别把它写成 `https://`** —— 那台上没有证书、也没装 nginx，
+    ///    改成 https 会连不上，而且错误信息会很难懂。
+    static let pairHost = "106.52.113.18"
+    static let pairPort = 9100
+
+    /// 客户端标识。
+    ///
+    /// **它不是密钥** —— 编进包里谁都能扒出来。它只用来挡掉「随手扫到一个 IP 就乱戳的人」，
+    /// 让扫描器收不到正经响应。真正的门是 `ticket` ＋ 用户点的那一下「同意」。
+    /// 所以它放在这儿（源码里）而不是 `BuiltInSecrets` —— 那个文件是给**真机密**用的。
+    static let pairClientToken = "aevis-pair-client-2026"
+
+    /// 配对服务器根地址（编译进去的**锚点**）。
+    static var pairBase: String { "http://\(pairHost):\(pairPort)" }
+
+    /// 远端配置里能**覆盖配对服务器地址**的键。
+    /// 想换服务器又不想重出包，就在后台把它的值写成 `http://新地址:端口`
+    /// （走的是 `app_config` 那套，跟 `accountBase` 一个机制）。
+    static let pairRemoteOverrideKey = "pairBase"
 }

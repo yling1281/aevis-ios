@@ -128,7 +128,7 @@ struct SettingsView: View {
                         keys: ["aitools", "companion", "baidupan", "music", "douyin",
                                "qqbot", "qq", "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
-                        keys: ["account", "device", "share", "about"])
+                        keys: ["account", "device", "pair", "share", "about"])
         ]
     }
 
@@ -163,6 +163,7 @@ struct SettingsView: View {
         case "qqbot": QQBotCard()
         case "account": AccountCard()
         case "device": DeviceCard()
+        case "pair": PairCard()
         case "share": ShareCard()
         case "baidupan": BaiduPanCard()
         case "system": SystemBridgeCard()

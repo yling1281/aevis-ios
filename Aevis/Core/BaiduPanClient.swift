@@ -333,13 +333,14 @@ final class BaiduPanClient {
     /// 建目录（已经存在不算错）。
     func makeDirectory(_ path: String) async throws {
         try await ensureFreshToken()
-        // 已存在时百度会返回 -8 之类，这里不当事
+        // 已存在时百度会返回 -8 之类，这里不当事。
+        // ⚠️ path / isdir / size 必须放 **body**，见 pan(bodyKeys:) 的注释。
         _ = try? await pan("/file", [
             "method": "create",
             "path": path,
             "isdir": "1",
             "size": "0"
-        ], method: "POST")
+        ], bodyKeys: ["path", "isdir", "size"])
     }
 
     /// 保证备份目录在，顺手返回它的路径。
@@ -369,7 +370,7 @@ final class BaiduPanClient {
             "isdir": "0",
             "autoinit": "1",
             "block_list": Self.jsonArray(blocks)
-        ], method: "POST")
+        ], bodyKeys: ["path", "size", "isdir", "autoinit", "block_list"])
 
         guard let uploadID = pre["uploadid"] as? String, !uploadID.isEmpty else {
             throw BaiduPanError.badResponse("预创建失败，没拿到 uploadid")
@@ -395,7 +396,7 @@ final class BaiduPanClient {
             "isdir": "0",
             "uploadid": uploadID,
             "block_list": Self.jsonArray(blocks)
-        ], method: "POST")
+        ], bodyKeys: ["path", "size", "isdir", "uploadid", "block_list"])
     }
 
     private func uploadChunk(_ slice: Data, path: String, uploadID: String, sequence: Int) async throws {
@@ -433,19 +434,52 @@ final class BaiduPanClient {
     // MARK: - 底层
 
     /// 网盘接口：自动带上 access_token，并检查 errno。
-    private func pan(_ path: String, _ query: [String: String], method: String = "GET") async throws -> [String: Any] {
-        var items = query
-        items["access_token"] = AppSettings.shared.baiduPanToken
+    ///
+    /// - Parameter bodyKeys: 这些参数走 **POST body**（form-urlencoded），
+    ///   其余走 query。**这个是关键**：百度只认 `method` / `access_token`
+    ///   在 URL 上，像 `path` / `isdir` / `size` / `block_list` / `uploadid`
+    ///   必须放 body —— 放 query 会一律返回 `errno: 2`「参数不对」。
+    ///
+    ///   （2026-10-02 真踩过：建目录、上传收尾全用 query 传参数，
+    ///   手机上就是「备份失败，错误码 2」。当时反复怀疑 token / 权限 /
+    ///   路径，其实只是参数位置错了。）
+    private func pan(_ path: String,
+                     _ query: [String: String],
+                     method: String = "GET",
+                     bodyKeys: Set<String> = []) async throws -> [String: Any] {
+        var queryItems = query.filter { !bodyKeys.contains($0.key) }
+        var bodyItems = query.filter { bodyKeys.contains($0.key) }
+        queryItems["access_token"] = AppSettings.shared.baiduPanToken
 
         var components = URLComponents(string: panBase + path)
-        components?.queryItems = items
+        components?.queryItems = queryItems
             .sorted { $0.key < $1.key }
             .map { URLQueryItem(name: $0.key, value: $0.value) }
         guard let url = components?.url else {
             throw BaiduPanError.badResponse("地址拼不出来：\(path)")
         }
 
-        let json = try await send(url, method: method)
+        var request = URLRequest(url: url)
+        request.httpMethod = bodyItems.isEmpty ? method : "POST"
+        request.timeoutInterval = 30
+        if !bodyItems.isEmpty {
+            // body 里不要再放 access_token —— 它已经挂在 URL 上了，
+            // 重复传百度会当成两个参数。
+            var allowed = CharacterSet.urlQueryAllowed
+            allowed.remove(charactersIn: "+&#=")
+            let encoded = bodyItems
+                .sorted { $0.key < $1.key }
+                .map { key, value in
+                    let k = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
+                    let v = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+                    return "\(k)=\(v)"
+                }
+                .joined(separator: "&")
+            request.httpBody = Data(encoded.utf8)
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        }
+
+        let json = try await send(request)
         if let errno = json["errno"] as? Int, errno != 0 {
             throw BaiduPanError.api(errno: errno)
         }

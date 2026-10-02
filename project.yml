@@ -212,10 +212,31 @@ settings:
     #       钉在编译期 —— 那样"远端换前缀"只换了一半）。
     #    ⑥ **后台页**从 `/admin` 搬到随机路径（`AevisHosts.adminPath`），App 里那条
     #       「向机器人要码」的入口跟着改；**全站去 `.html`**（规则页 / 免责声明链接跟着改）。
+    # ⚠️ 2026-10-02 0.0.97：**手机端接上「扫码配对电脑版」（生态第一期 D1）。**
+    #    老板原话：「电脑版聊天可以用**移动端加号扫码登录**」「**先扫码登录加配对**」。
+    #    ① **会话列表那个「+」从"直接建联系人"变成菜单**（跟微信同一位置同一手感）：
+    #       「扫一扫 · 配对电脑版」＋「新建联系人」。原来那个加号一点就弹新建，
+    #       现在进去先选，**旧功能一步没多**（新建的联系人路径不变）。
+    #    ② 新增 `Core/PairClient.swift` + `Features/Settings/PairScanView.swift` +
+    #       `Features/Settings/PairCard.swift`：
+    #       **扫码 / 手输 6 位码 → 确认 → 授权**，一屏走完。
+    #       🔴 **授权的逻辑只有一份**（`PairScanView`）—— 两个入口共用。
+    #          分别在两处写"扫到之后怎么办"，改口径时必定漏一个（这就是把它收进来的原因）。
+    #    ③ 二维码里是**我们自己的串**，不是网址：
+    #       `aevis://pair?v=1&h=<IP>&p=<端口>&t=<ticket>&c=<6位>`
+    #       ⇒ **没有域名也能用**：App 用自己的扫码器（`QRScannerView`）解析，
+    #         不需要浏览器打得开；明文 HTTP 也早就放开了（`Info.plist` 的
+    #         `NSAllowsArbitraryLoads`）。配对的服务器在**腾讯云**那台（`AevisHosts.pair*`）。
+    #    ④ ⚠️ **不上报 `accountToken`**：私服里没有账号库，发过去没人认，
+    #       白白多一条"本机凭据离机"的路。上报的是**身份快照**（设备码 / 名字 / 她叫什么），
+    #       只够让对方界面显示"是谁授权了我"。
+    #    ⑤ **服务器地址可被远端配置覆盖**（`app_config` 里写 `pairBase`）——
+    #       换服务器不必重出包，跟 `accountBase` 同一个套路。
+    #    ⑥ 相机用途说明补了"扫二维码"（原来只写"拍照认字"，用户看到权限弹窗会对不上）。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
     #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.96"
-    CURRENT_PROJECT_VERSION: "96"
+    MARKETING_VERSION: "0.0.97"
+    CURRENT_PROJECT_VERSION: "97"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
