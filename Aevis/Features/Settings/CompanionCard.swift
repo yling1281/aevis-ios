@@ -8,6 +8,8 @@ struct CompanionCard: View {
     @ObservedObject private var together = ListenTogetherService.shared
     @ObservedObject private var companion = ScreenCompanion.shared
     @ObservedObject private var player = MusicPlayer.shared
+    /// 「这一通被系统那边挂断了」——用来把下面那个通话页收掉（见 `CallEndSignal`）。
+    @ObservedObject private var callEnd = CallEndSignal.shared
 
     /// ⚠️ 2026-10-01：这里以前开的是 `TogetherView`（三张设置卡片）。
     /// 用户说「一起听不好用」「里面的东西全部重来」→ 那个面板整个删掉，
@@ -306,6 +308,11 @@ struct CompanionCard: View {
         }
         .fullScreenCover(isPresented: $showCall) {
             CallView()
+        }
+        // 系统那边（锁屏 / 灵动岛的通话卡）挂断 → 这一层的通话页也要收掉。
+        // 理由和 `MainTabView` 上那一处完全一样（见 `CallEndSignal`）。
+        .onChange(of: callEnd.tick) { _, _ in
+            showCall = false
         }
     }
 

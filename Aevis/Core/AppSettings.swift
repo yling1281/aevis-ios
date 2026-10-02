@@ -426,7 +426,9 @@ final class AppSettings: ObservableObject {
         static let defaultTab = "aevis.defaultTab"
         static let lockShortcutName = "aevis.lockShortcutName"
         static let screenTimeShortcutName = "aevis.screenTimeShortcutName"
-        static let listenTogetherMode = "aevis.listenTogetherMode"
+        // ⚠️ 这里原来有一条 `aevis.listenTogetherMode`（一起听的形态）。
+        //    2026-10-02 连同形态选择器一起删了 —— 见 `ListenTogetherService` 顶部那段。
+        //    老版本写过这个键，留着不管就行：读不到任何东西，也没人会去读它。
         /// 放歌就自动一起听（出厂开）
         static let listenTogetherAutoStart = "aevis.listenTogetherAutoStart"
         /// QQ 桥接：总开关 / 那个 OneBot 服务的地址 / 允不允许替用户发消息
@@ -1202,11 +1204,6 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(screenTimeShortcutName, forKey: Key.screenTimeShortcutName) }
     }
 
-    /// 上次用的一起听形态。
-    @Published var listenTogetherMode: String {
-        didSet { UserDefaults.standard.set(listenTogetherMode, forKey: Key.listenTogetherMode) }
-    }
-
     /// 在 App 里放歌时，**自动开始一起听**。
     ///
     /// 用户的原话：「在 App 内放音乐的话，默认一起听。」
@@ -1569,7 +1566,6 @@ final class AppSettings: ObservableObject {
         defaultTab = defaults.string(forKey: Key.defaultTab) ?? "contacts"
         lockShortcutName = defaults.string(forKey: Key.lockShortcutName) ?? ""
         screenTimeShortcutName = defaults.string(forKey: Key.screenTimeShortcutName) ?? ""
-        listenTogetherMode = defaults.string(forKey: Key.listenTogetherMode) ?? ListenTogetherMode.sync.rawValue
         // ⚠️ 必须用 object(forKey:) 判「有没有设过」。
         // 直接 bool(forKey:) 在没设过时返回 false —— 而出厂值是 **true**（开），
         // 用错就把默认值反过来了。

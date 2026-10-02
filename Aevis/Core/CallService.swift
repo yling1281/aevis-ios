@@ -37,6 +37,21 @@ final class CallService: ObservableObject {
     @Published private(set) var speakerOn = true
     @Published var errorText: String?
 
+    /// 这一通电话被**外面**结束了几次（系统卡上的挂断 / 锁屏上的结束）。
+    ///
+    /// ## 为什么需要它（用户 2026-10-02 报的「挂断 APP 同步不了」）
+    /// 挂断有两条来路：
+    ///   · 用户点 **App 里**那个红按钮 → 那条自己会 `dismiss()`，页面跟着关；
+    ///   · **系统那边**挂的 → 以前这里只把 `state` 置回 `.idle`，
+    ///     而通话页是挂在 `AppRouter.showCall` 这个 `fullScreenCover` 上的 ——
+    ///     **没有任何人去关那个开关**，于是"电话已经挂了，页面还杵在屏幕上"。
+    ///
+    /// ⚠️ 用**只增不减的计数器**而不是 Bool：连着被系统挂两通要能触发两次。
+    /// ⚠️ 别让根视图直接 `@ObservedObject` 这个 `CallService` 来观察它 ——
+    ///    通话中 `listeningText` 每秒会发几十次，那样整棵 Tab 都会跟着重画。
+    ///    要用的去 `CallEndSignal`（那个只发这一个数）。
+    @Published private(set) var remoteEndTick = 0
+
     private var persona = Persona()
     private var config = LLMConfig(baseURL: "", apiKey: "", model: "")
     private var memory: [String] = []
@@ -146,11 +161,18 @@ final class CallService: ObservableObject {
         BlackBox.log("☎️ 接通了")
     }
 
-    func hangUp() {
+    /// - Parameter fromSystem: 这一通是**系统那边**挂的（锁屏 / 灵动岛上的通话卡）。
+    ///   带上它才会发 `remoteEndTick` —— 展示通话页的那两层据此把页面收掉。
+    ///   App 自己那个红按钮走默认值（它自己会 `dismiss()`，不需要这个信号）。
+    func hangUp(fromSystem: Bool = false) {
         // ⚠️ 时长必须在重置 `startedAt` **之前**算出来 —— 放到后面就是 0 了。
         let seconds = elapsed
         let wasActive = state == .active
-        BlackBox.log(String(format: "☎️ 挂断（%.0f 秒）", seconds))
+        BlackBox.log(String(format: "☎️ 挂断（%.0f 秒）%@",
+                            seconds, fromSystem ? "（系统那边挂的）" : ""))
+
+        // 系统那边挂的 —— 先把信号发出去，免得后面任何一步提前 return 把它漏掉。
+        if fromSystem { remoteEndTick &+= 1 }
 
         // 系统那边那通也要收掉。
         //
@@ -204,13 +226,38 @@ final class CallService: ObservableObject {
     /// 静音（她说话的时候你自己不想被听到）。
     func toggleMute() {
         guard state == .active else { return }
-        if muted {
-            muted = false
-            resumeListening()
-        } else {
+        setMuted(!muted)
+    }
+
+    /// **直接设定**静音状态（不是切换）。
+    ///
+    /// ## 为什么要单独有这个（用户 2026-10-02 报的「静音同步不了」）
+    /// 系统那张通话卡上的静音按钮是个**带状态的开关**：点一下静音、再点一下取消。
+    /// 它派回来的 `MuteConversationAction` 里带着 `isMuted`（**目标状态**）。
+    ///
+    /// 而老代码在 `SystemCallCenter` 里写的是
+    /// `if state == .active, !muted { toggleMute() }` —— 把它当成了单向的：
+    ///   · 卡上点「静音」→ App 这边静音 ✅
+    ///   · 卡上再点「取消静音」→ `!muted` 不成立，**整段跳过** ❌
+    ///     麦克风继续关着、App 上那个按钮也还亮着"已静音"，
+    ///     看起来就是"点了取消没用"。
+    ///
+    /// 所以这里给出一个幂等的"设成某个值"，谁来设都不会串。
+    /// - Parameter pushToSystem: 要不要顺带把这个状态推给系统那张通话卡。
+    ///   **系统派回来的时候必须传 false** —— 那条是"它告诉我们的"，
+    ///   再推回去就是自己跟自己对讲（虽然 `muted != value` 那道守卫能收住，
+    ///   但让它压根不发生更干净）。
+    func setMuted(_ value: Bool, pushToSystem: Bool = true) {
+        guard state == .active else { return }
+        guard muted != value else { return }
+        if value {
             muted = true
             listen.stop()
+        } else {
+            muted = false
+            resumeListening()
         }
+        if pushToSystem { SystemCall.pushMuted(value) }
     }
 
     /// 免提开关（用户 2026-10-01：「第三个的话呢，可以加点功能」）。
@@ -384,4 +431,37 @@ final class CallService: ObservableObject {
         listeningText = "今天还好，就是有点想你"
     }
     #endif
+}
+
+/// 「这一通是被系统挂断的」这**一个**信号。
+///
+/// ## 为什么不让视图直接观察 `CallService`
+/// 需要这个信号的是**展示通话页的那两层**（`MainTabView` 的 `showCall`、
+/// `CompanionCard` 的 `showCall`），而 `MainTabView` 是个大东西 ——
+/// 它一旦 `@ObservedObject` 了 `CallService`，通话中 `listeningText`
+/// 每秒几十次实时转写就会带着整棵 Tab 树重画几十次。
+///
+/// 所以单独做一个只发这一个数的对象：观察它**不产生任何额外重画**。
+/// （用法：`@ObservedObject private var callEnd = CallEndSignal.shared`，
+///   然后 `.onChange(of: callEnd.tick) { _, _ in … 把通话页收掉 }`。）
+final class CallEndSignal: ObservableObject {
+
+    static let shared = CallEndSignal()
+
+    /// 只增不减。0 是初始值，别拿它当"刚挂了一通"。
+    @Published private(set) var tick = 0
+
+    private var bag: AnyCancellable?
+
+    private init() {
+        bag = CallService.shared.$remoteEndTick
+            .removeDuplicates()
+            // `remoteEndTick` 的写入方是 `SystemCallCenter`（`@MainActor`），
+            // 所以本来就在主线程；这一句是为了"以后有人从别处改它"也不出事。
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] value in
+                guard let self, value > 0 else { return }
+                self.tick = value
+            }
+    }
 }

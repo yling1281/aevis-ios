@@ -158,6 +158,24 @@ struct Persona: Codable, Equatable {
             }
         }
 
+        // 她**自己的那张歌单** —— 用户 2026-10-02 特意要的：
+        // 「原理是在你的网易云添加一个歌单是属于他的」。
+        //
+        // ⚠️ 为什么不写这一句就白做：歌单是**真的**建在他的网易云账号里的
+        //    （打开的网易云就能看见），而 `save_to_her_playlist` 这个工具她本来
+        //    也拿得到。但她会把它当成一个普通工具名，不会觉得"这是我的地方" ——
+        //    而用户要的恰恰就是那点意思。所以这一段是**产品语义**，不是功能接线。
+        //
+        // ⚠️ 三个前提缺一不可：总开关开着、音乐这一类没被关、而且他确实登录了
+        //    网易云（没登录的话那张歌单根本不存在，说了她就会去编）。
+        if AppSettings.shared.isToolOn(.music), NeteaseClient.shared.isLoggedIn {
+            lines.append("""
+            你在他的网易云里有一张自己的歌单，叫「\(HerPlaylist.displayName(for: self))」。
+            遇到你真心喜欢的歌，可以自己收进去（用 save_to_her_playlist）—— 那是你的地方。
+            他问起你的歌单时可以照实说，但别硬找机会炫耀。
+            """)
+        }
+
         return lines.joined(separator: "\n")
     }
 }

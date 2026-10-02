@@ -33,6 +33,65 @@ struct MusicTrack: Identifiable, Hashable {
     }
 }
 
+/// 一个歌单（列表用的轻量版 —— **不带曲目**，点进去才现拉）。
+///
+/// 为什么不复用 `MusicTrack` 那套：歌单和曲目是两个东西，硬塞进一个结构体
+/// 会让"这个字段对歌单有没有意义"永远说不清。
+struct NeteasePlaylist: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var trackCount: Int
+    var coverURL: URL?
+    /// 网易的 `specialType`：**5 = 「我喜欢的音乐」**，20 = 年度歌单，0 = 普通歌单。
+    /// 这个字段是"我喜欢的那张歌单"的**唯一**识别方式 —— 它的名字会跟着
+    /// 账号语言变（「我喜欢的音乐」/「我喜欢的歌曲」），按名字找迟早会崩。
+    var specialType: Int
+    /// 这个歌单是我自己建的吗（`creator.userId == 我`）。
+    var isMine: Bool
+    /// 我收藏的别人的歌单。
+    var isSubscribed: Bool
+
+    var isLiked: Bool { specialType == 5 }
+}
+
+/// 当前登录的账号。
+struct NeteaseAccount {
+    var uid: String
+    var nickname: String
+    var avatarURL: URL?
+}
+
+/// 「她的歌单」在**你自己的网易云账号里**的真名。
+///
+/// ## 为什么要有这么一个名字（用户 2026-10-02 点名的做法）
+/// 用户原话：「原理是在你的网易云添加一个歌单是属于他的，但是在这个，
+/// 就是一整个我们的 App 里面，这个歌单显示的是 AI 的账号和他的歌单」。
+///
+/// 翻成实现就是：**歌单真的建在你自己的网易云账号里**（所以你打开网易云
+/// 就能看到它、能自己往里加歌），但 App 界面上那一行显示成「她的歌单」——
+/// 不显示这个真名。两边用的是同一份数据，只是叫法不同。
+///
+/// ⚠️ 名字里带她的名字（「零砚的歌单」），所以**换人设之后就是另一个歌单** ——
+///    这是有意的：歌单是"她的"，不是"这台手机的"。
+enum HerPlaylist {
+    /// 找不到人设名的时候用的兜底。
+    static let fallback = "她的歌单"
+
+    /// 在网易云里真实的歌单名。
+    static func realName(for persona: Persona) -> String {
+        let her = persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (her.isEmpty ? "她" : her) + "的歌单"
+    }
+
+    /// App 界面上显示的名字。
+    ///
+    /// 现在和真名一样 —— 但**特意分成两个函数**：以后想把界面上的叫法
+    /// 换成「她偷偷藏的歌」之类，只改这一个地方，不用去动网易云里那个真名。
+    static func displayName(for persona: Persona) -> String {
+        realName(for: persona)
+    }
+}
+
 enum NeteaseError: LocalizedError {
     case badResponse(String)
     /// HTTP 层失败。**必须把状态码和响应体带出来** ——
@@ -51,6 +110,14 @@ enum NeteaseError: LocalizedError {
             switch code {
             case 301:
                 return "网易说要登录（code 301）。去「音乐」页更新一下 Cookie。"
+            case -2:
+                // 探针实测：这个码就是「无权限访问」。401/301 之外最常见的一个。
+                return "网易说没权限访问（code -2）。这一般是 Cookie 过期了 —— "
+                    + "去「音乐」页重新登录一次就好。"
+            case 462:
+                // 写接口（建歌单 / 加歌）最容易撞上它：网页端也要过一道验证码。
+                return "网易的写接口被风控拦了（code 462）。这个接口在网页上也要过验证，"
+                    + "先去网易云网页版随便操作一下、过一会儿再试。"
             case -460:
                 return "被网易的风控拦了（code -460）。过一会儿再试，或者换个网络。"
             case 50000005:
@@ -238,6 +305,291 @@ final class NeteaseClient {
             throw NeteaseError.badResponse("每日推荐里没有歌（\(Self.brief(json))）")
         }
         return await attachCovers(to: tracks.compactMap(Self.track(from:)))
+    }
+
+    // MARK: - 我的音乐（喜欢 / 最近 / 歌单）
+    //
+    // 用户 2026-10-02 要的：「他的喜欢、历史歌单、和他添加的歌单都加上」。
+    //
+    // ⚠️ 这一整段的接口**都是探针实测过存在的**（`_verify/_probe_netease_endpoints.py`）：
+    //    未登录时 `/api/user/playlist` 照样能被别人账号的公开歌单列表拿回来
+    //    （`specialType` 5 = 我喜欢的音乐 就在里面），`/api/v1/play/record` 则回
+    //    `code -2 无权限访问` —— 说明路径和参数名都对，只差一个 Cookie。
+
+    /// uid 在 UserDefaults 里的缓存键。uid 一辈子不会变，不值得每次现问。
+    private static let uidDefaultsKey = "aevis.netease.uid"
+
+    /// 我现在是谁。
+    ///
+    /// ⚠️ 未登录时网易返回的是 `{"code":200,"account":null,"profile":null}` ——
+    ///    **code 是 200、但内容全空**。所以不能只看 code，要盯着 `profile` 有没有。
+    ///    这个形状是探针实测的，别改成"看 code 是不是 200"。
+    func account() async throws -> NeteaseAccount {
+        guard isLoggedIn else {
+            throw NeteaseError.api(code: 301, message: "还没登录")
+        }
+        let json = try await plainRequest("/api/nuser/account/get", [:])
+        guard let profile = json["profile"] as? [String: Any],
+              let uid = Self.idString(profile["userId"]) else {
+            throw NeteaseError.badResponse(
+                "没拿到账号信息（\(Self.brief(json))）。Cookie 多半过期了，去「音乐」页重新登录一下。")
+        }
+        let nickname = (profile["nickname"] as? String) ?? ""
+        UserDefaults.standard.set(uid, forKey: Self.uidDefaultsKey)
+        return NeteaseAccount(
+            uid: uid,
+            nickname: nickname,
+            avatarURL: (profile["avatarUrl"] as? String).flatMap(URL.init(string:))
+        )
+    }
+
+    /// 当前账号的 uid。有缓存就用缓存，没有现问一次。
+    ///
+    /// 缓存不只是省一次请求：**「我的歌单 / 最近播放」这些接口全都要 uid**，
+    /// 每次现问一遍等于每个功能都多一次往返，而且网易那边 uid 是敏感信息。
+    func uid(forceRefresh: Bool = false) async throws -> String {
+        if !forceRefresh,
+           let cached = UserDefaults.standard.string(forKey: Self.uidDefaultsKey),
+           !cached.isEmpty {
+            return cached
+        }
+        return try await account().uid
+    }
+
+    /// 我建的 + 我收藏的歌单。**「我喜欢的音乐」也在这张表里**（`specialType == 5`）。
+    ///
+    /// 网易的 `limit` 有时会被忽略（探针里给 5 却回了 6 条），所以这里按
+    /// 「`more` 是不是 true」翻页，并且最多翻两轮 —— 几百个歌单的账号极罕见，
+    /// 万一真遇到也宁可少列几个，不要把一个页面卡在加载上。
+    func myPlaylists(uid: String) async throws -> [NeteasePlaylist] {
+        var collected: [NeteasePlaylist] = []
+        var offset = 0
+
+        for _ in 0..<2 {
+            let json = try await plainRequest("/api/user/playlist", [
+                "uid": uid, "limit": "1000", "offset": "\(offset)"
+            ])
+            let items = (json["playlist"] as? [[String: Any]]) ?? []
+            collected.append(contentsOf: items.compactMap { Self.playlist(from: $0, uid: uid) })
+            guard (json["more"] as? Bool) == true, !items.isEmpty else { break }
+            offset += items.count
+        }
+
+        // 同一个歌单可能被翻页带回来两次 —— 按 id 去重，省得界面上出现两行一样的。
+        var seen = Set<String>()
+        return collected.filter { seen.insert($0.id).inserted }
+    }
+
+    /// 我的全部歌单（自己解析 uid）。
+    func myPlaylists() async throws -> [NeteasePlaylist] {
+        try await myPlaylists(uid: try await uid())
+    }
+
+    /// 「我喜欢的音乐」那张歌单。找不到就是 nil。
+    func likedPlaylist() async throws -> NeteasePlaylist? {
+        try await myPlaylists().first { $0.isLiked }
+    }
+
+    /// 我喜欢的歌。
+    func likedTracks() async throws -> [MusicTrack] {
+        guard let liked = try await likedPlaylist() else {
+            throw NeteaseError.badResponse(
+                "没找到「我喜欢的音乐」这张歌单 —— 可能是还没红心过任何歌。")
+        }
+        return try await playlistDetail(liked.id)
+    }
+
+    /// 最近播放。
+    ///
+    /// ⚠️ 这个接口**未登录会被直接拒**（探针实测 `code -2`），和搜索不一样 ——
+    ///    搜索未登录也能用，所以别拿"搜索通"当成"登录有效"的证据。
+    ///
+    /// 返回里 `allData` 是全部记录、`weekData` 是最近一周；有 allData 就用它，
+    /// 没有才退回 weekData（新账号 / 刚清过记录时会只有一份）。
+    func recentTracks(limit: Int = 100) async throws -> [MusicTrack] {
+        let uid = try await uid()
+        let json = try await plainRequest("/api/v1/play/record", ["uid": uid, "type": "1"])
+
+        let all = (json["allData"] as? [[String: Any]]) ?? []
+        let week = (json["weekData"] as? [[String: Any]]) ?? []
+        let rows = all.isEmpty ? week : all
+
+        // 每条是 `{"song": {...}, "playCount": n}` —— 要的是里面那个 song。
+        let songs = rows.compactMap { $0["song"] as? [String: Any] }.prefix(limit)
+        guard !songs.isEmpty else {
+            throw NeteaseError.badResponse("最近播放是空的（\(Self.brief(json))）")
+        }
+        return await attachCovers(to: Self.dedupe(songs.compactMap(Self.track(from:))))
+    }
+
+    /// 按 id **精确**拿歌。
+    ///
+    /// 🔴 这个函数存在的唯一原因是修一个真 bug：`play_music` 拿到 `song_id` 之后
+    ///    原来是**把 id 当关键词丢进搜索**的（`search("33894312")`）——
+    ///    那当然搜不到东西。后果是"她放了我喜欢的某一首"永远是一句空话：
+    ///    模型从 `my_music` 里明明拿到了正确的 id，却怎么也放不出来。
+    ///
+    /// `/api/v3/song/detail` 本来就是"一次问多首"，所以顺手支持批量。
+    /// 它返回的 `songs[].al.picUrl` 里**直接带封面**，不用再补一次。
+    func tracks(ids: [String]) async throws -> [MusicTrack] {
+        let clean = ids.filter { !$0.isEmpty }
+        guard !clean.isEmpty else { return [] }
+        let payload = "[" + clean.map { "{\"id\":\($0)}" }.joined(separator: ",") + "]"
+
+        let json = try await plainRequest("/api/v3/song/detail", ["c": payload])
+        guard let songs = json["songs"] as? [[String: Any]] else {
+            throw NeteaseError.badResponse("没拿到这首歌（\(Self.brief(json))）")
+        }
+        return songs.compactMap { item -> MusicTrack? in
+            guard var track = Self.track(from: item) else { return nil }
+            if let pic = (item["al"] as? [String: Any])?["picUrl"] as? String,
+               !pic.isEmpty, let url = URL(string: pic) {
+                track.coverURL = url
+            }
+            return track
+        }
+    }
+
+    /// 按 id 拿一首。拿不到就是 nil（版权下架之类）。
+    func track(id: String) async throws -> MusicTrack? {
+        try await tracks(ids: [id]).first
+    }
+
+    /// 从返回体里解出一条歌单。
+    ///
+    /// ⚠️ `creator.userId` 和顶层的 `userId` 两个地方都可能承载"是谁的" ——
+    ///    探针实测两个都有。优先用 `creator.userId`，取不到再退回顶层。
+    private static func playlist(from item: [String: Any], uid: String) -> NeteasePlaylist? {
+        guard let id = idString(item["id"]) else { return nil }
+        let creatorUID = idString((item["creator"] as? [String: Any])?["userId"])
+            ?? idString(item["userId"])
+        return NeteasePlaylist(
+            id: id,
+            name: (item["name"] as? String) ?? "未命名歌单",
+            trackCount: (item["trackCount"] as? Int) ?? 0,
+            coverURL: (item["coverImgUrl"] as? String).flatMap(URL.init(string:)),
+            specialType: (item["specialType"] as? Int) ?? 0,
+            isMine: creatorUID == uid,
+            isSubscribed: (item["subscribed"] as? Bool) ?? false
+        )
+    }
+
+    // MARK: - 写：建歌单 / 加歌
+    //
+    // 🔴 **这是整个网易云接入里最脆的一段。**
+    //
+    // 读接口挂了最多是"看不到"，写接口挂了会让用户以为"她收藏了"、
+    // 其实什么都没写进去 —— 那是**假装完成**，是最不能忍的一类问题。
+    // 所以这里每一个失败都原样把网易的 code/message 带出去，绝不吞。
+    //
+    // 探针实测（未登录）：
+    //   · `/api/playlist/create`              → `code 301`（要登录）✅ 路径对
+    //   · `/api/playlist/manipulate/tracks`   → `code 404 歌单不存在` ✅ 参数名 op/pid/trackIds 对
+
+    /// 从 Cookie 里抠出 `__csrf`。
+    ///
+    /// 写接口必须带上它，而它**不在** `MUSIC_U` 里 —— 是同一份 Cookie 串里的另一条。
+    /// `NeteaseLogin` 抓 Cookie 时是把 163 域名下的**全部** cookie 拼在一起的，
+    /// 所以只要网页端有它，这里就有。取不到就返回空串（网易对此的反应是 301/462，
+    /// 会被上面的错误话术照实说出来，不会静悄悄失败）。
+    private var csrf: String {
+        for piece in cookie.split(separator: ";") {
+            let trimmed = piece.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("__csrf=") else { continue }
+            return String(trimmed.dropFirst("__csrf=".count))
+        }
+        return ""
+    }
+
+    /// 表单编码成一个 POST body。
+    ///
+    /// ⚠️ **不要用 `Self.formEncode`** —— 那个是给 weapi 的 base64 用的白名单编码，
+    ///    会把中文歌单名编成 `%E4%BD%A0...` 之外的怪东西。这里走 `queryItems`
+    ///    交给 Foundation 编（和 `plainRequest` 同一条路），中文、方括号全都不用管。
+    private static func formBody(_ form: [String: String]) -> String {
+        var components = URLComponents()
+        components.queryItems = form
+            .sorted { $0.key < $1.key }
+            .map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.percentEncodedQuery ?? ""
+    }
+
+    /// 明文 POST（表单）。写接口只能走这条 —— 那几个 GET 的都是只读的。
+    private func plainPost(_ path: String, _ form: [String: String]) async throws -> [String: Any] {
+        guard let url = URL(string: base + path) else {
+            throw NeteaseError.badResponse("路径拼错了：\(path)")
+        }
+        guard isLoggedIn else {
+            throw NeteaseError.api(code: 301, message: "还没登录")
+        }
+
+        var payload = form
+        payload["csrf_token"] = csrf
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 25
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue(desktopUA, forHTTPHeaderField: "User-Agent")
+        request.setValue(base + "/", forHTTPHeaderField: "Referer")
+        request.setValue(base, forHTTPHeaderField: "Origin")
+        if !cookie.isEmpty {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        request.httpBody = Data(Self.formBody(payload).utf8)
+
+        return try await send(request, label: "写 \(path)")
+    }
+
+    /// 建一个歌单，返回新歌单的 id。
+    func createPlaylist(name: String) async throws -> String {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else {
+            throw NeteaseError.badResponse("歌单名不能是空的。")
+        }
+        let json = try await plainPost("/api/playlist/create", ["name": clean])
+        // 新老返回体不一样：老版顶层给 id，新版包在 playlist 里。两个都认。
+        if let id = Self.idString(json["id"]) { return id }
+        if let nested = json["playlist"] as? [String: Any], let id = Self.idString(nested["id"]) {
+            return id
+        }
+        throw NeteaseError.badResponse("建歌单没返回 id（\(Self.brief(json))）")
+    }
+
+    /// 把一批歌加进一个歌单。
+    ///
+    /// `trackIds` 是**纯 id 的 JSON 数组**（`[123,456]`）—— 别照抄旁边
+    /// `attachCovers` 那个 `[{"id":123}]`：那是 `/api/v3/song/detail` 的格式，
+    /// 两个接口要的东西不一样。
+    func addTracks(_ ids: [String], to playlistID: String) async throws {
+        let clean = ids.filter { !$0.isEmpty }
+        guard !clean.isEmpty else { return }
+        let payload = "[" + clean.joined(separator: ",") + "]"
+        _ = try await plainPost("/api/playlist/manipulate/tracks", [
+            "op": "add", "pid": playlistID, "trackIds": payload
+        ])
+    }
+
+    /// 她的歌单：**先在你账号里按名字找**，找不到才建。
+    ///
+    /// ⚠️ 为什么不把 pid 存下来：歌单随时会被你自己删掉或改名，
+    ///    存一个 id 就等于埋一个"以后必然失效"的值。每次现找一遍，
+    ///    删了她那边下次收藏时自然就重建 —— 比缓存稳。
+    func ensureHerPlaylist(named name: String) async throws -> String {
+        let mine = try await myPlaylists()
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let hit = mine.first(where: { $0.name == clean }) {
+            return hit.id
+        }
+        return try await createPlaylist(name: clean)
+    }
+
+    /// 把一首歌收进她的歌单（没有就先建）。返回歌单 id。
+    @discardableResult
+    func saveToHerPlaylist(songID: String, playlistName: String) async throws -> String {
+        let pid = try await ensureHerPlaylist(named: playlistName)
+        try await addTracks([songID], to: pid)
+        return pid
     }
 
     // MARK: - 播放地址与歌词

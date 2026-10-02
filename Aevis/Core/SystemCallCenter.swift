@@ -77,6 +77,21 @@ enum SystemCall {
         #endif
     }
 
+    /// 把 App 这边的静音状态推给系统那张通话卡（让它上面的按钮跟着亮/灭）。
+    ///
+    /// 用户 2026-10-02 报的「打电话点击静音和挂断，就是 APP 同步不了」——
+    /// 反方向（系统 → App）由 `MuteConversationAction` 负责，这个是正方向。
+    static func pushMuted(_ value: Bool) {
+        guard isSupported else { return }
+        #if canImport(LiveCommunicationKit)
+        if #available(iOS 17.4, *) {
+            Task { @MainActor in
+                SystemCallCenter.shared.pushMuted(value)
+            }
+        }
+        #endif
+    }
+
     /// 上一次「让系统弹电话界面」为什么没成（成功就是空）。
     ///
     /// 给通话页显示用 —— 用户报「电话弹窗弹不了」，就得让他**看得见**原因，
@@ -163,6 +178,12 @@ final class SystemCallCenter {
     /// 见 `SystemCall.callFailureTick` 那段注释（为什么不能用 `lastFailure` 观察）。
     private(set) var failureTick = 0
 
+    /// 「已接通」这件事**已经报给系统了**的那一通。
+    ///
+    /// ⚠️ 必须有它：补报是一条会重试的链（见 `reportConnected`），
+    ///    没有这个标记就会重复上报 —— 计时器被反复重置，比不报还难看。
+    private var connectedReportedFor: UUID?
+
     // MARK: - 拨出
 
     func start(displayName: String) {
@@ -192,6 +213,7 @@ final class SystemCallCenter {
         self.manager = manager
 
         conversationUUID = UUID()
+        connectedReportedFor = nil
         let handle = Handle(
             type: .generic,
             value: Self.handleValue,
@@ -252,6 +274,7 @@ final class SystemCallCenter {
         self.manager = nil
         manager.delegate = nil
         let uuid = conversationUUID
+        connectedReportedFor = nil
 
         Task {
             // ⚠️ **没有** `endConversation(uuid:)` 这个方法（第一次就是这么写错的）。
@@ -262,11 +285,91 @@ final class SystemCallCenter {
         }
     }
 
+    // MARK: - 把「已接通」报给系统
+    //
+    // ## 🔴 这是「灵动岛上的通话时长一直是 0 秒」的根因（用户 2026-10-02 报的）
+    //
+    // 系统界面上那个计时器 = 现在 − **我们报上去的接通时刻**。
+    // 而 `reportConversationEvent` 要的是 `Conversation` **对象**（不是 uuid），
+    // 所以得先在 `manager.conversations` 里把它找出来。
+    //
+    // 老代码是这样的：
+    //     if let conversation = manager.conversations.first(where: { $0.uuid == … }) {
+    //         reportConversationEvent(.conversationStartedConnecting(.now), for: conversation)
+    //         reportConversationEvent(.conversationConnected(.now), for: conversation)
+    //     }
+    // —— **只在 `perform` 回调那一刻找一次**，找不到就两个事件全都不报。
+    // 而那一刻会话经常还没登记进列表（系统是异步建的），
+    // 于是系统永远收不到"接通"，那张卡的计时器就一直停在 0:00。
+    // 这也正好解释了用户为什么说"**有时候**是 0 秒"——是个竞态。
+    //
+    // 苹果自己的示例（Initiating VoIP conversations with LiveCommunicationKit）
+    // 就是靠"等一下再找"绕开它的：
+    //     try await manager.perform([action])
+    //     Task { try await Task.sleep(for: .seconds(1)); for c in manager.conversations { … } }
+    //
+    // 这里做得更稳一点：立刻试一次，然后每 0.3 秒重试，最多 15 次（约 4.5 秒）。
+    // 另外 `conversationChanged` 里还有一条兜底（会话主动撞上来时补报）。
+    // 两条路都留着 ——"会话什么时候才登记好"这件事系统没给任何保证。
+
+    /// 把「已接通」补报给系统。找不到会话就等一会儿再来。幂等。
+    private func reportConnected(attemptsLeft: Int = 15) {
+        guard let manager else { return }
+        guard connectedReportedFor != conversationUUID else { return }
+
+        if let conversation = manager.conversations.first(where: { $0.uuid == conversationUUID }) {
+            manager.reportConversationEvent(.conversationConnected(.now), for: conversation)
+            connectedReportedFor = conversationUUID
+            BlackBox.log("📞 系统通话界面：已报「接通」（第 \(16 - attemptsLeft) 次尝试）")
+            return
+        }
+
+        guard attemptsLeft > 0 else {
+            // 等到这里说明会话一直没进列表 —— 系统卡的计时器不会走。
+            // 记下来，下次真机对账时这一行就是现场。
+            BlackBox.log("📞 系统通话界面：一直没等到会话，系统卡的计时器不会走")
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            self.reportConnected(attemptsLeft: attemptsLeft - 1)
+        }
+    }
+
+    // MARK: - 把 App 这边的静音**推给系统那张卡**
+    //
+    // ## 为什么只能走 `perform`
+    // LiveCommunicationKit **没有** `setMuted` 这类接口，`Conversation.Event` 一共
+    // 也只有 4 个（connected / ended / startedConnecting / updated）——
+    // **没有一个能表达"静音了"**。所以唯一能往系统那张卡同步状态的通路就是
+    // `perform`（"请系统去做这件事"），也就是我们挂断时用的那条。
+    //
+    // ⚠️ 失败**静默**：卡上那个小指示灯没跟上，比让整通电话出毛病轻得多。
+    //    真正保证两边不脱节的是**反方向**（系统卡按静音派回来的
+    //    `MuteConversationAction`，见 `perform action:`）。
+    // ⚠️ 这条路在真机上到底推不推得动**还没验过**（本机没 Xcode），
+    //    所以它是锦上添花；`CallService.setMuted` 那边也带着 `pushToSystem`
+    //    开关，系统派回来时不会再推一遍（免得自己跟自己对讲）。
+
+    /// 把静音状态推给系统那张卡。
+    func pushMuted(_ value: Bool) {
+        guard let manager,
+              manager.conversations.contains(where: { $0.uuid == conversationUUID }) else { return }
+        let action = MuteConversationAction(conversationUUID: conversationUUID, isMuted: value)
+        Task {
+            try? await manager.perform([action])
+        }
+    }
+
     /// 系统那边（锁屏 / 灵动岛上的"结束"按钮）把通话挂了。
     /// **必须把我们的通话一起收掉** —— 不然麦克风还开着，她会继续听你说。
     fileprivate func systemDidEnd() {
         teardown()
-        CallService.shared.hangUp()
+        // ⚠️ 必须带 `fromSystem: true`：带上它才会发信号，把**通话页**也收掉。
+        //    用户报的「挂断 APP 同步不了」就是这个 ——
+        //    通话页挂在 `AppRouter.showCall` / `CompanionCard` 自己的 `showCall` 上，
+        //    只把 `CallService.state` 置回 idle 是**不会关页面**的。
+        CallService.shared.hangUp(fromSystem: true)
     }
 
     private func teardown() {
@@ -315,8 +418,19 @@ extension SystemCallCenter: ConversationManagerDelegate {
         conversationChanged conversation: Conversation
     ) {
         let state = String(describing: conversation.state)
+        let uuid = conversation.uuid
         Task { @MainActor in
             BlackBox.log("📞 系统通话界面：状态 → \(state)")
+            // 兜底：会话一旦出现在列表里就补报「接通」。
+            // `reportConnected` 那条是**主动去追**，这里是它**撞上来** ——
+            // 「会话什么时候才登记好」系统没给保证，两条路都留着才稳。
+            guard uuid == self.conversationUUID,
+                  self.connectedReportedFor != uuid,
+                  let manager = self.manager,
+                  let hit = manager.conversations.first(where: { $0.uuid == uuid }) else { return }
+            manager.reportConversationEvent(.conversationConnected(.now), for: hit)
+            self.connectedReportedFor = uuid
+            BlackBox.log("📞 系统通话界面：会话出现时补报了「接通」")
         }
     }
 
@@ -355,12 +469,17 @@ extension SystemCallCenter: ConversationManagerDelegate {
         case let start as StartConversationAction:
             // 真实通话的媒体流是在这里接上的；我们只要"接通"这个状态 ——
             // 声音走的是我们自己的 `ListenService` + `SpeechService`。
+            //
+            // ⚠️ **这里只报「开始连接」**（它说的是"我们发起了"，不依赖系统把会话
+            //    登记好）。「已接通」交给 `reportConnected()` —— 那条会一直重试到
+            //    找到会话为止。老代码把两个事件挤在同一个 `if let` 里同步报，
+            //    找不到会话就**两个都不报** ⇒ 系统卡的计时器永远停在 0:00。
             // ⚠️ `reportConversationEvent` 要的是 `Conversation` **对象**，不是 uuid。
             if let conversation = manager.conversations.first(where: { $0.uuid == start.conversationUUID }) {
                 manager.reportConversationEvent(.conversationStartedConnecting(.now), for: conversation)
-                manager.reportConversationEvent(.conversationConnected(.now), for: conversation)
             }
             start.fulfill(dateStarted: .now)
+            Task { @MainActor in self.reportConnected() }
 
         case let end as EndConversationAction:
             // 用户在系统界面（锁屏 / 灵动岛）上按了挂断。
@@ -368,12 +487,16 @@ extension SystemCallCenter: ConversationManagerDelegate {
             Task { @MainActor in self.systemDidEnd() }
 
         case let mute as MuteConversationAction:
-            // 用户在系统界面上按了静音 —— 跟着我们的麦克风一起动，
-            // 不然"界面上显示静音了、麦克风却还开着"，那是骗人。
+            // 用户在系统界面上按了静音 / 取消静音。
+            //
+            // ⚠️ `isMuted` 是**目标状态**（true = 要静音，false = 要取消静音），
+            //    不是"切换一下"。老代码写的是 `if !CallService.shared.muted { toggleMute() }`
+            //    —— 单向：取消了静音这一支**整段跳过**，于是"点了取消没用"。
+            let want = mute.isMuted
             Task { @MainActor in
-                if CallService.shared.state == .active, !CallService.shared.muted {
-                    CallService.shared.toggleMute()
-                }
+                // ⚠️ `pushToSystem: false` —— 这是系统派回来的，
+                //    别再推回去（见 `CallService.setMuted` 的参数说明）。
+                CallService.shared.setMuted(want, pushToSystem: false)
             }
             mute.fulfill()
 

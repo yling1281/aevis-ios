@@ -2,42 +2,25 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// 「一起听」的三种形态。
-enum ListenTogetherMode: String, Codable, CaseIterable, Identifiable {
-    case sync
-    case herControl
-    case neteaseRoom
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .sync: return "同步听"
-        case .herControl: return "\(Pronoun.current)控制"
-        case .neteaseRoom: return "一起听房间"
-        }
-    }
-
-    var explanation: String {
-        switch self {
-        case .sync:
-            return "歌在这台手机上放，\(Pronoun.current)跟着一起听，隔几句说一句自己在听什么。"
-        case .herControl:
-            return "播放器交给\(Pronoun.current) —— 你说「换首安静的」，\(Pronoun.current)自己去找、自己切。"
-        case .neteaseRoom:
-            return "进网易云自己的「一起听」房间。需要逆向它的房间接口，现在还没接。"
-        }
-    }
-
-    /// 这个形态真做了没有。**没做的就照实说**，不假装能用。
-    var isImplemented: Bool {
-        self != .neteaseRoom
-    }
-}
-
 /// 一起听。
 ///
-/// 为什么能真的"一起"：
+/// ## 形态选择器已经删掉了（2026-10-02 用户拍板）
+///
+/// 用户原话：「一点进去，不是有一个她控制，然后网易云一起听吗？那个就不要了」
+/// —— 说的是播放器里那个「同步听 / 她控制 / 一起听房间」的分段控件。
+///
+/// 删掉是对的：那三个形态本来就不是三种体验，而是**同一个体验的三个完成度**
+/// （「一起听房间」压根没接，界面上还写着"还没接"；「她控制」只是把她的歌词
+/// 碎碎念关掉）。真正该有的一直只有一种：
+///
+/// > **歌在这儿放，她跟着听、跟着说，而且她想切歌就切。**
+///
+/// 所以 `ListenTogetherMode` 这个枚举、`AppSettings.listenTogetherMode` 这个设置
+/// **全部删掉**。留着它们只会有一种下场：某天有人在某个角落里又把它读出来，
+/// 于是她莫名其妙不说话了（旧的 `herControl` 分支就是这么写的 ——
+/// `guard mode == .sync else { return }`，选中"她控制"就等于让她闭嘴）。
+///
+/// ## 为什么能真的"一起"
 /// 播放器里已经算出了**当前唱到哪一句**（`MusicPlayer.currentLyricLine`），
 /// 所以她知道你听到哪儿了 —— 她的话是接着这一句说的，不是随便说。
 ///
@@ -54,7 +37,6 @@ final class ListenTogetherService: ObservableObject {
     static let shared = ListenTogetherService()
 
     @Published private(set) var active = false
-    @Published private(set) var mode: ListenTogetherMode = .sync
     /// 她的实时反应（新的在前）
     @Published private(set) var herLines: [String] = []
     @Published private(set) var thinking = false
@@ -81,8 +63,7 @@ final class ListenTogetherService: ObservableObject {
 
     // MARK: - 开始 / 结束
 
-    func start(mode: ListenTogetherMode, persona: Persona, config: LLMConfig, memory: [String]) {
-        self.mode = mode
+    func start(persona: Persona, config: LLMConfig, memory: [String]) {
         self.persona = persona
         self.config = config
         self.memory = memory
@@ -90,10 +71,7 @@ final class ListenTogetherService: ObservableObject {
         lyricCount = 0
         lastSpokeAt = Date.distantPast
         active = true
-
-        statusLine = mode.isImplemented
-            ? nil
-            : "「一起听房间」还没接，先用另外两种。"
+        statusLine = nil
         // 一起听默认打开外放语音？不 —— 音乐在放，让她念会盖住歌。
         observeLyrics()
     }
@@ -140,8 +118,9 @@ final class ListenTogetherService: ObservableObject {
         guard trimmed.count >= 2 else { return }
 
         lyricCount += 1
-        // 她控制模式下不需要她念歌词 —— 那是她在操作播放器
-        guard mode == .sync else { return }
+        // 形态选择器删掉之后这里没有分支了 —— 她**永远**参与。
+        // （旧代码这里是 `guard mode == .sync else { return }`，
+        //   选中「她控制」就等于让她整场闭嘴。那个坑跟着枚举一起删了。）
         guard lyricCount % max(1, linesPerComment) == 0 else { return }
         guard Date().timeIntervalSince(lastSpokeAt) >= minimumGap else { return }
 
@@ -171,6 +150,9 @@ final class ListenTogetherService: ObservableObject {
         用一两句话说说你现在的感觉，就像真的在旁边一起听一样。
         可以提这句歌词给你的感觉，也可以顺着说点别的。短一点，别超过 30 个字。
         直接输出内容，不要引号，不要解释。
+
+        ⚠️ 工具是给你**备着**的，不是让你现在就动手：除非他明确说想换歌、
+        想听什么、或者让你收藏，否则不要自己切歌 / 暂停 / 收藏。
         """
 
         var collected = ""
@@ -179,8 +161,21 @@ final class ListenTogetherService: ObservableObject {
                 config: config,
                 systemPrompt: persona.systemPrompt,
                 history: [ChatMessage(role: .user, text: instruction)],
-                memory: memory
+                memory: memory,
+                // ⚠️ **这句以前是没有的**，是一处"假装完成"的温床：
+                //    她对着一句歌词说「给你换首安静的」，听起来像做了，
+                //    其实手上一个工具都没有，什么都没发生。
+                //    用户点名要的就是"给她切歌的权限"，所以这里必须给全。
+                tools: DeviceTools.all(),
+                onToolActivity: { [weak self] title in
+                    Task { @MainActor in self?.statusLine = title }
+                }
             ) {
+                // 她开始说话了，把「她翻了翻网易云…」那行收掉 ——
+                // 不然工具提示会压在她的话上面。
+                if collected.isEmpty, statusLine != nil, piece.isEmpty == false {
+                    statusLine = nil
+                }
                 collected += piece
                 if collected.count > 200 { break }
             }
@@ -278,7 +273,11 @@ final class ListenTogetherService: ObservableObject {
                 systemPrompt: persona.systemPrompt,
                 history: history,
                 memory: memory,
-                tools: DeviceTools.all()
+                tools: DeviceTools.all(),
+                // 她调工具的那几秒界面上不能是死的 —— 和聊天页同一条口径。
+                onToolActivity: { [weak self] title in
+                    Task { @MainActor in self?.statusLine = title }
+                }
             ) {
                 collected += piece
                 if chatLines.indices.contains(slot) {

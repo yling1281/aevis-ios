@@ -203,7 +203,15 @@ final class ListenService: ObservableObject {
         //    `setActive(false)` 会顺手把正在播的 AVPlayer 也停住，
         //    锁屏那圈控件跟着一起消失 —— 而这一切只是想"收起麦克风"。
         //    类别该还给音乐的那一下由上面的 `AudioSession.endRecord()` 负责。
-        if !AudioSession.musicPlaying {
+        //
+        // ⚠️⚠️ **通话中同样不能关**（2026-10-02 补的）。`AudioSession.inCall`
+        //    为真时，这条会话是**通话**在用的 —— 关掉它等于把整通电话的音频拆了：
+        //    · 她正在念的那半句会被掐断（TTS 用的也是这条会话）；
+        //    · 麦克风再拿回来要重设类别，中间那一下就是"她听不见了"。
+        //    触发路径特别日常：**按静音** → `CallService.setMuted(true)` →
+        //    `listen.stop()` → 走到这里。没有音乐在放就正好命中。
+        //    用户报的「点静音的话用不了 App 原本的工具」就是这一条。
+        if !AudioSession.musicPlaying, !AudioSession.inCall {
             try? AVAudioSession.sharedInstance().setActive(
                 false,
                 options: .notifyOthersOnDeactivation

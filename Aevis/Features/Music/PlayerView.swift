@@ -13,7 +13,8 @@ import UIKit
 /// 拍板后的结论：**这个界面本来就是那个"官网那样的界面"** ——
 /// 而原来「发现 → 一起听」打开的是 `TogetherView`，三张设置卡片，
 /// 跟"一起听"这件事本身毫无关系。所以这次：
-/// - `TogetherView` **整个删掉**，模式选择搬进这里（见 `modePicker`）
+/// - `TogetherView` **整个删掉**，模式选择当时搬进了这里
+///   （2026-10-02 连**模式选择本身**也删了 —— 见 `bottomArea` 里那段说明）
 /// - 所有「一起听」入口（发现页 / 聊天加号 / 通话申请）**都改成打开这个界面**
 /// - 找歌也从「音乐」页搬进来（右上角放大镜，见 `MusicSearchSheet`）——
 ///   以前想换歌得退出去翻页，一起听会断，这是"不好用"的一半原因
@@ -520,10 +521,20 @@ struct PlayerView: View {
                     .buttonStyle(.plain)
                 }
             } else {
-                // 形态选择从 `TogetherView` 搬过来的。
-                // 原来它长在一个单独的设置面板里 —— 而用户真正要挑形态的时刻
-                // 就是"站在播放界面、准备一起听"的这一刻，摆在这儿才对。
-                modePicker
+                // ⚠️ 这里原来是一个「同步听 / 她控制 / 一起听房间」的**形态选择器**。
+                //
+                //    2026-10-02 用户点名删掉：
+                //    「一点进去，不是有一个她控制，然后网易云一起听吗？那个就不要了」。
+                //
+                //    删得对 —— 那三个不是三种体验，是同一个体验的三个完成度：
+                //    「一起听房间」压根没接（界面上还写着"还没接"），
+                //    「她控制」的唯一实际效果是**让她整场不说话**。
+                //    现在只剩一种，就没必要让他挑。这一句说明代替它。
+                Text("歌从这儿放，\(Pronoun.current)跟着一起听 —— 想切歌、暂停，直接跟\(Pronoun.current)说就行。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Toggle(isOn: $settings.listenTogetherAutoStart) {
                     Text("放歌就一起听")
@@ -561,44 +572,13 @@ struct PlayerView: View {
 
     // MARK: - 一起听
 
-    /// 形态绑到设置里（而不是一个本地 `@State`）—— 挑完就记住了，
-    /// 下次打开还是这个。老 `TogetherView` 也是存进 `settings` 的，口径没变。
-    private var modeBinding: Binding<ListenTogetherMode> {
-        Binding(
-            get: { ListenTogetherMode(rawValue: settings.listenTogetherMode) ?? .sync },
-            set: { settings.listenTogetherMode = $0.rawValue }
-        )
-    }
-
-    private var listenMode: ListenTogetherMode {
-        ListenTogetherMode(rawValue: settings.listenTogetherMode) ?? .sync
-    }
-
-    private var modePicker: some View {
-        VStack(spacing: 5) {
-            Picker("形态", selection: modeBinding) {
-                ForEach(ListenTogetherMode.allCases) { item in
-                    Text(item.label).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            // 没做的形态照样摆出来，但**照实说** —— 不假装能用。
-            // 老 `TogetherView` 里那句解释性文案留着，只压成一行。
-            if !listenMode.isImplemented {
-                Text("这种形态还没接（房间接口要逆向签名）。先用另外两种。")
-                    .font(.aevis(11))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     /// 打开播放器就顺手开始一起听 —— 用户要的「默认一起听」。
     ///
-    /// 三个前提缺一不可，否则她会一直报错或者干脆不说话：
-    /// 开关开着、模型配好了、而且现在确实有歌在放。
+    /// 两个前提缺一不可，否则她会一直报错或者干脆不说话：
+    /// 开关开着、模型配好了。
+    ///
+    /// ⚠️ 以前还有第三道 `guard mode.isImplemented` —— 形态选择器删掉之后
+    ///    就没有"没实现的形态"这回事了，那道守卫跟着一起删。
     private func autoStartTogether() {
         guard settings.listenTogetherAutoStart else { return }
         guard !together.active, player.current != nil else { return }
@@ -608,11 +588,8 @@ struct PlayerView: View {
     private func startTogether() {
         guard !together.active else { return }
         guard settings.isConfigured else { return }
-        let mode = ListenTogetherMode(rawValue: settings.listenTogetherMode) ?? .sync
-        guard mode.isImplemented else { return }
 
         together.start(
-            mode: mode,
             persona: persona,
             config: settings.llm,
             memory: backgroundKnowledge()

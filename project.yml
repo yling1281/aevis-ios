@@ -127,11 +127,12 @@ settings:
     #       三处一起修：`replaceLast` trim、命中 `isSameLine` 时用定稿版覆盖、
     #       `load()` 里把已经存下来的首尾空白洗一遍（老用户的记录也能救）。
     #       新加的人设让模型更爱在行首留空格，所以这个老坑这轮才大规模显形。
-    # ⚠️ 2026-10-01 0.0.93：**「苹果来电界面」这条路真机判死刑了，把它收干净。**
-    #    探针（`AevisCallProbe`）在老板手机上跑过 —— 结论是**弹不出来**：
-    #    全能签重签用的那份描述文件里没有 `aps-environment`。这是**签名**的限制，
-    #    不是代码问题 —— 再怎么写也弹不出来。
-    #    所以这一版做的是「停止骗人 + 把好的那条路做扎实」：
+    # ⚠️ 2026-10-01 0.0.93：把那条**"骗人的选项"**收干净。
+    #    ⚠️⚠️ 这一条原来的标题是「苹果来电界面真机判死刑了」——**那个结论已作废**：
+    #    当时把老板那句「那上面显示不行，但是**探针可以用**」读成了"探针也不行",
+    #    后来他明确说探针**在灵动岛上是弹出来的**。⇒ 这套签名**能**弹系统通话界面，
+    #    真正的问题变成「探针能弹、主 App 为什么不能」。
+    #    但这版做的事本身没错，**不用回退**：
     #    ① `ChatView` 那个两选项对话框**删掉**（「打给她（用苹果的来电界面）」
     #       是个明知不通的选项）。现在点电话按钮**直接进通话页**。
     #    ② 失败原因用 `SystemCall.callFailureTick` 计数器触发一句 alert，
@@ -145,10 +146,48 @@ settings:
     #      在那之前别再往这条路上加代码。
     #    ＋ 后端：待核实邮件把「QQ 里发一句『确认 <单号>』」提到最前
     #      （手机上就能办，不用开电脑）—— 这条链**本来就通**，已线上核验。
+    # ⚠️ 2026-10-02 0.0.95：**网易云接进来 + 一起听收成一种 + 通话三修。**
+    #    ① 网易云补三样（用户原话：「他的喜欢、历史歌单、和他添加的歌单都加上」）：
+    #       `myPlaylists` / `likedTracks` / `recentTracks`，界面在「找歌」面板上
+    #       多了一条分页（找歌 / 我喜欢 / 最近 / 歌单）。
+    #       ⚠️ `specialType == 5` 才是「我喜欢的音乐」—— **别按名字找**，那个名字会变。
+    #    ② **她的歌单**：在他自己的网易云里真建一个，名字是「<她的名字>的歌单」，
+    #       App 界面上显示成「她的歌单」并排在最前（用户点名的做法：
+    #       「原理是在你的网易云添加一个歌单是属于他的」）。写接口走
+    #       `plainPost` + Cookie 里的 `__csrf`，失败**照实报**。
+    #    ③ **一起听的形态选择器整个删掉**（用户原话：「不是有一个她控制，
+    #       然后网易云一起听吗？那个就不要了」）。`ListenTogetherMode` 枚举和
+    #       `AppSettings.listenTogetherMode` 一并删除 —— 留着只会有人再去读它，
+    #       然后「她控制」那一支又让她整场闭嘴。
+    #    ④ **给她的播放器权限补全**：`music_control` 加 `seek`、新增 `my_music`
+    #       （看我喜欢/最近/歌单）、新增 `save_to_her_playlist`（收藏进她的歌单）。
+    #       🔴 顺带修一处**假装完成**：`ListenTogetherService.react()` 以前
+    #       **一个工具都不给**，所以她对着一句歌词说「给你换首安静的」是空话。
+    #    ⑤ 🔴 修 `play_music` 的真 bug：拿到 `song_id` 之后原来是**把 id 当关键词
+    #       丢进搜索**的，永远搜不到 —— 模型从列表里拿到的 id 全废。
+    #       现在走 `/api/v3/song/detail` 精确取，并且 `source` 参数能把整张列表
+    #       变成播放队列（不然「下一首」永远没有下一首）。
+    #    ⑥ 通话三个问题：
+    #       · **灵动岛上的通话时长一直是 0 秒** = 根因在 `SystemCallCenter`：
+    #         「已接通」那句 `reportConversationEvent` 只在 `perform` 回调那一刻
+    #         找得到会话才报，找不到就整段跳过 ⇒ 系统永远收不到接通。
+    #         改成"立刻试一次 + 每 0.3 秒重试（最多 15 次）"，并在
+    #         `conversationChanged` 里兜底补报。苹果自己的示例也是 sleep 完再找。
+    #       · **静音两边不同步** = `MuteConversationAction.isMuted` 是**目标状态**，
+    #         老代码用 `if !muted { toggleMute() }` 把它当单向的 ⇒ 在系统卡上
+    #         "取消静音"整段跳过。改成 `setMuted(_:)`，并且 App 这边按静音时
+    #         用 `perform` 把状态推回系统卡（`Conversation.Event` 里**没有**
+    #         能表达静音的事件，这条是唯一通路）。
+    #       · **系统挂断后 App 的通话页不收** = 通话页挂在 `AppRouter.showCall`
+    #         这个 `fullScreenCover` 上，而系统挂断只把 `state` 置回 idle。
+    #         现在发 `CallService.remoteEndTick`（经 `CallEndSignal`），
+    #         `MainTabView` 和 `CompanionCard` 各自收页面。
+    #       ＋ `ListenService.stopEngine()` 加一道 `!AudioSession.inCall` ——
+    #         不然按一下静音就把**整通电话的音频会话**关掉（她正念的半句会被掐断）。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
     #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.94"
-    CURRENT_PROJECT_VERSION: "94"
+    MARKETING_VERSION: "0.0.95"
+    CURRENT_PROJECT_VERSION: "95"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

@@ -49,6 +49,12 @@ struct MainTabView: View {
     @ObservedObject private var router = AppRouter.shared
     /// 她主动提的申请（打电话 / 看屏幕 / 一起听）—— 你要点一下才会真的开始。
     @ObservedObject private var companionRequest = CompanionRequest.shared
+    /// 「这一通被系统那边挂断了」的信号。
+    ///
+    /// ⚠️ **别图省事直接观察 `CallService`** —— 通话中 `listeningText`
+    ///    每秒发几十次实时转写，这个视图是整棵 Tab 树的根，
+    ///    观察它等于让整个 App 在通话中一直重画。`CallEndSignal` 只发这一个数。
+    @ObservedObject private var callEnd = CallEndSignal.shared
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -84,6 +90,15 @@ struct MainTabView: View {
             CallView()
                 .aevisScreen("通话")
                 .environmentObject(personaStore)
+        }
+        // 系统那边（锁屏 / 灵动岛上的通话卡）把电话挂了 —— 这个页面也得关掉。
+        //
+        // ⚠️ 用户 2026-10-02 报的「打电话点击静音和挂断，就是 APP 同步不了」：
+        //    系统挂断以前只把 `CallService.state` 置回 `.idle`，而这个通话页是
+        //    挂在 `showCall` 这个 `fullScreenCover` 上的 —— 没人去碰它，
+        //    于是"电话已经挂了，页面还杵在屏幕上"。
+        .onChange(of: callEnd.tick) { _, _ in
+            router.showCall = false
         }
         // 全屏播放器（仿网易云那个）。点一首歌就弹它；「一起听」也开它。
         .fullScreenCover(isPresented: $router.showPlayer) {
