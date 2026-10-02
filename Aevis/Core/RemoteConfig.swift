@@ -35,21 +35,22 @@ final class RemoteConfig {
     func refresh() async {
         // 基址**按优先级挨个试**（别只试一条，栽过）：
         //   ① `AccountEndpoint.resolved` —— 上次探到能通的那条线（最快，省一次 404）
-        //   ② `AppSettings.accountServerURL` —— 现在实际在用的接口地址
-        //   ③ `AevisHosts.accountCandidates` —— 编译进去的两条线（**锚点**）
-        // ⚠️ 为什么第 ③ 条最关键：这份配置的用途之一就是**改接口地址本身**。
-        //    如果只认①/②，一旦那条被改坏/下线，就永远拉不到新配置、也就永远纠不回来
+        //   ② `AevisHosts.accountCandidates` —— 编译进去的两条线（**锚点**）
+        // ⚠️ 为什么第 ② 条最关键：这份配置的用途之一就是**改接口地址本身**。
+        //    如果只认①，一旦那条被改坏/下线，就永远拉不到新配置、也就永远纠不回来
         //    （能拉配置的那条路必须先活着）。编译进去的地址**这一版包里不会变**，
         //    所以它才是那个"无论如何都试一下"的锚点。
         // ⚠️ 这里**不能**读远端配置里那个 `accountBase` 覆盖值本身 —— 它就在这份配置里，
-        //    读了是先有鸡还是先有蛋（这正是要留第 ③ 条锚点的原因）。
+        //    读了是先有鸡还是先有蛋（这正是要留第 ② 条锚点的原因）。
+        // ⚠️ **本文件必须自包含**（只依赖 Foundation + `AevisHosts` + `AccountEndpoint`）：
+        //    `AevisAdmin` 那个 target 也编它（`AccountEndpoint` 要调 `remoteOverride()`），
+        //    而管理端里**没有** `AppSettings` —— 2026-10-02 就因为这里读了一下
+        //    `AppSettings.shared.accountServerURL`，管理端那轮 CI 直接编不过。
+        //    **别**想着把 `AppSettings` 挪进管理端：那会把主 App 的设置体系整块拖进去。
         var bases: [String] = []
         if let resolved = AccountEndpoint.resolved, !resolved.isEmpty {
             bases.append(resolved)
         }
-        let inUse = AppSettings.shared.accountServerURL
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !inUse.isEmpty { bases.append(inUse) }
         bases.append(contentsOf: AevisHosts.accountCandidates)
         if bases.isEmpty { bases.append(AevisHosts.accountBase) }
 

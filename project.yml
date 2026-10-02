@@ -392,6 +392,13 @@ targets:
       # 线路探测（线路一/线路二）同样共用：两个 App 必须用同一套"谁通走谁"的判断，
       # 否则会出现"主 App 走线路二、管理端走线路一"，排查时对不上号。
       - path: Aevis/Core/AccountEndpoint.swift
+      # ⚠️ **远端配置也要编进来**（2026-10-02 补）：`AccountEndpoint.remoteOverride()`
+      #    读的就是它 —— 上一轮它引用了 `RemoteConfig` 却没把这份加进来，
+      #    管理端那轮 CI 当场报 "cannot find 'RemoteConfig' in scope"。
+      #    ⇒ 规矩：`AccountEndpoint` 引了谁，这里就得有谁（它是共用的那一份）。
+      #    它是自包含的（只依赖 Foundation + `AevisHosts`）；管理端**不刷新**它，
+      #    所以 `remoteOverride()` 恒为 nil —— 管理端照旧走编译进去的地址，行为没变。
+      - path: Aevis/Core/RemoteConfig.swift
     settings:
       base:
         # ⭐⭐ **管理端的名字只有这一处**（它当模板用）。
