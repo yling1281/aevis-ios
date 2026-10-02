@@ -97,15 +97,16 @@ struct AccountCard: View {
 
     /// 「线路一 · account.apekin.com」—— 让用户看得出现在走的是哪条线。
     /// 域名会被云厂商按**线路抽样**拦，所以两条线互为备用，全自动切换。
+    ///
+    /// ⚠️ 只显示**主机名**，不显示路径 —— 接口那段随机前缀不该出现在截图里
+    ///    （用户会把设置页截图发群里）。
     private var lineText: String {
-        let pretty = settings.accountServerURL
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-        if pretty.isEmpty { return "没配" }
+        let host = URL(string: settings.accountServerURL)?.host ?? ""
+        if host.isEmpty { return "没配" }
         guard let line = AevisHosts.lineName(for: settings.accountServerURL) else {
-            return pretty
+            return host
         }
-        return line + " · " + pretty
+        return line + " · " + host
     }
 
     /// 手动重新探测线路（启动时已经自动探过一次，这里给用户一个"我手动试一下"的入口）。

@@ -44,7 +44,9 @@ enum DeviceIdentity {
 
     /// 网页上绑定的入口 —— 绑定**只在网页上做**，App 里不需要登录。
     /// 域名走 `AevisHosts`，别写死。
-    static let bindPage = AevisHosts.accountURL("/me")
+    /// ⚠️ 用 `accountWebURL`（**不带接口前缀**）—— `/me` 是给浏览器看的网页，
+    ///    带前缀那条服务器上不存在。
+    static let bindPage = AevisHosts.accountWebURL("/me")
 
     // MARK: - 内部
 

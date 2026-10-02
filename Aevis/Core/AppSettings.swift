@@ -1318,7 +1318,8 @@ final class AppSettings: ObservableObject {
     /// 服务器发码钥匙。**只进钥匙串**。
     ///
     /// 它不在公开仓库里，也不走 GitHub Secrets —— 用户从自己的管理后台
-    /// （`AevisHosts.account("/admin")`）复制过来填一次。少一个要他配置的地方。
+    /// （`AevisHosts.accountWeb(AevisHosts.adminPath)`）复制过来填一次。
+    /// 少一个要他配置的地方。
     @Published var qqBotCodeKey: String {
         didSet { Keychain.set(qqBotCodeKey, for: Key.qqBotCodeKeyKeychain) }
     }

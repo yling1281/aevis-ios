@@ -117,8 +117,10 @@ struct MeView: View {
     }
 
     /// 规则页在网站上单独一页 —— 群里发的、App 里点的，都是同一个地址。
+    /// ⚠️ 用**不带 `.html`** 的那个（2026-10-02 站上统一成干净地址，
+    ///    `.html` 那种会 301 跳一下）。
     private func openRules() {
-        guard let url = AevisHosts.siteURL("/rules.html") else { return }
+        guard let url = AevisHosts.siteURL("/rules") else { return }
         openURL(url)
     }
 

@@ -168,8 +168,14 @@ struct DeviceCard: View {
         if manual { note = nil; problem = nil }
         defer { checking = false }
 
+        // ⚠️ 用**运行时**的接口基址（`AppSettings.accountServerURL`），不是编译进去那个 ——
+        //    后台「远端配置」换了接口前缀之后，这里跟着切，不用重出包。
+        var serverBase = AppSettings.shared.accountServerURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while serverBase.hasSuffix("/") { serverBase.removeLast() }
+        if serverBase.isEmpty { serverBase = AevisHosts.accountBase }
         guard let url = URL(string:
-            AevisHosts.account("/api/device/lookup?device_id=\(DeviceIdentity.canonical)"))
+            serverBase + "/api/device/lookup?device_id=\(DeviceIdentity.canonical)")
         else {
             problem = "内部错误：设备码拼不出查询地址。"
             return

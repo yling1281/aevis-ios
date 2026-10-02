@@ -52,18 +52,10 @@ struct AevisApp: App {
         //    漏了这一步，通知上根本不会出现打字框（而且不报错，只是悄悄没有）。
         ProactiveService.registerCategories()
 
-        // 账号后端有主域名 + 备用域名（拦截是按线路抽样的，谁通走谁）。
-        // 结果写回 `AppSettings.accountServerURL` —— 各处读的都是它，改一处全跟着走。
-        // ⚠️ 必须回到主线程再写：`AppSettings` 不是 `@MainActor`，在后台改 `@Published`
-        //    会让 SwiftUI 在别的线程上收到变更通知（iOS 26 上直接崩，踩过）。
-        Task {
-            let base = await AccountEndpoint.refresh()
-            await MainActor.run { AppSettings.shared.accountServerURL = base }
-        }
-
-        // 远端配置：开机拉一次（**不 await、不挡启动**，失败就安静用缓存）。
-        // 这是「不出新包也能改开关」那条路 —— 详见 `RemoteConfig`。
-        Task { await RemoteConfig.shared.refresh() }
+        // 账号后端：**先拉远端配置，再定线路**。
+        // 结果写回 `AppSettings.accountServerURL` —— 各处的接口请求读的都是它，
+        // 改这一处全跟着走（`AccountService` / `DeviceGate` / `DiagUploader`）。
+        Task { await AevisApp.syncEndpoint() }
 
         // 冷启动补一次灵动岛（Live Activity）同步 —— 第一次 `scenePhase` 变 active
         // 不一定触发 onChange，所以这里主动补一次，别让挂机态等到切后台才起来。
@@ -81,7 +73,44 @@ struct AevisApp: App {
                     // 得重开一个挂机态）。详见 `LiveIslandCenter.sync()`。
                     guard phase == .active else { return }
                     LiveIslandCenter.shared.sync()
+                    // 顺手对一次「远端有没有改接口地址」—— 改完**不用重启 App**，
+                    // 切回前台就生效（「不发新包直接切换」）。
+                    Task { await AevisApp.applyEndpointOverride() }
                 }
         }
+    }
+
+    // MARK: - 接口地址
+    //
+    // 两个静态方法，主 App / 启动路径共用一份口径，别在别处再拼一遍。
+
+    /// 启动时对齐一次接口地址：**先拉远端配置，再定线路**。
+    ///
+    /// ⚠️ 顺序不能反：远端配置里的 `accountBase` 优先级最高（见
+    ///    `AevisHosts.remoteOverrideKey`），而它得先从远端拿下来；
+    ///    反过来的话每次启动都先按编译进去的地址跑一轮，要**下次启动**才切过去。
+    /// ⚠️ 写 `AppSettings` 那一步必须回主线程 —— 它不是 `@MainActor`，
+    ///    在后台改 `@Published` 会让 SwiftUI 在别的线程收到变更通知（iOS 26 直接崩，踩过）。
+    /// ⚠️ 远端拉不到、线路全探不通都**不抛错、不挡启动**：`refresh()` 会退回编译进去
+    ///    那个地址，行为跟以前一样。
+    static func syncEndpoint() async {
+        await RemoteConfig.shared.refresh()
+        let base = await AccountEndpoint.refresh()
+        let current = await MainActor.run { AppSettings.shared.accountServerURL }
+        if base != current {
+            await MainActor.run { AppSettings.shared.accountServerURL = base }
+        }
+    }
+
+    /// 回前台时只做一件事：**远端把接口地址改了没有**。
+    ///
+    /// ⚠️ 故意**不**在这里重新探测线路 —— 网络抖一下就把用户手动选的线路改掉，
+    ///    那是帮倒忙。启动那次探测已经够了，用户还能在设置里点「换线」。
+    static func applyEndpointOverride() async {
+        await RemoteConfig.shared.refresh()
+        guard let remote = AccountEndpoint.remoteOverride() else { return }
+        let current = await MainActor.run { AppSettings.shared.accountServerURL }
+        guard remote != current, await AccountEndpoint.reachable(remote) else { return }
+        await MainActor.run { AppSettings.shared.accountServerURL = remote }
     }
 }

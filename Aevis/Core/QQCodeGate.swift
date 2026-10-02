@@ -45,9 +45,16 @@ final class QQCodeGate {
 
     private init() {}
 
-    /// 账号后端的地址。**必须和服务器上部署的一致。**
-    /// 域名在 `AevisHosts` 里定义一处，这里引用 —— 别再写死字面量。
-    private let server = AevisHosts.accountBase
+    /// 账号后端的地址。**取运行时那个**（`AppSettings.accountServerURL`）——
+    /// 这样后台「远端配置」把接口前缀改了，这里跟着切，**不用重出包**。
+    /// 取不到（空）时退回编译进去的基址（带随机前缀，见 `AevisHosts.apiPath`）。
+    /// ⚠️ 别写死字面量；末尾斜杠要削掉，不然拼出 `//api/...`。
+    private var server: String {
+        var text = AppSettings.shared.accountServerURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix("/") { text.removeLast() }
+        return text.isEmpty ? AevisHosts.accountBase : text
+    }
 
     /// 关键词后面跟的那一串，必须长得像口令才认（字母数字、4–12 位）。
     /// 为什么要有这个限制：不然「注册码是多少」这种话会被当成
@@ -119,7 +126,8 @@ final class QQCodeGate {
 
         guard !key.isEmpty else {
             return "发注册码的功能还没配好：缺服务器的钥匙。\n"
-                + "（管理员去 " + AevisHosts.account("/admin") + " 复制「发码钥匙」，"
+                + "（管理员去 " + AevisHosts.accountWeb(AevisHosts.adminPath)
+                + " 复制「发码钥匙」，"
                 + "填进 App 的「我 → 设置 → QQ 机器人 → 发注册码」。）"
         }
         guard !c2cOpenID.isEmpty else { return nil }

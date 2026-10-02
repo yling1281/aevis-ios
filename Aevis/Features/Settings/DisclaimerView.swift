@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// 为什么要有一页：这个项目会碰到别人的账号（QQ 机器人、网易云、百度网盘），
 /// 也会让别人往手机上装东西。**风险得摆在明面上**，不能让朋友装完才知道。
-/// 内容与网站上那一页（`AevisHosts.site("/disclaimer.html")`）是同一份口径，
+/// 内容与网站上那一页（`AevisHosts.site("/disclaimer")`）是同一份口径，
 /// 改的时候两边一起改。
 struct DisclaimerView: View {
 
@@ -12,7 +12,8 @@ struct DisclaimerView: View {
     @ObservedObject private var settings = AppSettings.shared
 
     /// 网页版。App 里看不够、想转发给别人的话，点这个。
-    static let webURL = AevisHosts.site("/disclaimer.html")
+    /// ⚠️ 用**不带 `.html`** 的那个（2026-10-02 站上统一成干净地址）。
+    static let webURL = AevisHosts.site("/disclaimer")
 
     private struct Block: Identifiable {
         let id = UUID()

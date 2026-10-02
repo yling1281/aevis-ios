@@ -33,10 +33,39 @@ final class RemoteConfig {
 
     /// 拉一次远端配置。**不抛异常、不阻塞启动** —— 失败就安静用缓存。
     func refresh() async {
-        // 基址用 AccountEndpoint（别自己硬编码域名）——
-        // 它已经探过哪条线路通，就用那条；没探过就退回站点主域名。
-        let base = AccountEndpoint.resolved ?? AevisHosts.accountBase
-        guard let url = URL(string: base + "/api/app/config") else { return }
+        // 基址**按优先级挨个试**（别只试一条，栽过）：
+        //   ① `AccountEndpoint.resolved` —— 上次探到能通的那条线（最快，省一次 404）
+        //   ② `AppSettings.accountServerURL` —— 现在实际在用的接口地址
+        //   ③ `AevisHosts.accountCandidates` —— 编译进去的两条线（**锚点**）
+        // ⚠️ 为什么第 ③ 条最关键：这份配置的用途之一就是**改接口地址本身**。
+        //    如果只认①/②，一旦那条被改坏/下线，就永远拉不到新配置、也就永远纠不回来
+        //    （能拉配置的那条路必须先活着）。编译进去的地址**这一版包里不会变**，
+        //    所以它才是那个"无论如何都试一下"的锚点。
+        // ⚠️ 这里**不能**读远端配置里那个 `accountBase` 覆盖值本身 —— 它就在这份配置里，
+        //    读了是先有鸡还是先有蛋（这正是要留第 ③ 条锚点的原因）。
+        var bases: [String] = []
+        if let resolved = AccountEndpoint.resolved, !resolved.isEmpty {
+            bases.append(resolved)
+        }
+        let inUse = AppSettings.shared.accountServerURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !inUse.isEmpty { bases.append(inUse) }
+        bases.append(contentsOf: AevisHosts.accountCandidates)
+        if bases.isEmpty { bases.append(AevisHosts.accountBase) }
+
+        var seen = Set<String>()
+        for raw in bases {
+            var base = raw
+            while base.hasSuffix("/") { base.removeLast() }
+            guard !base.isEmpty, seen.insert(base).inserted else { continue }
+            if await fetch(from: base) { return }
+        }
+        // 全都不通 → 安静用缓存，**绝不因此改行为**。
+    }
+
+    /// 从**一个**基址拉配置；拿到并写进缓存就返回 `true`。
+    private func fetch(from base: String) async -> Bool {
+        guard let url = URL(string: base + "/api/app/config") else { return false }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -45,9 +74,11 @@ final class RemoteConfig {
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return false
+            }
             guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let config = root["config"] as? [String: Any] else { return }
+                  let config = root["config"] as? [String: Any] else { return false }
 
             var fresh: [String: String] = [:]
             for (key, value) in config {
@@ -56,9 +87,11 @@ final class RemoteConfig {
             lock.lock()
             table = fresh
             lock.unlock()
+            // 缓存一份（跟机器走，不跨设备）：下次冷启动第一帧就能读，不等网络。
             UserDefaults.standard.set(fresh, forKey: Self.cacheKey)
+            return true
         } catch {
-            // 拉不到就安静用缓存 —— **绝不因此改行为**。
+            return false
         }
     }
 

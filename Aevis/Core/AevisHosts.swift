@@ -24,16 +24,59 @@ enum AevisHosts {
     /// 账号站：登录、激活、注册码、管理后台。和静态站同一台服务器、同一套后端。
     static let accountDomain = "account.apekin.com"
 
+    // MARK: - 接口的随机入口（2026-10-02）
+
+    /// App 调 `/api/...` 走的那段**随机前缀**。
+    ///
+    /// 老板原话：「APP 接口的话，你是不是也要改啊」「**不要拿那些就是很大众的东西**」
+    /// ⇒ 接口不再挂在裸 `/api/` 上，而是挂在 `/<这段随机串>/api/` 上。
+    /// 36 进制 8 位（约 2.8 万亿种），猜不出来。
+    ///
+    /// ⚠️ **改这个值要两处一起改**：
+    ///   ① 这里
+    ///   ② 服务器 `server/nginx-aevis-apekin.conf` 里那两处
+    ///      `location = /<前缀>` 和 `location ^~ /<前缀>/api/`
+    /// 想**不出新包**就切，别改这里 —— 去后台的「远端配置」写
+    /// `accountBase = https://account.apekin.com/<新前缀>`（见 `remoteOverrideKey`）。
+    ///
+    /// ⚠️ **老路径 `/api/...` 必须继续活着**（老板要求「做过渡」）：
+    ///    手机上装的老包（≤0.0.95）、QQ / 百度的回调、支付宝 / PayPro 的回调
+    ///    都还指着它。等大家都换了新包再单独收掉。
+    static let apiPath = "/k5stbt2o"
+
+    /// 远端配置里那个能**覆盖接口地址**的键（存在后端的 `app_config` 表里）。
+    /// 改它的值 = 所有装了新包的 App 下次启动 / 回前台就切过去，**不用重新出包**。
+    /// 这就是「不更新包直接切换」。
+    static let remoteOverrideKey = "accountBase"
+
+    /// 后台页在服务器上那条**随机路径** —— 必须和后端 `server/account/app.py`
+    /// 里的 `ADMIN_PATH` 一字不差（改要两处一起改）。
+    static let adminPath = "/afwjs9e870"
+
     // MARK: - 拼 URL
+    //
+    // ⚠️ 三个 base 别用混：
+    //   · `siteBase`        静态站（谁都能看：安装页、源、规则、免责声明）
+    //   · `accountBase`     **接口**根，带随机前缀 —— 所有 `/api/...` 走它
+    //   · `accountWebBase`  **人看的网页**根，不带前缀（登录页 / `/me` / 后台页）
+    //     ↑ 这三个混用就会 404：带前缀的 `/me` 服务器上根本不存在。
 
     static let siteBase = "https://" + siteDomain
-    static let accountBase = "https://" + accountDomain
+    static let accountBase = "https://" + accountDomain + apiPath
 
-    /// `AevisHosts.site("/rules.html")`
+    /// 同一个域名，**不带前缀** —— 过渡期兜底（老路径还在）。
+    static let accountPlainBase = "https://" + accountDomain
+    static let accountWebBase = accountPlainBase
+
+    /// `AevisHosts.site("/rules")`
     static func site(_ path: String) -> String { siteBase + path }
+    /// **接口**地址：`AevisHosts.account("/api/me")`
     static func account(_ path: String) -> String { accountBase + path }
-    static func siteURL(_ path: String) -> URL? { URL(string: siteBase + path) }
     static func accountURL(_ path: String) -> URL? { URL(string: accountBase + path) }
+    /// **网页**地址：`AevisHosts.accountWeb("/me")`
+    static func accountWeb(_ path: String) -> String { accountWebBase + path }
+    static func accountWebURL(_ path: String) -> URL? { URL(string: accountWebBase + path) }
+    static func siteURL(_ path: String) -> URL? { URL(string: siteBase + path) }
 
     // MARK: - 老域名 / 备用域名
 
@@ -42,6 +85,7 @@ enum AevisHosts {
     /// 所以两个域名互为备用，谁通走谁（见 `AccountEndpoint.refresh()`）。
     static let legacySiteDomain = "lingyan.cyou"
     static let legacyAccountDomain = "account.lingyan.cyou"
+    static let legacyAccountBase = "https://" + legacyAccountDomain
 
     // MARK: - 服务器线路（线路一 / 线路二）
 
@@ -56,11 +100,13 @@ enum AevisHosts {
     /// 两条线路，**顺序就是优先级**。用户口径：「线路一、线路二」——
     /// 主 App 和管理端**共用这一份**，别再各写一遍。
     ///
-    /// 线路一 = 新备案域名（主用）；线路二 = 老域名（备用）。
+    /// 线路一 = 新域名 + **接口随机前缀**（主用）；线路二 = 老域名（备用）。
     /// App 启动时依次探一下，谁通走谁（`AccountEndpoint.refresh()`）。
+    /// ⚠️ 线路二**故意不加前缀** —— 老域名那台上没配那条前缀规则，
+    ///    加了就是 404；它走的是原来那条裸 `/api/`。
     static let accountLines: [Line] = [
-        Line(name: "线路一", base: "https://" + accountDomain),
-        Line(name: "线路二", base: "https://" + legacyAccountDomain),
+        Line(name: "线路一", base: accountBase),
+        Line(name: "线路二", base: legacyAccountBase),
     ]
 
     static var accountCandidates: [String] { accountLines.map { $0.base } }
