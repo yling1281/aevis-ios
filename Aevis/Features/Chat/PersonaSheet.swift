@@ -187,7 +187,7 @@ struct PersonaSheet: View {
                 note = "这张图格式不支持，换成 JPG 或 PNG 再试。"
                 return
             }
-            personaStore.setAvatar(image)
+            personaStore.setAvatar(image, original: data)
             note = "头像换好了。"
             #else
             note = "这个平台上换不了头像。"

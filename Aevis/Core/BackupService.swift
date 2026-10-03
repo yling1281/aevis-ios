@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// 能被备份的东西，各自实现这三下。
@@ -19,6 +20,7 @@ enum BackupError: LocalizedError {
     case notOurs
     case tooNew(Int)
     case noBackups
+    case badKey
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +32,8 @@ enum BackupError: LocalizedError {
             return "这份备份是更新版本的 Aevis 做的（格式 \(version)），当前版本读不了。"
         case .noBackups:
             return "网盘里还没有备份。先去「备份到网盘」传一份。"
+        case .badKey:
+            return "这份备份解不开（密钥对不上）。"
         }
     }
 }
@@ -37,7 +41,7 @@ enum BackupError: LocalizedError {
 /// 数据搬家：把整台手机里的 Aevis 打成一个包传到网盘，换设备再拉回来。
 ///
 /// ## 包里装了什么
-/// 联系人（人设）、每个人的聊天记录、记忆、朋友圈，以及**一部分设置**。
+/// 联系人（人设）、每个人的聊天记录、记忆、朋友圈、情侣空间、**头像**，以及一部分设置。
 ///
 /// ## ⚠️ 包里**没有**什么，以及为什么
 /// API Key、网易云 Cookie、百度网盘自己的通行证 —— 这些是**这台设备的钥匙**，
@@ -50,6 +54,31 @@ enum BackupError: LocalizedError {
 /// password / authorization 的设置项一律不进包。
 /// 用黑名单而不是白名单，是因为设置项一直在加 —— 白名单总有一天会漏掉新项，
 /// 而漏掉一个**机密**的后果，比漏掉一个普通设置严重得多。
+///
+/// ## ⭐ 2026-10-03：包从「明文 JSON」升级成「加密的二进制包」（format 2）
+///
+/// 老板定的是 **0 和 1 机制**：头像这类图**原始字节上传**，不压缩、不重编码；
+/// 整个包加密之后再传网盘。两件事是分开的，**别混为一谈**：
+///
+/// | 诉求 | 真正的解法 | 为什么 |
+/// |---|---|---|
+/// | **不压缩画质** | **另存原图**（`avatarOriginalURL`） | 网盘是文件存储，**不会重编码我们的文件**。压画质的是**我们自己**：显示版是 512/JPEG0.88，源文件在那一步就损失了。加密救不回来。 |
+/// | **不被网盘扫描/和谐** | **整包 AEAD 加密** | 明文图片传上去，平台会做内容识别；加密之后是随机字节，认不出来，**秒传也失效**（秒传靠内容哈希）。 |
+/// | **传一半断掉不留半成品** | **打包成单文件** | 一次上传、原子完成。 |
+///
+/// ### 两处格式改动（都向后兼容）
+/// 1. **序列化**：JSON → **二进制 property list**。
+///    因为 `Data` 在 JSON 里只能 base64（膨胀 33%），在 plist 里是**原生字节**。
+///    这是"0 和 1"能真正落地的关键。
+/// 2. **外层**：加密容器（magic + 版本 + salt + ChaChaPoly）。
+///    恢复时先看头：有 magic 就解密，没有就按老格式读 —— **老备份照样能恢复**。
+///
+/// ### 🔴 这个加密的**边界**（别对外说成"安全加密"）
+/// 对称密钥是**编在 App 里的一段固定口令**派生的。它挡住的是：
+/// **网盘的内容扫描、平台的和谐、秒传识别、以及"网盘上躺着一份明文聊天记录"**。
+/// 它**挡不住**：拿到这个 App 并且愿意逆的人。
+/// 要做成"真的只有你能解"，唯一的办法是**让用户设恢复密码**（忘了就真没了）——
+/// 那是另一件事，没做。**别把这个说成端到端加密。**
 ///
 /// ## ⚠️⚠️ 恢复期间所有 Store 都「只读不写」
 /// 这条是 2026-10-01 修「搬家什么都不搬」时补的：`restore` 走的是
@@ -67,7 +96,12 @@ final class BackupService {
     static let shared = BackupService()
 
     /// 包的格式号。以后改结构就 +1，恢复时能认出是不是太新。
-    static let format = 1
+    ///
+    /// | 号 | 变化 |
+    /// |---|---|
+    /// | 1 | 明文 JSON，**不含头像** |
+    /// | 2 | 二进制 plist + 整包加密，**含头像原图**（2026-10-03） |
+    static let format = 2
 
     /// 上一次备份的文件名，界面上显示用。
     static let lastBackupKey = "aevis.lastBackupName"
@@ -118,12 +152,18 @@ final class BackupService {
         PersonaStore.shared.resyncToActive()
     }
 
-    /// 打一个包出来（纯内存操作，不联网）。
+    /// 打一个包出来（纯内存操作，不联网）。产出的是**加密后的二进制**，不是 JSON。
+    ///
+    /// ⚠️ **必须在主线程调**（两个调用方都是 `Task { @MainActor }`）。
+    ///    它要读各 Store 的 `@Published` 状态和 `ProfileStore` ——
+    ///    后台读会让 SwiftUI 收到别的线程的通知，**iOS 26 上会崩（真崩过）**。
     func makeBackup() throws -> Data {
         var storeObjects: [String: Any] = [:]
         for store in Self.stores() {
             let data = try store.exportBackup()
-            // 转成 JSON 对象再嵌进来，这样整个包就是一个规规矩矩的 JSON
+            // 转成 JSON 对象再嵌进来。
+            // ⚠️ 这里出来的 `imageData` / `voiceData` 是 **NSData**；
+            //    在下面那份**二进制 plist** 里它是原生存的（不 base64），正是我们要的。
             storeObjects[store.backupName] = try JSONSerialization.jsonObject(with: data)
         }
 
@@ -133,15 +173,41 @@ final class BackupService {
             "createdAt": ISO8601DateFormatter().string(from: Date()),
             "build": (Bundle.main.infoDictionary?["AevisCommit"] as? String) ?? "",
             "stores": storeObjects,
+            "avatars": Self.avatarPayload(),
             "settings": try JSONEncoder().encode(settingsSnapshot()).base64EncodedString()
         ]
-        return try JSONSerialization.data(withJSONObject: package, options: [.prettyPrinted, .sortedKeys])
+
+        // ⚠️ 一定要用 **PropertyListSerialization 的 `.binary`**，不能再用 JSONSerialization：
+        //    JSON 里 `Data` 只能写成 base64 字符串 —— 膨胀 33%，而且"原始字节"这层意思
+        //    当场就没了（老板要的 0 和 1 就落不了地）。
+        //    plist 里 `Data` 是**原生字节**，一个 bit 都不动。
+        let plain = try PropertyListSerialization.data(
+            fromPropertyList: package, format: .binary, options: 0)
+        return try Self.seal(plain)
+    }
+
+    /// 头像段：`"me"` 是我的，`"persona-<uuid>"` 是每个联系人的。
+    /// ⚠️ 值是**原始字节**，不做任何编码转换、不重编码、不缩放。
+    private static func avatarPayload() -> [String: Data] {
+        var out: [String: Data] = [:]
+        if let me = ProfileStore.shared.avatarBytesForBackup() {
+            out["me"] = me
+        }
+        for contact in PersonaStore.shared.contacts {
+            if let bytes = PersonaStore.shared.avatarBytesForBackup(for: contact.id) {
+                out["persona-" + contact.id.uuidString] = bytes
+            }
+        }
+        return out
     }
 
     /// 从包里恢复（**会覆盖**本机现有数据）。
     @discardableResult
-    func restore(from data: Data) throws -> String {
-        guard let package = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+    func restore(from raw: Data) throws -> String {
+        // ① 先过加密容器（老备份没有容器，原样返回）
+        let data = try Self.open(raw)
+        // ② 再解析（新的是二进制 plist，老的是明文 JSON，两种都认）
+        guard let package = Self.parsePackage(data) else {
             throw BackupError.badFormat
         }
         guard (package["app"] as? String) == "Aevis" else {
@@ -163,6 +229,13 @@ final class BackupService {
             names.append(Self.label(store.backupName))
         }
 
+        // ⭐ 头像必须在**联系人导完之后**才写回 —— 键是 `persona-<uuid>`，
+        //    得先有这些联系人，`adoptAvatar(for:)` 才认得出来是谁的。
+        let avatarCount = Self.adoptAvatars(package["avatars"] as? [String: Any])
+        if avatarCount > 0 {
+            names.append("头像 ×\(avatarCount)")
+        }
+
         // ⚠️ 设置放最后：`apply` 会往 UserDefaults 里写一堆键，
         //    先写的话上面那些 Store 恢复完再切一次人，反而可能被脏值带偏。
         if let text = package["settings"] as? String,
@@ -181,13 +254,37 @@ final class BackupService {
         return names.isEmpty ? "这个包里没有可恢复的数据。" : "已恢复：" + names.joined(separator: "、")
     }
 
+    /// 把头像段写回本机。返回成功写回的个数。
+    private static func adoptAvatars(_ raw: [String: Any]?) -> Int {
+        guard let raw, !raw.isEmpty else { return 0 }
+        var count = 0
+        for (key, value) in raw {
+            // plist 读回来是 NSData，桥接成 Data 就是原始字节
+            guard let bytes = value as? Data, !bytes.isEmpty else { continue }
+            if key == "me" {
+                ProfileStore.shared.adoptAvatar(from: bytes)
+                count += 1
+            } else if key.hasPrefix("persona-") {
+                let text = String(key.dropFirst("persona-".count))
+                guard let id = UUID(uuidString: text) else { continue }
+                if PersonaStore.shared.adoptAvatar(bytes, for: id) { count += 1 }
+            }
+        }
+        return count
+    }
+
     // MARK: - 和网盘打交道
+
+    /// 新备份的扩展名。
+    /// ⚠️ **故意不叫 `.json`** —— 它根本不是 JSON（是加密的二进制）。
+    ///    写成 `.json` 会让以后排查的人（包括未来的我）第一眼就以为是坏文件。
+    static let fileExtension = ".aevis"
 
     /// 备份并上传，返回文件名。
     func backupToPan() async throws -> String {
         let data = try makeBackup()
         let dir = try await BaiduPanClient.shared.ensureBackupDir()
-        let name = "aevis-" + Self.stamp() + ".json"
+        let name = "aevis-" + Self.stamp() + Self.fileExtension
         try await BaiduPanClient.shared.upload(data, to: dir + "/" + name)
         UserDefaults.standard.set(name, forKey: Self.lastBackupKey)
         return name
@@ -198,8 +295,16 @@ final class BackupService {
         let dir = try await BaiduPanClient.shared.ensureBackupDir()
         let files = try await BaiduPanClient.shared.list(dir)
         return files
-            .filter { !$0.isDirectory && $0.name.hasSuffix(".json") }
+            .filter { !$0.isDirectory && Self.isBackupName($0.name) }
             .sorted { ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast) }
+    }
+
+    /// 哪些文件算备份。
+    /// ⚠️ **两种都要认**：老备份是 `.json`（0.0.97 及以前），新的是 `.aevis`。
+    ///    只认新的话，用户以前的备份在列表里**直接消失** —— 他会以为数据没了。
+    ///    （新版能读老版，反过来不行：老 App 见不到 `.aevis`。）
+    static func isBackupName(_ name: String) -> Bool {
+        name.hasSuffix(fileExtension) || name.hasSuffix(".json")
     }
 
     /// 从网盘上某一份备份恢复。
@@ -250,6 +355,91 @@ final class BackupService {
                 break
             }
         }
+    }
+
+    // MARK: - 加密容器
+    //
+    // 布局（**长度都是固定的，见下面的常量**）：
+    //
+    //     ┌──────────┬─────────┬──────────┬───────────┬──────────────────────────┐
+    //     │ magic 8B │ ver 1B  │ saltLen 1B│ salt 32B  │ ChaChaPoly combined      │
+    //     │AEVISBAK  │  = 2    │  = 32    │ 每次随机   │ nonce12 + 密文 + tag16   │
+    //     └──────────┴─────────┴──────────┴───────────┴──────────────────────────┘
+    //
+    // ⚠️ `saltLen` 存了但固定是 32 —— 留着是为了以后想换长度时不用改 magic。
+    // ⚠️ 密文用的是 `SealedBox.combined`，它**自带 nonce**，所以不用另存。
+
+    /// 认自己人的标记。恢复时先看这 8 个字节：
+    /// 有 → 新格式（要解密）；没有 → 老格式（明文，直接读）。
+    private static let magic = Data("AEVISBAK".utf8)
+    private static let containerVersion: UInt8 = 2
+    private static let saltLength = 32
+
+    /// 派生密钥用的**固定口令**。
+    ///
+    /// 🔴 **它不是密钥** —— 编进 App 的东西，谁都能扒出来。见类型注释里的「边界」那段。
+    ///    它挡住的是**网盘的扫描 / 和谐 / 秒传识别**，不是"逆了 App 的人"。
+    ///
+    /// ⚠️ **改这个常量 = 所有老备份当场解不开。** 真要改就得同时留一条"用老口令再试一次"
+    ///    的路，否则用户网盘上那些包全废。改之前先想清楚。
+    private static let passphrase = "aevis.pan.backup.v2.7f3a91c4e2b8d506"
+
+    private static func key(salt: Data) -> SymmetricKey {
+        HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: Data(passphrase.utf8)),
+            salt: salt,
+            info: Data("aevis.backup.v2".utf8),
+            outputByteCount: 32)
+    }
+
+    /// 加密整个包。
+    private static func seal(_ plain: Data) throws -> Data {
+        // `SymmetricKey(size:)` 出来的就是密码学随机字节，正好当 salt
+        let salt = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+        let box = try ChaChaPoly.seal(plain, using: key(salt: salt))
+
+        var out = magic
+        out.append(containerVersion)
+        out.append(UInt8(saltLength))
+        out.append(salt)
+        out.append(box.combined)
+        return out
+    }
+
+    /// 如果是加密容器就解开；**不是就原样返回**（老备份走这条路）。
+    private static func open(_ raw: Data) throws -> Data {
+        guard raw.starts(with: magic) else { return raw }        // 老格式：明文
+        let head = magic.count + 2                                // magic + ver + saltLen
+        guard raw.count > head + 1 else { throw BackupError.badFormat }
+
+        let version = raw.subdata(in: magic.count..<(magic.count + 1)).first ?? 0
+        guard version <= containerVersion else { throw BackupError.tooNew(Int(version)) }
+
+        let len = Int(raw.subdata(in: (magic.count + 1)..<head).first ?? 0)
+        guard len > 0, raw.count > head + len else { throw BackupError.badFormat }
+
+        let salt = raw.subdata(in: head..<(head + len))
+        let combined = raw.subdata(in: (head + len)..<raw.count)
+        do {
+            let box = try ChaChaPoly.SealedBox(combined: combined)
+            return try ChaChaPoly.open(box, using: key(salt: salt))
+        } catch {
+            // ⚠️ 这里**只可能是密钥不对**（格式我们已经检查过了）。
+            //    单独一个错误码，别跟 badFormat 混 —— 用户看到"格式读不出来"
+            //    会去重传，而实际是"这份不是你这个密钥做的"。
+            throw BackupError.badKey
+        }
+    }
+
+    /// 解析包体。**新老两种都要认**：
+    /// · 新：二进制 property list（`.binary`）
+    /// · 老：明文 JSON（0.0.97 及以前）
+    private static func parsePackage(_ data: Data) -> [String: Any]? {
+        if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+           let dict = plist as? [String: Any] {
+            return dict
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     // MARK: - 零件

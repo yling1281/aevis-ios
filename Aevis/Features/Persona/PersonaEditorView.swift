@@ -461,7 +461,7 @@ struct PersonaEditorView: View {
                 }
                 #if canImport(UIKit)
                 if let image = UIImage(data: data) {
-                    personaStore.setAvatar(image)
+                    personaStore.setAvatar(image, original: data)
                     avatarNote = "头像换好了。"
                 } else {
                     avatarNote = "这张图格式不支持，换一张试试。"

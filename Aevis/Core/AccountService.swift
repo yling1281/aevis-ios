@@ -298,7 +298,8 @@ final class AccountService: ObservableObject {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = UIImage(data: data) {
-                ProfileStore.shared.setAvatar(image)
+                // 服务器上那张就是我们上传时没压过的原图 ⇒ 网络字节直接当原图存一份
+                ProfileStore.shared.setAvatar(image, original: data)
                 avatarCacheStamp = url.absoluteString
             }
         } catch {

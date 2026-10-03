@@ -233,10 +233,13 @@ settings:
     #    ⑤ **服务器地址可被远端配置覆盖**（`app_config` 里写 `pairBase`）——
     #       换服务器不必重出包，跟 `accountBase` 同一个套路。
     #    ⑥ 相机用途说明补了"扫二维码"（原来只写"拍照认字"，用户看到权限弹窗会对不上）。
+    # ⭐ 0.0.98：**头像进备份 + 整包加密**。头像另存原图（`*.orig`，不再只剩 512/JPEG0.88）；
+    #    备份从明文 JSON 换成 **二进制 plist + ChaChaPoly**（magic `AEVISBAK`，首字节判魔数，
+    #    老 `.json` 明文包照样能恢复）。加密只挡网盘扫描/和谐/秒传，**不是端到端加密**。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
     #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.97"
-    CURRENT_PROJECT_VERSION: "97"
+    MARKETING_VERSION: "0.0.98"
+    CURRENT_PROJECT_VERSION: "98"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

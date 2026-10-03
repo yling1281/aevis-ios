@@ -263,7 +263,7 @@ struct MomentsDecorSheet: View {
                 note = "这张图格式不支持，换成 JPG 或 PNG 再试。"
                 return
             }
-            profile.setAvatar(image)
+            profile.setAvatar(image, original: raw)
             note = "我的头像换好了。"
             #else
             note = "这个平台上换不了头像。"

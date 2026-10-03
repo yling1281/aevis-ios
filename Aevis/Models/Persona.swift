@@ -287,6 +287,7 @@ final class PersonaStore: ObservableObject {
         contacts.removeAll { $0.id == id }
         avatars[id] = nil
         try? FileManager.default.removeItem(at: Self.avatarURL(for: id))
+        try? FileManager.default.removeItem(at: Self.avatarOriginalURL(for: id))
 
         ChatStore.shared.forget(id)
         MemoryStore.shared.forget(id)
@@ -322,20 +323,29 @@ final class PersonaStore: ObservableObject {
 
     // MARK: - 头像
 
-    func setAvatar(_ image: UIImage?) {
+    func setAvatar(_ image: UIImage?, original: Data? = nil) {
         guard let id = active?.id else { return }
-        setAvatar(image, for: id)
+        setAvatar(image, for: id, original: original)
     }
 
-    func setAvatar(_ image: UIImage?, for id: UUID) {
+    /// 给某个联系人设头像。
+    ///
+    /// - Parameter original: **选图时拿到的原始字节**（`PhotosPicker` 的
+    ///   `loadTransferable(type: Data.self)`）。传了就给备份另存一份**不压缩**的原图；
+    ///   传 nil 就退回压缩版兜底。
+    ///   为什么要两份：显示要的是小图（省内存），备份要的是**原图**
+    ///   —— 用户 2026-10-03 明确要「不压缩画质」，而这里这份 512/JPEG0.88
+    ///   是**唯一**的存档，源文件被压掉之后加密再怎么搞也救不回来。
+    func setAvatar(_ image: UIImage?, for id: UUID, original: Data? = nil) {
         #if canImport(UIKit)
         guard let image else {
             avatars[id] = nil
             try? FileManager.default.removeItem(at: Self.avatarURL(for: id))
+            try? FileManager.default.removeItem(at: Self.avatarOriginalURL(for: id))
             return
         }
 
-        // 存之前先压一下，头像用不着原图那么大
+        // 显示用的：压到 512，头像用不着原图那么大
         let target: CGFloat = 512
         let longest = max(image.size.width, image.size.height)
         let scale = longest > target ? target / longest : 1
@@ -349,6 +359,34 @@ final class PersonaStore: ObservableObject {
         if let data = squared.jpegData(compressionQuality: 0.88) {
             try? data.write(to: Self.avatarURL(for: id), options: .atomic)
         }
+
+        // 备份用的那份：**原始字节原样落盘**（0 和 1，不重编码）。
+        let keep = original ?? squared.jpegData(compressionQuality: 1.0)
+        if let keep {
+            try? keep.write(to: Self.avatarOriginalURL(for: id), options: .atomic)
+        }
+        #endif
+    }
+
+    /// 备份要的字节：优先原图；老版本装的头像没有原图，就退回显示版。
+    func avatarBytesForBackup(for id: UUID) -> Data? {
+        if let data = try? Data(contentsOf: Self.avatarOriginalURL(for: id)), !data.isEmpty {
+            return data
+        }
+        return try? Data(contentsOf: Self.avatarURL(for: id))
+    }
+
+    /// 从备份里把某个联系人的头像写回来。
+    /// ⚠️ 走 `setAvatar(image:original:)` 而不是自己写文件，保证三处（压缩版 /
+    ///    原图 / 内存里的 `avatars[id]`）一起更新，不会"文件换了界面还是旧的"。
+    @discardableResult
+    func adoptAvatar(_ data: Data, for id: UUID) -> Bool {
+        #if canImport(UIKit)
+        guard let image = UIImage(data: data) else { return false }
+        setAvatar(image, for: id, original: data)
+        return true
+        #else
+        return false
         #endif
     }
 
@@ -367,6 +405,14 @@ final class PersonaStore: ObservableObject {
 
     private static func avatarURL(for id: UUID) -> URL {
         baseDirectory().appendingPathComponent("aevis-avatar-\(id.uuidString).jpg")
+    }
+
+    /// ⭐ 头像**原图**（不压缩）。备份只认这一份。
+    ///
+    /// 和 `avatarURL` 那份的区别：那份是 512 / JPEG 0.88 的显示版。
+    /// 为什么必须单开一份 —— 见 `setAvatar(_:for:original:)` 的注释。
+    static func avatarOriginalURL(for id: UUID) -> URL {
+        baseDirectory().appendingPathComponent("aevis-avatar-\(id.uuidString).orig")
     }
 
     private func load() {

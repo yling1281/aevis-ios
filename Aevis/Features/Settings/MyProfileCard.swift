@@ -136,7 +136,8 @@ struct MyProfileCard: View {
                 return
             }
             // 本地先换上（断网也不耽误看），再往账号上推
-            profile.setAvatar(image)
+            // 顺手把**原图**另存一份给备份用 —— 否则备份里只剩 512/JPEG0.88 的缩略图
+            profile.setAvatar(image, original: data)
             pickedAvatar = nil
 
             guard account.isSignedIn else {
