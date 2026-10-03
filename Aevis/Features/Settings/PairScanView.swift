@@ -435,6 +435,9 @@ struct PairScanView: View {
             gotName = claim.pcName
             gotAlready = claim.already
             stage = .done
+            // ⭐ 配对完**立刻把数据通道接上** —— 用户下一步多半就是去电脑上看聊天，
+            //    要是等到下次启动 App 才连，他会觉得"配是配上了，还是没反应"。
+            PairChannel.shared.start(session: claim.session, pcName: claim.pcName)
         } catch let failure as PairClient.Failure {
             problem = failure.errorDescription
             stage = .failed

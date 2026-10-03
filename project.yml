@@ -238,8 +238,12 @@ settings:
     #    老 `.json` 明文包照样能恢复）。加密只挡网盘扫描/和谐/秒传，**不是端到端加密**。
     # ⚠️ 版本号 CI **不会**自己改（workflow 里没有 run_number 那套），
     #    必须在这里手改，否则出的包还叫旧版本，装的时候会跟旧包撞版本。
-    MARKETING_VERSION: "0.0.98"
-    CURRENT_PROJECT_VERSION: "98"
+    # ⭐ 0.0.99：**电脑端聊天**（生态第二期）。手机侧新增 `PairChannel`（配对服务那条 WS
+    #    上的 `relay` 长连）+ `PairChatBridge`（协议 + 流式回传 + 记忆提取）；
+    #    `ChatStore` 加了 `onAppended` 钩子。⚠️ 信封是**明文**，服务器看得见内容（只是不存），
+    #    端到端加密还没做。
+    MARKETING_VERSION: "0.0.99"
+    CURRENT_PROJECT_VERSION: "99"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

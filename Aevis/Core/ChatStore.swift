@@ -95,11 +95,23 @@ final class ChatStore: ObservableObject {
 
     // MARK: - 读写
 
+    /// 有新消息落进某个会话时叫一声。
+    ///
+    /// 谁在用：生态第二期的**配对通道** —— 好把手机上这段聊天同步给电脑那块屏
+    /// （见 `PairChatBridge`）。挂在 `append` 里而不是各个调用点，理由跟 `track()`
+    /// 一样：调用点有十几处，漏一个就是"电脑上少一条"、而且**只在特定路径下少**，
+    /// 那种 bug 极难查。
+    ///
+    /// ⚠️ 流式期间改字（`replaceLast` / `finishStreamingLine`）**不走这里** ——
+    ///    那些增量由 `PairChatBridge` 自己以 `delta` 推给电脑。
+    var onAppended: ((ChatMessage, UUID?) -> Void)?
+
     func append(_ message: ChatMessage) {
         guard !isRepeat(message) else { return }
         messages.append(message)
         track(message)
         save()
+        onAppended?(message, currentID)
     }
 
     // MARK: - 转账 / 红包（假钱包）
@@ -253,6 +265,7 @@ final class ChatStore: ObservableObject {
         }
         track(message)
         save()
+        onAppended?(message, id)
     }
 
     /// 现在能不能接收她主动发来的消息。

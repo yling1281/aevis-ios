@@ -242,6 +242,11 @@ struct PairCard: View {
         working = true
         await PairClient.revoke(session: pc.session)
         paired = PairClient.forget(session: pc.session)
+        // ⭐ 解除的这台正好是通道连着的 → 顺手把通道也关了，
+        //    别让它继续挂在那台已经"不再是我们的电脑"的机器上。
+        if PairChannel.shared.currentSession == pc.session {
+            PairChannel.shared.stop()
+        }
         working = false
         note = "已经解除和「\(pc.name)」的配对。"
     }

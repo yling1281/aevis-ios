@@ -60,6 +60,13 @@ struct AevisApp: App {
         // 冷启动补一次灵动岛（Live Activity）同步 —— 第一次 `scenePhase` 变 active
         // 不一定触发 onChange，所以这里主动补一次，别让挂机态等到切后台才起来。
         Task { @MainActor in LiveIslandCenter.shared.sync() }
+
+        // ⭐ 生态第二期（电脑端聊天）：配过电脑就把那条数据通道接上。
+        // ⚠️ 放在 `init` 里而不是 `.onAppear` —— SwiftUI 的 onAppear 会随视图重建
+        //    反复触发，而这两件事要的是"整个 App 生命周期只做一次"。
+        // 没配过电脑的话它俩**什么也不做**（不建连接、不占资源）。
+        PairChatBridge.shared.start()
+        PairChannel.shared.autoStart()
     }
 
     var body: some Scene {
