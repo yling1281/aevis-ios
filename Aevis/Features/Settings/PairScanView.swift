@@ -170,7 +170,10 @@ struct PairScanView: View {
                     if digits != fresh { code = digits }
                 }
 
-            Text("服务器：\(PairClient.currentBase)")
+            // ⭐ 手输的码**不知道是哪台电脑出的** ⇒ 这里显示"会先问哪一台"
+            //    （实际会按 `manualBases()` 挨个试）。写死 `currentBase` 的话，
+            //    局域网直连时显示的是腾讯云，用户会以为要去电脑上改什么。
+            Text("先去这里找：\(PairClient.manualBases().first ?? PairClient.currentBase)")
                 .font(.aevis(11).monospaced())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -418,32 +421,57 @@ struct PairScanView: View {
         ticket = nil
         problem = nil
         stage = .working
-        await perform(ticket: nil, code: digits, base: PairClient.currentBase)
+        // 手输的码**不知道是哪台电脑出的** ⇒ 按可能性挨个问
+        // （先"上次配过的那台"，再公网那台）。见 perform(ticket:code:bases:)。
+        await perform(ticket: nil, code: digits, bases: PairClient.manualBases())
     }
 
     private func submit() async {
         guard let ticket else { return }
         stage = .working
-        await perform(ticket: ticket.ticket, code: nil, base: ticket.base)
+        await perform(ticket: ticket.ticket, code: nil, bases: [ticket.base])
     }
 
+    /// 试一台或几台服务器。
+    ///
+    /// ⭐ 为什么要"几台"：电脑版现在默认走局域网 —— 手输码的时候我们**不知道**
+    ///    那张码是哪台出的，只能按可能性挨个问（先问"上次配过的那台电脑"，
+    ///    再问公网那台）。只问公网的话，局域网那张码永远找不到，
+    ///    服务端还会把它当"码输错了"回 403，用户看到的是「配对码不对」——
+    ///    而码其实一个字都没错。
     private func perform(ticket ticketValue: String?, code codeValue: String?,
-                         base: String) async {
-        do {
-            let claim = try await PairClient.claim(ticket: ticketValue, code: codeValue, base: base)
-            PairClient.remember(session: claim.session, pcName: claim.pcName, pcOS: claim.pcOS)
-            gotName = claim.pcName
-            gotAlready = claim.already
-            stage = .done
-            // ⭐ 配对完**立刻把数据通道接上** —— 用户下一步多半就是去电脑上看聊天，
-            //    要是等到下次启动 App 才连，他会觉得"配是配上了，还是没反应"。
-            PairChannel.shared.start(session: claim.session, pcName: claim.pcName)
-        } catch let failure as PairClient.Failure {
-            problem = failure.errorDescription
-            stage = .failed
-        } catch {
-            problem = error.localizedDescription
-            stage = .failed
+                         bases: [String]) async {
+        var lastProblem: String?
+        for base in bases {
+            do {
+                let claim = try await PairClient.claim(ticket: ticketValue,
+                                                       code: codeValue, base: base)
+                // ⭐ 把**那台电脑的地址**一起记下来 —— 之后聊天长连要靠它，
+                //    否则会回落到公网那台（那儿没有这个 session）⇒ 永远连不上。
+                let where_ = PairClient.hostPort(from: base)
+                PairClient.remember(session: claim.session, pcName: claim.pcName,
+                                    pcOS: claim.pcOS,
+                                    host: where_.host, port: where_.port)
+                gotName = claim.pcName
+                gotAlready = claim.already
+                stage = .done
+                // ⭐ 配对完**立刻把数据通道接上** —— 用户下一步多半就是去电脑上看聊天，
+                //    要是等到下次启动 App 才连，他会觉得"配是配上了，还是没反应"。
+                PairChannel.shared.start(session: claim.session, pcName: claim.pcName)
+                return
+            } catch let failure as PairClient.Failure {
+                lastProblem = failure.errorDescription
+                // ⚠️ 只有"**压根没连上**"才值得换下一台试；服务器明确答复了
+                //    （码错 / 过期 / 错太多次）就停下 —— 再问另一台只是白挨一次限流，
+                //    而且会把真正的错因盖成"网络不好"。
+                if case .network = failure { continue }
+                break
+            } catch {
+                lastProblem = error.localizedDescription
+                break
+            }
         }
+        problem = lastProblem ?? "配对失败。"
+        stage = .failed
     }
 }

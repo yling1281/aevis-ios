@@ -52,8 +52,25 @@ enum PairClient {
         var name: String
         var os: String
         var at: Double
+        /// ⭐ **配对时那台电脑的地址**（2026-10-03 加）。
+        ///
+        /// 🔴 为什么非记不可：电脑版现在默认**自己当服务器**（局域网直连），
+        ///    那张码里的 `h` 是路由器给的 `192.168.x.x`，session 也只存在
+        ///    **那台电脑**上。要是聊天长连还去连写死在包里的公网地址，
+        ///    配对明明成功了，聊天却永远连不上（公网那台根本没这个 session）。
+        ///
+        /// ⚠️ 这两个字段**必须是可选的**：老版本存下来的记录里没有它们，
+        ///    写成非可选会让 `Codable` 整个解码失败 ⇒ 用户升级后**配对记录全没了**。
+        var host: String?
+        var port: Int?
 
         var id: String { session }
+
+        /// 这台电脑的 base 地址；没记过就返回 `nil`（老记录 / 走公网那台）。
+        var base: String? {
+            guard let host, !host.isEmpty, let port, port > 0 else { return nil }
+            return "http://\(host):\(port)"
+        }
     }
 
     enum Failure: LocalizedError {
@@ -106,6 +123,39 @@ enum PairClient {
         var base = override.isEmpty ? AevisHosts.pairBase : override
         while base.hasSuffix("/") { base.removeLast() }
         return base
+    }
+
+    /// 某个 session 该在哪台服务器上操作（解除配对、探活、长连都靠它）。
+    ///
+    /// 🔴 **一定是"配对时那台"**，别退回 `currentBase` 就完事：
+    ///    局域网配对（电脑自己当服务器）时，session 只存在那台电脑上 ——
+    ///    拿它去问公网那台，服务端只会回 404/401，**解除配对看着成功了、
+    ///    其实那台电脑上还留着这个 session**（下次它还会以为配着）。
+    static func base(for session: String) -> String {
+        if let pc = paired.first(where: { $0.session == session }), let base = pc.base {
+            return base
+        }
+        return currentBase
+    }
+
+    /// 从 `http://host:port` 里拆出 host / port（配对成功后要一起记下来）。
+    static func hostPort(from base: String) -> (host: String?, port: Int?) {
+        guard let url = URL(string: base), let host = url.host else { return (nil, nil) }
+        return (host, url.port)
+    }
+
+    /// 手输配对码时该试哪几台服务器，**按可能性排序**。
+    ///
+    /// ⭐ 为什么不能只试公网那台：电脑版现在默认走局域网，码是**电脑自己**出的 ——
+    ///    手输却去问公网那台，永远找不到（服务端把它当"码输错了"回 403，
+    ///    用户看到的是「配对码不对」，而码其实一个字都没错）。
+    ///    扫过一次码的手机记着那台电脑的地址，先拿它试。
+    static func manualBases() -> [String] {
+        var out: [String] = []
+        if let base = paired.first?.base { out.append(base) }
+        let current = currentBase
+        if !out.contains(current) { out.append(current) }
+        return out
     }
 
     // MARK: - 解析二维码
@@ -233,10 +283,12 @@ enum PairClient {
     }
 
     @discardableResult
-    static func remember(session: String, pcName: String, pcOS: String) -> [PairedPC] {
+    static func remember(session: String, pcName: String, pcOS: String,
+                         host: String? = nil, port: Int? = nil) -> [PairedPC] {
         var list = paired.filter { $0.session != session }
         list.insert(PairedPC(session: session, name: pcName, os: pcOS,
-                             at: Date().timeIntervalSince1970), at: 0)
+                             at: Date().timeIntervalSince1970,
+                             host: host, port: port), at: 0)
         save(Array(list.prefix(20)))          // 最多记 20 台，别让它无限长
         return paired
     }
@@ -257,7 +309,7 @@ enum PairClient {
     /// **不管服务器答不答应，本机都算解除** —— 用户按的是"不再配对"，
     /// 因为网络不好就继续把它列在那儿，才是更糟的事。
     static func revoke(session: String) async {
-        guard let url = URL(string: currentBase + "/pair/revoke") else { return }
+        guard let url = URL(string: base(for: session) + "/pair/revoke") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 10
@@ -268,8 +320,15 @@ enum PairClient {
     }
 
     /// 顺手探一下配对服务器通不通（卡片上"当前服务器"那行要用）。
+    ///
+    /// ⚠️ 探的必须是**当前这台**：局域网配对时公网那台可能压根连不上，
+    ///    拿公网去探会显示「连不上」，而用户其实用得好好的。
     static func ping() async -> Bool {
-        guard let url = URL(string: currentBase + "/health") else { return false }
+        await ping(base: paired.first?.base ?? currentBase)
+    }
+
+    static func ping(base: String) async -> Bool {
+        guard let url = URL(string: base + "/health") else { return false }
         var request = URLRequest(url: url)
         request.timeoutInterval = 6
         request.cachePolicy = .reloadIgnoringLocalCacheData

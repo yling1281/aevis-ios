@@ -61,7 +61,11 @@ struct PairCard: View {
             explain
 
             rule
-            Text("配对服务器：\(PairClient.currentBase)")
+            // ⭐ 显示**实际在用的那台**：局域网直连时是电脑自己的地址
+            //    （`192.168.x.x:9100`），公网配对才是腾讯云那台。
+            //    这里要是钉死写 `currentBase`，用户明明连的是家里的电脑，
+            //    界面上却写着别人的服务器 —— 出问题时会把人带去错误的方向。
+            Text("配对服务器：\(paired.first?.base ?? PairClient.currentBase)")
                 .font(.aevis(10.5).monospaced())
                 .foregroundStyle(.tertiary)
                 .textSelection(.enabled)

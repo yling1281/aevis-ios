@@ -18,8 +18,13 @@ import Foundation
 /// 跟它们混在一起不好排查。这里单开一个，配置也只为自己。
 ///
 /// ## ⚠️ 地址永远是 `ws://`
-/// 配对服务器**没有证书、没有 nginx**（腾讯云 `106.52.113.18:9100`），
-/// 所以别想当然写 `wss://` —— 那是连不上的。`Info.plist` 里已经放开了明文。
+/// 配对服务器**没有证书、没有 nginx**（腾讯云 `106.52.113.18:9100`）—— 所以别想当然
+/// 写 `wss://`，那是连不上的。`Info.plist` 里已经放开了明文。
+///
+/// ## ⭐ 连的是「配对时那台电脑」，不是公网那台（2026-10-03）
+/// 电脑版现在**默认自己当服务器**（局域网直连）⇒ 地址跟着 `PairClient` 里记的
+/// 那台电脑走（见 `base(for:)`）。局域网里那台是 `http://192.168.x.x:9100`，
+/// 公网模式配的才是腾讯云 —— **两种都在同一段代码里，靠记录的地址区分**。
 final class PairChannel: NSObject, ObservableObject {
 
     static let shared = PairChannel()
@@ -100,7 +105,7 @@ final class PairChannel: NSObject, ObservableObject {
 
     private func connect() {
         guard wantOn, let session else { return }
-        let base = PairClient.currentBase
+        let base = Self.base(for: session)
             .replacingOccurrences(of: "https://", with: "wss://")
             .replacingOccurrences(of: "http://", with: "ws://")
         guard let url = URL(string: base + "/ws?role=phone&session=" + session) else { return }
@@ -111,6 +116,25 @@ final class PairChannel: NSObject, ObservableObject {
         task.resume()
         listen(task)
         armPing()
+    }
+
+    /// 该连哪台 —— **配对时那台电脑**，不是写死在包里的公网地址。
+    ///
+    /// 🔴🔴 这是「电脑端走局域网」最后的一步（2026-10-03）。
+    ///   电脑版现在默认**自己当服务器**：那张码里的 `h` 是路由器给的
+    ///   `192.168.x.x`，session 也只存在**那台电脑**上。
+    ///   要是这里还按老的 `PairClient.currentBase`（腾讯云那台）去连：
+    ///     · 那台服务器**根本没有这个 session** ⇒ 握手直接 401；
+    ///     · 这里把失败当"网断了、等会儿重连" ⇒ 变成**无限重连**，
+    ///       界面上就是一个永远转圈的小圆点，而且**一点都不报错**。
+    ///   ⚠️ 老记录（记之前配的）没有地址 ⇒ 老实地退回 `currentBase`，
+    ///      这样才能既支持局域网、又不动已经配好的用户。
+    static func base(for session: String) -> String {
+        if let pc = PairClient.paired.first(where: { $0.session == session }),
+           let base = pc.base {
+            return base
+        }
+        return PairClient.currentBase
     }
 
     private func listen(_ task: URLSessionWebSocketTask) {

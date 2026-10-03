@@ -100,9 +100,12 @@
 	</dict>
 	<!-- iOS 14 起，访问 192.168.x.x 这类局域网地址必须声明这一条，
 	     否则连接会被系统静默拒绝（连报错都不给，就单纯连不上）。
-	     要用电脑上的 MCP 服务、本地安装源、QQ 桥接都得靠它。 -->
+	     要用电脑上的 MCP 服务、本地安装源、QQ 桥接都得靠它。
+	     ⭐ 2026-10-03 起还多了一个大用户：**电脑版走局域网直连** ——
+	     手机扫的那张码里的地址就是电脑自己的 `192.168.x.x`，聊天也走那条。
+	     忘了这一条，表现是"配对码扫到了、然后一直连不上"，且**没有任何提示**。 -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Aevis 需要访问你的局域网：连接你在电脑上跑的服务（外接能力、安装源、消息桥接）。不声明的话系统会直接拦截，连报错都不给。</string>
+	<string>Aevis 需要访问你的局域网：和电脑上的 Aevis 配对聊天、连接你在电脑上跑的服务（外接能力、安装源、消息桥接）。不声明的话系统会直接拦截，连报错都不给。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Aevis 需要读取相册，这样你可以挑一张图给 TA 看、或者拿来当聊天背景和头像。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

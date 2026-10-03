@@ -242,8 +242,18 @@ settings:
     #    上的 `relay` 长连）+ `PairChatBridge`（协议 + 流式回传 + 记忆提取）；
     #    `ChatStore` 加了 `onAppended` 钩子。⚠️ 信封是**明文**，服务器看得见内容（只是不存），
     #    端到端加密还没做。
-    MARKETING_VERSION: "0.0.99"
-    CURRENT_PROJECT_VERSION: "99"
+    # ⭐ 0.0.100：**电脑端走局域网**（老板原话「电脑端的话走局域网，因为我这边登录不了」）。
+    #    电脑版不再只认腾讯云那台配对服务 —— 它**自己起一个**（`pc/aevis-desktop/lanserver.py`），
+    #    出码时把 `h` 写成自己的局域网 IP（`192.168.x.x`）。
+    #    手机这边跟的一句关键改动：**记住配对时那台电脑的地址**，聊天长连照着它连
+    #    （`PairedPC.host/port` + `PairChannel.base(for:)`）。
+    #    🔴 不跟这一句的后果是**不报错的**：局域网配对能成功，但长连还去连腾讯云那台，
+    #       那边没有这个 session ⇒ 401 ⇒ 被当成"网断了" ⇒ **无限重连、一个错都不报**。
+    #       所以 `swift_check.py` 立了 **R30** 盯死这条（`_verify/_r30_selftest.py` 验它有牙）。
+    #    ⚠️ `PairedPC.host/port` 必须是**可选**：老记录里没有它们，写成非可选会让
+    #       `Codable` 整个解码失败 ⇒ 用户升级后配对记录全没。
+    MARKETING_VERSION: "0.0.100"
+    CURRENT_PROJECT_VERSION: "100"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
