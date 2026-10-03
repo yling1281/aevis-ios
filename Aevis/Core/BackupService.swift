@@ -41,7 +41,7 @@ enum BackupError: LocalizedError {
 /// 数据搬家：把整台手机里的 Aevis 打成一个包传到网盘，换设备再拉回来。
 ///
 /// ## 包里装了什么
-/// 联系人（人设）、每个人的聊天记录、记忆、朋友圈、情侣空间、**头像**，以及一部分设置。
+/// 联系人（人设）、每个人的聊天记录、记忆、**朋友圈（文字 + 配图）**、情侣空间、**头像**，以及一部分设置。
 ///
 /// ## ⚠️ 包里**没有**什么，以及为什么
 /// API Key、网易云 Cookie、百度网盘自己的通行证 —— 这些是**这台设备的钥匙**，
@@ -99,8 +99,8 @@ final class BackupService {
     ///
     /// | 号 | 变化 |
     /// |---|---|
-    /// | 1 | 明文 JSON，**不含头像** |
-    /// | 2 | 二进制 plist + 整包加密，**含头像原图**（2026-10-03） |
+    /// | 1 | 明文 JSON，**不含头像、不含朋友圈配图** |
+    /// | 2 | 二进制 plist + 整包加密，**含头像原图 + 朋友圈配图**（2026-10-03） |
     static let format = 2
 
     /// 上一次备份的文件名，界面上显示用。
@@ -161,9 +161,11 @@ final class BackupService {
         var storeObjects: [String: Any] = [:]
         for store in Self.stores() {
             let data = try store.exportBackup()
-            // 转成 JSON 对象再嵌进来。
-            // ⚠️ 这里出来的 `imageData` / `voiceData` 是 **NSData**；
-            //    在下面那份**二进制 plist** 里它是原生存的（不 base64），正是我们要的。
+            // 各 Store 导出的是 **JSON**，所以里面像 `imageData`（聊天图片）这种字段
+            // 是 **base64 字符串**，**不是**原生字节 —— 进了下面的 plist 也还是字符串。
+            // （base64 是**无损**的 ⇒ 画质不受影响，只是体积多 33%。真要让聊天图片也走
+            //   原生字节，得改五个 Store 的序列化协议并双向兼容 —— 本期不做。）
+            // ⭐ 真正以**原生字节**进包的是下面单独收的两段：`avatars` 和 `momentImages`。
             storeObjects[store.backupName] = try JSONSerialization.jsonObject(with: data)
         }
 
@@ -174,6 +176,7 @@ final class BackupService {
             "build": (Bundle.main.infoDictionary?["AevisCommit"] as? String) ?? "",
             "stores": storeObjects,
             "avatars": Self.avatarPayload(),
+            "momentImages": MomentStore.shared.momentImagesForBackup(),
             "settings": try JSONEncoder().encode(settingsSnapshot()).base64EncodedString()
         ]
 
@@ -236,6 +239,12 @@ final class BackupService {
             names.append("头像 ×\(avatarCount)")
         }
 
+        // 朋友圈配图同理，等 `moments` 导完再往文件写（按文件名落盘，跟 owner 无关）。
+        let imageCount = Self.adoptMomentImages(package["momentImages"] as? [String: Any])
+        if imageCount > 0 {
+            names.append("朋友圈配图 ×\(imageCount)")
+        }
+
         // ⚠️ 设置放最后：`apply` 会往 UserDefaults 里写一堆键，
         //    先写的话上面那些 Store 恢复完再切一次人，反而可能被脏值带偏。
         if let text = package["settings"] as? String,
@@ -269,6 +278,18 @@ final class BackupService {
                 guard let id = UUID(uuidString: text) else { continue }
                 if PersonaStore.shared.adoptAvatar(bytes, for: id) { count += 1 }
             }
+        }
+        return count
+    }
+
+    /// 把朋友圈配图段写回文件。返回成功写回的个数。
+    private static func adoptMomentImages(_ raw: [String: Any]?) -> Int {
+        guard let raw, !raw.isEmpty else { return 0 }
+        var count = 0
+        for (name, value) in raw {
+            // plist 读回来是 NSData，桥接成 Data 就是原始字节
+            guard let bytes = value as? Data, !bytes.isEmpty else { continue }
+            if MomentStore.shared.adoptMomentImage(bytes, name: name) { count += 1 }
         }
         return count
     }

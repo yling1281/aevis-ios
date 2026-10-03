@@ -224,7 +224,7 @@ struct BaiduPanCard: View {
                 Text("备份到网盘")
                     .font(.aevis(15))
                 Text(BackupService.shared.lastBackupName.isEmpty
-                     ? "把头像、联系人、聊天记录、记忆、朋友圈打成一个加密包传上去"
+                     ? "把头像、联系人、聊天记录、记忆、朋友圈（含配图）打成一个加密包传上去"
                      : "上次：\(BackupService.shared.lastBackupName)")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
@@ -334,7 +334,7 @@ struct BaiduPanCard: View {
             defer { self.busy = false }
             do {
                 let summary = try await BackupService.shared.restoreFromPan(fsID: picked.id)
-                note = summary + "。头像的原图也在里面，画质不会掉。"
+                note = summary + "。头像和朋友圈配图的原图都在里面，画质不会掉。"
             } catch {
                 note = "恢复失败：" + error.localizedDescription
             }

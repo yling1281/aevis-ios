@@ -733,10 +733,54 @@ extension MomentStore: BackupableStore {
         return try JSONEncoder().encode(Archive(byOwner: flat))
     }
 
+    /// 备份用：把所有 owner 的朋友圈配图收成一张表，**值是文件原始字节**。
+    ///
+    /// 为什么单独收、不塞进 `Archive`：图片是按文件存的（`AevisMoments/<uuid>.jpg`），
+    /// 塞进 JSON 要每个 `Moment` 都背一段几百 KB 的 base64，编解码都变慢。
+    /// 这里按**文件名**收，`BackupService` 会把它放进包里的 `momentImages` 段
+    /// （二进制 plist 里是**原生字节**，不经 base64）。
+    ///
+    /// ⚠️ 跟 `byOwner` 有关：`MomentStore.moments` 只看得见**当前 owner** 的，
+    ///    而备份要的是**所有人**的 —— 所以这里遍历 `byOwner`。
+    ///    调用前先 `stash()`，把当前那份内存改动落回字典。
+    func momentImagesForBackup() -> [String: Data] {
+        stash()
+        var out: [String: Data] = [:]
+        for (_, list) in byOwner {
+            for moment in list {
+                guard let name = moment.imageName, out[name] == nil else { continue }
+                let url = imageDirectory.appendingPathComponent(name)
+                if let data = try? Data(contentsOf: url), !data.isEmpty { out[name] = data }
+            }
+        }
+        return out
+    }
+
+    /// 恢复用：把一张配图写回文件。返回是否成功。
+    ///
+    /// ⚠️ `name` 来自**外部数据**（备份包）。包虽然是我们自己产的，但口令就编在 App 里
+    ///    （见 `BackupService.passphrase` 的注释）—— 所以这里只认**单纯的文件名**，
+    ///    带路径分隔符或 `..` 的一律拒掉，别让它写到目录外面去。
+    @discardableResult
+    func adoptMomentImage(_ data: Data, name: String) -> Bool {
+        guard !data.isEmpty, !name.isEmpty,
+              !name.contains("/"), !name.contains("\\"), !name.contains("..") else {
+            return false
+        }
+        let url = imageDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// 恢复朋友圈。
     ///
-    /// ⚠️ 动态里配的**图片不进包**（它们本来就是按文件单独存的，塞进 JSON 会爆），
-    /// 所以恢复完带图的动态会变成纯文字 —— 这条得告诉用户。
+    /// ⚠️ 文字（`Archive`）和配图（`momentImages` 段）是**分开**走的：
+    ///    这里只恢复文字；配图由 `BackupService` 随后调 `adoptMomentImage` 写回。
+    ///    只导文字的话，带图的动态会退化成纯文字。
     func importBackup(_ data: Data) throws {
         let archive = try JSONDecoder().decode(Archive.self, from: data)
         // ⚠️ 导入全程禁写：中途 `setOwner` 的 `stash()` 会用旧机器的 `moments`
