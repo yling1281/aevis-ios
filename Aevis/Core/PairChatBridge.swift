@@ -129,9 +129,22 @@ final class PairChatBridge {
         PairChannel.shared.send([
             "k": "state",
             "owner": owner?.uuidString ?? "",
-            "name": active?.name ?? "TA",
+            "name": Self.displayName(active),
             "messages": list.suffix(200).map { Self.wire($0) }
         ])
+    }
+
+    /// 电脑那边顶栏上显示的名字。
+    ///
+    /// ⚠️ `PersonaStore.active` 给的是 `Contact`，**它没有 `name`** ——
+    ///    名字在 `contact.persona.name`（`Contact.displayName` 在空名字时会返回
+    ///    "还没起名字"，那是给手机上通讯录列表用的文案，写给电脑看很怪）。
+    ///    2026-10-03 CI 编译就挂在这一行（`value of type 'Contact' has no member 'name'`），
+    ///    本地没有 Xcode，静态检查也查不出这个 —— **只能靠 CI 编**。
+    private static func displayName(_ contact: Contact?) -> String {
+        let name = contact?.persona.name
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "她" : name
     }
 
     // MARK: - 让她回
