@@ -95,23 +95,43 @@ final class ChatStore: ObservableObject {
 
     // MARK: - 读写
 
-    /// 有新消息落进某个会话时叫一声。
+    /// 有话要说的观察者（见 `addAppendListener`）。
+    private var appendListeners: [(ChatMessage, UUID?) -> Void] = []
+
+    /// 订阅「有新消息落进某个会话」。
     ///
-    /// 谁在用：生态第二期的**配对通道** —— 好把手机上这段聊天同步给电脑那块屏
-    /// （见 `PairChatBridge`）。挂在 `append` 里而不是各个调用点，理由跟 `track()`
-    /// 一样：调用点有十几处，漏一个就是"电脑上少一条"、而且**只在特定路径下少**，
-    /// 那种 bug 极难查。
+    /// 谁在用：
+    ///  · 生态第二期的**配对通道**（`PairChatBridge`）—— 把手机上这段聊天同步给电脑那块屏；
+    ///  · **自动同步到网盘**（`AutoSync`）—— 每说一句就往网盘推一次。
+    /// 挂在 `append` 里而不是各个调用点，理由跟 `track()` 一样：调用点有十几处，
+    /// 漏一个就是"电脑上少一条"、而且**只在特定路径下少**，那种 bug 极难查。
+    ///
+    /// 🔴🔴 **这里必须是"可以挂多个"的**（2026-10-03 改）。
+    ///    原来它是一个赋值位：`var onAppended: ((ChatMessage, UUID?) -> Void)?`，
+    ///    第二个使用者 `=` 上去会把第一个**悄悄顶掉**：
+    ///      · `PairChatBridge.start()` 先挂，`AutoSync.start()` 后挂 ⇒ 电脑端从此收不到消息；
+    ///      · 反过来 ⇒ 网盘一直不更新。
+    ///    两种都**完全不报错**，只是那个功能"永远不响"。
+    ///    ⇒ 观察者表：只能加、不能替。以后再加使用者直接 `addAppendListener` 就行。
     ///
     /// ⚠️ 流式期间改字（`replaceLast` / `finishStreamingLine`）**不走这里** ——
     ///    那些增量由 `PairChatBridge` 自己以 `delta` 推给电脑。
-    var onAppended: ((ChatMessage, UUID?) -> Void)?
+    func addAppendListener(_ block: @escaping (ChatMessage, UUID?) -> Void) {
+        appendListeners.append(block)
+    }
+
+    private func notifyAppended(_ message: ChatMessage, _ owner: UUID?) {
+        for block in appendListeners {
+            block(message, owner)
+        }
+    }
 
     func append(_ message: ChatMessage) {
         guard !isRepeat(message) else { return }
         messages.append(message)
         track(message)
         save()
-        onAppended?(message, currentID)
+        notifyAppended(message, currentID)
     }
 
     // MARK: - 转账 / 红包（假钱包）
@@ -265,7 +285,7 @@ final class ChatStore: ObservableObject {
         }
         track(message)
         save()
-        onAppended?(message, id)
+        notifyAppended(message, id)
     }
 
     /// 现在能不能接收她主动发来的消息。

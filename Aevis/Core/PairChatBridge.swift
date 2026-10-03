@@ -59,7 +59,10 @@ final class PairChatBridge {
             DispatchQueue.main.async { self?.receive(payload) }
         }
 
-        ChatStore.shared.onAppended = { [weak self] message, owner in
+        // ⚠️ 用 `addAppendListener`（**观察者表**），不是赋值 ——
+        //    `AutoSync`（每句话同步到网盘）也挂在这上面，赋值会把对方顶掉。
+        //    详见 `ChatStore.addAppendListener` 的注释。
+        ChatStore.shared.addAppendListener { [weak self] message, owner in
             self?.note(message, owner: owner)
         }
     }

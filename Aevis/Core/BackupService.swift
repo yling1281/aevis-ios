@@ -106,6 +106,35 @@ final class BackupService {
     /// 上一次备份的文件名，界面上显示用。
     static let lastBackupKey = "aevis.lastBackupName"
 
+    /// 上一次**自动同步**的时刻（自动那个流程用它做节流）。
+    static let lastAutoKey = "aevis.lastAutoSync"
+
+    // MARK: - 两种包（**别混着用**）
+    //
+    // ⭐ 为什么要有两种（2026-10-03 老板要"每发一句话就同步到网盘"之后加的）：
+    //    完整包里带头像原图和朋友圈配图，**是几 MB 级的**（图片按 0 和 1 原样存）。
+    //    每说一句话就传一次几 MB ⇒ 手机流量、网盘限流、电池全崩。
+    //    而聊天记录本身（纯文字）只有几十 KB。
+    //    ⇒ 拆成两种：
+    //      · `.live`  实时/退出时用：**只有文字那部分**（联系人/聊天/记忆/情侣空间/设置）
+    //      · `.full`  手动备份用：加头像 + 朋友圈配图
+    //    ⚠️ `.live` 恢复是**非破坏性**的：包里没有 `avatars` / `momentImages` 那两段，
+    //       恢复时自然跳过 ⇒ 不会把本机已有的头像覆盖成空。
+    /// ⚠️ 声明成 `String` 的 raw value：包里的 `"kind"` 字段直接用 `rawValue`，
+    ///    免得再写一处字符串映射（两处映射迟早会对不上）。
+    enum Kind: String {
+        case live
+        case full
+
+        /// 给人看的名字（界面上说"正在同步聊天记录"比"正在同步"清楚）。
+        var label: String {
+            switch self {
+            case .live: return "聊天记录"
+            case .full: return "完整备份"
+            }
+        }
+    }
+
     private init() {}
 
     // MARK: - 打包
@@ -154,10 +183,17 @@ final class BackupService {
 
     /// 打一个包出来（纯内存操作，不联网）。产出的是**加密后的二进制**，不是 JSON。
     ///
-    /// ⚠️ **必须在主线程调**（两个调用方都是 `Task { @MainActor }`）。
-    ///    它要读各 Store 的 `@Published` 状态和 `ProfileStore` ——
+    /// ⚠️ **必须在主线程调**。它要读各 Store 的 `@Published` 状态和 `ProfileStore` ——
     ///    后台读会让 SwiftUI 收到别的线程的通知，**iOS 26 上会崩（真崩过）**。
-    func makeBackup() throws -> Data {
+    ///
+    /// 🔴 这是一个**同步**函数，所以它跑在**调用方的线程**上：
+    ///    · 视图里直接调（`ShareCard.runExport`）→ 主线程 ✓
+    ///    · 从 `@MainActor` 上下文调 → 主线程 ✓
+    ///    真正危险的是"从非主线程的异步函数里调它" —— 见 `backupToPan` 的注释。
+    ///
+    /// - Parameter kind: `.live` 只装文字那部分（实时同步用，小）；`.full` 连头像和
+    ///   朋友圈配图一起装（手动备份用，大）。见 `Kind` 的注释。
+    func makeBackup(kind: Kind = .full) throws -> Data {
         var storeObjects: [String: Any] = [:]
         for store in Self.stores() {
             let data = try store.exportBackup()
@@ -169,16 +205,22 @@ final class BackupService {
             storeObjects[store.backupName] = try JSONSerialization.jsonObject(with: data)
         }
 
-        let package: [String: Any] = [
+        var package: [String: Any] = [
             "app": "Aevis",
             "format": Self.format,
+            // ⭐ 记下这份是轻包还是完整包。恢复时可以照实告诉用户
+            //    （"这份是实时同步过来的，没有头像"比"恢复完了"诚实得多）。
+            "kind": kind.rawValue,
             "createdAt": ISO8601DateFormatter().string(from: Date()),
             "build": (Bundle.main.infoDictionary?["AevisCommit"] as? String) ?? "",
             "stores": storeObjects,
-            "avatars": Self.avatarPayload(),
-            "momentImages": MomentStore.shared.momentImagesForBackup(),
             "settings": try JSONEncoder().encode(settingsSnapshot()).base64EncodedString()
-        ]
+        ]        // ⚠️ `.live` 时这两段**整个不进包**（不是塞空字典）——
+        //    这样恢复端"包里没有就跳过"，不会误以为"备份里就是没有头像"而清空本机。
+        if kind == .full {
+            package["avatars"] = Self.avatarPayload()
+            package["momentImages"] = MomentStore.shared.momentImagesForBackup()
+        }
 
         // ⚠️ 一定要用 **PropertyListSerialization 的 `.binary`**，不能再用 JSONSerialization：
         //    JSON 里 `Data` 只能写成 base64 字符串 —— 膨胀 33%，而且"原始字节"这层意思
@@ -260,7 +302,11 @@ final class BackupService {
         //    界面上显示的会是旧会话，用户一样会说「没搬过来」。
         syncActive()
 
-        return names.isEmpty ? "这个包里没有可恢复的数据。" : "已恢复：" + names.joined(separator: "、")
+        // 告诉用户这份是什么 —— `aevis-live`（实时同步那份）里没有头像和朋友圈配图，
+        // 不说明的话他会以为"我的头像丢了"。
+        let wasLive = ((package["kind"] as? String) ?? "full") == "live"
+        let tail = wasLive ? "（实时同步那份，不含头像和朋友圈配图）" : ""
+        return names.isEmpty ? "这个包里没有可恢复的数据。" : "已恢复：" + names.joined(separator: "、") + tail
     }
 
     /// 把头像段写回本机。返回成功写回的个数。
@@ -301,11 +347,36 @@ final class BackupService {
     ///    写成 `.json` 会让以后排查的人（包括未来的我）第一眼就以为是坏文件。
     static let fileExtension = ".aevis"
 
+    /// 实时同步那份的**固定文件名**（每次覆盖同一个文件）。
+    ///
+    /// 🔴 为什么实时同步必须用**固定名**而不是像手动备份那样带时间戳：
+    ///    每说一句话就传一次，带时间戳的话一天能在网盘上堆出几百个文件
+    ///    （老板打开网盘会以为出事了），而且"哪一份是最新的"就没法一眼看出来。
+    ///    手动备份仍然带时间戳 —— 那个是要留历史、能挑着恢复的。
+    static let liveName = "aevis-live" + fileExtension
+
     /// 备份并上传，返回文件名。
-    func backupToPan() async throws -> String {
-        let data = try makeBackup()
+    ///
+    /// - Parameter kind: `.live`（默认）只同步聊天记录那部分，小、快 ——
+    ///   **自动那个流程一律用它**；`.full` 是手动「备份到网盘」。
+    ///
+    /// 🔴🔴 **这里必须是 `@MainActor`**（2026-10-03 补的，以前靠"两个调用方都在
+    ///    `Task { @MainActor }` 里"这条**并不成立**的推断撑着）。
+    ///
+    ///    为什么那条推断不成立：`backupToPan` 是 **`nonisolated` 的 async 函数**，
+    ///    Swift 并发规定它**不在调用方的 actor 上跑**，而是跳到通用执行器 ——
+    ///    于是 `makeBackup()`（同步函数，跑在调用方线程）**就跑到后台线程去了**，
+    ///    而它要读一堆 `@Published` ⇒ SwiftUI 在别的线程收到变更通知 ⇒ iOS 26 硬崩。
+    ///    这次是"加自动同步"时顺手查出来的：`BaiduPanCard` 那两条路一直在裸奔。
+    ///
+    /// ⚠️ 标了 `@MainActor` 也**不会卡住界面**：里面每一句 `await` 都会让出主线程
+    ///    （分片上传那几十秒是在 URLSession 的后台队列上跑的）。
+    @MainActor
+    @discardableResult
+    func backupToPan(kind: Kind = .live) async throws -> String {
+        let data = try makeBackup(kind: kind)
         let dir = try await BaiduPanClient.shared.ensureBackupDir()
-        let name = "aevis-" + Self.stamp() + Self.fileExtension
+        let name = kind == .live ? Self.liveName : ("aevis-" + Self.stamp() + Self.fileExtension)
         try await BaiduPanClient.shared.upload(data, to: dir + "/" + name)
         UserDefaults.standard.set(name, forKey: Self.lastBackupKey)
         return name
@@ -320,6 +391,17 @@ final class BackupService {
             .sorted { ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast) }
     }
 
+    /// 该自动恢复哪一份：**实时同步那份和完整备份里，挑更新时间最新的**。
+    ///
+    /// ⭐ 为什么不是"一律用最新那份完整备份"：老板要的是"换设备就把聊天记录带过来"，
+    ///    而聊天记录是**实时**在 `aevis-live` 上更新的 —— 上一份完整备份可能是几天前的。
+    ///    挑"最新"能保证拿到的是最近一次说话时的状态。
+    /// ⚠️ 拿不到任何一份就返回 `nil`（**别抛错** —— 调用方在启动路径上，
+    ///    抛出去会让启动流程难看；"网盘里还没有备份"是正常状态，不是错误）。
+    func newestBackup() async -> PanFile? {
+        (try? await listBackups())?.first
+    }
+
     /// 哪些文件算备份。
     /// ⚠️ **两种都要认**：老备份是 `.json`（0.0.97 及以前），新的是 `.aevis`。
     ///    只认新的话，用户以前的备份在列表里**直接消失** —— 他会以为数据没了。
@@ -329,6 +411,12 @@ final class BackupService {
     }
 
     /// 从网盘上某一份备份恢复。
+    ///
+    /// ⚠️ `@MainActor` 的理由跟 `backupToPan` 一模一样：`restore(from:)` 是同步函数，
+    ///    会往各 Store 的 `@Published` 里写；这个 async 函数要是 `nonisolated`，
+    ///    那一步就在后台线程上执行 —— 恢复完的瞬间界面就会崩。
+    ///    （恢复的破坏性比备份大得多，这里更没得商量。）
+    @MainActor
     func restoreFromPan(fsID: Int64) async throws -> String {
         let data = try await BaiduPanClient.shared.download(fsID: fsID)
         return try restore(from: data)

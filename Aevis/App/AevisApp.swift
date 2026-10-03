@@ -67,6 +67,16 @@ struct AevisApp: App {
         // 没配过电脑的话它俩**什么也不做**（不建连接、不占资源）。
         PairChatBridge.shared.start()
         PairChannel.shared.autoStart()
+
+        // ⭐ 聊天记录自动同步到百度网盘（2026-10-03 老板要的三件事）。
+        //
+        // `start()` 只做一件永久的事：在 `ChatStore` 上挂一个"又落了一条消息"的监听
+        // ⇒ 每说一句话就把聊天记录传上网盘（去抖几秒，见 `AutoSync.quiet`）。
+        // 真正的搬运**不在这里做** —— 见 `RootView` 里 `scenePhase` 那两行。
+        //
+        // ⚠️ 条件不满足时（没登录 / 没连网盘 / 开关关了）它只是把状态标成"没在同步"，
+        //    不会去连网、不会去读聊天记录。
+        AutoSync.shared.start()
     }
 
     var body: some Scene {

@@ -47,6 +47,25 @@ struct LoginView: View {
     @State private var note: String?
     @State private var noteIsBad = false
 
+    // —— 手机扫码登录（2026-10-03）——
+    /// 扫码那一页是不是正开着。
+    @State private var showScan = false
+    /// iPad 上**自动弹一次**扫码页，别弹第二次（用户关掉就是不想用）。
+    @State private var didAutoOfferScan = false
+
+    /// 这台设备是不是 iPad。
+    ///
+    /// 老板原话：「如果检测到登录的设备是 iPad，支持手机扫码登录」——
+    /// 检测到 iPad 就把它当**首选**（自动弹出来）；iPhone 上仍然找得到，
+    /// 只是不抢主动（iPhone 上敲验证码本来就不难，弹出来反而是打扰）。
+    private var isPad: Bool {
+        #if canImport(UIKit)
+        return UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        return false
+        #endif
+    }
+
     enum Tab: String, CaseIterable, Identifiable {
         case code, password, register
 
@@ -68,9 +87,11 @@ struct LoginView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    if isPad { scanCallout }
                     switcher
                     card
                     qqButton
+                    if !isPad { scanButton }
 
                     if let note {
                         Text(note)
@@ -87,6 +108,21 @@ struct LoginView: View {
                 .padding(.bottom, 40)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+        .sheet(isPresented: $showScan) {
+            ScanLoginView {
+                // 登录成功。`RootView` 会把整棵树换成主界面（它盯着 isSignedIn），
+                // 所以这里只要把这一页收掉就行。
+                showScan = false
+            }
+        }
+        // iPad：进来就先把扫码那条路摆到面前。⚠️ 延后 0.4 秒再弹 ——
+        // 在视图还没画完的时候弹 sheet，SwiftUI 会"吞掉"这一次（表现是点了没反应）。
+        .task {
+            guard isPad, !didAutoOfferScan else { return }
+            didAutoOfferScan = true
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            showScan = true
         }
     }
 
@@ -261,6 +297,55 @@ struct LoginView: View {
     }
 
     // MARK: - QQ
+
+    /// iPad 上最显眼的那一条：直接进扫码页。
+    private var scanCallout: some View {
+        Button {
+            showScan = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.aevis(17))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("用手机扫码登录")
+                        .font(.aevis(15, weight: .semibold))
+                    Text("不用在这台设备上敲邮箱和验证码")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.aevis(12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.primary)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .aevisGlass(cornerRadius: 16)
+        }
+        .buttonStyle(.plain)
+        .disabled(working)
+    }
+
+    /// iPhone 上它在最下面，一个安静的入口。
+    private var scanButton: some View {
+        Button {
+            showScan = true
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.aevis(15))
+                Text("用手机扫码登录")
+                    .font(.aevis(15, weight: .medium))
+            }
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .aevisGlass(cornerRadius: 16)
+        }
+        .buttonStyle(.plain)
+        .disabled(working)
+    }
 
     private var qqButton: some View {
         Button {

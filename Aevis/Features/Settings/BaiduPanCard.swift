@@ -18,6 +18,10 @@ import UIKit
 struct BaiduPanCard: View {
 
     @ObservedObject private var settings = AppSettings.shared
+    /// 自动同步的状态（"正在同步…" / "上次：…" / 失败了）。
+    /// ⚠️ 必须 `@ObservedObject` 盯住 —— `AutoSync.state` 是 `@Published`，
+    ///    不盯的话那一行字会停在打开这一页时的样子，永远不动。
+    @ObservedObject private var autoSync = AutoSync.shared
 
     @State private var showCredentials = false
     @State private var appKeyDraft = ""
@@ -52,6 +56,10 @@ struct BaiduPanCard: View {
 
             restoreRow
 
+            rule
+
+            autoSyncBlock
+
             if let note {
                 rule
                 Text(note)
@@ -73,6 +81,11 @@ struct BaiduPanCard: View {
             }
         }
         .aevisGlass(cornerRadius: 20)
+        .onAppear {
+            // 进这一页就重算一次 —— 用户可能刚从别处登录 / 关过开关，
+            // 不刷的话那行状态字是上一次进来时的样子。
+            AutoSync.shared.refresh()
+        }
         .alert("百度网盘应用凭据", isPresented: $showCredentials) {
             TextField("AppKey", text: $appKeyDraft)
             TextField("SecretKey", text: $secretDraft)
@@ -163,6 +176,9 @@ struct BaiduPanCard: View {
                 Button("取消授权") {
                     BaiduPanClient.shared.signOut()
                     note = "已取消授权。"
+                    // 条件没了（没网盘授权）—— 状态行要跟着变成"没在同步"，
+                    // 否则会出现"显示已同步、其实已经断了"这种谎报。
+                    AutoSync.shared.refresh()
                 }
                 .font(.aevis(14))
                 .buttonStyle(.borderless)
@@ -253,6 +269,80 @@ struct BaiduPanCard: View {
                 .font(.aevis(14))
                 .buttonStyle(.borderless)
                 .disabled(!BaiduPanClient.shared.isAuthorized || busy)
+        }
+    }
+
+    // MARK: - 自动同步（老板 2026-10-03 要的三件事）
+
+    /// 「每次退出 App 自动备份」「登录其他设备自动恢复」「每发一句话实时同步」。
+    ///
+    /// 三件事共用一颗总开关（`autoSyncEnabled`）＋ 一颗恢复开关，理由：
+    /// 老板说的是「聊天记录存哪」，用户看到的就是"要不要把聊天记录放网盘上" ——
+    /// 拆成三个开关只会让人不敢动。**总开关一关，实时同步和退出备份一起停**。
+    ///
+    /// ⚠️ 这一整块**不涉及密钥**：传上去的是加密包（见 `BackupService` 的说明）。
+    ///    界面上也别写"端到端加密" —— 那是假的，对称口令是编在 App 里的。
+    private var autoSyncBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("自动同步")
+                        .font(.aevis(15))
+                    Text(autoSyncDetail)
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Toggle("", isOn: $settings.autoSyncEnabled)
+                    .labelsHidden()
+                    .onChange(of: settings.autoSyncEnabled) { _, _ in
+                        AutoSync.shared.refresh()
+                    }
+            }
+
+            if settings.autoSyncEnabled {
+                rule
+
+                row {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("换设备自动恢复")
+                            .font(.aevis(15))
+                        Text("在别的设备上登录之后，自动把网盘上的聊天记录拉回来（只在本机还是空的时候）")
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("", isOn: $settings.autoRestoreEnabled)
+                        .labelsHidden()
+                }
+            }
+        }
+    }
+
+    /// 状态行。分三种情况说话：没条件 → 说清缺什么；有条件 → 说上次什么时候传的；失败 → 说为什么。
+    private var autoSyncDetail: String {
+        switch autoSync.state {
+        case .syncing(let what):
+            return "正在同步\(what)…"
+        case .failed(let why):
+            return "上次没传上去（\(why)）。下一句话或者下次退出时会再试一次。"
+        case .off:
+            if !settings.autoSyncEnabled { return "已关掉。聊天记录只留在这台手机上。" }
+            if !BaiduPanClient.shared.canConnect {
+                return "要先用账号登录一次，服务器才认得出你是谁。"
+            }
+            if !BaiduPanClient.shared.isAuthorized {
+                return "还没连接百度网盘。连上之后每说一句话、每次退出都会自动存上去。"
+            }
+            return "条件都齐了，下一步说话就会开始同步。"
+        case .idle:
+            guard let when = autoSync.lastSuccess else {
+                return "说第一句话、或者离开 App 时会自动存上去。"
+            }
+            return "每说一句话自动存一次；离开 App 时再存一次。上次："
+                + when.formatted(date: .abbreviated, time: .shortened)
         }
     }
 
@@ -378,6 +468,8 @@ struct BaiduPanCard: View {
                 let token = try await AccountService.shared.authedGet("/api/baidu/token")
                 try BaiduPanClient.shared.adoptServerToken(token)
                 note = "连上了，可以备份和搬家了。"
+                // 刚连上，自动同步的条件从"缺网盘授权"变成"齐了" —— 立刻刷新状态行。
+                AutoSync.shared.refresh()
                 loadBackups()
             } catch {
                 note = "连接失败：" + error.localizedDescription

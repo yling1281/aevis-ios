@@ -252,8 +252,28 @@ settings:
     #       所以 `swift_check.py` 立了 **R30** 盯死这条（`_verify/_r30_selftest.py` 验它有牙）。
     #    ⚠️ `PairedPC.host/port` 必须是**可选**：老记录里没有它们，写成非可选会让
     #       `Codable` 整个解码失败 ⇒ 用户升级后配对记录全没。
-    MARKETING_VERSION: "0.0.100"
-    CURRENT_PROJECT_VERSION: "100"
+    # ⭐ 0.0.101：**聊天记录自动同步到百度网盘** + **iPad 手机扫码登录**
+    #    （老板 2026-10-03：「如果检测到登录的设备是 iPad，支持手机扫码登录，扫码后就直接同步」
+    #     「每次退出 APP 时自动把聊天记录存到百度网盘；登录其他设备时自动从百度网盘恢复」
+    #     「每发出一句话，聊天记录都会自动同步到百度网盘」）。三处改动：
+    #    ① `AutoSync`（新）：挂在 `ChatStore` 的落消息钩子上 —— 说一句话 → 去抖 6 秒 →
+    #       传一份**只有文字**的轻包（`aevis-live.aevis`，固定文件名每次覆盖）。
+    #       退到后台时再传一次（`beginBackgroundTask` 要一段后台时间，不然那几秒根本传不完）。
+    #    ② `ChatStore.onAppended` → **`appendListeners` 观察者表**（`addAppendListener`）。
+    #       🔴 原来那是**单个赋值位**：`PairChatBridge` 已经用 `=` 占住了，再挂一个
+    #          `AutoSync` 会把它**静默顶掉** —— 电脑端聊天从此不再推送，而且不报任何错。
+    #          `swift_check.py` 立了 **R32** 盯死（`_verify/_r32_selftest.py` 验它有牙）。
+    #    ③ 扫码登录：新设备显示二维码 → 手机（随便什么相机）扫开
+    #       `account.apekin.com/scan?t=…` → 点「同意」→ 新设备 poll 到登录态，
+    #       接着 `AutoSync.autoRestoreIfNewDevice()` 自动把聊天记录从网盘拉回来。
+    #       🔴 二维码里**只有一张 5 分钟、一次性的票**，批准必须由一个**已登录的手机**点
+    #          （服务器 `api_device_login_approve` 走 `current_user()`）。
+    #          ⇒ 页面被人看到/被拍照都不构成账号泄露。
+    #    ⚠️ 后端是**同一批**改动（`server/account/app.py` 新表 `device_logins` + 三条路由
+    #       + `web/scan.html`）；`_verify/deploy_app.py` 里加了 4 条探针盯它。
+    #       后端没上而先装这个包，扫码登录会 404 —— 自动同步那半是纯客户端，不受影响。
+    MARKETING_VERSION: "0.0.101"
+    CURRENT_PROJECT_VERSION: "101"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

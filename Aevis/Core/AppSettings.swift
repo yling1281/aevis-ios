@@ -478,6 +478,9 @@ final class AppSettings: ObservableObject {
         /// 最近一次授权/续期失败的原文。界面上要显示出来 ——
         /// 光说一句"授权失败"用户和我都没法判断是回调不合法还是 SecretKey 错了。
         static let baiduPanLastError = "aevis.baiduPan.lastError"
+        /// 自动同步（聊天记录 → 网盘）。见 `AutoSync`。
+        static let autoSyncEnabled = "aevis.autoSync.enabled"
+        static let autoRestoreEnabled = "aevis.autoRestore.enabled"
     }
 
     /// 主题色候选。用户挑一个，界面里所有强调色跟着变。
@@ -1440,6 +1443,25 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(baiduPanLastError, forKey: Key.baiduPanLastError) }
     }
 
+    // MARK: - 自动同步（聊天记录 → 网盘）
+    //
+    // ⭐ 2026-10-03 老板要的：「每次退出这个 App 就把聊天记录备份到百度网盘，
+    //    登录其他设备的话就从网盘恢复，还有实时同步 —— 每发一句话就同步过去。」
+    //    真正干活的在 `AutoSync`，这里只是两个开关。
+
+    /// 开着就每说一句（去抖几秒）把聊天记录同步到网盘。
+    @Published var autoSyncEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoSyncEnabled, forKey: Key.autoSyncEnabled) }
+    }
+
+    /// 换设备时（本机还是空的）自动从网盘把聊天记录拉回来。
+    ///
+    /// ⚠️ 只在**本机还没有人和聊天**的时候才动手 —— 见 `AutoSync.autoRestoreIfNewDevice()`。
+    ///    这条不能反：本地有数据还自动恢复，等于把用户正在用的记录覆盖掉。
+    @Published var autoRestoreEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoRestoreEnabled, forKey: Key.autoRestoreEnabled) }
+    }
+
     private static var backgroundFileURL: URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -1618,6 +1640,11 @@ final class AppSettings: ObservableObject {
         baiduPanRedirect = defaults.string(forKey: Key.baiduPanRedirect) ?? "oob"
         baiduPanExpiresAt = defaults.double(forKey: Key.baiduPanExpiresAt)
         baiduPanLastError = defaults.string(forKey: Key.baiduPanLastError) ?? ""
+        // ⭐ 自动同步默认**开**：老板要的就是"不用管它，自己一直在同步"。
+        //    ⚠️ 默认值取 `?? true` 要小心 —— 老用户升级上来 UserDefaults 里没这个键，
+        //       拿到的是默认值，所以"默认开"对老用户同样生效（这正是我们要的）。
+        autoSyncEnabled = defaults.object(forKey: Key.autoSyncEnabled) as? Bool ?? true
+        autoRestoreEnabled = defaults.object(forKey: Key.autoRestoreEnabled) as? Bool ?? true
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
         momentCoverData = try? Data(contentsOf: Self.momentCoverFileURL)
 

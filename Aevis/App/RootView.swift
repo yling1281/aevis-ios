@@ -12,6 +12,8 @@ struct RootView: View {
     @State private var bridgeNote: String?
     /// 上次崩了 → **整个屏幕报错误码**（用户 2026-09-26 明确要求）。
     @State private var showCrash = RootView.shouldShowCrashReport
+    /// 「换设备自动恢复」这辈子只试一次 —— 见下面那个 `.task`。
+    @State private var didTryRestore = false
 
     /// 崩了要不要弹那一屏。
     ///
@@ -104,12 +106,27 @@ struct RootView: View {
             // 代价是"在非活跃状态下崩"会漏掉，那种极少，比天天误报值。
             if phase == .background || phase == .inactive {
                 BlackBox.markCleanExit()
+                // ⭐ 「每次退出 App 就把聊天记录存到百度网盘」（2026-10-03 老板要的）。
+                //
+                // ⚠️ **只认 `.background`，不认 `.inactive`。** 两者都会走到上面这一行，
+                //    但 `.inactive` 是"被打断"（下拉通知中心、来电话弹窗、切到多任务预览），
+                //    一天能发生几十次 —— 每次都传一份包纯属浪费，而且会占满
+                //    `beginBackgroundTask` 的后台额度，真到退出那一刻反而要不到时间。
+                //    `.background` 才是"人真的走了"。
+                if phase == .background {
+                    AutoSync.shared.syncNow(reason: "退出前")
+                }
                 return
             }
 
             // 每次回到前台，为接下来 24 小时重排一次「不定时」消息 ——
             // 本地通知只能在排程时定下时间，这是能做到的最接近随机的办法。
             guard phase == .active else { return }
+
+            // 顺手重算一次"现在能不能同步聊天记录"：用户可能刚在设置页点完
+            // 「连接百度网盘」，也可能刚退出登录 —— 这两种变化都不会落消息，
+            // 不主动刷一下，状态行会一直停在旧值上（用户会以为坏了）。
+            AutoSync.shared.refresh()
 
             // ⭐ **回到前台先把音频会话抢回来。**
             //
@@ -183,6 +200,25 @@ struct RootView: View {
                     config: config,
                     memory: memory
                 )
+            }
+        }
+        // ⭐ 「当你登录其他设备时，自动从百度网盘恢复你的聊天记录」（2026-10-03 老板要的）。
+        //
+        // 盯 `account.isSignedIn`：两道门（设备授权 + 账号登录）都过了才轮到这一步 ——
+        // 没登录就恢复，等于绕过登录门把数据填进来。
+        //
+        // ⚠️ **只试一次**（`didTryRestore`）。这个 `.task` 会随着
+        //    `isSignedIn` 变化重新跑（退出登录 → 再登录），而恢复是有破坏性的动作，
+        //    不设闸的话"退出再登录"就会再恢复一遍、把用户刚聊的那几句顶掉。
+        //    `AutoSync` 内部还有第二重门槛（本机必须一个人都没有），两层一起才安全。
+        //
+        // ⚠️ 恢复完 `personaStore` 变了，`normal` 那一层会自己从
+        //    「造一个她」切到主界面 —— 不用我们手动跳。
+        .task(id: account.isSignedIn) {
+            guard account.isSignedIn, !gate.isBlocking, !didTryRestore else { return }
+            didTryRestore = true
+            if let what = await AutoSync.shared.autoRestoreIfNewDevice() {
+                bridgeNote = "已从百度网盘恢复\(what)。"
             }
         }
     }

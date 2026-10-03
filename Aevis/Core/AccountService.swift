@@ -216,6 +216,76 @@ final class AccountService: ObservableObject {
         await afterSignIn()
     }
 
+    // MARK: - 扫码登录（**新设备这一侧**，2026-10-03）
+    //
+    // 老板原话：「如果检测到登录的设备是 iPad，支持手机扫码登录，扫码后就直接同步。」
+    //
+    // 为什么值得单独做一套：在 iPad 上敲邮箱 → 等邮件 → 敲 6 位验证码，是最容易
+    // 半路放弃的一段（iPad 的屏幕键盘本身就难用）。手机扫一下、点一下「同意」就完了。
+    //
+    // 这里只有**两步**（第三、四步在网页和服务器上，见 `server/account/app.py`
+    // 的 `api_device_login_*` 和 `server/account/web/scan.html`）：
+    //   ① `newDeviceLoginTicket()`  拿一张票，画成二维码显示出来
+    //   ② `pollDeviceLogin(ticket:)` 每两秒问一句"有人批了吗"
+    //
+    // 🔴 **这个流程里没有任何"本机就能过"的环节**：
+    //    本机拿到的 token 是**服务器**在"已登录的手机点了同意"之后才发出来的。
+    //    光有一张 ticket 什么都换不到（ticket 只是"请让某个人来批一下"的凭据）。
+    //    所以这个页面可以放心地被随便谁看到 —— 包括被人拍照。
+
+    /// 服务器给的二维码内容。
+    struct DeviceTicket {
+        /// 用来轮询的凭据。
+        let ticket: String
+        /// **要画成二维码的**那段文字（是一个 `https://…/scan?t=…` 网址）。
+        ///
+        /// 🔴 故意用**普通 https 网址**而不是自定义 scheme（`aevis://…`）：
+        ///    扫它的不一定是 Aevis，**任何手机的原生相机**都要能扫开。
+        ///    自定义 scheme 在系统相机里根本不会被识别成链接。
+        let scanURL: String
+        /// 有效期（秒）。界面拿它做倒计时、也拿它决定轮询什么时候放弃。
+        let expiresIn: Int
+    }
+
+    enum DeviceLoginStatus {
+        case pending
+        case approved(email: String, token: String)
+    }
+
+    /// ① 要一张二维码的票。
+    @MainActor
+    func newDeviceLoginTicket() async throws -> DeviceTicket {
+        let json = try await post("/api/device/login/new", [:])
+        guard let ticket = json["ticket"] as? String, !ticket.isEmpty,
+              let url = json["scan_url"] as? String, !url.isEmpty else {
+            throw AccountError.badResponse("服务器没给二维码内容")
+        }
+        return DeviceTicket(ticket: ticket,
+                            scanURL: url,
+                            expiresIn: (json["expires_in"] as? Int) ?? 300)
+    }
+
+    /// ② 问一句「有人批了吗」。
+    ///
+    /// ⚠️ **"还没人批"是 200 + `pending`**，不是错误 —— 调用方在每两秒轮询，
+    ///    把它当异常处理会让"等待"这个过程看起来像一直在报错。
+    ///    只有**真的不能再用**（过期 / 用过 / 不认）才是 4xx，那时候必须停下来。
+    @MainActor
+    func pollDeviceLogin(ticket: String) async throws -> DeviceLoginStatus {
+        let encoded = ticket.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ticket
+        let json: [String: Any]
+        do {
+            json = try await get("/api/device/login/poll?t=" + encoded)
+        } catch AccountError.http(let status, let body) {
+            throw DeviceLoginError.rejected(status: status, reason: body)
+        }
+        if (json["status"] as? String) == "approved",
+           let token = json["token"] as? String, !token.isEmpty {
+            return .approved(email: (json["email"] as? String) ?? "", token: token)
+        }
+        return .pending
+    }
+
     /// App 里点 QQ 登录时要打开的那一页（内置浏览器）。
     ///
     /// `?app=1` 是给服务端的暗号：**这一次跳完要回 App**（`aevis://login?token=…`），
@@ -462,6 +532,27 @@ final class AccountService: ObservableObject {
         let tag = digest.map { String(format: "%02x", $0) }.joined().prefix(24)
         UserDefaults.standard.set(String(tag), forKey: key)
         return String(tag)
+    }
+}
+
+/// 扫码登录里"这张二维码不能再用"的四种情况。
+///
+/// ⚠️ 为什么不复用 `AccountError.http`：那个的错误文案是"服务器返回 410：{...}"，
+///    对着用户念状态码等于什么都没说。这里把**每一种情况该怎么做**说清楚 ——
+///    用户唯一能做、也唯一需要做的事就是「重新生成一张」。
+enum DeviceLoginError: LocalizedError {
+    case rejected(status: Int, reason: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .rejected(status, reason):
+            switch status {
+            case 410: return "二维码过期了，点「重新生成」再来一张。"
+            case 404: return "服务器不认这张二维码，点「重新生成」再来一张。"
+            case 409: return "这张二维码已经批过了。"
+            default: return reason.isEmpty ? "服务器说不可以（\(status)）。" : reason
+            }
+        }
     }
 }
 

@@ -144,6 +144,37 @@ final class BaiduPanClient {
         !AppSettings.shared.baiduPanToken.isEmpty
     }
 
+    /// 从账号服务器把网盘授权**取回来**（不弹百度、不用用户点任何东西）。
+    ///
+    /// 🔴 这一步是「换设备自动恢复」真正能走通的关键（2026-10-03 加的）。
+    ///
+    ///    服务器上的授权是**按账号（邮箱）存的，跟设备无关**：
+    ///    `server/account/app.py` 的 `/api/baidu/token` 拿的是"这个账号绑过的
+    ///    那份百度通行证"。所以新设备（比如 iPad 扫码登录进来）只要登录了
+    ///    同一个账号，就能把**同一份**通行证取回来 ⇒ 用户什么都不用点，
+    ///    "登录完聊天记录就自己回来了"。
+    ///
+    /// ⚠️ 本机已经有通行证就直接返回，不去打扰服务器。
+    /// ⚠️ 拿不到（从没连过网盘 / 没登录）**不算错误** —— 返回 false 就行。
+    ///    调用方在启动路径上，抛出去会让启动流程难看。
+    /// ⚠️ 失败时**把服务器回的那句错误恢复成原来的**：这条路是后台偷偷跑的，
+    ///    让它往设置页顶一行红字（"还没绑定"之类），用户会莫名其妙。
+    @MainActor
+    @discardableResult
+    func adoptFromAccount() async -> Bool {
+        guard AccountService.shared.isSignedIn else { return false }
+        if isAuthorized { return true }
+
+        let before = AppSettings.shared.baiduPanLastError
+        guard let json = try? await AccountService.shared.authedGet("/api/baidu/token") else {
+            AppSettings.shared.baiduPanLastError = before
+            return false
+        }
+        try? adoptServerToken(json)
+        if !isAuthorized { AppSettings.shared.baiduPanLastError = before }
+        return isAuthorized
+    }
+
     /// 通行证到期时刻。提前一小时就算过期，免得正好卡边界上失败。
     var expiresAt: Date? {
         let stamp = AppSettings.shared.baiduPanExpiresAt
