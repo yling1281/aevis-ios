@@ -1584,26 +1584,32 @@ final class AppSettings: ObservableObject {
         // 不能直接 `?? .white` 一把梭：老用户已经存了 aurora 的，得保留他们的选择，
         // 别把正在用的背景偷偷换掉。backgroundStyle 只在 didSet 写 UserDefaults，
         // 所以「没改过 = 没存过」天然成立。
+        // ⚠️⚠️ 这里**只准用局部变量**，绝对不许读 `self.backgroundStyle` 之类的已初始化属性：
+        //    `AppSettings` 的 `@Published` 都带 `didSet`，Swift 会走保守路径，
+        //    在**所有存储属性赋值完之前**禁止碰 `self`，否则报
+        //    `'self' used in property access 'X' before all stored properties are initialized`。
+        //    （0.0.106 第 1 轮就是这么挂的：3 处 error 全在 init 里读了 self。）
+        let initialChatStyle: BackgroundStyle
         if defaults.object(forKey: Key.backgroundStyle) == nil {
-            backgroundStyle = .white
+            initialChatStyle = .white
         } else {
-            backgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .white
+            initialChatStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .white
         }
-        backgroundDim = defaults.object(forKey: Key.backgroundDim) as? Double ?? 0.12
+        backgroundStyle = initialChatStyle
+        let initialChatDim = defaults.object(forKey: Key.backgroundDim) as? Double ?? 0.12
+        backgroundDim = initialChatDim
         // ——— 「开始页背景」：一次性兼容迁移 ———
         //
-        // ⚠️ 必须排在 `backgroundStyle` / `backgroundDim` 解析**之后** —— 这两行
-        //    要在「老用户没存过开始页设置」时，拿到的是**用户真实的那套值**
-        //    （而不是默认白）。这样老用户升上来视觉 100% 不变。
-        //
         // 逻辑：没存过 → 跟聊天那套当前值（原样继承）；存过 → 按存的解析；兜底 `.white`。
+        // 「聊天那套当前值」取自上面两个局部常量 `initialChatStyle` / `initialChatDim`
+        // （不是读 self）—— 这样老用户升上来视觉 100% 不变。
         if defaults.object(forKey: Key.startBackgroundStyle) == nil {
-            startBackgroundStyle = backgroundStyle
+            startBackgroundStyle = initialChatStyle
         } else {
             startBackgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.startBackgroundStyle) ?? "") ?? .white
         }
         if defaults.object(forKey: Key.startBackgroundDim) == nil {
-            startBackgroundDim = backgroundDim
+            startBackgroundDim = initialChatDim
         } else {
             startBackgroundDim = defaults.object(forKey: Key.startBackgroundDim) as? Double ?? 0.12
         }
@@ -1722,7 +1728,10 @@ final class AppSettings: ObservableObject {
         autoRestoreEnabled = defaults.object(forKey: Key.autoRestoreEnabled) as? Bool ?? true
         // ⭐ 网盘引导弹窗：默认**没弹过**（false）。
         panGuideShown = defaults.object(forKey: Key.panGuideShown) as? Bool ?? false
-        customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
+        // 同上：只准用局部变量读文件（init 里读 self 会报 "before all stored properties
+        // are initialized"）。
+        let chatData = try? Data(contentsOf: Self.backgroundFileURL)
+        customBackgroundData = chatData
         // 「开始页背景」图：先读自己那份文件；**若为空、而聊天那份有图**，
         // 就把聊天那份复制一份过来（一次性）—— 保证两套初始完全一致，
         // 老用户升上来开始页不会突然变空。
@@ -1731,7 +1740,7 @@ final class AppSettings: ObservableObject {
         //    所以这里得**手动**把文件写出去，不能指望 didSet 代劳。
         if let startData = try? Data(contentsOf: Self.startBackgroundFileURL) {
             startCustomBackgroundData = startData
-        } else if let chatData = customBackgroundData {
+        } else if let chatData {
             try? chatData.write(to: Self.startBackgroundFileURL, options: .atomic)
             startCustomBackgroundData = chatData
         } else {
