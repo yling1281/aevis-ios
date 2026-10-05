@@ -194,6 +194,24 @@ enum BlackBox {
         log("💬 \(direction) \(flat.prefix(200))")
     }
 
+    /// 记一次她的「思考过程」（推理模型的 `reasoning_content`）。
+    ///
+    /// 和 `chat()` 一个待遇、三条一起守：
+    /// ① **换行压成空格**：一行一条，崩了才不会半条记录；
+    /// ② **截断到 500 字以内**：日志是环形缓冲，一段长思考会把现场全挤掉；
+    /// ③ 加密由 `write` → `appendLocked` 负责，这里**绝不写明文**。
+    ///
+    /// ⚠️ 频率：调用方**每次回答只调一次**（把整段 reasoning 增量拼好了再传进来），
+    ///    别每个 delta 都写一行 —— 那样日志会被"她想了什么"刷屏，现场全没了。
+    static func reasoning(_ text: String) {
+        let flat = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard !flat.isEmpty else { return }
+        log("🤔 \(flat.prefix(500))")
+    }
+
     // MARK: - 读出来
 
     /// 最近这些行（给界面显示）。

@@ -388,7 +388,9 @@ struct WalletView: View {
             return rollDice()
         }
 
-        return parseDecision(collected) ?? rollDice()
+        // ⭐ 先剥掉末尾的心情标记再解析她的答复 ——
+        //    不然标记会被当成"她想说的话"拼进那句里、露给用户。
+        return parseDecision(MoodStore.shared.consume(collected)) ?? rollDice()
     }
 
     /// 认她给的答复。**宽容**一点 —— 她不一定会老老实实守格式。

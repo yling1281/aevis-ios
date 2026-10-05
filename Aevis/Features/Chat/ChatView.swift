@@ -24,6 +24,16 @@ struct ChatView: View {
     @State private var isSending = false
     @State private var errorText: String?
     @State private var toolNote: String?
+    /// 她这次回答的「思考过程」—— 推理模型流式吐出来的 `reasoning`，拼起来显示。
+    ///
+    /// ⚠️ 这是**临时状态**（不是聊天记录），所以不进 `ChatStore`：下次一发送就清掉。
+    @State private var reasoningText = ""
+    /// 「她想了一下」那块展开着没有。正文一开始流式输出就**自动收起**，但仍可点开。
+    @State private var reasoningExpanded = true
+    /// 正文开始了没有 —— 开始了就不再往思考区块里塞新内容（也不重复收起）。
+    @State private var bodyStarted = false
+    /// 这次回答里她动过的每一次手（每条留一条轻量记录，互不覆盖）。
+    @State private var toolTraces: [String] = []
     /// 底下那个「更多」面板（微信的加号）开没开。
     @State private var showMorePanel = false
     /// 表情面板（输入框左边的笑脸点开）—— 用户 2026-09-30 要「我也能发表情包」。
@@ -400,6 +410,11 @@ struct ChatView: View {
                     }
 
                     ForEach(chat.messages) { message in
+                        // ⭐ 「她想了一下」+ 工具记录 —— 贴在她**这次回复的第一条**气泡前面。
+                        //    这样看起来就是「先想了想 / 动了下手，再开口」，而不是飘在别处。
+                        if message.id == workAnchorID {
+                            workBlock
+                        }
                         if message.kind == .call {
                             // 通话记录 —— 微信那种居中的一行小字，**不是气泡**。
                             // 做成气泡会让人以为她真发过这么一句话。
@@ -561,6 +576,96 @@ struct ChatView: View {
                 .aevisGlass(cornerRadius: 14)
             Spacer(minLength: 30)
         }
+    }
+
+    // MARK: - 「过程」：她想了一下 + 她动了几下手
+    //
+    // 用户 2026-10-05：「先想再答、连续调工具、**过程看得见**」。
+    // 这两块都是**临时状态**（不进聊天记录），贴在「她这次回复的第一条」气泡前面。
+
+    /// 她这次回复的**第一条**气泡 —— 「她想了一下」和工具记录就贴在这条前面。
+    ///
+    /// 取「最后一条用户消息的下一条」。找不到（比如她还没开口、或回复被清空）⇒ nil，
+    /// 这时过程块不显示（宁可少显示，也别飘到别的地方去）。
+    private var workAnchorID: UUID? {
+        guard let lastUser = chat.messages.lastIndex(where: { $0.role == .user }) else { return nil }
+        let next = chat.messages.index(after: lastUser)
+        guard next < chat.messages.endIndex else { return nil }
+        return chat.messages[next].id
+    }
+
+    /// 这一轮的过程块：思考区块（若有）+ 每次工具调用的一条轻量记录（若有）。
+    @ViewBuilder
+    private var workBlock: some View {
+        if !reasoningText.isEmpty || !toolTraces.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if !reasoningText.isEmpty {
+                    reasoningBlock
+                }
+                // ⚠️ 用下标当 id：一次回答里同一个工具可能连着调两次，
+                //    用内容当 id 会撞成同一个、少显示一条。
+                ForEach(toolTraces.indices, id: \.self) { index in
+                    toolTraceRow(toolTraces[index])
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 「她想了一下」—— 灰字、小字、可折叠；默认展开，正文一开始流式输出就自动收起。
+    private var reasoningBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    reasoningExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: reasoningExpanded ? "chevron.down" : "chevron.right")
+                        .font(.aevis(9, weight: .semibold))
+                    Text("她想了一下")
+                        .font(.aevis(12, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(reasoningExpanded ? "收起她的思考" : "展开她的思考")
+
+            if reasoningExpanded {
+                Text(reasoningText.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+            }
+        }
+    }
+
+    /// 一次工具调用的轻量记录：一行小 pill（形如「🔧 看了眼时间」）。
+    ///
+    /// **故意不做成气泡** —— 那只是她动了下手，不是她说的一句话。
+    /// 配色 / 字体 / 圆角全部照 `CallRecordBubble` 那套抄，不自造视觉语言。
+    private func toolTraceRow(_ title: String) -> some View {
+        HStack(spacing: 5) {
+            Text("🔧")
+                .font(.aevis(11))
+            Text(title)
+                .font(.aevis(12))
+        }
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(Color.primary.opacity(0.06))
+        )
     }
 
     // MARK: - 底部输入栏
@@ -890,6 +995,11 @@ struct ChatView: View {
 
         errorText = nil
         toolNote = nil
+        // 新一轮开始：把上一轮的「过程」清干净（思考 / 工具记录都是临时的）
+        reasoningText = ""
+        reasoningExpanded = true
+        bodyStarted = false
+        toolTraces = []
         SpeechService.shared.stop()
 
         chat.append(ChatMessage(role: .user, text: text, imageData: image))
@@ -966,10 +1076,26 @@ struct ChatView: View {
                     onToolActivity: { title in
                         Task { @MainActor in
                             toolNote = title
+                            // ⭐ 每次工具调用都留一条痕（一次消息可能连着好几次），
+                            //    显示的是**脱敏后的中文动作名**（如「看了眼时间」），
+                            //    绝不带入参原文 —— 见 DeviceTools.summarize 那套。
+                            toolTraces.append(title)
+                        }
+                    },
+                    onReasoningDelta: { piece in
+                        Task { @MainActor in
+                            // 正文一旦开始，思考区块**不再往里塞新内容**
+                            guard !bodyStarted else { return }
+                            reasoningText += piece
                         }
                     }
                 ) {
-                    // 她开始说话了，把「她看了眼时间…」收掉
+                    // 她开始说话了：把「她看了眼时间…」收掉，并把思考区块自动收起。
+                    // ⚠️ 只在这一下收起一次 —— 之后用户手动点开不该被再次收掉。
+                    if !bodyStarted {
+                        bodyStarted = true
+                        if !reasoningText.isEmpty { reasoningExpanded = false }
+                    }
                     if toolNote != nil { toolNote = nil }
                     accumulated += piece
                     pending += piece
@@ -978,14 +1104,34 @@ struct ChatView: View {
                 // 收尾：剩下的 pending 早就显示在最后一条上了，这里只要清掉
                 // 多余的空占位就行 —— **不要再定稿一次**（见上面那段注释）。
                 chat.removeLastIfEmpty()
+
+                // ⭐ 她的「心里话」写在回复**最后一行**上 —— 流式过程中已经上屏了，
+                //    这里在**定稿之前**把它剥掉，保证用户永远看不到那个标记。
+                //    `consume` 一边剥、一边把心情落库（`MoodStore`）。
+                let reply = accumulated
+                let clean = MoodStore.shared.consume(reply)
+                // 剥掉了东西 ⇒ 最后那条气泡里还残留着标记，用同一套解析补剥一次。
+                if clean != reply,
+                   let last = chat.messages.last,
+                   last.role == .assistant {
+                    chat.replaceLast(with: MoodStore.strippingMarker(from: last.text))
+                    chat.removeLastIfEmpty()
+                }
+
                 chat.commit()
+
+                // ⭐ 思考过程也进黑匣子 —— 每次回答**只记一条**（把整段增量拼好再记）。
+                let thinking = reasoningText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !thinking.isEmpty { BlackBox.reasoning(thinking) }
 
                 // ⭐ 她这一整段话说完 → 送上**灵动岛**（Live Activity）。
                 // ⚠️ 每次回复**只调一次**（不是每行一次，所以挂在这里、不挂在
                 //    `flushLines` 里）。`accumulated` 是整段、可能很长 ——
                 //    `LiveIslandCenter` 会**在意层截断**，别把整段塞进活动状态。
                 // ⚠️ 只在真有内容时调；空回复不打扰灵动岛。
-                let said = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                // ⚠️ 送灵动岛的是**剥干净的**那份（`clean`）——
+                //    别让那块屏上出现心里话标记。
+                let said = clean.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !said.isEmpty {
                     LiveIslandCenter.shared.push(name: herName, text: said)
                 }
@@ -1010,9 +1156,14 @@ struct ChatView: View {
                 )
             }
 
-            if shouldSpeak, !accumulated.isEmpty {
+            // ⭐ 她「说出口的」和「看到的」必须一致 —— 心里话标记只该留在屏幕的折叠区里，
+            //    绝不能被念出来、也不该进语音条。这里再剥一次
+            //    （纯剥、不落库 —— 落库在 `do` 里用 `consume` 做过了）。
+            let spokenText = MoodStore.strippingMarker(from: accumulated)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if shouldSpeak, !spokenText.isEmpty {
                 SpeechService.shared.speak(
-                    accumulated,
+                    spokenText,
                     config: ttsConfig,
                     systemVoiceIdentifier: systemVoice
                 ) { message in
@@ -1023,8 +1174,8 @@ struct ChatView: View {
             // ⭐ 她发语音消息（2026-09-30）：文字之外再合成一条语音条（点一下播放）。
             //    只走外部 API 音色（系统音色导不出音频文件）；合成失败就静默跳过，
             //    文字已经在聊天里，不缺这一条。
-            if settings.voiceMessageEnabled, !accumulated.isEmpty {
-                let text = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+            if settings.voiceMessageEnabled, !spokenText.isEmpty {
+                let text = spokenText
                 if !text.isEmpty {
                     do {
                         let audio = try await SpeechService.shared.synthesize(text, config: ttsConfig)

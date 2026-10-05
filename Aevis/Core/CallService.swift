@@ -350,7 +350,11 @@ final class CallService: ObservableObject {
 
         thinking = false
 
-        let reply = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ⭐ 剥掉她写在最后一行的那条心情标记（`〔心情：…｜心里话：…〕`）——
+        //    通话里她这句话既要说出口、又要落进聊天记录，标记一个字都不能露。
+        //    用 `consume` 的返回值：剥标记 + 同步心情，语义跟聊天页那条主链路一致。
+        let reply = MoodStore.shared.consume(collected)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else {
             if token == session { resumeListening() }
             return

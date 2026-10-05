@@ -514,7 +514,10 @@ final class QQBotService: ObservableObject {
             return nil
         }
 
-        let cleaned = Self.plain(collected)
+        // ⭐ 先剥掉末尾的心情标记 —— 这句要发到 QQ、还要写回 App 聊天记录，
+        //    标记不能跟着出去。本函数在主 actor 之外，跳一次主线程再剥。
+        let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
+        let cleaned = Self.plain(stripped)
         guard !cleaned.isEmpty else { return nil }
 
         // 她的回复也写回 App 的聊天记录（role = .assistant 是 TA 说的话）。

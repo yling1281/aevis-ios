@@ -12,7 +12,10 @@ struct LLMConfig {
     var apiKey: String
     var model: String
     /// 推理预算。不支持的接口会自动降级重试。
-    var reasoning: ReasoningBudget = .off
+    ///
+    /// ⚠️ 默认 **`.medium`**（2026-10-05 起）：让她「先想再答」是这次改版的
+    ///    核心 —— 关闭时她回得最快但最容易张口就来。不支持的接口会自动降级。
+    var reasoning: ReasoningBudget = .medium
     /// 每次带多少条历史。
     var contextLimit: Int = 40
 }
@@ -1501,7 +1504,10 @@ final class AppSettings: ObservableObject {
         modelList = defaults.stringArray(forKey: Key.modelList) ?? []
         apiKey = Keychain.get(Key.llmKeychain) ?? ""
         providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .deepseek
-        reasoningBudget = ReasoningBudget(rawValue: defaults.string(forKey: Key.reasoningBudget) ?? "") ?? .off
+        // ⚠️ 出厂默认 **`.medium`** —— 必须跟 `LLMConfig.reasoning` 的默认值保持一致。
+        //    只改上面那个默认值是不够的：`settings.llm` 用的是这个 `@Published` 属性，
+        //    而它从 UserDefaults 读，没存过时落到这里。两处要一起改。
+        reasoningBudget = ReasoningBudget(rawValue: defaults.string(forKey: Key.reasoningBudget) ?? "") ?? .medium
         contextLimit = defaults.object(forKey: Key.contextLimit) as? Int ?? 40
         autoTestOnLaunch = defaults.object(forKey: Key.autoTestOnLaunch) as? Bool ?? true
         if let data = defaults.data(forKey: Key.searchSources),

@@ -53,7 +53,8 @@ enum LLMService {
         history: [ChatMessage],
         memory: [String] = [],
         tools: [DeviceTool] = [],
-        onToolActivity: (@Sendable (String) -> Void)? = nil
+        onToolActivity: (@Sendable (String) -> Void)? = nil,
+        onReasoningDelta: (@Sendable (String) -> Void)? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
@@ -67,7 +68,8 @@ enum LLMService {
                         onDelta: { piece in
                             _ = continuation.yield(piece)
                         },
-                        onTool: onToolActivity
+                        onTool: onToolActivity,
+                        onReasoning: onReasoningDelta
                     )
                     continuation.finish()
                 } catch {
@@ -126,6 +128,18 @@ enum LLMService {
 
     // MARK: - 多轮：她可以用几次手再说
 
+    /// 一轮对话最多让她用几轮工具。
+    ///
+    /// ⚠️ 2026-10-05：从 4 提到 **8** —— 用户要的是「能连着干」，
+    ///    4 轮常常不够（搜一下、翻一页、再查一次就没了）。
+    ///    另有 `conversationBudget` 兜底，避免她陷在循环里出不来。
+    private static let maxRounds = 8
+
+    /// 一整轮对话（含所有工具往返）的总时限（秒）。
+    ///
+    /// ⚠️ 纯时间戳比较、**不用 `Task.sleep`**（那会阻塞、还多占一个任务）。
+    private static let conversationBudget: TimeInterval = 120
+
     private static func runConversation(
         config: LLMConfig,
         systemPrompt: String,
@@ -133,7 +147,8 @@ enum LLMService {
         memory: [String],
         tools: [DeviceTool],
         onDelta: @escaping (String) -> Void,
-        onTool: (@Sendable (String) -> Void)?
+        onTool: (@Sendable (String) -> Void)?,
+        onReasoning: ((String) -> Void)?
     ) async throws {
         // 让她「感知现实时间」：把当前时间直接写进系统提示词，
         // 不用她每次都去调 get_current_time。
@@ -161,17 +176,26 @@ enum LLMService {
             ])
         }
 
-        let maxRounds = 4
+        // ⚠️ 纯时间戳比较（`Date()` 差值），**不用 Task.sleep** —— 后者会阻塞，
+        //    而且她正流式吐字的时候，任何 await 停顿都会让界面看起来卡住。
+        let deadline = Date().addingTimeInterval(conversationBudget)
         var usedTools = false
 
         for round in 0..<maxRounds {
+            // 总时限到了就跳出去走「强制收尾」—— 不再让她调工具，直接用自己话回。
+            if Date() >= deadline {
+                onTool?("想得有点久了，先停下来")
+                break
+            }
+
             var result: RoundResult
             do {
                 result = try await sendOnce(
                     config: config,
                     messages: messages,
                     tools: tools,
-                    onDelta: onDelta
+                    onDelta: onDelta,
+                    onReasoning: onReasoning
                 )
             } catch LLMError.http(let status, _) where status == 400
                 && ((!tools.isEmpty) || config.reasoning != .off) && round == 0 {
@@ -184,8 +208,16 @@ enum LLMService {
                     config: plain,
                     messages: messages,
                     tools: [],
-                    onDelta: onDelta
+                    onDelta: onDelta,
+                    onReasoning: onReasoning
                 )
+                // ⭐ 记住「这家 baseURL + model 不认 reasoning_effort」，
+                //    后续请求直接不带这个字段 —— 免得每次回答都白跑一次 400 往返。
+                //    ⚠️ 只在**确实因为推理参数**才降级时记（tools 一起被砍那不算）。
+                //    换模型 / 换地址时 hash 变了，会自然重新试 —— 见 `noReasoningKey`。
+                if config.reasoning != .off {
+                    rememberNoReasoning(baseURL: config.baseURL, model: config.model)
+                }
             }
 
             if result.toolCalls.isEmpty {
@@ -204,13 +236,23 @@ enum LLMService {
                     "content": output
                 ])
             }
+        }
 
-            if round == maxRounds - 1 && usedTools {
-                messages.append([
-                    "role": "user",
-                    "content": "（工具已经用完了，现在直接用你自己的话回我，别再调工具。）"
-                ])
-            }
+        // 走到这儿 = **轮数用完（或超时），而她还惦记着调工具**。
+        // 补那句话逼她收尾，并**真的再问一次**（这一次不带工具）——
+        // 少问这一次的话，她最后一轮只调了工具、没有正文，用户就干等一个空回复。
+        if usedTools {
+            messages.append([
+                "role": "user",
+                "content": "（工具已经用完了，现在直接用你自己的话回我，别再调工具。）"
+            ])
+            _ = try await sendOnce(
+                config: config,
+                messages: messages,
+                tools: [],
+                onDelta: onDelta,
+                onReasoning: onReasoning
+            )
         }
     }
 
@@ -220,7 +262,8 @@ enum LLMService {
         config: LLMConfig,
         messages: [[String: Any]],
         tools: [DeviceTool],
-        onDelta: @escaping (String) -> Void
+        onDelta: @escaping (String) -> Void,
+        onReasoning: ((String) -> Void)?
     ) async throws -> RoundResult {
         let key = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw LLMError.notConfigured }
@@ -248,8 +291,12 @@ enum LLMService {
             body["tools"] = DeviceTools.definitions()
             body["tool_choice"] = "auto"
         }
-        // 推理预算：关闭时不传这个字段（有些模型不认，传了反而报错）
-        if let effort = config.reasoning.parameter {
+        // 推理预算：关闭时不传这个字段（有些模型不认，传了反而报错）。
+        // ⚠️ 这家接口**已经证明不认** `reasoning_effort`（记在 UserDefaults，
+        //    key 里带 baseURL+model 的稳定哈希）时就不传了 —— 直接省掉每次那一次 400 往返。
+        //    换模型 / 换地址 → hash 变 → 自然重新试。
+        if let effort = config.reasoning.parameter,
+           !remembersNoReasoning(baseURL: config.baseURL, model: config.model) {
             body["reasoning_effort"] = effort
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -284,6 +331,16 @@ enum LLMService {
             if let piece = delta["content"] as? String, !piece.isEmpty {
                 text += piece
                 onDelta(piece)
+            }
+
+            // ⭐ 深度思考：把 `reasoning_content` 透出去。
+            // ⚠️ 有的兼容实现字段名叫 `reasoning` —— **两个都试**：
+            //    先看 `reasoning_content`，没有再退到 `reasoning`，且**只有它是 String 才算**。
+            // 🔴 这段**绝不混进 `content`**，也不混进最终回复 —— 否则用户会看到她的内心独白。
+            //    这里传出去的是**增量**（一段一段），全量由调用方自己拼。
+            if let piece = (delta["reasoning_content"] as? String)
+                ?? (delta["reasoning"] as? String), !piece.isEmpty {
+                onReasoning?(piece)
             }
 
             if let fragments = delta["tool_calls"] as? [[String: Any]] {
@@ -338,5 +395,34 @@ enum LLMService {
         }
 
         return RoundResult(text: text, toolCalls: toolCalls, assistantMessage: assistant)
+    }
+
+    // MARK: - 「这家接口不认推理参数」的记忆
+
+    /// 记过的判定，落在 UserDefaults。key 里带 baseURL+model 的稳定哈希 ——
+    /// 所以**换模型 / 换地址会自然得到一个新 key**，等于重新试一次，
+    /// 不会被上一家接口的"坏印象"连累。
+    ///
+    /// ⚠️ 用**自己算的稳定哈希**（FNV-1a），**绝不能用 `String.hashValue`** ——
+    ///    后者每次进程启动都会变（Swift 的哈希是随机加盐的），
+    ///    存进去的 key 下次启动就对不上了，等于没记。
+    private static func noReasoningKey(baseURL: String, model: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325          // FNV-1a
+        for byte in (baseURL + "|" + model).utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        let hex = String(format: "%08X", UInt32(truncatingIfNeeded: hash))
+        return "aevis.noReasoning.\(hex)"
+    }
+
+    /// 这家接口是不是已经证明不认 `reasoning_effort`。
+    private static func remembersNoReasoning(baseURL: String, model: String) -> Bool {
+        UserDefaults.standard.bool(forKey: noReasoningKey(baseURL: baseURL, model: model))
+    }
+
+    /// 记下「这家接口不认 `reasoning_effort`」—— 后续请求直接不带。
+    private static func rememberNoReasoning(baseURL: String, model: String) {
+        UserDefaults.standard.set(true, forKey: noReasoningKey(baseURL: baseURL, model: model))
     }
 }

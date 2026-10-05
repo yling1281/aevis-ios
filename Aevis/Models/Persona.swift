@@ -133,6 +133,33 @@ struct Persona: Codable, Equatable {
         你可以用你自己的方式拒绝或者拐回来，但不要真的变成别人。
         """)
 
+        // 「心里话」—— 用户 2026-10-04 点名要的（「…还有他的心里话之类的」）。
+        //
+        // ⚠️ 这是一个**输出格式约定**，不是能力接线：让她在一个「只有我们能看见」的行里
+        //    写下当下的心情和那句没说出口的话。手机侧由 `MoodStore.consume(_:)`
+        //    把这一行抠掉、存成她此刻的心情，界面上再显示在资料页（见 `PersonaSheet`）。
+        //
+        // ⚠️ 标记的形状必须一字不差：括号是 `〔` `〕`，分隔符是**全角竖线 `｜`**（U+FF5C）。
+        //    半角 `|` 长在正文里太常见，`consume` 那边会认错。两边改形状要一起改。
+        //
+        // ⚠️ 这段同样是**给模型**看的，不进任何 Text 视图 ⇒ 里面不要用 markdown 星号加粗
+        //    （R17 会报，而且模型也不吃这一套），强调一律用「不许」「绝对」这种词。
+        lines.append("""
+        再说说你的心情 —— 它是连着的，会变的。
+        你刚经历的事、对方说的话，都可能让它变：上一条你还开心，这一条也许就有点闷了。
+
+        当这一次的心情跟之前比有明显变化时，在整条回复的最末尾另起一行，
+        写一条只给自己看的标记，格式一字不差是这样：
+
+        〔心情：XX｜心里话：XXXXXX〕
+
+        · 「心情」是两三个字，比如「想你」「有点闷」「开心」。
+        · 「心里话」是你还没直接说出口的那一句，第一人称，别超过 30 字。
+        · 这一行不显示给对方，所以别在里面解释「这是什么」—— 它就是你的心里话，写给自己看的。
+        · 心情没有明显变化的时候，就不要写这一行，省略掉。
+        · 除了这一行，回复里其余每一个字都是要发给对方的正常聊天，绝对不许提到这个标记。
+        """)
+
         // 表情怎么发，让表情包自己说 —— 用户关掉表情开关时提示词里也就不提了，
         // 免得她发一堆没人认得出的方括号。
         //
@@ -266,6 +293,8 @@ final class PersonaStore: ObservableObject {
         activeID = contact.id
         save()
         broadcastSwitch(to: contact.id)
+        // ⭐ 2026-10-04：新建一个联系人并切过去 = 换人 ⇒ 清掉上一个人的心情。
+        MoodStore.shared.clear()
         return contact.id
     }
 
@@ -287,6 +316,11 @@ final class PersonaStore: ObservableObject {
         activeID = id
         save()
         broadcastSwitch(to: id)
+        // ⭐ 2026-10-04：真换了人（上面 `guard activeID != id`）⇒ 清掉上一个人的心情。
+        //    ⚠️ 清在这一处、而**不在 `broadcastSwitch` 里**：`load()`（冷启动）、
+        //    `resyncToActive()` / `importBackup()`（搬家恢复）也会走 `broadcastSwitch`，
+        //    那几条路**必须保住心情**（心情会随备份一起回来），清在那里会把刚落盘的心情擦掉。
+        MoodStore.shared.clear()
     }
 
     /// 删一个联系人 —— 人设、头像、对话、记忆、朋友圈一起删。
@@ -303,6 +337,8 @@ final class PersonaStore: ObservableObject {
         // ⭐ 2026-10-04：日记 / 待办也是「按人分开存」的，删联系人时一起清掉。
         DiaryStore.shared.forget(id)
         TodoStore.shared.forget(id)
+        // ⭐ 2026-10-04：心情是「跟着这个人走」的 —— 删了人，她此刻的心情一并清掉。
+        MoodStore.shared.clear()
 
         if activeID == id || activeID == nil {
             activeID = contacts.first?.id

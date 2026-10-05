@@ -224,7 +224,11 @@ final class BackupService {
          MomentStore.shared, CoupleStore.shared,
          // ⭐ 2026-10-04：日记 / 待办 / 虚拟银行一起进包 ——
          //    老板明确的「所有的东西都存百度网盘」。
-         DiaryStore.shared, TodoStore.shared, WalletStore.shared]
+         DiaryStore.shared, TodoStore.shared, WalletStore.shared,
+         // ⭐ 2026-10-04：她的心情（她的心里话）也进包 —— 换设备后心情还在。
+         //    `MoodStore.swift` 里已补 `extension MoodStore: BackupableStore`
+         //    （`backupName = "mood"`），与 `label()` 的 `case "mood"` 对得上。
+         MoodStore.shared]
     }
 
     /// 恢复收尾：把「现在看着谁」摆到搬过来的那个 activeID 上。
@@ -644,6 +648,8 @@ final class BackupService {
         case "diary": return "日记"
         case "todo": return "一起做的事"
         case "wallet": return "虚拟银行"
+        // ⭐ 2026-10-04：她的心情（她的心里话）。
+        case "mood": return "她的心情"
         default: return name
         }
     }

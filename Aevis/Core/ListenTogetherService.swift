@@ -184,7 +184,10 @@ final class ListenTogetherService: ObservableObject {
             return
         }
 
-        let text = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ⭐ 她跟着歌词说的这句要显示在面板上（还可能被点小喇叭念出来）——
+        //    先剥掉末尾的心情标记，跟聊天页一个口径（顺便把心情落库）。
+        let text = MoodStore.shared.consume(collected)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         herLines.insert(text, at: 0)
         if herLines.count > 30 { herLines.removeLast() }
@@ -291,7 +294,10 @@ final class ListenTogetherService: ObservableObject {
             return
         }
 
-        let reply = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ⭐ 收尾剥掉末尾的心情标记 —— 跟她打字的这条也要镜像进正式聊天记录，
+        //    不能把标记带进去（顺带把心情落库，跟主链路一致）。
+        let reply = MoodStore.shared.consume(collected)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else {
             if chatLines.indices.contains(slot) { chatLines.remove(at: slot) }
             return

@@ -310,7 +310,9 @@ final class ProactiveService {
     private func callLine(settings: AppSettings) -> String {
         if let line = settings.proactiveLines.randomElement(),
            !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return line
+            // ⭐ 这句会写到「她打给你」那条通知的正文上 —— 池里可能是旧文案，
+            //    纯剥一次标记（不更新心情），别让标记露在来电通知上。
+            return MoodStore.strippingMarker(from: line)
         }
         return Self.fallbackCallLines.randomElement() ?? "想给你打个电话"
     }
@@ -659,7 +661,10 @@ final class ProactiveService {
         } catch {
             return nil
         }
-        let trimmed = collected.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ⭐ 剥掉末尾的心情标记 —— 这句要弹成通知、还要落进聊天记录，
+        //    标记一个字都不能露（本函数是 @MainActor，直接调 consume）。
+        let trimmed = MoodStore.shared.consume(collected)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
@@ -692,7 +697,9 @@ final class ProactiveService {
     /// 取话术池；不够就先让模型写一批，写不出来用内置兜底。
     func linePool(persona: Persona, settings: AppSettings) async -> [String] {
         if settings.proactiveLines.count >= 4 {
-            return settings.proactiveLines
+            // ⭐ 话术池是持久化的，可能还存着「早先那版没剥过标记」的旧句子 ——
+            //    取出来顺手纯剥一遍（不更新心情：这是回放旧文案，不是她刚说的）。
+            return settings.proactiveLines.map { MoodStore.strippingMarker(from: $0) }
         }
         if settings.isConfigured {
             let generated = await generateLines(
@@ -732,7 +739,10 @@ final class ProactiveService {
             return []
         }
 
-        let lines = collected
+        // ⭐ 先剥掉末尾的心情标记再拆句 —— 这批话会存进话术池、以后弹给用户看，
+        //    标记不能混在里面。本函数在主 actor 之外，跳一次主线程再剥。
+        let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
+        let lines = stripped
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .map { line -> String in

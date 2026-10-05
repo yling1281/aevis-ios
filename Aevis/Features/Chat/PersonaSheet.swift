@@ -31,6 +31,10 @@ struct PersonaSheet: View {
     @State private var showMC = false
     @State private var note: String?
 
+    /// ⭐ 2026-10-04：她此刻的心情（她在聊天里悄悄写下的「心里话」）。
+    /// 只读 —— 值由 `MoodStore.consume(_:)` 在收到回复时写入，这里只负责显示。
+    @ObservedObject private var moodStore = MoodStore.shared
+
     private var persona: Persona { personaStore.persona }
 
     var body: some View {
@@ -38,6 +42,11 @@ struct PersonaSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     avatarCard
+                    // ⭐ 2026-10-04：她此刻的心情 —— 只有真的有心情时才出现，
+                    //    没心情（`current == nil`）就整块不显示，别露个空壳。
+                    if moodStore.current != nil {
+                        moodCard
+                    }
                     editCard
                     dangerCard
 
@@ -187,6 +196,62 @@ struct PersonaSheet: View {
 
     private var tagLine: String {
         persona.tags.isEmpty ? "还没贴标签，点一下加几个" : persona.tags.joined(separator: " · ")
+    }
+
+    // MARK: - 她的心情（2026-10-04）
+
+    /// 她**此刻**的心情 + 那句没说出口的心里话。
+    ///
+    /// ⚠️ 只在 `current != nil` 时被 `body` 显示 —— 没心情不露空壳。
+    /// ⚠️ 样式全部照这一页已有的「卡片」抄：`.aevisGlass(cornerRadius: 20)` + 语义色，
+    ///    不自造颜色、不用 emoji 图标。这一页本来就没用 emoji 当图标，所以这里也不加。
+    private var moodCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(moodStore.current?.mood ?? "")
+                    .font(.aevis(18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if let updated = moodStore.current?.updatedAt {
+                    Text(Self.relativeTime(from: updated))
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Text(moodStore.current?.innerVoice ?? "")
+                .font(.aevis(13))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // 「清掉」—— 不显眼处的一个小入口，别抢主操作。
+            HStack {
+                Spacer(minLength: 8)
+                Button {
+                    MoodStore.shared.clear()
+                } label: {
+                    Text("清掉")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .aevisGlass(cornerRadius: 20)
+    }
+
+    /// 「刚刚 / 3 分钟前 / 2 小时前 / 1 天前」。
+    private static func relativeTime(from date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 { return "刚刚" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes) 分钟前" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours) 小时前" }
+        return "\(hours / 24) 天前"
     }
 
     private var dangerCard: some View {
