@@ -14,6 +14,8 @@ struct RootView: View {
     @State private var showCrash = RootView.shouldShowCrashReport
     /// 「换设备自动恢复」这辈子只试一次 —— 见下面那个 `.task`。
     @State private var didTryRestore = false
+    /// ⭐ 2026-10-04：登录之后那条「把东西存到你自己的网盘」的引导（只弹一次）。
+    @State private var showPanGuide = false
 
     /// 崩了要不要弹那一屏。
     ///
@@ -59,6 +61,10 @@ struct RootView: View {
         // 没授权的时候人本来就卡在门禁页，而崩溃码是当下更该看到的东西。
         .fullScreenCover(isPresented: $showCrash) {
             CrashReportView { showCrash = false }
+        }
+        // ⭐ 2026-10-04：登录后一次性的「把东西存到你自己的网盘」引导。
+        .sheet(isPresented: $showPanGuide) {
+            BaiduPanGuideSheet()
         }
         // 授权通过的那一刻：门禁页淡出、主界面淡入。
         // ⚠️ 盯的是 `gate.authorized` 而不是 `isBlocking` —— 后者是计算属性，
@@ -215,12 +221,28 @@ struct RootView: View {
         // ⚠️ 恢复完 `personaStore` 变了，`normal` 那一层会自己从
         //    「造一个她」切到主界面 —— 不用我们手动跳。
         .task(id: account.isSignedIn) {
-            guard account.isSignedIn, !gate.isBlocking, !didTryRestore else { return }
+            guard account.isSignedIn, !gate.isBlocking else { return }
+            // ⭐ 登录之后**弹一次**「把东西存到你自己的网盘」的引导 ——
+            //    只弹一次（`AppSettings.panGuideShown` 落盘记着），
+            //    而且只在还没授权网盘的时候提。见 `BaiduPanGuideSheet`。
+            offerPanGuideIfNeeded()
+            guard !didTryRestore else { return }
             didTryRestore = true
             if let what = await AutoSync.shared.autoRestoreIfNewDevice() {
                 bridgeNote = "已从百度网盘恢复\(what)。"
             }
         }
+    }
+
+    /// 该不该弹网盘引导：**已登录 且 还没授权网盘 且 从没弹过**。
+    ///
+    /// ⚠️ 先置 `panGuideShown = true` 再弹 —— 用户点了「以后再说」也算弹过，
+    ///    不能因为没授权就每次登录都来烦一遍。
+    private func offerPanGuideIfNeeded() {
+        guard !AppSettings.shared.panGuideShown else { return }
+        guard !BaiduPanClient.shared.isAuthorized else { return }
+        AppSettings.shared.panGuideShown = true
+        showPanGuide = true
     }
 
     @ViewBuilder

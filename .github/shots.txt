@@ -103,3 +103,10 @@
 # ⚠️ 必须带 -aevisOpenCall：模拟器里没有麦克风权限也没有 API Key，
 #    真起一通电话必然失败 → `state` 回 `.idle` → 那一层根本不显示，等于白截。
 41-call        -aevisDemo -aevisOpenCall
+
+# ⭐ 2026-10-04 手机端补齐：发现页新入口 —— 日记 / 一起做的事 / 一起玩。
+#    ⚠️ 必须带 -aevisOpenTab=discover：这几个界面是从发现页弹出来的，
+#       不切到发现 tab，那一页根本不出现，启动参数也就没人接。
+42-diary       -aevisDemo -aevisOpenTab=discover -aevisOpenDiary
+43-todo        -aevisDemo -aevisOpenTab=discover -aevisOpenTodo
+44-mc          -aevisDemo -aevisOpenTab=discover -aevisOpenMC

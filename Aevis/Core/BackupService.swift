@@ -103,6 +103,17 @@ final class BackupService {
     /// | 2 | 二进制 plist + 整包加密，**含头像原图 + 朋友圈配图**（2026-10-03） |
     static let format = 2
 
+    /// ⭐ T01 新增：**包内结构版本**（与容器 `format` 分开，各管一摊）。
+    ///
+    /// | 号 | 变化 |
+    /// |---|---|
+    /// | 2 | 没有 `deviceId` / `revision`，没有 wallet/diary/todo/playlist 分节 |
+    /// | 3 | T01 起：包内多了 `deviceId` / `revision`（版本戳），后续再加若干分节 |
+    ///
+    /// ⚠️ 恢复端**只认 `<= schema`**：比它新的包读不了（`BackupError.tooNew`）。
+    ///    改结构就 +1，别动这条规矩。
+    static let schema = 3
+
     /// 上一次备份的文件名，界面上显示用。
     static let lastBackupKey = "aevis.lastBackupName"
 
@@ -125,12 +136,17 @@ final class BackupService {
     enum Kind: String {
         case live
         case full
+        /// ⭐ T01 新增：**钥匙包**（API Key / 网易云 Cookie）。**默认关**（R-17）——
+        ///    只有用户显式勾选才写 `aevis-keys.aevis`。**它不含任何业务 Store**，
+        ///    只有一个 `keys` 段（见 `KeyBundle.swift` / 架构 §3.2.3）。
+        case keys
 
         /// 给人看的名字（界面上说"正在同步聊天记录"比"正在同步"清楚）。
         var label: String {
             switch self {
             case .live: return "聊天记录"
             case .full: return "完整备份"
+            case .keys: return "钥匙包"
             }
         }
     }
@@ -166,9 +182,49 @@ final class BackupService {
         "aevis.lastBackupName"
     ]
 
+    // MARK: - 版本戳（T01）
+    //
+    // ⭐ `deviceId` / `revision` 是**本机**的同步状态，不是"你们之间的东西"：
+    //    跟着包搬到新机上 = 新机冒充旧机 ⇒ 一律存 UserDefaults，且**不进包**
+    //    （靠 `excludedPrefixes` 里的 `aevis.device.` 前缀天然挡住）。
+
+    /// 产出方稳定设备 id。首次生成后落盘持久（跨启动不变）。
+    ///
+    /// ⚠️ 故意用 `aevis.device.` 前缀 ⇒ 被 `excludedPrefixes` 挡在 settings 快照外
+    ///    （这个 id **绝不能**跟着包搬到别的设备上）。
+    static var deviceId: String {
+        let key = "aevis.device.syncId"
+        if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty {
+            return saved
+        }
+        let fresh = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(fresh, forKey: key)
+        return fresh
+    }
+
+    /// 版本戳快照（冲突检测用）：本机单调写入序号 + 本机认可的 remote mtime/size。
+    ///
+    /// ⚠️ 全用 `aevis.device.` 前缀 ⇒ 不进包、不跨设备。写入（`+1`）由同步逻辑负责
+    ///    （见 `AutoSync`）；这里只负责**如实打进包**，让电脑端能做三向判断。
+    private static func revisionSnapshot() -> [String: Any] {
+        let d = UserDefaults.standard
+        return [
+            "seq": d.integer(forKey: "aevis.device.syncSeq"),
+            "baseMtime": d.integer(forKey: "aevis.device.baseMtime"),
+            "baseSize": d.integer(forKey: "aevis.device.baseSize")
+        ]
+    }
+
+    /// 所有会进包的 Store。
+    ///
+    /// ⚠️ 钥匙包（`.keys`）**不走这里** —— 它只有一个 `keys` 段（由 `KeyBundle` 管），
+    ///    不含任何业务 Store。`makeBackup(kind: .keys)` 会跳过这一整段。
     private static func stores() -> [BackupableStore] {
         [PersonaStore.shared, ChatStore.shared, MemoryStore.shared,
-         MomentStore.shared, CoupleStore.shared]
+         MomentStore.shared, CoupleStore.shared,
+         // ⭐ 2026-10-04：日记 / 待办 / 虚拟银行一起进包 ——
+         //    老板明确的「所有的东西都存百度网盘」。
+         DiaryStore.shared, TodoStore.shared, WalletStore.shared]
     }
 
     /// 恢复收尾：把「现在看着谁」摆到搬过来的那个 activeID 上。
@@ -195,24 +251,34 @@ final class BackupService {
     ///   朋友圈配图一起装（手动备份用，大）。见 `Kind` 的注释。
     func makeBackup(kind: Kind = .full) throws -> Data {
         var storeObjects: [String: Any] = [:]
-        for store in Self.stores() {
-            let data = try store.exportBackup()
-            // 各 Store 导出的是 **JSON**，所以里面像 `imageData`（聊天图片）这种字段
-            // 是 **base64 字符串**，**不是**原生字节 —— 进了下面的 plist 也还是字符串。
-            // （base64 是**无损**的 ⇒ 画质不受影响，只是体积多 33%。真要让聊天图片也走
-            //   原生字节，得改五个 Store 的序列化协议并双向兼容 —— 本期不做。）
-            // ⭐ 真正以**原生字节**进包的是下面单独收的两段：`avatars` 和 `momentImages`。
-            storeObjects[store.backupName] = try JSONSerialization.jsonObject(with: data)
+        // ⚠️ 钥匙包**不含任何业务 Store** —— 它只有 `keys` 那一段（§3.2.3）。
+        //    不加这道判断的话，钥匙包会把整台机器的聊天记录也塞进去。
+        if kind != .keys {
+            for store in Self.stores() {
+                let data = try store.exportBackup()
+                // 各 Store 导出的是 **JSON**，所以里面像 `imageData`（聊天图片）这种字段
+                // 是 **base64 字符串**，**不是**原生字节 —— 进了下面的 plist 也还是字符串。
+                // （base64 是**无损**的 ⇒ 画质不受影响，只是体积多 33%。真要让聊天图片也走
+                //   原生字节，得改五个 Store 的序列化协议并双向兼容 —— 本期不做。）
+                // ⭐ 真正以**原生字节**进包的是下面单独收的两段：`avatars` 和 `momentImages`。
+                storeObjects[store.backupName] = try JSONSerialization.jsonObject(with: data)
+            }
         }
 
         var package: [String: Any] = [
             "app": "Aevis",
             "format": Self.format,
+            // ⭐ T01 新增：包内结构版本（2→3）。与 `format`（容器版本）分开。
+            "schema": Self.schema,
             // ⭐ 记下这份是轻包还是完整包。恢复时可以照实告诉用户
             //    （"这份是实时同步过来的，没有头像"比"恢复完了"诚实得多）。
             "kind": kind.rawValue,
+            // ⭐ T01 新增：产出方稳定设备 id（本机，落盘持久，不进包）。
+            "deviceId": Self.deviceId,
             "createdAt": ISO8601DateFormatter().string(from: Date()),
             "build": (Bundle.main.infoDictionary?["AevisCommit"] as? String) ?? "",
+            // ⭐ T01 新增：版本戳（冲突检测用，见架构 §5.2）。本机状态，不跨设备。
+            "revision": Self.revisionSnapshot(),
             "stores": storeObjects,
             "settings": try JSONEncoder().encode(settingsSnapshot()).base64EncodedString()
         ]        // ⚠️ `.live` 时这两段**整个不进包**（不是塞空字典）——
@@ -261,6 +327,12 @@ final class BackupService {
         let version = (package["format"] as? Int) ?? 0
         guard version <= Self.format else {
             throw BackupError.tooNew(version)
+        }
+        // ⭐ T01：**包内结构版本**也要认。比它新 ⇒ 读不了（老 App 见新结构会错位）。
+        //    ⚠️ 缺省当成当前版本：老包（schema 2 及以前）根本没有这个字段，不能因此把它拒了。
+        let schema = (package["schema"] as? Int) ?? Self.schema
+        guard schema <= Self.schema else {
+            throw BackupError.tooNew(schema)
         }
         guard let storeObjects = package["stores"] as? [String: Any] else {
             throw BackupError.badFormat
@@ -567,6 +639,11 @@ final class BackupService {
         case "chats": return "聊天记录"
         case "memory": return "记忆"
         case "moments": return "朋友圈"
+        case "couple": return "情侣空间"
+        // ⭐ 2026-10-04 新增的三段（日记 / 待办 / 虚拟银行）。
+        case "diary": return "日记"
+        case "todo": return "一起做的事"
+        case "wallet": return "虚拟银行"
         default: return name
         }
     }

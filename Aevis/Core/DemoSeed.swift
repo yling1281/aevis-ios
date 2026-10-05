@@ -41,6 +41,7 @@ enum DemoSeed {
         seedProfile()
         seedMemory()
         seedMoments()
+        seedDiaryAndTodo()
         #endif
     }
 
@@ -165,6 +166,47 @@ enum DemoSeed {
             store.comment("知道啦，今天就放了一点点", on: hers, author: .ta)
         }
         store.statusLine = nil
+    }
+
+    /// ⭐ 2026-10-04：日记 / 待办也要有内容，不然截图只能截到空状态。
+    /// （这两块都是「按人分开存」的，所以必须在 `seedContacts` 选好人之后再塞。）
+    private static func seedDiaryAndTodo() {
+        let diary = DiaryStore.shared
+        if diary.entries.isEmpty {
+            var first = DiaryEntry()
+            first.date = Date()
+            first.title = "今天去看海了"
+            first.body = "风有点大，头发全糊在脸上。她说下次要带我坐一次船。"
+            first.mood = "开心"
+            first.authorIsMe = true
+            diary.add(first)
+
+            var reply = DiaryEntry()
+            reply.date = Date()
+            reply.title = "记一件小事"
+            reply.body = "他今天走路走神，差点撞到电线杆。记下来，以后笑他。"
+            reply.mood = "想你"
+            reply.authorIsMe = false
+            diary.add(reply)
+        }
+
+        let todo = TodoStore.shared
+        if todo.items.isEmpty {
+            var a = TodoItem()
+            a.title = "一起去看一次海"
+            a.note = "等天气暖和一点"
+            todo.add(a)
+
+            var b = TodoItem()
+            b.title = "陪她把你那首歌听完"
+            todo.add(b)
+
+            var c = TodoItem()
+            c.title = "给她做一顿饭"
+            c.done = true
+            c.doneAt = Date()
+            todo.add(c)
+        }
     }
 
     private static func seedMessages() {

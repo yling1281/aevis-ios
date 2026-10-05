@@ -481,6 +481,8 @@ final class AppSettings: ObservableObject {
         /// 自动同步（聊天记录 → 网盘）。见 `AutoSync`。
         static let autoSyncEnabled = "aevis.autoSync.enabled"
         static let autoRestoreEnabled = "aevis.autoRestore.enabled"
+        /// ⭐ 2026-10-04：网盘引导弹窗是不是**已经弹过**了（只弹一次，落盘记着）。
+        static let panGuideShown = "aevis.panGuide.shown"
     }
 
     /// 主题色候选。用户挑一个，界面里所有强调色跟着变。
@@ -1462,6 +1464,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(autoRestoreEnabled, forKey: Key.autoRestoreEnabled) }
     }
 
+    /// ⭐ 2026-10-04：登录之后那条「把东西存到你自己的网盘」的引导**只弹一次**。
+    ///
+    /// 弹之前先把它置 true —— 用户点了「以后再说」也算弹过，不再打扰。
+    /// （落盘存，跨启动有效；跟 `AutoSync.lastSyncKey` 一个写法。）
+    @Published var panGuideShown: Bool {
+        didSet { UserDefaults.standard.set(panGuideShown, forKey: Key.panGuideShown) }
+    }
+
     private static var backgroundFileURL: URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -1645,6 +1655,8 @@ final class AppSettings: ObservableObject {
         //       拿到的是默认值，所以"默认开"对老用户同样生效（这正是我们要的）。
         autoSyncEnabled = defaults.object(forKey: Key.autoSyncEnabled) as? Bool ?? true
         autoRestoreEnabled = defaults.object(forKey: Key.autoRestoreEnabled) as? Bool ?? true
+        // ⭐ 网盘引导弹窗：默认**没弹过**（false）。
+        panGuideShown = defaults.object(forKey: Key.panGuideShown) as? Bool ?? false
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
         momentCoverData = try? Data(contentsOf: Self.momentCoverFileURL)
 

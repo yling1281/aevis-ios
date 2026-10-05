@@ -296,7 +296,15 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
 
-            AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
+            // ⭐ 2026-10-04：头像也可以点 —— 点它进「TA 的资料」。
+            //    用户习惯"点对方的头像看资料"，右上角那个人像按钮之外再补这一下。
+            Button {
+                composerFocused = false
+                showPersona = true
+            } label: {
+                AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
+            }
+            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(persona.name)

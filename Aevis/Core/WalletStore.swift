@@ -175,8 +175,75 @@ final class WalletStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Key.entries)
     }
 
+    /// 从 `UserDefaults` 重新读一遍余额和流水。
+    ///
+    /// ⭐ 2026-10-04：搬家恢复时用。`importBackup` 是**非隔离**的（见文件末尾），
+    ///    它只写 UserDefaults，写完跳回主线程调这个方法，把 `@Published` 刷新过来。
+    func reloadFromDefaults() {
+        let defaults = UserDefaults.standard
+        myBalance = defaults.object(forKey: Key.mine) as? Double ?? 520.00
+        taBalance = defaults.object(forKey: Key.theirs) as? Double ?? 1314.00
+        if let data = defaults.data(forKey: Key.entries),
+           let list = try? JSONDecoder().decode([Entry].self, from: data) {
+            entries = list
+        } else {
+            entries = []
+        }
+    }
+
     /// 钱怎么显示。**两位小数 + ¥**，全 App 一处说了算。
     static func money(_ value: Double) -> String {
         String(format: "¥%.2f", value)
     }
 }
+
+// MARK: - 进网盘备份（2026-10-04）
+
+/// 让虚拟银行跟**聊天记录一起进网盘** —— 老板明确的「所有的东西都存百度网盘」。
+///
+/// ⚠️ 这个钱包本身是 `@MainActor` 的，而 `BackupableStore` 的方法是**同步、
+///    非隔离**的（`BackupService` 会在非主线程的路径上调到）。所以这三个方法
+///    一律标 `nonisolated`，**只碰 `UserDefaults`**（它自带线程安全），
+///    绝不碰 `@Published` —— 导入之后跳回主线程再刷新。
+///
+/// ⚠️ 键名一个都不能改（`aevis.wallet.mine` / `.theirs` / `.entries`）——
+///    那是已经落盘的数据，改了老用户的钱包当场清零。
+extension WalletStore: BackupableStore {
+
+    /// 包里这段的名字。**定了就别改** —— 改了的话老备份恢复不回来。
+    nonisolated var backupName: String { "wallet" }
+
+    /// 钱包的存档结构。`Entry` 复用类里那个。
+    private struct Archive: Codable {
+        var mine: Double = 520.00
+        var theirs: Double = 1314.00
+        var entries: [Entry] = []
+    }
+
+    nonisolated func exportBackup() throws -> Data {
+        let defaults = UserDefaults.standard
+        let archive = Archive(
+            mine: defaults.object(forKey: Key.mine) as? Double ?? 520.00,
+            theirs: defaults.object(forKey: Key.theirs) as? Double ?? 1314.00,
+            entries: defaults.data(forKey: Key.entries).flatMap {
+                try? JSONDecoder().decode([Entry].self, from: $0)
+            } ?? []
+        )
+        return try JSONEncoder().encode(archive)
+    }
+
+    nonisolated func importBackup(_ data: Data) throws {
+        let archive = try JSONDecoder().decode(Archive.self, from: data)
+        let defaults = UserDefaults.standard
+        defaults.set(archive.mine, forKey: Key.mine)
+        defaults.set(archive.theirs, forKey: Key.theirs)
+        if let list = try? JSONEncoder().encode(archive.entries) {
+            defaults.set(list, forKey: Key.entries)
+        }
+        // ⚠️ 界面上的余额 / 流水跳回主线程刷新 —— 直接改 @Published 会硬崩。
+        Task { @MainActor in
+            WalletStore.shared.reloadFromDefaults()
+        }
+    }
+}
+

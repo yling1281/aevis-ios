@@ -56,6 +56,11 @@ struct Persona: Codable, Equatable {
     var relationship: String = ""
     var voiceIdentifier: String = ""
     var avatarSeed: Int = 0
+    /// ⭐ 2026-10-04 新增：**个性标签**（「嘴硬心软」「夜猫子」这种几个字的短签）。
+    ///
+    /// 用在她资料页上，让她一眼有个性。**不给默认值以外的东西** ——
+    /// 老存档里没有这个字段，走 `decodeIfPresent` 就是空数组，等于没加。
+    var tags: [String] = []
 
     var isComplete: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -192,6 +197,8 @@ extension Persona {
         relationship = try container.decodeIfPresent(String.self, forKey: .relationship) ?? ""
         voiceIdentifier = try container.decodeIfPresent(String.self, forKey: .voiceIdentifier) ?? ""
         avatarSeed = try container.decodeIfPresent(Int.self, forKey: .avatarSeed) ?? 0
+        // ⚠️ 老存档里没有 tags ⇒ 空数组（不是 nil、也不是解码失败）。
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
     }
 }
 
@@ -293,6 +300,9 @@ final class PersonaStore: ObservableObject {
         MemoryStore.shared.forget(id)
         MomentStore.shared.forget(id)
         CoupleStore.shared.forget(id)
+        // ⭐ 2026-10-04：日记 / 待办也是「按人分开存」的，删联系人时一起清掉。
+        DiaryStore.shared.forget(id)
+        TodoStore.shared.forget(id)
 
         if activeID == id || activeID == nil {
             activeID = contacts.first?.id
@@ -301,7 +311,7 @@ final class PersonaStore: ObservableObject {
         save()
     }
 
-    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间）。
+    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间 / 日记 / 待办）。
     ///
     /// **集中在这一处**：以后再加「按人分开存」的东西时，
     /// 只要往这里加一行，就不会出现「换了人但某一块没跟着切」。
@@ -310,6 +320,8 @@ final class PersonaStore: ObservableObject {
         MemoryStore.shared.setOwner(id)
         MomentStore.shared.setOwner(id)
         CoupleStore.shared.setOwner(id)
+        DiaryStore.shared.setOwner(id)
+        TodoStore.shared.setOwner(id)
     }
 
     /// 搬家恢复完之后，把四家一起切到搬过来的那个人。

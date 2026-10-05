@@ -4,16 +4,26 @@ import SwiftUI
 ///
 /// 朋友圈、一起听这些原来藏在「更多」面板里的东西，
 /// 现在集中摆在这儿（用户的要求：跟微信一样）。
+///
+/// ⭐ 2026-10-04：老板看完电脑版新界面之后说「**手机端也同步这些**」——
+///    这一页一次补齐了四块：虚拟银行 / 日记 / 待办 / 一起玩。
 struct DiscoverView: View {
     @EnvironmentObject private var personaStore: PersonaStore
     @ObservedObject private var router = AppRouter.shared
     @ObservedObject private var together = ListenTogetherService.shared
     @ObservedObject private var player = MusicPlayer.shared
     @ObservedObject private var couple = CoupleStore.shared
+    @ObservedObject private var wallet = WalletStore.shared
+    @ObservedObject private var diary = DiaryStore.shared
+    @ObservedObject private var todo = TodoStore.shared
 
     @State private var showMusic = false
     @State private var showDouyin = false
     @State private var showCouple = false
+    @State private var showWallet = false
+    @State private var showDiary = false
+    @State private var showTodo = false
+    @State private var showMC = false
 
     var body: some View {
         NavigationStack {
@@ -29,24 +39,40 @@ struct DiscoverView: View {
                         entry("情侣空间", "heart.text.square", coupleLine) {
                             showCouple = true
                         }
-                        // 一起听 / 音乐 默认藏起来（见 Experimental）：买家装上去
-                        // 只会看到"要登录网易云、要订阅 Apple Music"，属于劝退项。
-                        if Experimental.enabled {
-                            // ⚠️ 「一起听」现在**直接开全屏播放器**（2026-10-01）。
-                            // 以前它开的是 `TogetherView`（三张设置卡片），
-                            // 用户说「不好用」「里面的东西全部重来」——
-                            // 那个面板已删，形态选择和找歌都搬进 `PlayerView` 了。
-                            entry("一起听", "music.note.list", togetherLine) {
-                                router.showPlayer = true
-                            }
-                            entry("音乐", "music.note", musicLine) {
-                                showMusic = true
-                            }
+                        // 一起听 / 音乐：**已经放开了**（2026-10-04）。
+                        // 原来它们裹在 `Experimental.enabled` 里（虽然那个开关恒为 true）。
+                        // 现在跟「情侣空间」一样是**裸入口** —— 这块功能已经定下来，
+                        // 不该再挂在"内测"的名头后面。
+                        //
+                        // ⚠️ 「一起听」开的是**全屏播放器**（2026-10-01）：
+                        //    以前它开 `TogetherView`（三张设置卡片），用户说「不好用」，
+                        //    那个面板已删，形态选择和找歌都搬进 `PlayerView` 了。
+                        entry("一起听", "music.note.list", togetherLine) {
+                            router.showPlayer = true
+                        }
+                        entry("音乐", "music.note", musicLine) {
+                            showMusic = true
+                        }
+                        // ⭐ 一起玩《我的世界》（2026-10-04 从电脑版同步过来）。
+                        entry("一起玩", "gamecontroller", "选个人设，陪你在《我的世界》里过一天") {
+                            showMC = true
                         }
                     }
                     // ⚠️ 抖音**永远不显示**（用户 2026-09-28：「抖音关掉」）。
                     //    抖音的代码没删：哪天想放开，把那段 entry 加回来即可。
-                    //
+                    card {
+                        // ⭐ 2026-10-04：虚拟银行搬进发现页（以前只藏在聊天页加号里），
+                        //    并且跟聊天记录一起进网盘备份。
+                        entry("虚拟银行", "yensign.circle", walletLine) {
+                            showWallet = true
+                        }
+                        entry("日记", "book.closed", diaryLine) {
+                            showDiary = true
+                        }
+                        entry("一起做的事", "checklist", todoLine) {
+                            showTodo = true
+                        }
+                    }
                     // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
                     //（现在恒为 true），所以它一直都在。用户 2026-10-01 要
                     //「让他真的能动起来」→ 这一条也从「更多」面板里提出来了，
@@ -73,7 +99,33 @@ struct DiscoverView: View {
             .sheet(isPresented: $showDouyin) {
                 DouyinBrowserView()
             }
+            .sheet(isPresented: $showWallet) {
+                WalletView()
+            }
+            .sheet(isPresented: $showDiary) {
+                DiaryView()
+            }
+            .sheet(isPresented: $showTodo) {
+                TodoView()
+            }
+            .sheet(isPresented: $showMC) {
+                MCView()
+            }
+            .onAppear {
+                applyLaunchOptions()
+            }
         }
+    }
+
+    /// 截图自检用的启动直达（只在 Debug 生效）。
+    private func applyLaunchOptions() {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-aevisOpenWallet") { showWallet = true }
+        if args.contains("-aevisOpenDiary") { showDiary = true }
+        if args.contains("-aevisOpenTodo") { showTodo = true }
+        if args.contains("-aevisOpenMC") { showMC = true }
+        #endif
     }
 
     // MARK: - 文案
@@ -95,6 +147,21 @@ struct DiscoverView: View {
         if let days = couple.daysTogether { return "在一起第 \(days) 天" }
         if let next = couple.upcoming.first { return "\(next.title) · \(next.daysText())" }
         return "倒数日、在一起多少天"
+    }
+
+    private var walletLine: String {
+        "我钱包里还有 " + WalletStore.money(wallet.myBalance)
+    }
+
+    private var diaryLine: String {
+        let count = diary.sorted.count
+        return count == 0 ? "两个人写同一个本子" : "已经写了 \(count) 篇"
+    }
+
+    private var todoLine: String {
+        if todo.items.isEmpty { return "想一起做的事，都写在这儿" }
+        if todo.openCount == 0 { return "清单上这些都做完啦" }
+        return "还有 \(todo.openCount) 件等着一起做"
     }
 
     // MARK: - 零件
