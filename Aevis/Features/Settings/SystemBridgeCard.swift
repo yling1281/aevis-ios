@@ -1,4 +1,5 @@
 import SwiftUI
+import AppIntents
 
 #if canImport(UIKit)
 import UIKit
@@ -8,6 +9,11 @@ import UIKit
 ///
 /// 这一版把「快捷指令」那条双向通道补全了 —— 之前只有半个（我们能调它，
 /// 它的输出回不来），所以锁屏和屏幕使用时间都只能说"做不到"。
+///
+/// ⭐ 2026-10-05：加了「Aevis 自带的动作」一栏（`ShortcutsLink()`）。
+///   Aevis 现在**出厂就带着**几条快捷指令动作（见 `Core/AppShortcuts.swift`），
+///   用户点一下 `ShortcutsLink` 就跳到系统「快捷指令」里 Aevis 的动作页，
+///   **不用自己手搓**。下面原来的手搓说明保留，但降级成"进阶 / 自定义"。
 struct SystemBridgeCard: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var screenTime = ScreenTimeInsight.shared
@@ -21,6 +27,12 @@ struct SystemBridgeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             title("系统")
+
+            // ——— Aevis 自带的动作（出厂就有，不用手搓）———
+
+            builtInActions
+
+            rule
 
             // ——— 锁屏 ———
 
@@ -75,11 +87,11 @@ struct SystemBridgeCard: View {
             // ——— 快捷指令怎么把数据发回来 ———
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("让快捷指令把数据发回来")
+                Text("进阶：自己拼快捷指令")
                     .font(.aevis(12.5, weight: .medium))
                     .foregroundStyle(.secondary)
 
-                Text("在快捷指令里最后加一步「打开 URL」，把下面任意一条填进去。点一下就能复制。")
+                Text("上面那些是现成的。如果你想要更自由的做法：在「快捷指令」里自己拼，最后加一步「打开 URL」，把下面任意一条填进去。点一下就能复制。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -218,6 +230,35 @@ struct SystemBridgeCard: View {
         #else
         note = text
         #endif
+    }
+
+    // MARK: - Aevis 自带的动作
+    //
+    // 这些走 **App Intents / App Shortcuts**（`Core/AppShortcuts.swift`）——
+    // 代码里声明一次，随 App 安装就出现在系统「快捷指令」的「App 快捷指令」分类里。
+    // 下面这个按钮一下跳到那里，用户不用自己拼。
+
+    private var builtInActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Aevis 自带的动作")
+                .font(.aevis(12.5, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Text("这些是现成的 —— 装好 Aevis 就有，不用你自己做。点下面这个按钮，到系统「快捷指令」里的 Aevis 那儿，点一下就能跑。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // 一下跳到「快捷指令」App 里本 App 的 App Shortcuts 页面。
+            ShortcutsLink()
+
+            Text("有：上报电量、上报位置、告诉\(Pronoun.current)我在干嘛。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
     }
 
     // MARK: - 零件

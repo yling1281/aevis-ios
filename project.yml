@@ -272,8 +272,8 @@ settings:
     #    ⚠️ 后端是**同一批**改动（`server/account/app.py` 新表 `device_logins` + 三条路由
     #       + `web/scan.html`）；`_verify/deploy_app.py` 里加了 4 条探针盯它。
     #       后端没上而先装这个包，扫码登录会 404 —— 自动同步那半是纯客户端，不受影响。
-    MARKETING_VERSION: "0.0.102"
-    CURRENT_PROJECT_VERSION: "102"
+    MARKETING_VERSION: "0.0.103"
+    CURRENT_PROJECT_VERSION: "103"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
