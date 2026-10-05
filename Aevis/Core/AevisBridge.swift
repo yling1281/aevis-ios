@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// 和「快捷指令」之间的**双向**桥。
 ///
 /// 为什么必须双向：iOS 只给了两根方向不同的通道，缺一条就什么都做不了。
@@ -35,7 +39,9 @@ import SwiftUI
 /// aevis://weather?text=北京 晴 26度
 /// aevis://calendar?text=下午三点开会
 /// aevis://health?text=昨晚睡了6小时
+/// aevis://deviceinfo?text=iPhone 14 Pro Max，iOS 26.0，存储剩 42GB
 /// aevis://device?text=现在在回家的地铁上   万能兜底，写什么都行
+/// aevis://paste?kind=health             把剪贴板里的内容当成这条信息（kind 可换 steps/battery/…，不给就进「其它」）
 /// aevis://clearcontext                    清掉上面这些
 /// ```
 enum AevisBridge {
@@ -150,8 +156,11 @@ enum AevisBridge {
         // ——— 外面的信息 ———
 
         case "location", "battery", "focus", "steps",
-             "weather", "calendar", "health", "device":
+             "weather", "calendar", "health", "deviceinfo", "device":
             return ingestAmbient(kind: command.host, command: command)
+
+        case "paste":
+            return ingestPaste(command: command)
 
         case "clearcontext":
             AmbientContext.shared.clear()
@@ -217,9 +226,44 @@ enum AevisBridge {
             return AmbientContext.shared.ingest(kind: kind, text: command.first)
 
         default:
-            // weather / calendar / health / device —— 快捷指令那边已经拼好一句话了
+            // weather / calendar / health / deviceinfo / device ——
+            // 快捷指令那边已经拼好一句话了
             return AmbientContext.shared.ingest(kind: kind, text: command.first)
         }
+    }
+
+    // MARK: - 剪贴板
+
+    /// 把**剪贴板**里的内容当成一条环境信息收下来。
+    ///
+    /// 为什么单独开一条：iOS 的 App **没有**后台读剪贴板的常规手段，
+    /// 但快捷指令可以「拷贝到剪贴板」，再用 `aevis://paste?kind=…` 把我们唤起 ——
+    /// 我们一被唤起就读一次剪贴板。适合传多行 / 长文本（比如健康同步的一整段）。
+    ///
+    /// ⚠️ **iOS 16 起，App 从别的 App 被唤起后第一次读 `UIPasteboard`，
+    ///    系统会弹一次「允许粘贴？」确认 —— 这是系统隐私行为，改不掉，不是我们写错了。**
+    ///    所以：单纯传一行数据（电量 / 步数）用 `aevis://battery?level=…` 这类**更顺**，
+    ///    只有"想把一整段文本搬进来"时才值得吃这一次弹窗。
+    private static func ingestPaste(command: Command) -> String {
+        // kind 白名单：认得的才收，乱写的一律退回「其它」，免得污染存储。
+        let known = AmbientContext.kinds.map(\.key)
+        let raw = (command.params["kind"] ?? "device").lowercased()
+        let kind = known.contains(raw) ? raw : "device"
+
+        #if canImport(UIKit)
+        let pasted = UIPasteboard.general.string ?? ""
+        #else
+        let pasted = ""
+        #endif
+
+        var text = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "剪贴板是空的，没记下。" }
+        // 截断：有人可能粘一整本书进来，别把 UserDefaults 撑爆。
+        if text.count > 2000 {
+            text = String(text.prefix(2000)) + "…"
+        }
+        // ingest 本身就返回一句中文提示，直接用。
+        return AmbientContext.shared.ingest(kind: kind, text: text)
     }
 
     // MARK: - 放歌
@@ -262,6 +306,8 @@ enum AevisBridge {
         ("打开一起听", "aevis://listen", "直接进一起听"),
         ("锁屏", "aevis://lock", "需要先在下面填好「锁屏」快捷指令的名字"),
         ("跑任意快捷指令", "aevis://shortcut?name=回家开灯", "name 要和那个快捷指令完全一致"),
+        ("剪贴板里的东西也发给她", "aevis://paste?kind=health",
+         "快捷指令先「拷贝到剪贴板」，再打开这个；iOS 会问一次「允许粘贴」"),
         ("清掉外面来的信息", "aevis://clearcontext", "位置 / 电量 / 步数这些一并清空")
     ]
 }

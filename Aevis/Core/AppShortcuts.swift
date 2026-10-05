@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import Network
 import UIKit
 
 /// 「快捷指令」里**出厂自带**的动作 —— 装好 Aevis 就有，用户一下都不用手搓。
@@ -16,17 +17,17 @@ import UIKit
 ///
 /// ## 三条硬规矩（错了就**静默失效**，界面上什么都看不出来）
 /// 1. 每个 phrase **必须含 `\(.applicationName)`**，否则那条动作不会出现在「快捷指令」里；
-/// 2. 一个 App 最多 **10** 条（Apple 建议 2–5 条），这里放 3 条；
+/// 2. 一个 App 最多 **10** 条（Apple 建议 2–5 条），这里放 6 条；
 /// 3. 这些动作**不能被 `shortcuts://run-shortcut?name=` 按名字调** —— 那条 URL 只认
 ///    用户自己库里的快捷指令。所以 Aevis 要用它们，只能在自己的代码里直接读
-///    （下面三个 intent 就是把"读"这一步做进了 App 自己）。
+///    （下面这些 intent 就是把"读"这一步做进了 App 自己）。
 ///
 /// ## 它和 `aevis://` 那条老路的关系
-/// 读到的值**写进 `AmbientContext`**（她聊天时会看到），进的跟
-/// `aevis://battery?level=57` 是**同一处存储、同一套保鲜期** —— 两条路只是入口不同。
+/// 读到的值**写进 `AmbientContext`**（她聊天时会看到），进的跟 `aevis://…` 是
+/// **同一处存储、同一套保鲜期** —— 两条路只是入口不同。
 /// 老路（用户自建快捷指令 + 「打开 URL」回传）**一条没动**，见 `AevisBridge`。
 ///
-/// ⚠️ 读电量这类系统数据，**在 intent 里直接读**（我们自己就是 App 进程），
+/// ⚠️ 读电量/机型这类系统数据，**在 intent 里直接读**（我们自己就是 App 进程），
 ///    比让用户拼「取电量 → 打开 URL」干净得多。读不到就如实说读不到，绝不编一个数。
 
 // MARK: - 上报电量
@@ -128,9 +129,87 @@ struct TellAevisIntent: AppIntent {
     }
 }
 
+// MARK: - 设备详细信息
+
+/// 采集"这台机器是什么"，记进 `AmbientContext` 的「设备」那一格。
+///
+/// 🔴 存的是 `deviceinfo`，**不是** `device` —— `device` 是「其它 / 随手记一句」的
+///    兜底格（`TellAevisIntent`、`aevis://device?text=` 都在用），若也写进 `device`
+///    会跟"我在干嘛"**互相覆盖**。
+struct ReportDeviceInfoIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "把设备信息发给 Aevis"
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let network = await NetworkKindReader.current()
+        let text = await AevisDevice.summary(network: network)
+        _ = await MainActor.run {
+            AmbientContext.shared.ingest(kind: "deviceinfo", text: text)
+        }
+        return .result(dialog: "已把设备信息告诉 Aevis：\(text)")
+    }
+}
+
+// MARK: - 打开 App
+
+/// 把 Aevis 带到前台。
+///
+/// ⚠️ iOS 26 里 `openAppWhenRun` 已废弃、官方推荐 `supportedModes`，
+///    但这里**故意沿用旧写法**：废弃只产生一条"过时"**警告**（不是错误 —— 苹果从不会
+///    在同一个 SDK 里既给出替换项、又把旧项变成不可用，那会让所有用到它的 App 当场编不过）。
+///    行为跟 `supportedModes = .foreground(.immediate)` **完全一样**。
+///    🔴 **⚠️ 待 CI 验证**：本机没有 Xcode/SDK，无法 100% 确认 iOS 26 SDK 把它标成
+///    deprecated（=警告）而不是 unavailable（=错误）。**若 CI 真报错**，就换成
+///    `static var supportedModes: IntentModes { .foreground(.immediate) }`。
+struct OpenAevisIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "打开 Aevis"
+
+    static var openAppWhenRun: Bool { true }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        return .result(dialog: "Aevis 这就来。")
+    }
+}
+
+// MARK: - 上报健康
+
+/// 健康数据的**接收端**：让用户在系统「快捷指令」里把「查找健康样本 / 统计健康样本」
+/// 的结果**直接拖进这个动作的参数**，记进 `AmbientContext` 的「健康」那一格。
+///
+/// 为什么只能这样：**Aevis 自己的 intent 读不了 HealthKit** —— 健康数据要
+/// `com.apple.developer.healthkit` 能力（entitlement），而侧载重签用的描述文件里没有它
+/// （卡的是**签名**，不是**代码**）。所以这条路只能是：**系统快捷指令自己读健康**，
+/// 再把结果喂给我们；我们当好"接收端"。
+///
+/// 参数类型用 `String` —— 这样在快捷指令里能点进去，把上游动作的变量拖进来。
+struct ReportHealthIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "把健康数据发给 Aevis"
+
+    @Parameter(title: "内容")
+    var text: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("把\(\.$text)发给 Aevis")
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            return .result(dialog: "没读到你想要的内容 —— 先确认健康里真有数据。")
+        }
+        // AmbientContext 是 @Published，必须在主线程上写（和同文件其它 intent 一致）。
+        let note = await MainActor.run {
+            AmbientContext.shared.ingest(kind: "health", text: value)
+        }
+        return .result(dialog: "\(note)")
+    }
+}
+
 // MARK: - 出厂预置
 
-/// 把上面三个 intent 变成「快捷指令」里 Aevis 分类下的动作。
+/// 把上面的 intent 变成「快捷指令」里 Aevis 分类下的动作。
 ///
 /// ⚠️ 这个类型**必须待在主 App target 里**（`Aevis/Core/` 就在主 target）。
 ///    放进扩展的话，intent 只能后台跑，读电量这类要前台的能力会拿不到。
@@ -164,5 +243,211 @@ struct AevisAppShortcuts: AppShortcutsProvider {
             shortTitle: "我在干嘛",
             systemImageName: "figure.walk"
         )
+        AppShortcut(
+            intent: ReportDeviceInfoIntent(),
+            phrases: [
+                "用\(.applicationName)看设备信息",
+                "告诉\(.applicationName)我的设备信息"
+            ],
+            shortTitle: "设备信息",
+            systemImageName: "info.circle"
+        )
+        AppShortcut(
+            intent: OpenAevisIntent(),
+            phrases: [
+                "打开\(.applicationName)",
+                "用\(.applicationName)打开自己"
+            ],
+            shortTitle: "打开 Aevis",
+            systemImageName: "arrow.up.forward.app"
+        )
+        AppShortcut(
+            intent: ReportHealthIntent(),
+            phrases: [
+                "把健康发给\(.applicationName)",
+                "用\(.applicationName)记一下健康"
+            ],
+            shortTitle: "上报健康",
+            systemImageName: "heart.fill"
+        )
     }
+}
+
+// MARK: - 网络类型
+
+/// 当前网络是 WiFi 还是蜂窝。
+///
+/// 用 `NWPathMonitor`（**后台也能用**，不像 `UIScreen` 那样要前台 scene）。
+/// `start(queue:)` 之后系统**必定**会回调一次（给当前路径），所以不会一直等不到。
+enum NetworkKindReader {
+
+    static func current() async -> String {
+        let monitor = NWPathMonitor()
+        let value: String = await withCheckedContinuation { continuation in
+            let once = ResumeOnce(continuation)
+            monitor.pathUpdateHandler = { path in
+                once.finish(describe(path))
+            }
+            monitor.start(queue: DispatchQueue(label: "com.aevis.networkkind"))
+        }
+        monitor.cancel()
+        return value
+    }
+
+    private static func describe(_ path: NWPath) -> String {
+        if path.usesInterfaceType(.wifi) { return "WiFi" }
+        if path.usesInterfaceType(.cellular) { return "蜂窝网络" }
+        if path.usesInterfaceType(.wiredEthernet) { return "有线网络" }
+        if path.status == .satisfied { return "在线" }
+        return "离线"
+    }
+}
+
+/// 保证 continuation **只被 resume 一次**。
+///
+/// `NWPathMonitor` 的回调会被调**不止一次**，而二次 resume 一个 `CheckedContinuation`
+/// 会**直接崩**（不是抛错）—— 所以这里上锁 + 一个"已经交过卷"的标志。
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private let continuation: CheckedContinuation<String, Never>
+
+    init(_ continuation: CheckedContinuation<String, Never>) {
+        self.continuation = continuation
+    }
+
+    func finish(_ value: String) {
+        lock.lock()
+        let shouldResume = !done
+        done = true
+        lock.unlock()
+        guard shouldResume else { return }
+        continuation.resume(returning: value)
+    }
+}
+
+// MARK: - 读设备
+
+/// 读"这台机器"的几样东西。**全部后台可读**
+/// （故意不碰 `UIScreen` —— 它要前台 scene，后台拿不到）。
+enum AevisDevice {
+
+    /// 机器标识 → 好懂的营销名。表里没有的返回 `nil`（调用方退回显示机器标识本身）。
+    static func marketingName(for identifier: String) -> String? {
+        names[identifier]
+    }
+
+    /// 一句话把"这台机器"说清楚。跑在主线程上（读 `UIDevice` 方便）。
+    @MainActor
+    static func summary(network: String) -> String {
+        var parts: [String] = []
+
+        // 机型：机器标识**复用现成的 `Diagnostics.machine`**（`Diagnostics.swift`，
+        // 别把 sysctl 那套再写一遍）。营销名查得到就用；查不到**原样显示机器标识**，
+        // 绝不猜名字；连标识都读不到才说"未知设备"。
+        let identifier = Diagnostics.machine
+        if let name = marketingName(for: identifier) {
+            parts.append(name)
+        } else if identifier.isEmpty || identifier == "unknown" {
+            parts.append("未知设备")
+        } else {
+            parts.append(identifier)
+        }
+
+        parts.append("iOS \(UIDevice.current.systemVersion)")
+
+        let memoryGB = Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024))
+        if memoryGB > 0 { parts.append("\(memoryGB)GB 内存") }
+
+        if let storage = storageSummary() { parts.append(storage) }
+        if let battery = batterySummary() { parts.append(battery) }
+
+        parts.append(network)
+        parts.append(localeSummary())
+        parts.append(gmtSummary())
+
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { parts.append("省电模式") }
+
+        return parts.joined(separator: "，")
+    }
+
+    // MARK: - 零件
+
+    private static func storageSummary() -> String? {
+        guard let attributes = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()),
+              let total = (attributes[.systemSize] as? NSNumber)?.int64Value,
+              let free = (attributes[.systemFreeSize] as? NSNumber)?.int64Value,
+              total > 0 else { return nil }
+        // 用十进制 GB（跟苹果标称一致），四舍五入到整数。
+        let totalGB = Int((Double(total) / 1_000_000_000).rounded())
+        let freeGB = Int((Double(free) / 1_000_000_000).rounded())
+        return "存储 \(totalGB)GB 剩 \(freeGB)GB"
+    }
+
+    private static func batterySummary() -> String? {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let raw = UIDevice.current.batteryLevel
+        guard raw >= 0 else { return nil }
+        let level = Int((raw * 100).rounded())
+        let state = UIDevice.current.batteryState
+        let charging = (state == .charging || state == .full)
+        return charging ? "电量 \(level)% 充电中" : "电量 \(level)%"
+    }
+
+    private static func localeSummary() -> String {
+        let locale = Locale.current
+        let code = locale.language.languageCode?.identifier ?? ""
+        let script = locale.language.script?.identifier
+
+        let language: String
+        if code == "zh" {
+            language = (script == "Hant") ? "繁体中文" : "简体中文"
+        } else if !code.isEmpty, let name = locale.localizedString(forLanguageCode: code) {
+            language = name
+        } else {
+            language = code.isEmpty ? "未知语言" : code
+        }
+
+        let regionCode = locale.region?.identifier ?? ""
+        let region = locale.localizedString(forRegionCode: regionCode) ?? regionCode
+        return region.isEmpty ? language : "\(language)·\(region)"
+    }
+
+    private static func gmtSummary() -> String {
+        let offset = TimeZone.current.secondsFromGMT()
+        let hours = offset / 3600
+        let minutes = abs(offset % 3600) / 60
+        let sign = offset < 0 ? "-" : "+"
+        if minutes == 0 { return "GMT\(sign)\(abs(hours))" }
+        return String(format: "GMT%@%d:%02d", sign, abs(hours), minutes)
+    }
+
+    /// `hw.machine` → 营销名。
+    ///
+    /// ⚠️ **只放有把握的型号。** 表里没有的一律退回显示机器标识 ——
+    ///    猜错一个名字（比如把 16 Plus 说成 16 Pro）比显示 `iPhone17,4` 更糟。
+    ///    iPad 的标识又多又杂，这里**故意不收**，iPad 上就显示 `iPad…` 原始标识。
+    private static let names: [String: String] = [
+        "iPhone8,1": "iPhone 6s", "iPhone8,2": "iPhone 6s Plus", "iPhone8,4": "iPhone SE",
+        "iPhone9,1": "iPhone 7", "iPhone9,3": "iPhone 7",
+        "iPhone9,2": "iPhone 7 Plus", "iPhone9,4": "iPhone 7 Plus",
+        "iPhone10,1": "iPhone 8", "iPhone10,4": "iPhone 8",
+        "iPhone10,2": "iPhone 8 Plus", "iPhone10,5": "iPhone 8 Plus",
+        "iPhone10,3": "iPhone X", "iPhone10,6": "iPhone X",
+        "iPhone11,8": "iPhone XR", "iPhone11,2": "iPhone XS",
+        "iPhone11,4": "iPhone XS Max", "iPhone11,6": "iPhone XS Max",
+        "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro",
+        "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE（第 2 代）",
+        "iPhone13,1": "iPhone 12 mini", "iPhone13,2": "iPhone 12",
+        "iPhone13,3": "iPhone 12 Pro", "iPhone13,4": "iPhone 12 Pro Max",
+        "iPhone14,4": "iPhone 13 mini", "iPhone14,5": "iPhone 13",
+        "iPhone14,2": "iPhone 13 Pro", "iPhone14,3": "iPhone 13 Pro Max",
+        "iPhone14,6": "iPhone SE（第 3 代）",
+        "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus",
+        "iPhone15,2": "iPhone 14 Pro", "iPhone15,3": "iPhone 14 Pro Max",
+        "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
+        "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max",
+        "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max",
+        "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus"
+    ]
 }

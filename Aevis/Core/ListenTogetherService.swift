@@ -318,7 +318,6 @@ final class ListenTogetherService: ObservableObject {
     /// **只在 Debug 生效。**
     func seedDemo() {
         active = true
-        mode = .sync
         thinking = false
         statusLine = nil
         herLines = [

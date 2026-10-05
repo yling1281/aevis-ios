@@ -252,7 +252,7 @@ struct SystemBridgeCard: View {
             // 一下跳到「快捷指令」App 里本 App 的 App Shortcuts 页面。
             ShortcutsLink()
 
-            Text("有：上报电量、上报位置、告诉\(Pronoun.current)我在干嘛。")
+            Text("有：上报电量、上报位置、上报设备信息、上报健康、打开 Aevis、告诉\(Pronoun.current)我在干嘛。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

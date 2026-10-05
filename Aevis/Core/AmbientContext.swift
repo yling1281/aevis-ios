@@ -38,6 +38,8 @@ final class AmbientContext: ObservableObject {
          "aevis://calendar?text=下午三点开会"),
         ("health", "健康", 12 * 3600,
          "aevis://health?text=昨晚睡了6小时，静息心率62"),
+        ("deviceinfo", "设备", 12 * 3600,
+         "aevis://deviceinfo?text=iPhone 14 Pro Max，iOS 26.0，存储剩 42GB"),
         ("device", "其它", 24 * 3600,
          "aevis://device?text=现在在回家的地铁上")
     ]
