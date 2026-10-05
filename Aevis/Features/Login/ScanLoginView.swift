@@ -11,7 +11,7 @@ import UIKit
 /// ## 屏幕上发生的事
 /// 这个页面拿一张票 → 把它画成二维码 → 每两秒问服务器一句「有人批了吗」。
 /// 用户拿**手机**（随便什么相机 App）扫这张码，会打开
-/// `https://account.apekin.com/scan?t=…`；那一页上点一下「同意」，
+/// `https://account.aevis.cn/scan?t=…`；那一页上点一下「同意」，
 /// 这边下一次轮询就拿到登录态了 —— **用户不用在这台设备上敲任何字**。
 ///
 /// ## 为什么不用自定义 scheme（`aevis://…`）
@@ -50,7 +50,9 @@ struct ScanLoginView: View {
 
     var body: some View {
         ZStack {
-            AevisBackground()
+            // 扫码登录页同样属于「开始页」这条链路（门禁 → 登录/扫码 → 主界面），
+            // 背景跟 RootView 的 `.start` 一致，避免页面间背景跳变。
+            AevisBackground(scope: .start)
 
             ScrollView {
                 VStack(spacing: 16) {

@@ -38,7 +38,7 @@ struct AdminLoginView: View {
         .scrollDismissesKeyboard(.interactively)
         .onAppear { serverDraft = store.base }
         .task {
-            // 开屏自动挑一条通的线路（线路一 → 线路二），和主 App 同一套判断。
+            // 开屏自动挑一条通的线路（线路一 → 线路二 → 线路三），和主 App 同一套判断。
             // 要是用户手动选过、且那条还通着，`autoPickLine` 会原样保留，不会乱改。
             let picked = await AdminAPI.autoPickLine()
             await MainActor.run {
@@ -157,7 +157,7 @@ struct AdminLoginView: View {
 
     private var serverEditor: some View {
         VStack(spacing: 8) {
-            // 线路一 / 线路二：两条线互为备用（域名会被云厂商按线路抽样拦，谁通走谁）。
+            // 线路一 / 线路二 / 线路三：三条线互为备用（域名会被云厂商按线路抽样拦，谁通走谁）。
             // 和主 App 用同一份 `AevisHosts.accountLines` / 同一套探测判断。
             HStack(spacing: 8) {
                 ForEach(AevisHosts.accountLines) { line in
@@ -193,7 +193,7 @@ struct AdminLoginView: View {
                         await MainActor.run {
                             store.updateBase(AdminAPI.base)
                             serverDraft = store.base
-                            lineNote = picked == nil ? "两条线路都连不上。" : "已切到\(picked!)。"
+                            lineNote = picked == nil ? "三条线路都连不上。" : "已切到\(picked!)。"
                         }
                     }
                 }

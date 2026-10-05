@@ -13,11 +13,18 @@ struct AppearanceSettingsCard: View {
     @ObservedObject private var fonts = FontStore.shared
     @ObservedObject private var icons = AppIconStore.shared
 
-    @State private var pickedItem: PhotosPickerItem?
-    @State private var imageNote: String?
+    /// 选图的两个入口**必须各存各的 item** —— 共用一个的话，
+    /// 在开始页那组选了图，聊天那组的 `onChange` 会被同时触发，两套就串了。
+    @State private var startPickedItem: PhotosPickerItem?
+    @State private var chatPickedItem: PhotosPickerItem?
+    /// 两套各自的「选完了 / 失败了」那行小字，互不干扰。
+    @State private var startImageNote: String?
+    @State private var chatImageNote: String?
     /// 背景图失败的原因 —— 用一个**弹窗**说出来。
     /// 之前只写进那一行小字里，用户翻不到，反馈就变成「选完图没变化」。
     @State private var imageAlert = ""
+    /// 弹窗的标题（哪一套背景出的问题）。见 `fail(_:target:)`。
+    @State private var imageAlertTitle = "背景"
     @State private var showImageAlert = false
     @State private var importingFont = false
     @State private var fontNote: String?
@@ -45,11 +52,23 @@ struct AppearanceSettingsCard: View {
         VStack(alignment: .leading, spacing: 0) {
             title(chatOnly ? "聊天背景与气泡" : "外观")
 
-            // ⚠️ **「聊天背景」放在第一位**。
-            //    以前它排在最后一屏之后 —— 用户进来找"改背景"，
+            // ⚠️ **背景相关的两组放最前面**。
+            //    以前「聊天背景」排在最后一屏之后 —— 用户进来找"改背景"，
             //    要划过玻璃/圆角/主题色/图标/字体五段才看到，反馈就是
             //    "点开外观怎么还是全部设置"。最常改的先给。
-            group("background", "聊天背景") { backgroundSection }
+            // ⭐ 两套背景**各占一组、各带自己的选择器**：
+            //    开始页一套（门禁 / 登录 / 主界面），聊天页一套（聊天框里）。
+            //    用户 2026-10-05：「选开始页……我要是选哪背景是聊天就是点进那个聊天框，
+            //    其他的不要」→ 其余页面不再跟随（见 `AevisBackgroundScope`）。
+            //
+            // ⚠️ 从聊天那种窄入口进来时（`chatOnly`），开始页那组**收起来** ——
+            //    **不是删掉**，完整模式（设置 → 外观）里还在。
+            if !chatOnly {
+                group("background", "开始页背景") { backgroundSection(.start) }
+                rule
+            }
+
+            group("chatbg", "聊天背景") { backgroundSection(.chat) }
             rule
 
             group("tone", "气泡与圆角") { toneSection }
@@ -84,6 +103,13 @@ struct AppearanceSettingsCard: View {
             allowsMultipleSelection: true
         ) { result in
             handleFontImport(result)
+        }
+        // 背景图失败就弹窗 —— **标题按是哪一套背景来定**（见 `fail(_:target:)`）。
+        // 一个 alert 就够了（两套共用一个 `showImageAlert`），别在两处各挂一个。
+        .alert(imageAlertTitle, isPresented: $showImageAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(imageAlert)
         }
     }
 
@@ -486,20 +512,49 @@ struct AppearanceSettingsCard: View {
         .padding(.vertical, 13)
     }
 
-    // MARK: - 聊天背景
+    // MARK: - 背景（开始页 / 聊天页 两套）
 
-    private var backgroundSection: some View {
+    /// 背景图属于**哪一套**设置。选图 / 删图 / 报错都按它分派，别串了。
+    private enum BackgroundTarget {
+        case start
+        case chat
+
+        /// 界面上给人看的名字（也当弹窗标题）。
+        var title: String {
+            switch self {
+            case .start: return "开始页背景"
+            case .chat: return "聊天背景"
+            }
+        }
+
+        /// 缩略图下面那句「已经设成 XX 了」。
+        var setLabel: String {
+            switch self {
+            case .start: return "已经设成开始页背景了"
+            case .chat: return "已经设成聊天背景了"
+            }
+        }
+    }
+
+    /// 一套「背景」小节 —— 开始页和聊天页**各一份**，只是绑的东西不同。
+    @ViewBuilder
+    private func backgroundSection(_ target: BackgroundTarget) -> some View {
+        let style = styleBinding(target)
+        let data = dataBinding(target)
+        let picked = pickedBinding(target)
+        let note = noteBinding(target)
+
         VStack(alignment: .leading, spacing: 11) {
 
-            Picker("聊天背景", selection: $settings.backgroundStyle) {
-                ForEach(BackgroundStyle.allCases) { style in
-                    Text(style.label).tag(style)
+            Picker(target.title, selection: style) {
+                ForEach(BackgroundStyle.allCases) { option in
+                    Text(option.label).tag(option)
                 }
             }
             .pickerStyle(.segmented)
 
             HStack(spacing: 10) {
-                PhotosPicker(selection: $pickedItem, matching: .images) {
+                PhotosPicker(selection: picked, matching: .images) {
                     Text("从相册选一张")
                         .font(.aevis(14, weight: .medium))
                         .foregroundStyle(.primary)
@@ -511,13 +566,13 @@ struct AppearanceSettingsCard: View {
                 // 光写 .foregroundStyle(.primary) 不够 —— 截图自检时发现的（文字是蓝的）。
                 .tint(Color.primary)
 
-                if settings.customBackgroundData != nil {
+                if data.wrappedValue != nil {
                     Button {
-                        settings.customBackgroundData = nil
-                        if settings.backgroundStyle == .custom {
-                            settings.backgroundStyle = .aurora
+                        data.wrappedValue = nil
+                        if style.wrappedValue == .custom {
+                            style.wrappedValue = .aurora
                         }
-                        imageNote = nil
+                        note.wrappedValue = nil
                     } label: {
                         Text("删掉这张")
                             .font(.aevis(14))
@@ -531,8 +586,8 @@ struct AppearanceSettingsCard: View {
                 Spacer(minLength: 0)
             }
 
-            if let imageNote {
-                Text(imageNote)
+            if let message = note.wrappedValue {
+                Text(message)
                     .font(.aevis(12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -542,8 +597,8 @@ struct AppearanceSettingsCard: View {
             // 为什么要有：用户报「选完图没变化」，可那张图到底设进去没有，
             // 光看背景是看不出来的（背景变化本来就很轻）。把这个摆出来，
             // 「到底有没有生效」一眼就能确认。
-            if let data = settings.customBackgroundData,
-               let preview = UIImage(data: data) {
+            if let raw = data.wrappedValue,
+               let preview = UIImage(data: raw) {
                 HStack(spacing: 11) {
                     Color.clear
                         .frame(width: 54, height: 54)
@@ -555,10 +610,10 @@ struct AppearanceSettingsCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("已经设成背景了")
+                        Text(target.setLabel)
                             .font(.aevis(13))
                             .foregroundStyle(.primary)
-                        Text("\(Int(preview.size.width))×\(Int(preview.size.height)) · \(data.count / 1024) KB")
+                        Text("\(Int(preview.size.width))×\(Int(preview.size.height)) · \(raw.count / 1024) KB")
                             .font(.aevis(11.5))
                             .foregroundStyle(.secondary)
                     }
@@ -573,14 +628,40 @@ struct AppearanceSettingsCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
-        .onChange(of: pickedItem) { _, item in
+        .onChange(of: picked.wrappedValue) { _, item in
             guard let item else { return }
-            load(item)
+            load(item, target: target)
         }
-        .alert("聊天背景", isPresented: $showImageAlert) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(imageAlert)
+    }
+
+    // 下面四个把「哪一套」翻译成对应的 `@State` / `AppSettings` 绑定。
+    // 抽出来是为了让 `backgroundSection(_:)` 里只写一遍界面。
+
+    private func styleBinding(_ target: BackgroundTarget) -> Binding<BackgroundStyle> {
+        switch target {
+        case .start: return $settings.startBackgroundStyle
+        case .chat: return $settings.backgroundStyle
+        }
+    }
+
+    private func dataBinding(_ target: BackgroundTarget) -> Binding<Data?> {
+        switch target {
+        case .start: return $settings.startCustomBackgroundData
+        case .chat: return $settings.customBackgroundData
+        }
+    }
+
+    private func pickedBinding(_ target: BackgroundTarget) -> Binding<PhotosPickerItem?> {
+        switch target {
+        case .start: return $startPickedItem
+        case .chat: return $chatPickedItem
+        }
+    }
+
+    private func noteBinding(_ target: BackgroundTarget) -> Binding<String?> {
+        switch target {
+        case .start: return $startImageNote
+        case .chat: return $chatImageNote
         }
     }
 
@@ -619,10 +700,12 @@ struct AppearanceSettingsCard: View {
         }
     }
 
-    private func load(_ item: PhotosPickerItem) {
-        imageNote = nil
+    private func load(_ item: PhotosPickerItem, target: BackgroundTarget) {
+        let note = noteBinding(target)
+        let picked = pickedBinding(target)
+        note.wrappedValue = nil
         Task { @MainActor in
-            defer { pickedItem = nil }
+            defer { picked.wrappedValue = nil }
 
             // 相册里有两种图**第一次读不出来**：还在 iCloud 上的、刚拍完没写完的。
             // 隔一下再试一次这两种都能过。只试一次的表现就是
@@ -635,24 +718,27 @@ struct AppearanceSettingsCard: View {
 
             guard let raw else {
                 fail("这张图没能从相册读出来 —— 多半是还在 iCloud 里没下载到本机。"
-                     + "等它下载完再选一次；或者先在相册里打开它一遍。")
+                     + "等它下载完再选一次；或者先在相册里打开它一遍。", target: target)
                 return
             }
             guard let compressed = Self.compress(raw) else {
-                fail("这张图解码不了（\(raw.count / 1024) KB）。换成 JPG 或 PNG 再试一次。")
+                fail("这张图解码不了（\(raw.count / 1024) KB）。换成 JPG 或 PNG 再试一次。", target: target)
                 return
             }
 
-            settings.customBackgroundData = compressed
-            settings.backgroundStyle = .custom
-            imageNote = "好了，已经换成这张。"
+            // 只动**这一套**的背景（开始页 / 聊天页各改各的）。
+            dataBinding(target).wrappedValue = compressed
+            styleBinding(target).wrappedValue = .custom
+            note.wrappedValue = "好了，已经换成这张。"
         }
     }
 
-    /// 失败要说清楚，而且要说在**用户一定看得见的地方**。
-    private func fail(_ reason: String) {
-        imageNote = reason
+    /// 失败要说清楚，而且要说在**用户一定看得见的地方** ——
+    /// 哪一套背景出的问题，弹窗标题就写哪一套。
+    private func fail(_ reason: String, target: BackgroundTarget) {
+        noteBinding(target).wrappedValue = reason
         imageAlert = reason
+        imageAlertTitle = target.title
         showImageAlert = true
     }
 

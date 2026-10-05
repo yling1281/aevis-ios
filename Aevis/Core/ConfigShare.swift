@@ -30,6 +30,8 @@ enum ConfigShare {
         var simpleMode: Bool?
         var useGlass: Bool?
         var backgroundStyle: String?
+        /// 「开始页背景」那套。可选 —— 老版本发来的配置里没有它，不该报错。
+        var startBackgroundStyle: String?
         var personaName: String?
     }
 
@@ -49,6 +51,7 @@ enum ConfigShare {
             simpleMode: settings.simpleMode,
             useGlass: settings.useGlass,
             backgroundStyle: settings.backgroundStyle.rawValue,
+            startBackgroundStyle: settings.startBackgroundStyle.rawValue,
             personaName: persona.name
         )
 
@@ -112,6 +115,12 @@ enum ConfigShare {
            let parsed = BackgroundStyle(rawValue: style) {
             settings.backgroundStyle = parsed
             changed.append("背景")
+        }
+        // 「开始页背景」那套 —— 老配置里没有这个字段，`if let` 自然跳过，不报错。
+        if let style = payload.startBackgroundStyle,
+           let parsed = BackgroundStyle(rawValue: style) {
+            settings.startBackgroundStyle = parsed
+            changed.append("开始页背景")
         }
         if let name = payload.personaName, !name.isEmpty {
             persona.name = name

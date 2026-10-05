@@ -371,8 +371,16 @@ final class AppSettings: ObservableObject {
         static let tintStrength = "aevis.tintStrength"
         static let fontColorIndex = "aevis.fontColorIndex"
         static let simpleMode = "aevis.simpleMode"
+        // ⚠️ 这三个键从 2026-10-05 起语义正式定为「**聊天背景**」——
+        //    界面上一开始就叫「聊天背景」，语义天然对齐，所以旧 Key 名字不改、
+        //    `ConfigShare` / `DemoSeed` / `SelfCheckView` 那些调用点一行都不用动。
         static let backgroundStyle = "aevis.backgroundStyle"
         static let backgroundDim = "aevis.backgroundDim"
+        // 「开始页背景」**独立的一套** —— 门禁 / 登录 / 主界面那一层底用。
+        // 用户 2026-10-05：「选开始页……我要是选哪背景是聊天就是点进那个聊天框，
+        // 其他的不要」→ 开始页一套、聊天页一套，其余页面不再跟随。
+        static let startBackgroundStyle = "aevis.startBackgroundStyle"
+        static let startBackgroundDim = "aevis.startBackgroundDim"
         static let chatTheme = "aevis.chatTheme"
         static let emojiFrequency = "aevis.emojiFrequency"
         static let accentIndex = "aevis.accentIndex"
@@ -818,6 +826,12 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(backgroundStyle.rawValue, forKey: Key.backgroundStyle) }
     }
 
+    /// 「开始页背景」的样式 —— **独立于聊天背景**。
+    /// 门禁 / 登录 / 主界面那一层底看它（见 `RootView` 的 `AevisBackground(scope: .start)`）。
+    @Published var startBackgroundStyle: BackgroundStyle {
+        didSet { UserDefaults.standard.set(startBackgroundStyle.rawValue, forKey: Key.startBackgroundStyle) }
+    }
+
     /// 聊天主题：微信风 / iMessage 风。
     @Published var chatTheme: ChatTheme {
         didSet { UserDefaults.standard.set(chatTheme.rawValue, forKey: Key.chatTheme) }
@@ -829,10 +843,23 @@ final class AppSettings: ObservableObject {
     }
 
     /// 自定义背景图（已压缩）。放文件，不放 UserDefaults。
+    /// ⚠️ 这是**聊天背景**那份（语义见上方 Key 注释）。
     @Published var customBackgroundData: Data? {
         didSet {
             let url = Self.backgroundFileURL
             if let data = customBackgroundData {
+                try? data.write(to: url, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    /// 「开始页背景」的自定义图（已压缩）。和聊天那份**各存各的文件**。
+    @Published var startCustomBackgroundData: Data? {
+        didSet {
+            let url = Self.startBackgroundFileURL
+            if let data = startCustomBackgroundData {
                 try? data.write(to: url, options: .atomic)
             } else {
                 try? FileManager.default.removeItem(at: url)
@@ -885,8 +912,14 @@ final class AppSettings: ObservableObject {
     @Published private(set) var avatarTint: Color?
 
     /// 自定义背景图上压的那层遮罩有多重。0 = 不压。压太重会把图糊掉，所以默认很轻。
+    /// ⚠️ 这是**聊天背景**那份。
     @Published var backgroundDim: Double {
         didSet { UserDefaults.standard.set(backgroundDim, forKey: Key.backgroundDim) }
+    }
+
+    /// 「开始页背景」自定义图上那层遮罩有多重。和聊天那份各存各的。
+    @Published var startBackgroundDim: Double {
+        didSet { UserDefaults.standard.set(startBackgroundDim, forKey: Key.startBackgroundDim) }
     }
 
     // MARK: - 主动消息
@@ -1483,6 +1516,15 @@ final class AppSettings: ObservableObject {
         return base.appendingPathComponent("aevis-background.img")
     }
 
+    /// 「开始页背景」图存这儿。和聊天那份是**两个文件**，各改各的互不影响。
+    private static var startBackgroundFileURL: URL {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("aevis-start-background.img")
+    }
+
     /// 朋友圈封面（用户自己挑的图）。
     static var momentCoverFileURL: URL {
         Self.storageURL("aevis-moment-cover.img")
@@ -1548,6 +1590,23 @@ final class AppSettings: ObservableObject {
             backgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.backgroundStyle) ?? "") ?? .white
         }
         backgroundDim = defaults.object(forKey: Key.backgroundDim) as? Double ?? 0.12
+        // ——— 「开始页背景」：一次性兼容迁移 ———
+        //
+        // ⚠️ 必须排在 `backgroundStyle` / `backgroundDim` 解析**之后** —— 这两行
+        //    要在「老用户没存过开始页设置」时，拿到的是**用户真实的那套值**
+        //    （而不是默认白）。这样老用户升上来视觉 100% 不变。
+        //
+        // 逻辑：没存过 → 跟聊天那套当前值（原样继承）；存过 → 按存的解析；兜底 `.white`。
+        if defaults.object(forKey: Key.startBackgroundStyle) == nil {
+            startBackgroundStyle = backgroundStyle
+        } else {
+            startBackgroundStyle = BackgroundStyle(rawValue: defaults.string(forKey: Key.startBackgroundStyle) ?? "") ?? .white
+        }
+        if defaults.object(forKey: Key.startBackgroundDim) == nil {
+            startBackgroundDim = backgroundDim
+        } else {
+            startBackgroundDim = defaults.object(forKey: Key.startBackgroundDim) as? Double ?? 0.12
+        }
         chatTheme = ChatTheme(rawValue: defaults.string(forKey: Key.chatTheme) ?? "") ?? .wechat
         emojiFrequency = EmojiFrequency(rawValue: defaults.string(forKey: Key.emojiFrequency) ?? "") ?? .moderate
         accentIndex = defaults.object(forKey: Key.accentIndex) as? Int ?? 0
@@ -1664,6 +1723,20 @@ final class AppSettings: ObservableObject {
         // ⭐ 网盘引导弹窗：默认**没弹过**（false）。
         panGuideShown = defaults.object(forKey: Key.panGuideShown) as? Bool ?? false
         customBackgroundData = try? Data(contentsOf: Self.backgroundFileURL)
+        // 「开始页背景」图：先读自己那份文件；**若为空、而聊天那份有图**，
+        // 就把聊天那份复制一份过来（一次性）—— 保证两套初始完全一致，
+        // 老用户升上来开始页不会突然变空。
+        //
+        // ⚠️ init 里给 @Published 属性赋值**不会触发 didSet**，
+        //    所以这里得**手动**把文件写出去，不能指望 didSet 代劳。
+        if let startData = try? Data(contentsOf: Self.startBackgroundFileURL) {
+            startCustomBackgroundData = startData
+        } else if let chatData = customBackgroundData {
+            try? chatData.write(to: Self.startBackgroundFileURL, options: .atomic)
+            startCustomBackgroundData = chatData
+        } else {
+            startCustomBackgroundData = nil
+        }
         momentCoverData = try? Data(contentsOf: Self.momentCoverFileURL)
 
         // —— API 预设（放在 init 最末尾：这时候所有属性都已就位，才能调方法）——

@@ -82,7 +82,9 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            AevisBackground()
+            // 登录页也是「开始页」这条路上的一环（门禁 → 登录 → 主界面），
+            // 背景跟 RootView 的 `.start` 保持一致 —— 不然从门禁进登录会"啪"一下变脸。
+            AevisBackground(scope: .start)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {

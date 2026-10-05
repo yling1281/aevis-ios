@@ -24,6 +24,7 @@ struct AccountCard: View {
     @State private var note: String?
     @State private var busy = false
     @State private var probing = false
+    @State private var switching = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -76,27 +77,82 @@ struct AccountCard: View {
     // MARK: - 各行
 
     private var serverRow: some View {
-        row {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("服务器")
-                    .font(.aevis(15))
-                Text(lineText)
-                    .font(.aevis(11.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            row {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("服务器")
+                        .font(.aevis(15))
+                    Text(lineText)
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Button(probing ? "探测中…" : "自动") {
+                    Task { await reprobe() }
+                }
+                .font(.aevis(14))
+                .buttonStyle(.borderless)
+                .disabled(probing || switching)
             }
-            Spacer(minLength: 8)
-            Button(probing ? "探测中…" : "换线") {
-                Task { await reprobe() }
-            }
-            .font(.aevis(14))
-            .buttonStyle(.borderless)
-            .disabled(probing)
+            linePicker
         }
     }
 
-    /// 「线路一 · account.apekin.com」—— 让用户看得出现在走的是哪条线。
-    /// 域名会被云厂商按**线路抽样**拦，所以两条线互为备用，全自动切换。
+    /// 三条线路的**手动点选**排 —— 老板要的「三个路线你自己点选」。
+    ///
+    /// 当前那条高亮；点别的先探（`AccountEndpoint.use(_:)` 探通才切），探不通就不动。
+    /// ⚠️ 只显示**线路名**（线路一 / 线路二 / 线路三），不显示主机名、更不显示接口随机前缀
+    ///    —— 用户会把设置页截图发群里。主机名在上面 `lineText` 那一行里。
+    private var linePicker: some View {
+        HStack(spacing: 8) {
+            ForEach(AevisHosts.accountLines) { line in
+                lineButton(line)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 13)
+    }
+
+    /// 一个可点选的线路按钮。当前这条用强调色填充，其余是淡灰胶囊底。
+    private func lineButton(_ line: AevisHosts.Line) -> some View {
+        let active = AevisHosts.lineName(for: settings.accountServerURL) == line.name
+        return Button {
+            Task { await switchTo(line) }
+        } label: {
+            Text(line.name)
+                .font(.aevis(13, weight: active ? .medium : .regular))
+                .foregroundStyle(active ? Color.white : Color.secondary)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule().fill(active ? settings.accentColor : Color.primary.opacity(0.07))
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(switching || probing)
+        .opacity(switching && !active ? 0.5 : 1)
+    }
+
+    /// 用户点了某条线路 —— 先探，通了才切。
+    ///
+    /// ⭐ 复用 `AccountEndpoint.use(_:)`：它自己会探 `/api/health`，
+    ///    探通才写缓存并返回 true；探不通返回 false，界面保持原样、只给个提示。
+    private func switchTo(_ line: AevisHosts.Line) async {
+        switching = true
+        defer { switching = false }
+        if await AccountEndpoint.use(line.base) {
+            settings.accountServerURL = line.base
+            note = "已切到\(line.name)。"
+        } else {
+            note = "\(line.name)连不上，换一条试试。"
+        }
+    }
+
+    /// 「线路一 · account.aevis.cn」—— 让用户看得出现在走的是哪条线。
+    /// 域名会被云厂商按**线路抽样**拦，所以三条线互为备用；既能在启动时自动切换，
+    /// 也能在上面那排按钮里手动点选。
     ///
     /// ⚠️ 只显示**主机名**，不显示路径 —— 接口那段随机前缀不该出现在截图里
     ///    （用户会把设置页截图发群里）。
@@ -118,7 +174,7 @@ struct AccountCard: View {
         if let line = AevisHosts.lineName(for: base) {
             note = "已切到\(line)。"
         } else {
-            note = "两条线路都连不上，稍后再试。"
+            note = "三条线路都连不上，稍后再试。"
         }
     }
 

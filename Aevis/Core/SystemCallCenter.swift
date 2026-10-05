@@ -16,7 +16,7 @@ import LiveCommunicationKit
 /// 只有一件事没人能替你打包票：**签名**。`ConversationManager` 要求 App 有通话资格，
 /// 资格写在 `aps-environment` 这条权限里，而全能签重签用的是**它自己的**证书和
 /// 描述文件 —— 我们写的那条到底有没有被继承过去，只有真机跑一次才知道。
-/// 所以先出了 `AevisCallProbe`（`https://sucai.apekin.com/CallProbe-3086.ipa`），
+/// 所以先出了 `AevisCallProbe`（`https://sucai.aevis.cn/CallProbe-3086.ipa`），
 /// 这里是把探针里**验证过能编过的那套用法原样搬过来**。
 ///
 /// ## 两条路，我们只走一条

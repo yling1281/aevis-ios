@@ -35,7 +35,7 @@ final class RemoteConfig {
     func refresh() async {
         // 基址**按优先级挨个试**（别只试一条，栽过）：
         //   ① `AccountEndpoint.resolved` —— 上次探到能通的那条线（最快，省一次 404）
-        //   ② `AevisHosts.accountCandidates` —— 编译进去的两条线（**锚点**）
+        //   ② `AevisHosts.accountCandidates` —— 编译进去的三条线（**锚点**）
         // ⚠️ 为什么第 ② 条最关键：这份配置的用途之一就是**改接口地址本身**。
         //    如果只认①，一旦那条被改坏/下线，就永远拉不到新配置、也就永远纠不回来
         //    （能拉配置的那条路必须先活着）。编译进去的地址**这一版包里不会变**，

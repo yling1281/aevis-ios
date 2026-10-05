@@ -1,10 +1,13 @@
 import Foundation
 
-/// 账号后端有**主域名 + 备用域名**两个，这里负责挑一个能通的。
+/// 账号后端有**三条线路**（线路一 / 线路二 / 线路三），这里负责挑一个能通的。
 ///
 /// 为什么非要有它：域名的拦截不是"全通或全断"，而是**按线路抽样**的 ——
-/// `lingyan.cyou` 被阿里云按备案状态拦着，可有的线路照样能访问、有的只能看到拦截页；
-/// 而 `sucai/account.apekin.com` 是已备案的新域名。
+/// `lingyan.cyou` 被阿里云按备案状态拦着，可有的线路照样能访问、有的只能看到拦截页。
+/// 所以留了**三条互为备用**：
+///   · 线路一 `account.aevis.cn`（新主站）
+///   · 线路二 `account.apekin.com`（上一代）
+///   · 线路三 `account.lingyan.cyou`（最老，裸 `/api/`，不带随机前缀）
 /// 写死任何一个都等于赌运气，所以开机探一次，谁通走谁，结果写进 `AppSettings.accountServerURL`。
 ///
 /// 还有一层：**远端配置可以指定接口地址**（`AevisHosts.remoteOverrideKey`）——
@@ -19,7 +22,7 @@ enum AccountEndpoint {
     /// 上一次探测到的可用地址（跟机器走，不跨设备）。
     static var resolved: String? { UserDefaults.standard.string(forKey: key) }
 
-    /// 现在走的是哪条线路（"线路一" / "线路二"）。没探过就是 nil。
+    /// 现在走的是哪条线路（"线路一" / "线路二" / "线路三"）。没探过就是 nil。
     static var activeLineName: String? {
         // 远端覆盖优先 —— 否则界面上会显示成"线路一"，而接口其实打在别处。
         if let remote = remoteOverride() { return AevisHosts.lineName(for: remote) }

@@ -53,14 +53,61 @@ struct AevisBarBackground: View {
     }
 }
 
+/// 背景用**哪一套**设置。用户 2026-10-05 定的规矩：
+/// 「选开始页……我要是选哪背景是聊天就是点进那个聊天框，其他的不要」。
+///
+/// - `.start`：**开始页**（门禁 / 登录 / 主界面那一层底）→ 用「开始页背景」那套。
+/// - `.chat` ：**聊天页** → 用「聊天背景」那套（也就是**原来那一套**设置）。
+/// - `.base` ：**其余所有二级页面** → **固定素色底，不读任何用户设置**。
+///
+/// ⭐ 默认值就是 `.base` —— 所以老的 `AevisBackground()` 调用点**一行都不用改**，
+///    自动变成"不跟随"。只有开始页和聊天页两处显式传 `.start` / `.chat`。
+enum AevisBackgroundScope {
+    case start
+    case chat
+    case base
+}
+
 /// 聊天背景。默认给一个「光晕」，但用户能换成纯色、纸感或自己的图片。
+///
+/// ⚠️ 现在**按 `scope` 取哪一组设置**：开始页一套、聊天页一套、其余素色底。
 struct AevisBackground: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var scheme
 
+    /// 这套背景取哪一组设置。**默认 `.base`（不跟随）** —— 见 `AevisBackgroundScope`。
+    var scope: AevisBackgroundScope = .base
+
+    /// 当前 scope 对应的一组取色 / 取图参数。
+    ///
+    /// 抽出来是为了避免 `body` / `customImage` / `scrimOpacity` 里
+    /// 把同一段 switch 抄三遍。
+    private struct Skin {
+        let style: BackgroundStyle
+        let data: Data?
+        let dim: Double
+    }
+
+    private var skin: Skin {
+        switch scope {
+        case .start:
+            return Skin(style: settings.startBackgroundStyle,
+                        data: settings.startCustomBackgroundData,
+                        dim: settings.startBackgroundDim)
+        case .chat:
+            return Skin(style: settings.backgroundStyle,
+                        data: settings.customBackgroundData,
+                        dim: settings.backgroundDim)
+        case .base:
+            // 素色底：**不读任何用户设置** —— 固定走 `plain` 那档的 base 色
+            //（跟随深浅色）。这里绝不能出现自定义图或光晕。
+            return Skin(style: .plain, data: nil, dim: 0)
+        }
+    }
+
     var body: some View {
         ZStack {
-            switch settings.backgroundStyle {
+            switch skin.style {
             case .white:
                 pureWhite
             case .aurora:
@@ -131,7 +178,7 @@ struct AevisBackground: View {
     @ViewBuilder
     private var customImage: some View {
         #if canImport(UIKit)
-        if let data = settings.customBackgroundData, let image = UIImage(data: data) {
+        if let data = skin.data, let image = UIImage(data: data) {
             // 关键：用 Color.clear 定尺寸、图片放 overlay。
             // 直接把 scaledToFill 放进 ZStack 会把整棵布局撑大，
             // 底部的输入栏会被挤出屏幕 —— 之前就是这个 bug。
@@ -160,7 +207,7 @@ struct AevisBackground: View {
     /// **强度交给用户控制**（backgroundDim），默认很轻 ——
     /// 之前写死 0.30 / 0.46，用户反馈「换自定义图之后背景整个暗下来，很别扭」。
     private var scrimOpacity: Double {
-        let extra = min(max(settings.backgroundDim, 0), 0.8)
+        let extra = min(max(skin.dim, 0), 0.8)
         return scheme == .dark ? 0.08 + extra : 0.04 + extra
     }
 }

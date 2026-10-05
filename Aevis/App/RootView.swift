@@ -35,7 +35,8 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            AevisBackground()
+            // ⭐ 这是整个 App 的底（门禁 / 登录 / 主界面共用）→ 用「开始页背景」那套。
+            AevisBackground(scope: .start)
             content
 
             if let bridgeNote {

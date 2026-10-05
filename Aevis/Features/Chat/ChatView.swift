@@ -86,33 +86,39 @@ struct ChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            messageList
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        ZStack {
+            // ⭐ 聊天页自己的底 —— 用「聊天背景」那套（**独立于开始页**）。
+            //    底下这层铺满整屏，上面的内容浮在它之上。
+            AevisBackground(scope: .chat)
+
             VStack(spacing: 0) {
-                // 微信那个加号下面的面板：点开才出来，收起就没了
-                if showMorePanel {
-                    morePanel
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                // 表情面板（输入框左边笑脸点开）
-                if showEmojiPanel {
-                    EmojiPanelView(theme: settings.chatTheme) { item in
-                        sendEmoji(item)
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                composer
+                header
+                messageList
             }
-            // 面板和输入栏**共用**这一层背景，而且一直铺到屏幕最下沿 ——
-            // 之前输入框下面留白，就是背景没铺到底。
-            .background(
-                Rectangle()
-                    .fill(.bar)
-                    .ignoresSafeArea(edges: .bottom)
-            )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    // 微信那个加号下面的面板：点开才出来，收起就没了
+                    if showMorePanel {
+                        morePanel
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    // 表情面板（输入框左边笑脸点开）
+                    if showEmojiPanel {
+                        EmojiPanelView(theme: settings.chatTheme) { item in
+                            sendEmoji(item)
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    composer
+                }
+                // 面板和输入栏**共用**这一层背景，而且一直铺到屏幕最下沿 ——
+                // 之前输入框下面留白，就是背景没铺到底。
+                .background(
+                    Rectangle()
+                        .fill(.bar)
+                        .ignoresSafeArea(edges: .bottom)
+                )
+            }
         }
         // 顶栏是我们自己画的（微信那种：返回 + 头像 + 名字），
         // 所以把系统的导航栏藏掉，不然会顶着两个头。

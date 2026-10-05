@@ -272,8 +272,8 @@ settings:
     #    ⚠️ 后端是**同一批**改动（`server/account/app.py` 新表 `device_logins` + 三条路由
     #       + `web/scan.html`）；`_verify/deploy_app.py` 里加了 4 条探针盯它。
     #       后端没上而先装这个包，扫码登录会 404 —— 自动同步那半是纯客户端，不受影响。
-    MARKETING_VERSION: "0.0.105"
-    CURRENT_PROJECT_VERSION: "105"
+    MARKETING_VERSION: "0.0.106"
+    CURRENT_PROJECT_VERSION: "106"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
@@ -481,8 +481,11 @@ targets:
         # ⚠️ 2026-09-28 1.0.4：**冷启动自动拉数据** —— 以前钥匙串里有令牌就直接
         # 进主界面，一个请求都不发，所有列表是空的（用户报的「划掉后台重开就
         # 什么数据都没有」）。另外从后台切回来也会自动刷一次。
-        MARKETING_VERSION: "1.0.5"
-        CURRENT_PROJECT_VERSION: "6"
+        # 1.0.6（2026-10-05）：服务器线路 **2 → 3 条**（线路一 aevis.cn（新主站）/
+        # 线路二 apekin / 线路三 lingyan），登录页三条可手动点选。和主 App 共用
+        # 同一份 `AevisHosts.accountLines`，两边不会再各写一遍。
+        MARKETING_VERSION: "1.0.6"
+        CURRENT_PROJECT_VERSION: "7"
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"

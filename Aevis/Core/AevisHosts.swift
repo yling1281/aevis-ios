@@ -19,10 +19,10 @@ enum AevisHosts {
     // MARK: - 对外域名
 
     /// 静态站：安装页 / IPA / `source.json` / 规则 / 免责声明。
-    static let siteDomain = "sucai.apekin.com"
+    static let siteDomain = "sucai.aevis.cn"
 
     /// 账号站：登录、激活、注册码、管理后台。和静态站同一台服务器、同一套后端。
-    static let accountDomain = "account.apekin.com"
+    static let accountDomain = "account.aevis.cn"
 
     // MARK: - 接口的随机入口（2026-10-02）
 
@@ -37,7 +37,7 @@ enum AevisHosts {
     ///   ② 服务器 `server/nginx-aevis-apekin.conf` 里那两处
     ///      `location = /<前缀>` 和 `location ^~ /<前缀>/api/`
     /// 想**不出新包**就切，别改这里 —— 去后台的「远端配置」写
-    /// `accountBase = https://account.apekin.com/<新前缀>`（见 `remoteOverrideKey`）。
+    /// `accountBase = https://account.aevis.cn/<新前缀>`（见 `remoteOverrideKey`）。
     ///
     /// ⚠️ **老路径 `/api/...` 必须继续活着**（老板要求「做过渡」）：
     ///    手机上装的老包（≤0.0.95）、QQ / 百度的回调、支付宝 / PayPro 的回调
@@ -78,35 +78,48 @@ enum AevisHosts {
     static func accountWebURL(_ path: String) -> URL? { URL(string: accountWebBase + path) }
     static func siteURL(_ path: String) -> URL? { URL(string: siteBase + path) }
 
-    // MARK: - 老域名 / 备用域名
+    // MARK: - 备用域名（线路二 / 线路三）
 
-    /// 老域名。⚠️ **不是废弃值，是"备用域名"**：
+    /// 最老的备用域名（线路三）。⚠️ **不是废弃值，是"备用域名"**：
     /// 阿里云的备案拦截是按**线路抽样**触发的 —— 同一条链接，有的用户能开、有的开到拦截页。
-    /// 所以两个域名互为备用，谁通走谁（见 `AccountEndpoint.refresh()`）。
+    /// 所以三个域名互为备用，谁通走谁（见 `AccountEndpoint.refresh()`）。
     static let legacySiteDomain = "lingyan.cyou"
     static let legacyAccountDomain = "account.lingyan.cyou"
     static let legacyAccountBase = "https://" + legacyAccountDomain
 
-    // MARK: - 服务器线路（线路一 / 线路二）
+    /// 上一代主域名（现役 → 转备用，线路二）。
+    ///
+    /// ⚠️ 这一条**必须带 `apiPath` 前缀** —— apekin 那台 nginx 块里配了
+    ///    `location ^~ /k5stbt2o/api/`，不带前缀的裸 `/api/` 在那台上是 404。
+    static let apekinSiteDomain = "sucai.apekin.com"
+    static let apekinAccountDomain = "account.apekin.com"
+    static let apekinAccountBase = "https://" + apekinAccountDomain + apiPath
+
+    // MARK: - 服务器线路（线路一 / 线路二 / 线路三）
 
     /// 一条线路。用结构体而不是元组 —— 元组不能给 `ForEach` 当 id（KeyPath 取不到元组元素），
-    /// 界面上要遍历两条线，所以这里必须是能 `Identifiable` 的类型。
+    /// 界面上要遍历三条线，所以这里必须是能 `Identifiable` 的类型。
     struct Line: Identifiable, Hashable {
         let name: String
         let base: String
         var id: String { name }
     }
 
-    /// 两条线路，**顺序就是优先级**。用户口径：「线路一、线路二」——
+    /// 三条线路，**顺序就是优先级**。用户口径：「三个路线你自己点选」——
     /// 主 App 和管理端**共用这一份**，别再各写一遍。
     ///
-    /// 线路一 = 新域名 + **接口随机前缀**（主用）；线路二 = 老域名（备用）。
-    /// App 启动时依次探一下，谁通走谁（`AccountEndpoint.refresh()`）。
-    /// ⚠️ 线路二**故意不加前缀** —— 老域名那台上没配那条前缀规则，
+    /// 线路一 = `aevis.cn`（新主站，主用）+ **接口随机前缀**；
+    /// 线路二 = `apekin.com`（上一代，现役 → 转备用）+ **接口随机前缀**；
+    /// 线路三 = `lingyan.cyou`（最老）**裸 `/api/`，故意不加前缀**。
+    /// App 启动时依次探一下，谁通走谁（`AccountEndpoint.refresh()`）；
+    /// 用户也能在设置里手动点选（`AccountEndpoint.use(_:)`）。
+    /// ⚠️ 线路一 / 线路二**都带前缀**（两台都配了 `location ^~ /k5stbt2o/api/`）；
+    ///    线路三**故意不带** —— 老域名那台上没配那条前缀规则，
     ///    加了就是 404；它走的是原来那条裸 `/api/`。
     static let accountLines: [Line] = [
-        Line(name: "线路一", base: accountBase),
-        Line(name: "线路二", base: legacyAccountBase),
+        Line(name: "线路一", base: accountBase),         // aevis.cn（新主站）+ 接口随机前缀
+        Line(name: "线路二", base: apekinAccountBase),    // apekin.com（上一代）+ 接口随机前缀
+        Line(name: "线路三", base: legacyAccountBase),    // lingyan.cyou（最老，裸 /api/，不带前缀）
     ]
 
     static var accountCandidates: [String] { accountLines.map { $0.base } }
