@@ -1,0 +1,424 @@
+# ============================================================================
+#  Aevis · 内置真 Linux 沙箱（iSH 系）原生构建 / 验证  —  仅手动触发
+#  ---------------------------------------------------------------------------
+#  这一步**不编译 App、不改任何 Swift 代码、不碰其它 workflow**。它只回答一个问题：
+#  「这套东西能不能在云端 CI 上编出来、要编多久、产物多大？」
+#
+#  产物（上传为 artifact）：
+#    - libish.a / libish_emu.a / libfakefs.a   iOS 真机 arm64 静态库
+#    - vdso/arm64/libvdso.so.elf               guest aarch64 Linux ELF
+#    - fakefsify / ish                         macOS host 工具（打 rootfs / 跑沙箱用）
+#    - alpine-rootfs.zip                       Alpine aarch64 fakefs（data/ + meta.db）
+#
+#  ---------------------------------------------------------------------------
+#  上游来源与许可证（合规记录）
+#  ---------------------------------------------------------------------------
+#  iSH 源码：https://github.com/OpenMinis/ish-arm64
+#      分支  feature-arm64
+#      pin   commit 54ca185b77f170e12fd353fcd7443232f6cb73fd
+#      许可  GPL-3.0（仓库 LICENSE.md：iSH 采用 GPLv3，另加 LICENSE.IOS 附加条款）
+#      说明  这是 ARM64 同架构 fork（asbestos 引擎，guest 为 aarch64，不依赖 JIT、
+#            不需要越狱）。**不用上游 ish-app/ish**——那是 32 位 x86 的 Alpine。
+#
+#  Alpine minirootfs：https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/
+#      版本  3.21.3，sha256 见下方 ALPINE_SHA256 常量（多镜像回退 + 强制校验）
+#
+#  ★ Aevis 是 **GPL-3.0 公开仓库**。任何包含上述 GPL 产物的 IPA 发布时，
+#    必须能同时提供「对应源码」——即该 commit 的 iSH 源码本身（公开仓库，可直接
+#    clone）＋ 可复现的构建方式（就是本文件）。GPL-3.0 与 GPL-3.0 相互兼容。
+#    参考项目 Kelivo 的脚本是 AGPL-3.0，本文件**没有逐行复制**它，只参考了做法。
+#  ============================================================================
+
+name: iSH Sandbox (manual)
+
+# 触发方式：只手动；另外，改动「本文件自身」或 `ish-sandbox/**` 时会触发。
+# ⚠️ 普通推送（改 Aevis/**、scripts/** 等）**不会**触发本 workflow —— 这是刻意的，
+#    否则每轮源码推送都会连带重编一遍 iSH，代价太大。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/ish-sandbox.yml'
+      - 'ish-sandbox/**'
+
+# 同一分支上避免并发跑重活。
+concurrency:
+  group: ish-sandbox-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SBX: ${{ github.workspace }}/ish-sandbox
+  ISH_REPO: "https://github.com/OpenMinis/ish-arm64"
+  ISH_BRANCH: "feature-arm64"
+  ISH_SHA: "54ca185b77f170e12fd353fcd7443232f6cb73fd"
+  IOS_MIN: "15.0"
+  ALPINE_SERIES: "3.21"
+  ALPINE_VERSION: "3.21.3"
+  ALPINE_SHA256: "ead8a4b37867bd19e7417dd078748e2312c0aea364403d96758d63ea8ff261ea"
+
+jobs:
+  build:
+    name: Build iSH sandbox artifacts
+    # macos-15 默认就是 Apple Silicon（M 系）——编 iOS arm64 静态库没问题。
+    # ⚠️ 不要换成 macos-15-intel / macos-14-large 这类 Intel runner：
+    #    asbestos 引擎只有面向 aarch64 主机的 guest-arm64 gadgets，x86_64 host 编不出来。
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      # —— 0. 环境自述 + 建目录 ——
+      - name: Runner info
+        run: |
+          set -euo pipefail
+          mkdir -p "$SBX" "$SBX/out" "$SBX/build" "$SBX/.cache"
+          : > "$SBX/timings.txt"
+          echo "runner.os   = ${RUNNER_OS:-?}"
+          echo "runner.arch = ${RUNNER_ARCH:-?}"
+          echo "uname -m    = $(uname -m)"
+          sw_vers
+          xcodebuild -version
+          echo "iphoneos SDK path: $(xcrun --sdk iphoneos --show-sdk-path)"
+          echo "iphoneos SDK ver : $(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "macosx   SDK path: $(xcrun --sdk macosx --show-sdk-path)"
+
+      # —— 1. 装编译依赖 ——
+      #   meson / ninja        : 构建系统
+      #   llvm / lld           : 编 guest VDSO（aarch64-linux-gnu 目标，用 llvm clang + ld.lld）
+      #   libarchive           : host 版 fakefsify 需要（tools/meson.build 从 Homebrew 找它）
+      - name: Install build tools (Homebrew)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          brew install meson ninja llvm lld libarchive
+          echo "----- versions -----"
+          echo "meson:      $(meson --version 2>/dev/null || echo '?')"
+          echo "ninja:      $(ninja --version 2>/dev/null || echo '?')"
+          echo "llvm clang: $(ls -d /opt/homebrew/opt/llvm/bin/clang 2>/dev/null || echo 'MISSING')"
+          echo "ld.lld:     $(command -v ld.lld 2>/dev/null || ls /opt/homebrew/opt/lld/bin/ld.lld 2>/dev/null || echo 'MISSING')"
+          echo "libarchive: $(ls -d /opt/homebrew/opt/libarchive 2>/dev/null || echo 'MISSING')"
+          echo "phase brew: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 2. 恢复缓存 ——
+      #   key 里带本 workflow 文件的哈希 ⇒ 只要「脚本 / pinned SHA / 补丁」变了，
+      #   缓存自动失效并重编；否则命中缓存，增量 ninja 几乎瞬间完成。
+      # 缓存内容：两个 meson 构建目录 + Alpine 包缓存（源码 clone 每次重来，很便宜）。
+      - name: Restore build cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ish-sandbox/build/ios-iphoneos
+            ish-sandbox/build/native
+            ish-sandbox/.cache
+          key: ish-sandbox-${{ runner.os }}-${{ hashFiles('.github/workflows/ish-sandbox.yml') }}
+
+      # —— 3. 取 iSH 源码（pin 到固定 commit）——
+      #   iSH 的三个 submodule（deps/libapps、deps/libarchive、deps/linux）在
+      #   `-Dkernel=ish` 下**都用不到**（libarchive 走 Homebrew；linux 只在
+      #   `-Dkernel=linux` 时编）。所以这里**不拉 submodule**，省时又省流量。
+      - name: Fetch iSH source (pinned commit)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          mkdir -p "$SBX/src"
+          rm -rf "$SBX/src/ish"
+          git init -q "$SBX/src/ish"
+          git -C "$SBX/src/ish" remote add origin "$ISH_REPO"
+          git -C "$SBX/src/ish" config advice.detachedHead false
+          if git -C "$SBX/src/ish" fetch -q --depth 1 origin "$ISH_SHA"; then
+            echo "直接取到 pinned SHA"
+            git -C "$SBX/src/ish" checkout -q FETCH_HEAD
+          else
+            # 退路：取整个分支历史（不浅），保证 pinned SHA 的对象一定在本地。
+            # 分支头以后可能前进，浅取分支头就拿不到旧 commit 了，所以这里不用 --depth。
+            echo "取不到单个 SHA，退回取分支历史再 checkout"
+            git -C "$SBX/src/ish" fetch -q origin "$ISH_BRANCH"
+            git -C "$SBX/src/ish" checkout -q "$ISH_SHA"
+          fi
+          GOT="$(git -C "$SBX/src/ish" rev-parse HEAD)"
+          echo "checked out: $GOT"
+          if [ "$GOT" != "$ISH_SHA" ]; then
+            echo "::error::pinned SHA 不一致：期望 $ISH_SHA，实际 $GOT"
+            exit 1
+          fi
+          echo "源码文件数: $(find "$SBX/src/ish" -type f | wc -l | tr -d ' ')"
+          echo "phase fetch: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 4. 编 iOS 真机 arm64 静态库 ——
+      #   交叉编译文件用 iphoneos SDK，部署目标 iOS $IOS_MIN，host_machine 声明为
+      #   darwin/aarch64（这样 meson 会挑 platform/darwin.c 与 guest-arm64/gadgets-aarch64）。
+      #   🔴 只编 arm64 device slice：不编 x86_64 simulator（asbestos 没有 x86_64 gadgets）。
+      - name: Build iOS static libraries (device, arm64)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          SRC="$SBX/src/ish"
+          BUILD="$SBX/build/ios-iphoneos"
+          CROSS="$SBX/ios-cross.txt"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          printf '%s\n' \
+            "[binaries]" \
+            "c = ['clang', '-arch', 'arm64', '-isysroot', '$IOS_SDK', '-miphoneos-version-min=$IOS_MIN']" \
+            "ar = 'ar'" \
+            "strip = 'strip'" \
+            "pkg-config = 'false'" \
+            "" \
+            "[host_machine]" \
+            "system = 'darwin'" \
+            "cpu_family = 'aarch64'" \
+            "cpu = 'aarch64'" \
+            "endian = 'little'" \
+            "" \
+            "[built-in options]" \
+            "c_args = []" \
+            "c_link_args = ['-L$IOS_SDK/usr/lib']" \
+            "" \
+            "[properties]" \
+            "needs_exe_wrapper = true" \
+            "sys_root = '$IOS_SDK'" \
+            "library_dirs = ['$IOS_SDK/usr/lib']" \
+            > "$CROSS"
+          echo "----- ios-cross.txt -----"
+          cat "$CROSS"
+          if [ ! -f "$BUILD/build.ninja" ]; then
+            rm -rf "$BUILD"; mkdir -p "$BUILD"
+            meson setup "$BUILD" "$SRC" \
+              --cross-file "$CROSS" \
+              --buildtype=release -Db_ndebug=true \
+              -Dlog= -Dlog_handler=nslog \
+              -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64
+          else
+            echo "复用已有构建目录，重新配置"
+            meson configure "$BUILD" --buildtype=release -Db_ndebug=true
+          fi
+          ninja -C "$BUILD" libish.a libish_emu.a libfakefs.a
+          for f in libish.a libish_emu.a libfakefs.a; do
+            cp "$BUILD/$f" "$SBX/out/$f"
+          done
+          echo "phase ios-libs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 5. 编 guest VDSO（aarch64 Linux ELF）——
+      #   这个目标其实会随 libish.a 一起编出来，这里单独跑一次只为单独计时。
+      - name: Build guest VDSO (aarch64 Linux ELF)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          BUILD="$SBX/build/ios-iphoneos"
+          ninja -C "$BUILD" vdso/arm64/libvdso.so.elf
+          cp "$BUILD/vdso/arm64/libvdso.so.elf" "$SBX/out/libvdso.so.elf"
+          file "$SBX/out/libvdso.so.elf"
+          echo "phase vdso: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 6. 编 host 版工具 ——
+      #   fakefsify 把 minirootfs 转成 iSH 的 fakefs（data/ + meta.db）；
+      #   ish 是能在 macOS 上直接跑沙箱的 CLI（后面拿来做冒烟测试、打 rootfs）。
+      #   ⚠️ native 构建要用 **macOS SDK**，并清掉 Xcode 注入的 IPHONEOS_DEPLOYMENT_TARGET。
+      - name: Build host tools (fakefsify, ish)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          SRC="$SBX/src/ish"
+          BUILD="$SBX/build/native"
+          HOST_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          if [ ! -f "$BUILD/build.ninja" ]; then
+            rm -rf "$BUILD"; mkdir -p "$BUILD"
+            env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+              meson setup "$BUILD" "$SRC" \
+                --buildtype=release \
+                -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64
+          fi
+          env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" ninja -C "$BUILD" cpu-offsets.h
+          env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" ninja -C "$BUILD" tools/fakefsify ish
+          cp "$BUILD/tools/fakefsify" "$SBX/out/fakefsify"
+          cp "$BUILD/ish" "$SBX/out/ish"
+          chmod +x "$SBX/out/fakefsify" "$SBX/out/ish"
+          echo "phase host-tools: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 7. 打 Alpine rootfs（只能在 macOS 上做，因为 fakefsify 是 macOS 原生二进制）——
+      #   下 Alpine 3.21.3 aarch64 minirootfs（多镜像回退 + 强制 sha256 校验）
+      #   → 解包 → 写 /etc/resolv.conf、/etc/apk/repositories、删 EXTERNALLY-MANAGED（放开 pip）
+      #   → 重新打包 → fakefsify 转成 fakefs（data/ + meta.db）→ zip。
+      - name: Prepare Alpine aarch64 rootfs (fakefs)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          FAKEFSIFY="$SBX/out/fakefsify"
+          TARBALL="$SBX/.cache/alpine-minirootfs-${ALPINE_VERSION}-aarch64.tar.gz"
+          mkdir -p "$SBX/.cache" "$SBX/out"
+          if [ ! -s "$TARBALL" ]; then
+            ok=0
+            for M in \
+              "https://mirrors.aliyun.com/alpine" \
+              "https://mirrors.tuna.tsinghua.edu.cn/alpine" \
+              "https://mirrors.ustc.edu.cn/alpine" \
+              "https://dl-cdn.alpinelinux.org/alpine"; do
+              URL="$M/v${ALPINE_SERIES}/releases/aarch64/alpine-minirootfs-${ALPINE_VERSION}-aarch64.tar.gz"
+              echo "download: $URL"
+              if curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 300 -o "$TARBALL" "$URL"; then
+                ok=1; break
+              fi
+            done
+            [ "$ok" = 1 ] || { echo "::error::minirootfs 在所有镜像都下不动"; exit 1; }
+          else
+            echo "使用缓存的 minirootfs"
+          fi
+          GOT="$(shasum -a 256 "$TARBALL" | awk '{print $1}')"
+          echo "minirootfs sha256 = $GOT"
+          [ "$GOT" = "$ALPINE_SHA256" ] || { echo "::error::sha256 校验失败（期望 $ALPINE_SHA256）"; exit 1; }
+
+          TREE="$SBX/alpine-tree"
+          rm -rf "$TREE"; mkdir -p "$TREE"
+          tar -xzf "$TARBALL" -C "$TREE"
+
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$TREE/etc/resolv.conf"
+          printf 'https://dl-cdn.alpinelinux.org/alpine/v%s/main\nhttps://dl-cdn.alpinelinux.org/alpine/v%s/community\n' \
+            "$ALPINE_SERIES" "$ALPINE_SERIES" > "$TREE/etc/apk/repositories"
+          find "$TREE/usr/lib" -name EXTERNALLY-MANAGED -delete 2>/dev/null || true
+          mkdir -p "$TREE/dev" "$TREE/proc" "$TREE/sys" "$TREE/tmp" "$TREE/run" "$TREE/root" "$TREE/home"
+
+          CONFIG_TAR="$SBX/.cache/alpine-configured.tar.gz"
+          rm -f "$CONFIG_TAR"
+          tar -czf "$CONFIG_TAR" -C "$TREE" .
+
+          FAKEFS="$SBX/alpine-fakefs"
+          rm -rf "$FAKEFS"
+          "$FAKEFSIFY" "$CONFIG_TAR" "$FAKEFS"
+          [ -d "$FAKEFS/data" ]   || { echo "::error::fakefsify 没产出 data/"; exit 1; }
+          [ -f "$FAKEFS/meta.db" ] || { echo "::error::fakefsify 没产出 meta.db"; exit 1; }
+          [ -e "$FAKEFS/data/bin/sh" ] || { echo "::error::fakefs 里没有 /bin/sh"; exit 1; }
+
+          printf 'alpine-%s-r1\n' "$ALPINE_VERSION" > "$FAKEFS/.version"
+          printf 'aarch64\n' > "$FAKEFS/.arch"
+
+          rm -f "$SBX/out/alpine-rootfs.zip"
+          ( cd "$FAKEFS" && zip -qry "$SBX/out/alpine-rootfs.zip" . -x '*.db-shm' -x '*.db-wal' )
+          echo "phase rootfs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 8. 冒烟测试：用 host 版 ish 真的把 Alpine 跑起来 ——
+      #   这是「不只是编出来、而是真的能跑」的硬证据。失败只告警、不挂整个 job
+      #   （真机上的行为才是最终标准，这里只是提前发现问题）。
+      - name: Smoke test - boot Alpine under host iSH
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ISH="$SBX/out/ish"
+          FAKEFS="$SBX/alpine-fakefs"
+          LOG="$SBX/out/ish-smoke.log"
+          "$ISH" -f "$FAKEFS" /bin/sh -c 'echo AEVIS_ISH_SMOKE_OK; cat /etc/alpine-release; uname -m' > "$LOG" 2>&1 &
+          PID=$!
+          for _ in $(seq 1 90); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "冒烟测试超时（90s），杀掉"
+            kill -9 "$PID" 2>/dev/null || true
+          fi
+          echo "----- ish smoke output -----"
+          cat "$LOG" 2>/dev/null || true
+          if grep -q AEVIS_ISH_SMOKE_OK "$LOG" 2>/dev/null; then
+            echo "冒烟测试：OK"
+          else
+            echo "::warning::host ish 冒烟测试没打印 OK（见上面日志）"
+          fi
+
+      # —— 9. 验收：逐个检查产物 + 打印大小 + 打印分步耗时 ——
+      - name: Validate artifacts and report sizes/timings
+        run: |
+          set -euo pipefail
+          OUT="$SBX/out"
+          fail=0
+
+          echo "===== 产物大小 (artifact sizes) ====="
+          for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf fakefsify ish alpine-rootfs.zip; do
+            if [ -e "$OUT/$f" ]; then
+              printf '  %-18s %s\n' "$f" "$(du -h "$OUT/$f" | cut -f1)"
+            else
+              printf '  %-18s MISSING\n' "$f"
+              fail=1
+            fi
+          done
+          echo "  rootfs data/      $(du -sh "$SBX/alpine-fakefs/data" 2>/dev/null | cut -f1)"
+          echo "  rootfs meta.db    $(du -h "$SBX/alpine-fakefs/meta.db" 2>/dev/null | cut -f1)"
+
+          echo ""
+          echo "===== 架构检查 (arch check) ====="
+          for f in libish.a libish_emu.a libfakefs.a; do
+            echo "--- $f ---"
+            file "$OUT/$f"
+            lipo -info "$OUT/$f"
+            lipo -info "$OUT/$f" | grep -q arm64 || { echo "::error::$f 不是 arm64"; fail=1; }
+          done
+          echo "--- libvdso.so.elf ---"
+          file "$OUT/libvdso.so.elf"
+          file "$OUT/libvdso.so.elf" | grep -qi 'aarch64' || echo "::warning::libvdso 架构可能不对"
+          echo "--- host tools ---"
+          file "$OUT/fakefsify" "$OUT/ish"
+
+          echo ""
+          echo "===== rootfs zip 内容检查 ====="
+          # ⚠️ 先落盘再 grep，不要 `unzip -l | grep -q`：
+          #   fakefs 里文件成千上万，`grep -q` 一命中就退出会让 unzip 收到 SIGPIPE，
+          #   配上 `set -o pipefail` 会被误判成失败 —— 明明有 data/ 却说没有。
+          LIST="$SBX/zip-listing.txt"
+          unzip -l "$OUT/alpine-rootfs.zip" > "$LIST"
+          grep -E '(^| )data/|meta\.db' "$LIST" | head -5 || true
+          grep -q 'data/'   "$LIST" || { echo "::error::zip 里没有 data/";   fail=1; }
+          grep -q 'meta.db' "$LIST" || { echo "::error::zip 里没有 meta.db"; fail=1; }
+
+          echo ""
+          echo "===== 分步耗时 (phase timings) ====="
+          cat "$SBX/timings.txt" | tee "$OUT/timings.txt"
+          du -h "$OUT"/* 2>/dev/null | sort -h > "$OUT/sizes.txt" || true
+          echo "(字节级大小见 sizes.txt)"
+
+          echo ""
+          [ "$fail" = 0 ] || { echo "::error::产物验收未通过"; exit 1; }
+          echo "全部验收项通过。"
+
+      # —— 10. 任务摘要（页面上直接可见）——
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "# iSH sandbox build"
+            echo ""
+            echo "- run: ${{ github.run_number }}"
+            echo "- iSH: \`OpenMinis/ish-arm64\` @ \`${ISH_SHA}\` (feature-arm64, GPL-3.0)"
+            echo "- Alpine: ${ALPINE_VERSION} aarch64"
+            echo ""
+            echo "## 分步耗时"
+            echo '```'
+            cat "$SBX/timings.txt" 2>/dev/null || echo "(none)"
+            echo '```'
+            echo ""
+            echo "## 产物大小"
+            echo '```'
+            ls -lh "$SBX/out" 2>/dev/null || echo "(none)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # —— 11. 上传产物 ——
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-sandbox-${{ github.run_number }}
+          path: ish-sandbox/out/**
+          if-no-files-found: error
+          retention-days: 14
+
+      # —— 12. 保存缓存（只在成功时保存，避免把半截构建目录写进不可变缓存）——
+      - name: Save build cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ish-sandbox/build/ios-iphoneos
+            ish-sandbox/build/native
+            ish-sandbox/.cache
+          key: ish-sandbox-${{ runner.os }}-${{ hashFiles('.github/workflows/ish-sandbox.yml') }}
