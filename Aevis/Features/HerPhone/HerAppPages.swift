@@ -233,7 +233,10 @@ private struct HerChatAppPage: View {
     }
 }
 
-/// 只读的聊天记录 —— 只画气泡，**不做输入框**，也**不去动** `ChatStore`。
+/// 聊天记录 —— 只画气泡，**不去动** `ChatStore`。
+///
+/// **微信页**（`platform == .wechat`）底下多一条发送栏，能真的给 ta 发微信；
+/// QQ 页仍然只读 —— QQ 那条通道不走这里，别摆一个发不出去的框骗人。
 private struct HerChatLogPage: View {
 
     let platform: HerChatPlatform
@@ -241,7 +244,19 @@ private struct HerChatLogPage: View {
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var settings = AppSettings.shared
 
+    /// 输入框里正在打的字。
+    @State private var draft = ""
+    /// 正在发 —— 发的时候按钮原地换成转圈，顺便挡住连点。
+    @State private var sending = false
+    /// 上一次发送的结果 —— **如实**摆出来，不做「3 秒后自动消失」那种花活。
+    @State private var note: String?
+
     private var title: String { platform == .qq ? "QQ" : "微信" }
+
+    /// 去掉首尾空白的草稿 —— 「发不发得出去」全看它。
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// 本平台有内容的那些消息，最新的 80 条。
     private var visibleMessages: [ChatMessage] {
@@ -267,6 +282,108 @@ private struct HerChatLogPage: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        // 发送栏挂在**底部安全区**上（不是盖在列表上），气泡不会被挡。
+        .safeAreaInset(edge: .bottom) {
+            if platform == .wechat {
+                sendBar
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    // MARK: - 底部发送栏（只有微信页才有）
+
+    /// 底部输入栏。**苹果玻璃质感**：纯底 + 一条发丝分隔线，没有渐变、没有背景图。
+    /// 没绑机器人时**不摆**输入框，只留一句实话（免得看着像能发、其实发不出去）。
+    private var sendBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if settings.weChatBotToken.isEmpty {
+                Text("还没绑定微信机器人，绑了才能从这里发。")
+                    .font(.aevis(12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 8) {
+                    TextField("让 ta 给你发条微信…", text: $draft)
+                        .font(.aevis(14))
+                        .foregroundStyle(.primary)
+                        .textFieldStyle(.plain)
+                        .submitLabel(.send)
+                        .onSubmit(send)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+
+                    sendButton
+                }
+            }
+
+            if let note {
+                Text(note)
+                    .font(.aevis(12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.05))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.10))
+                .frame(height: 1)
+        }
+    }
+
+    /// 发送按钮 —— 正在发时**原地**换成转圈，视觉不跳。
+    @ViewBuilder
+    private var sendButton: some View {
+        if sending {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 44, height: 32)
+        } else {
+            Button {
+                send()
+            } label: {
+                Text("发")
+                    .font(.aevis(14, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.green)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(sending || trimmedDraft.isEmpty)
+        }
+    }
+
+    /// 真发一条微信 —— 交给 `WeChatBotService.shared.send(_:)`。
+    ///
+    /// ⚠️ `send` 内部自己处理线程（它的 `@Published` 都从 `setXxx` 过一道），
+    ///    所以这里**不要**在外面再包 `MainActor.run`；但本页自己的 `@State`
+    ///    （`note` / `draft` / `sending`）是在 `await` **之后**改的，必须回到主 actor，
+    ///    因此整个 task 标 `@MainActor` —— 这跟「拿 MainActor.run 去裹 send」不是一回事。
+    private func send() {
+        let text = trimmedDraft
+        guard !text.isEmpty, !sending else { return }
+        sending = true
+        Task { @MainActor in
+            let result = await WeChatBotService.shared.send(text)
+            note = result
+            if result.hasPrefix("发出去了") {
+                draft = ""
+            }
+            sending = false
+        }
     }
 
     /// 空状态 —— **说人话**：分清「还没绑定」和「绑了但还没收到消息」，

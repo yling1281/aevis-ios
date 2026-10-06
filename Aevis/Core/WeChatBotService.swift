@@ -468,8 +468,8 @@ final class WeChatBotService: ObservableObject {
         // ⭐ 把这些消息也落进 App 的聊天记录（用户要的：「点微信能看到我俩真实的聊天记录」）。
         //
         // ⚠️ **方向不猜**：`getupdates` 拿到的是**用户发给 bot 的**消息，
-        //    所以一律 `role: .user`。本通道目前**只有收、没有发**（这个类里
-        //    没有任何发送方法），这里记的全是「用户发给 ta 的」。
+        //    所以一律 `role: .user`；从这里回发出去的那条走 `send`（`role: .assistant`）。
+        //    也就是：`readOnce` 这里记的全是「用户发给 ta 的」。
         // ⚠️ `readOnce()` 已经是 `@MainActor`，直接写 `ChatStore` 是安全的 ——
         //    **不要**再套一层 `DispatchQueue.main.async`。
         // ⚠️ 打上 `source = "wechat"`，让微信页只挑本通道的消息显示。
@@ -478,6 +478,13 @@ final class WeChatBotService: ObservableObject {
         for item in added {
             ChatStore.shared.append(
                 ChatMessage(role: .user, text: item.text, source: "wechat"), for: ownerID)
+        }
+
+        // ⭐ 记住「最近一次入站」的发送者 + context_token —— `send` 就是要发给
+        //    「最后跟 ta 说话的那个人」。取 `added` 的**最后一条**（时间上最近的那条）。
+        if let latest = added.last {
+            if let peer = latest.peer, !peer.isEmpty { lastPeer = peer }
+            if let context = latest.context, !context.isEmpty { lastContext = context }
         }
 
         let existing = incoming
@@ -489,6 +496,68 @@ final class WeChatBotService: ObservableObject {
         setIncoming([])
         setReceived(0)
         setError(nil)
+    }
+
+    // MARK: - 发送（以 ta 的身份发给用户）
+
+    /// 往微信发一条文本（以 ta 的身份发给用户）。返回一句能直接显示的中文结果。
+    ///
+    /// 收件人 = **最近一次入站消息的发送者**（`lastPeer`）；`context_token` 能拿到就原样带上。
+    /// ⚠️ 只走 `linux(_:)` 这一个入口碰 iSH，绝不自己起进程。
+    /// ⚠️ 请求体由**宿主**拼好、base64 写进 `send_body.json`，脚本只负责 `-d @` 发出去
+    ///    （sh 里拼 JSON 太脆）。
+    func send(_ text: String) async -> String {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return "没内容，没发。" }
+        guard !lastPeer.isEmpty else { return "还不知道发给谁（还没收到过 ta 的消息）。" }
+
+        // 1) 拼请求体（照 iLink 的 `sendmessage` 形状）。
+        //    `message_type = 2` = BOT 发出；`item_list[].type = 1` = TEXT（纯文本不用先传媒体）。
+        let textItem: [String: Any] = ["text": body]
+        let item: [String: Any] = ["type": 1, "text_item": textItem]
+        var msg: [String: Any] = [
+            "from_user_id": "",
+            "to_user_id": lastPeer,
+            "client_id": UUID().uuidString,
+            "message_type": 2,
+            "message_state": 2,
+            "item_list": [item]
+        ]
+        // `context_token`：官方说「每次发都要原样带回」。能拿到就带，拿不到就省 —— 并在文案里说清带没带。
+        let hasContext = !lastContext.isEmpty
+        if hasContext { msg["context_token"] = lastContext }
+        let baseInfo: [String: Any] = ["channel_version": "1.0.0", "bot_agent": "aevis"]
+        let payload: [String: Any] = ["msg": msg, "base_info": baseInfo]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return "没发出去：请求体拼不出来。"
+        }
+
+        // 2) base64 写进 guest（同 `writeGuest` 的写法；base64 字母表没有下划线，不会撞哨兵串）。
+        _ = await writeGuest(json, to: Guest.sendBody)
+
+        // 3) 真正发出去（脚本内部把 `http_code=` 和响应原文吐到 stdout）。
+        let result = await linux("sh \(Guest.script) send")
+        let output = result.output
+
+        // 4) 成败判定：输出里能解出 `"ret": 0` 才算成 —— **绝不假装成功**。
+        if Self.containsRetZero(output) {
+            // 成功 ⇒ 补一条聊天记录（这一步是 ta 发的，所以是 `assistant`）。
+            // ⚠️ `ChatStore.append` 会改它自己的 `@Published`，而 `await` 之后线程是随机的
+            //    ⇒ 必须回主线程再写（用本类现成的 `onMain` 包一道，和别处一致）。
+            onMain {
+                ChatStore.shared.append(
+                    ChatMessage(role: .assistant, text: body, source: "wechat"),
+                    for: PersonaStore.shared.active?.id)
+            }
+            return hasContext
+                ? "发出去了（ret=0）（带 context_token）"
+                : "发出去了（ret=0）（没带 context_token，能不能收到不确定）"
+        }
+
+        // 失败 ⇒ 如实把响应原文（截到 400 字）摆出来，绝不假装成功。
+        let clipped = String(output.suffix(400))
+        return "没发出去：" + clipped
     }
 
     // MARK: - 小工具
@@ -521,6 +590,17 @@ final class WeChatBotService: ObservableObject {
         return Int(digits)
     }
 
+    /// 输出里有没有 `"ret": 0`（去掉空白后找 `"ret":0`）。
+    ///
+    /// ⚠️ 只认**恰好 0**：`0` 后面不能跟数字或小数点，免得把 `"ret":0.5` / `"ret":10` 当成成功。
+    /// ⚠️ `ret` 非 0 = 失败 —— 这里返回 false，由调用方把原文如实报出去。
+    private static func containsRetZero(_ text: String) -> Bool {
+        let compact = text.filter { !$0.isWhitespace }
+        guard let range = compact.range(of: "\"ret\":0") else { return false }
+        guard let next = compact[range.upperBound...].first else { return true }
+        return !(next.isNumber || next == ".")
+    }
+
     /// 从一个 getupdates 响应里抠出消息。
     ///
     /// ⚠️ 我们手上**没有 iLink 的权威字段表**，所以这里把几个常见的容器名 / 字段名
@@ -550,7 +630,16 @@ final class WeChatBotService: ObservableObject {
                 ?? (item["message"] as? String)
                 ?? ""
             guard !text.isEmpty else { continue }
-            out.append(Incoming(from: from, text: text, at: Date()))
+            // peer = 回发时要用的收件人 id（iLink 的 `to_user_id`）。优先 from_user_id。
+            let peer = (item["from_user_id"] as? String)
+                ?? (item["from_user_name"] as? String)
+                ?? (item["from"] as? String)
+                ?? (item["sender"] as? String)
+            // context = 该用户最近一次入站带的 `context_token`，回发时要**原样带回**。
+            let context = (item["context_token"] as? String)
+                ?? (item["contextToken"] as? String)
+            out.append(Incoming(from: from, text: text, at: Date(),
+                                peer: peer, context: context))
         }
         return out
     }
