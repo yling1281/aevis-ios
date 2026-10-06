@@ -18,14 +18,87 @@ struct HerApp: Identifiable, Codable, Equatable {
     var symbol: String
     var installedAt: Date
 
+    /// 点开这个 App 之后走哪种"面"。
+    ///
+    /// `nil` = 还没定 —— 去 `HerAppCatalog.surface(forID:)` 按 id 查默认。
+    /// （老存档里没有这个 key，解出来就是 `nil`；store 会在内存里补上。）
+    var surface: HerAppSurface? = nil
+    /// 语义色名（`"green"` / `"blue"` …）。
+    /// `nil` = 保持现在"按名字算色"的老行为（旧的 `HerPhoneStyle.tint(for:)`）。
+    var accent: String? = nil
+    /// 内置的 App 能不能卸载。
+    var isBuiltin: Bool = false
+    /// 排序用。`0` = 按现有顺序追加（用户新装进来的）。
+    var order: Int = 0
+
+    /// 进存档的 key。和下面的 `init(from:)` 必须一一对应。
+    private enum CodingKeys: String, CodingKey {
+        case id, name, symbol, installedAt, surface, accent, isBuiltin, order
+    }
+
     init(id: String = UUID().uuidString,
          name: String,
          symbol: String,
-         installedAt: Date = Date()) {
+         installedAt: Date = Date(),
+         surface: HerAppSurface? = nil,
+         accent: String? = nil,
+         isBuiltin: Bool = false,
+         order: Int = 0) {
         self.id = id
         self.name = name
         self.symbol = symbol
         self.installedAt = installedAt
+        self.surface = surface
+        self.accent = accent
+        self.isBuiltin = isBuiltin
+        self.order = order
+    }
+
+    // MARK: - 持久化（🔴 手写解码，改动里最要紧的一处）
+
+    /// 手写 `init(from:)` —— **这是整个改动里最要紧、最容易丢用户数据的地方**。
+    ///
+    /// 为什么不能靠自动合成：`HerApp` 是 `Codable` 且**已经持久化**过。
+    /// 给新字段写 `= nil` 默认值**救不了它** —— 自动合成的 `init(from:)` 遇到
+    /// "JSON 里没有这个 key" 会直接抛 `keyNotFound`，整份存档都解不出来。
+    /// 所以这里**每个字段**都走 `decodeIfPresent` + 兜底：
+    ///   · 老存档里没有的新字段（surface / accent / isBuiltin / order）→ 各自默认值；
+    ///   · 残缺/损坏的老字段（缺 id、缺 name…）→ 也绝不抛错，给一个安全兜底。
+    ///
+    /// `encode(to:)` 故意**不写** —— 让编译器自动合成（用上面那套 `CodingKeys`）。
+    /// 只提供 `init(from:)` 不会取消 `encode(to:)` 的合成。
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let rawID = Self.lenient(String.self, .id, from: container, fallback: "")
+        self.id = rawID.isEmpty ? UUID().uuidString : rawID
+
+        let rawName = Self.lenient(String.self, .name, from: container, fallback: "")
+        self.name = rawName.isEmpty ? "App" : rawName
+
+        let rawSymbol = Self.lenient(String.self, .symbol, from: container, fallback: "")
+        self.symbol = rawSymbol.isEmpty ? "app.fill" : rawSymbol
+
+        self.installedAt = Self.lenient(Date.self, .installedAt, from: container, fallback: Date())
+
+        // 可选字段单独写：`(try? decodeIfPresent) ?? nil` 把 `T??` 压成 `T?`，
+        // key 不在 / 值为 null / 类型不对 → 都得到 nil。
+        self.surface = (try? container.decodeIfPresent(HerAppSurface.self, forKey: .surface)) ?? nil
+        self.accent = (try? container.decodeIfPresent(String.self, forKey: .accent)) ?? nil
+
+        self.isBuiltin = Self.lenient(Bool.self, .isBuiltin, from: container, fallback: false)
+        self.order = Self.lenient(Int.self, .order, from: container, fallback: 0)
+    }
+
+    /// `decodeIfPresent` 的容错版：key 不存在、值为 null、类型不对 —— 一律退回兜底，绝不抛错。
+    private static func lenient<T: Decodable>(
+        _ type: T.Type,
+        _ key: CodingKeys,
+        from container: KeyedDecodingContainer<CodingKeys>,
+        fallback: T
+    ) -> T {
+        let decoded: T?? = try? container.decodeIfPresent(type, forKey: key)
+        return decoded.flatMap { $0 } ?? fallback
     }
 }
 
@@ -76,6 +149,15 @@ final class HerPhoneStore: ObservableObject {
     /// 读档 / 搬家导入期间**只读不写**（同 `TodoStore.loading`）。
     private var loading = false
 
+    /// 存档里记下的**格式版本**（没有这个 key 的老存档 = 0）。见 `migrateIfNeeded()`。
+    private var archivedVersion = 0
+
+    /// 当前存档格式版本。
+    ///  · `0` / 缺省 = 只有 id/name/symbol/installedAt 的旧格式；
+    ///  · `2` = 已把 2026-10-06 新增的三个内置 App（推特 / 百度网盘 / 浏览器）
+    ///          并进**已经存在**的 ta 的手机里。
+    private static let archiveVersion = 2
+
     /// events 最多留这么多条，超了从**最老的**开始丢（滚动裁剪）。
     static let maxEvents = 200
 
@@ -94,22 +176,12 @@ final class HerPhoneStore: ObservableObject {
 
     /// 首次运行时给 ta 一套默认 App。
     ///
+    /// ⚠️ 现在**统一由 `HerAppCatalog` 产出**（单一事实来源）：名字 / 图标 /
+    ///    色名 / 点开走哪种面全在目录里定义，这里只是展开成 `HerApp`。
+    ///    好处是新增一个 App 只改目录一处，不用两边同步。
+    ///
     /// ⚠️ 每个 `symbol` 都是**系统里真有**的 SF Symbol —— 别随手改。
-    ///    颜色不在模型里存（模型只有 name/symbol），界面按名字算一个稳定色。
-    static let defaultApps: [HerApp] = [
-        HerApp(id: "wechat", name: "微信", symbol: "message.fill"),
-        HerApp(id: "qq", name: "QQ", symbol: "bubble.left.and.bubble.right.fill"),
-        HerApp(id: "taobao", name: "淘宝", symbol: "bag.fill"),
-        HerApp(id: "pinduoduo", name: "拼多多", symbol: "cart.fill"),
-        HerApp(id: "douyin", name: "抖音", symbol: "music.note"),
-        HerApp(id: "xiaohongshu", name: "小红书", symbol: "book.fill"),
-        HerApp(id: "meituan", name: "美团", symbol: "fork.knife"),
-        HerApp(id: "netease", name: "网易云音乐", symbol: "headphones"),
-        HerApp(id: "wangzhe", name: "王者荣耀", symbol: "gamecontroller.fill"),
-        HerApp(id: "alipay", name: "支付宝", symbol: "creditcard.fill"),
-        HerApp(id: "gaode", name: "高德地图", symbol: "map.fill"),
-        HerApp(id: "camera", name: "相机", symbol: "camera.fill")
-    ]
+    static let defaultApps: [HerApp] = HerAppCatalog.defaultApps()
 
     /// 认一个 App 名字对应的 SF Symbol；认不出就给一个通用兜底图。
     ///
@@ -137,7 +209,10 @@ final class HerPhoneStore: ObservableObject {
         if appsByOwner[id] == nil {
             appsByOwner[id] = Self.defaultApps
         }
-        apps = appsByOwner[id] ?? []
+        // 老存档里的 App 没有 `surface` —— 在**内存里**按 id 补上默认的"面"。
+        // ⚠️ 故意不在这里落盘：补 surface 是派生数据，下次因别的原因 `save()` 时
+        //    自然会跟着写回去，不必为它单独整份改写用户数据。
+        apps = backfillSurfaces(appsByOwner[id] ?? [])
         events = eventsByOwner[id] ?? []
     }
 
@@ -154,11 +229,21 @@ final class HerPhoneStore: ObservableObject {
     // MARK: - 装 / 卸
 
     /// ta"装"了一个 App。
+    ///
+    /// 名字能对上目录里的内置 App 时，顺手把它的"面"/色名带上 ——
+    /// 这样手动装回来的「微信」点开还是聊天列表，而不是兜底页。
+    /// 对不上（用户自己编的 App）→ `.generic`（只显示一句"她打开了 X"）。
     @discardableResult
     func install(name: String, symbol: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
-        let app = HerApp(name: trimmed, symbol: symbol)
+        var app = HerApp(name: trimmed, symbol: symbol)
+        if let entry = HerAppCatalog.entry(forName: trimmed) {
+            app.surface = entry.surface
+            app.accent = entry.accent
+        } else {
+            app.surface = .generic
+        }
         apps.append(app)
         save()
         return app.id
@@ -168,6 +253,26 @@ final class HerPhoneStore: ObservableObject {
     func uninstall(id: String) {
         apps.removeAll { $0.id == id }
         save()
+    }
+
+    // MARK: - 查询 / 目录
+
+    /// 按 id 取一个 App（供下一轮界面用）。找不到返回 `nil`。
+    func app(withID id: String) -> HerApp? {
+        apps.first { $0.id == id }
+    }
+
+    /// 给 `surface == nil` 的 App 补上默认的"面"（按 id 去目录里查；查不到 → `.generic`）。
+    ///
+    /// ⚠️ **只在内存里补**，不落盘、不整份改写用户数据 —— 目的就是让老存档也能正常点开。
+    ///    已经定过 `surface` 的 App 原样返回，不动它。
+    private func backfillSurfaces(_ list: [HerApp]) -> [HerApp] {
+        list.map { app in
+            guard app.surface == nil else { return app }
+            var copy = app
+            copy.surface = HerAppCatalog.surface(forID: app.id)
+            return copy
+        }
     }
 
     // MARK: - 动作
@@ -203,6 +308,12 @@ final class HerPhoneStore: ObservableObject {
     private struct Archive: Codable {
         var apps: [String: [HerApp]] = [:]
         var events: [String: [HerPhoneEvent]] = [:]
+        /// 存档格式版本。
+        /// 🔴 **必须声明成 `Int?`** —— 自动合成的解码器对 **Optional** 字段走
+        ///    `decodeIfPresent`，所以**没有这个 key 的旧存档照样解得出来**；
+        ///    写成 `var version: Int = 0` 反而会让旧存档直接抛 `keyNotFound`,
+        ///    整个"她的手机"数据全丢。
+        var version: Int? = nil
     }
 
     private func load() {
@@ -220,6 +331,47 @@ final class HerPhoneStore: ObservableObject {
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
+        archivedVersion = archived.version ?? 0
+        // 🔴 这一步不能省：老存档里的手机只有旧那 12 个 App，
+        //    不迁移的话老板升级完**看不到**推特 / 百度网盘 / 浏览器。
+        if migrateIfNeeded() { writeArchive() }
+    }
+
+    // MARK: - 迁移
+
+    /// 一次性把**后来新增的内置 App** 补进"已经有手机"的联系人里。
+    ///
+    /// 🔴 为什么必须有这一段（2026-10-06 踩过）：
+    ///    `setOwner` 只在 `appsByOwner[id] == nil`（这个人**从来没建过手机**）时才
+    ///    用 `defaultApps` 装那套默认 App。老用户手机上早就有 12 个 App 了 ⇒
+    ///    永远走不到那一步 ⇒ **只改目录/`defaultApps` 是完全没用的**，
+    ///    升级完仍然是老样子。所以必须在**读档**这一刻做一次合并。
+    ///
+    /// ⚠️ 只在 `archivedVersion < archiveVersion` 时跑一次（跑完把版本落盘）——
+    ///    这样用户**之后自己卸载**掉的 App 不会在下次启动又冒出来。
+    /// ⚠️ **空列表跳过**（用户把 App 全卸载光了）—— 尊重那个状态，别硬塞回来。
+    /// ⚠️ 返回值 = 有没有改到数据；调用方据此决定要不要落盘。
+    @discardableResult
+    private func migrateIfNeeded() -> Bool {
+        guard archivedVersion < Self.archiveVersion else { return false }
+
+        let builtins = HerAppCatalog.defaultApps()
+        for (id, list) in appsByOwner where !list.isEmpty {
+            var merged = list
+            // 老存档里 `order` 全是 0 —— 先按当前数组顺序把序号钉住，
+            // 否则新补进来的 App 会和老的撞同一个序号，界面排序就乱了。
+            if merged.allSatisfy({ $0.order == 0 }) {
+                for index in merged.indices { merged[index].order = index + 1 }
+            }
+            let existing = Set(merged.map { $0.id })
+            for app in builtins where !existing.contains(app.id) {
+                merged.append(app)
+            }
+            appsByOwner[id] = merged
+        }
+
+        archivedVersion = Self.archiveVersion
+        return true
     }
 
     private func stash() {
@@ -237,7 +389,8 @@ final class HerPhoneStore: ObservableObject {
 
     private func writeArchive() {
         guard !appsByOwner.isEmpty || !eventsByOwner.isEmpty else { return }
-        let archive = Archive(apps: flatApps(), events: flatEvents())
+        let archive = Archive(apps: flatApps(), events: flatEvents(),
+                              version: Self.archiveVersion)
         guard let data = try? JSONEncoder().encode(archive) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
@@ -262,7 +415,8 @@ extension HerPhoneStore: BackupableStore {
 
     func exportBackup() throws -> Data {
         stash()
-        return try JSONEncoder().encode(Archive(apps: flatApps(), events: flatEvents()))
+        return try JSONEncoder().encode(
+            Archive(apps: flatApps(), events: flatEvents(), version: Self.archiveVersion))
     }
 
     func importBackup(_ data: Data) throws {
@@ -277,7 +431,10 @@ extension HerPhoneStore: BackupableStore {
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
-        apps = owner.flatMap { appsByOwner[$0] } ?? []
+        // 从老版本搬过来的存档同样要补新 App —— 跟 `load()` 走同一条迁移。
+        archivedVersion = archived.version ?? 0
+        _ = migrateIfNeeded()
+        apps = backfillSurfaces(owner.flatMap { appsByOwner[$0] } ?? [])
         events = owner.flatMap { eventsByOwner[$0] } ?? []
         writeArchive()
     }

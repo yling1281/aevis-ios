@@ -124,3 +124,11 @@
 #       少了它就只截到列表。演示数据里已经手工连了 3 条线（模拟器没 API Key、
 #       织不了网），所以这张图能看出线，不是四个孤零零的点。
 48-memoryweb  -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory -aevisOpenMemoryList -aevisOpenMemoryWeb
+
+# ⭐ 2026-10-06：「ta 的小手机」里的**二级页**（点图标进去那一层）。
+#    ⚠️ 以前图标点了只往聊天里插一条消息，「点进去到底是什么样」从来没验证过 ——
+#       这两条就是专门补这个空白的：-aevisOpenHerApp=<id> 直接推到某个 App 的二级页。
+#    ⚠️ 必须带 -aevisOpenHerPhone：二级页是从小手机里推的，不打开小手机就无从推起、
+#       启动参数也没人接（跟 47-herphone 一个道理）。
+49-herphone-wechat  -aevisDemo -aevisOpenTab=discover -aevisOpenHerPhone -aevisOpenHerApp=wechat
+50-herphone-netdisk -aevisDemo -aevisOpenTab=discover -aevisOpenHerPhone -aevisOpenHerApp=baidupan

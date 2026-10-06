@@ -83,11 +83,12 @@ struct HerPhoneBubble: View {
 ///
 /// 这一页做三件事：
 ///  1. 画一部手机（外框 + 状态栏 + 灵动岛 + 屏幕）；
-///  2. 上半屏列出 ta 装了哪些 App（点一下 = ta 打开了它）；
+///  2. 上半屏列出 ta 装了哪些 App（点一下 = 进到那个 App 里面）；
 ///  3. 下半屏显示 ta 最近发来的几句话（简化的气泡，不是全屏聊天那套）。
 ///
-/// 点某个 App 会走 `HerPhoneStore.shared.logEvent(...)` ——
-/// 那边会落一条 `.herPhone` 聊天消息，所以回到聊天页就能看到「ta 刚打开了 淘宝」。
+/// 点某个 App 做两件事：**推进二级页**（`HerAppLaunchPage(app:)`，定义在 `HerAppPages.swift`），
+/// 同时走 `HerPhoneStore.shared.logEvent(...)` 留痕（会落一条 `.herPhone` 聊天消息，
+/// 所以回到聊天页就能看到「ta 刚打开了 淘宝」）—— 同一个 App 每次打开只留痕一次。
 ///
 /// ⚠️ 入口由 **team-lead** 挂（在 `DiscoverView` 上）。这里只要保证
 ///    `HerPhoneView()` 能被直接构造、单独调起来就行。
@@ -96,10 +97,20 @@ struct HerPhoneView: View {
     @ObservedObject private var store = HerPhoneStore.shared
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var personaStore = PersonaStore.shared
-    @ObservedObject private var settings = AppSettings.shared
+    // ⚠️ 这里**不要**再挂 `@ObservedObject private var settings = AppSettings.shared`：
+    //    AppSettings 的 @Published 非常多（改任何设置都会 objectWillChange），
+    //    挂了它 = 本视图跟着无关的设置变更反复重绘，而这台「小手机」是常驻大视图。
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
+
+    /// 二级页的**页面栈**：元素 = `HerApp.id`。整页**复用最外层那个** `NavigationStack`，
+    /// 不再嵌套新的（嵌套 `NavigationStack` 会多出一层壳、返回按钮也乱）。
+    @State private var path: [String] = []
+
+    /// 本次打开期间**已经记过痕迹**的 App id —— 防止在桌面和二级页之间来回进出
+    /// 把聊天里同一条「ta 打开了 X」刷屏。
+    @State private var loggedAppIDs: Set<String> = []
 
     /// App 网格：4 列。
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
@@ -133,25 +144,44 @@ struct HerPhoneView: View {
     // MARK: - 主体
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    device
-                    hint
+        NavigationStack(path: $path) {
+            phoneScreen
+                .background(AevisBackground().ignoresSafeArea())
+                .navigationTitle("ta 的小手机")
+                .navigationBarTitleDisplayMode(.inline)
+                .navigationDestination(for: String.self) { id in
+                    if let app = HerPhoneStore.shared.app(withID: id) {
+                        // 二级页 = 全屏 APP：压在桌面那一屏**上面**，
+                        // 顶到安全区，不被手机外壳那圈边距包着。
+                        HerAppLaunchPage(app: app)
+                    } else {
+                        // 兜底：id 对不上（数据被清了）也绝不能白屏。
+                        ContentUnavailableView("这个 App 不见了", systemImage: "questionmark.app")
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-            }
-            .background(AevisBackground().ignoresSafeArea())
-            .navigationTitle("ta 的小手机")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                .toolbar {
+                    // ⚠️ 这个「关闭」关的是**整个 sheet**，保持不变。
+                    //    点进二级页后系统自带的返回按钮会自己出现，这里不要自绘返回箭头。
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("关闭") { dismiss() }
+                    }
                 }
-            }
         }
         .aevisScreen("ta 的小手机")
+        .onAppear { applyLaunchOptions() }
+    }
+
+    /// 桌面那一屏（手机外壳 + 说明）—— 二级页是压在它**上面**的另一页，
+    /// 所以外壳那圈边距只属于桌面，不会箍住二级页。
+    private var phoneScreen: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                device
+                hint
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
     }
 
     // MARK: - 手机外壳
@@ -238,22 +268,40 @@ struct HerPhoneView: View {
             sectionLabel("ta 的 App")
 
             LazyVGrid(columns: columns, spacing: 14) {
-                ForEach(store.apps) { app in
+                ForEach(sortedApps) { app in
                     appIcon(app)
                 }
             }
         }
     }
 
+    /// 渲染用的排序（⚠️ 只排**画出来的顺序**，不动 `store.apps` 本体）：
+    /// `order == 0` 的（用户自己装的）排**最后**，其余按 `order` 升序，
+    /// `order` 并列时再按 `installedAt` 升序。
+    private var sortedApps: [HerApp] {
+        store.apps.sorted { lhs, rhs in
+            let lhsNew = lhs.order == 0
+            let rhsNew = rhs.order == 0
+            if lhsNew != rhsNew { return !lhsNew }
+            if lhs.order != rhs.order { return lhs.order < rhs.order }
+            return lhs.installedAt < rhs.installedAt
+        }
+    }
+
     private func appIcon(_ app: HerApp) -> some View {
         Button {
-            // 点一下 = ta 打开了这个 App。
-            store.logEvent(appName: app.name, action: "打开了 \(app.name)")
+            // ① 进这个 App 的二级页；
+            // ② 同时留痕（`logEvent` 语义不变），但**同一次打开期间只记一次** ——
+            //    否则在桌面和二级页之间来回进出会把聊天里同一条刷屏。
+            path.append(app.id)
+            if loggedAppIDs.insert(app.id).inserted {
+                store.logEvent(appName: app.name, action: "打开了 \(app.name)")
+            }
         } label: {
             VStack(spacing: 5) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 15, style: .continuous)
-                        .fill(HerPhoneStyle.tint(for: app.name))
+                        .fill(iconTint(app))
                     Image(systemName: app.symbol)
                         .font(.aevis(20, weight: .medium))
                         .foregroundStyle(.white)
@@ -273,6 +321,43 @@ struct HerPhoneView: View {
         .contextMenu {
             Button("卸载", role: .destructive) { store.uninstall(id: app.id) }
         }
+    }
+
+    /// 图标底色：`app.accent` 有值就按语义色名取色；`nil` 时保持老的"按名字算色"。
+    private func iconTint(_ app: HerApp) -> Color {
+        guard let accent = app.accent else { return HerPhoneStyle.tint(for: app.name) }
+        switch accent {
+        case "green":  return .green
+        case "blue":   return .blue
+        case "red":    return .red
+        case "orange": return .orange
+        case "yellow": return .yellow
+        case "teal":   return .teal
+        case "indigo": return .indigo
+        case "gray":   return .gray
+        default:       return HerPhoneStyle.tint(for: app.name)
+        }
+    }
+
+    // MARK: - CI 截图旁路
+
+    /// 截图自检用的启动直达（**只在 Debug 生效**）：`-aevisOpenHerApp=<id>`
+    /// （如 `-aevisOpenHerApp=wechat` / `baidupan` / `browser`）直接进某个 App 的二级页。
+    ///
+    /// ⚠️ 和 `DemoSeed` / `DiscoverView` 的开关**一个写法**（`#if DEBUG` + 启动参数），
+    ///    不然这些开关会被编进正式版。本机没有 Xcode，CI 截图是唯一能看见结果的眼睛，
+    ///    所以「点进去」这一层必须能靠启动参数直接截到。
+    /// ⚠️ 只有 `HerPhoneStore.shared.app(withID:)` 真能查到时才推 —— 演示数据里没有
+    ///    这个 App 就别动，避免白屏。
+    private func applyLaunchOptions() {
+        #if DEBUG
+        let prefix = "-aevisOpenHerApp="
+        guard let arg = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix(prefix) })
+        else { return }
+        let id = String(arg.dropFirst(prefix.count))
+        guard !id.isEmpty, HerPhoneStore.shared.app(withID: id) != nil else { return }
+        path = [id]
+        #endif
     }
 
     // MARK: 下半屏：ta 发来的几句话
@@ -336,7 +421,7 @@ struct HerPhoneView: View {
     // MARK: - 底下一行说明
 
     private var hint: some View {
-        Text("点 ta 手机上的图标，就像 ta 真的打开了那个 App —— 聊天里会多出一条「ta 刚打开了 …」。")
+        Text("点 ta 手机上的图标，能进到那个 App 里面看看 —— 聊天里也会多出一条「ta 刚打开了 …」。")
             .font(.aevis(11))
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)

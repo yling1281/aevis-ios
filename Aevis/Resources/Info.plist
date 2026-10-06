@@ -59,18 +59,39 @@
 	<array>
 		<string>INSendMessageIntent</string>
 	</array>
+	<!-- ⭐ 2026-10-06：她的小手机要能「点开真 App」——
+	     手机里的微信/QQ/支付宝/百度网盘图标要能唤起系统里**真的**那个 App。
+	     ⚠️ 没列进这张白名单的 scheme，`canOpenURL` 一律返回 false，
+	        表现是"点了没反应、也不报错"，特别难查。
+	     ⚠️ 补的这几个：mqq/mqqapi（QQ）、alipay（注意跟已有的 alipays 不是同一个）、
+	        bdnetdisk（百度网盘）、twitter/x（推特）、weibo/sinaweibo（微博）、
+	        didi（高德不行时打车兜底）。 -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>shortcuts</string>
 		<string>snssdk1128</string>
 		<string>aweme</string>
 		<string>weixin</string>
+		<string>alipay</string>
 		<string>alipays</string>
 		<string>taobao</string>
 		<string>bilibili</string>
 		<string>zhihu</string>
 		<string>xiaohongshu</string>
 		<string>music</string>
+		<string>mqq</string>
+		<string>mqqapi</string>
+		<string>mqqopensdkapiV2</string>
+		<string>bdnetdisk</string>
+		<string>baidunetdisk</string>
+		<string>twitter</string>
+		<string>x</string>
+		<string>weibo</string>
+		<string>sinaweibo</string>
+		<string>pinduoduo</string>
+		<string>snssdk141</string>
+		<string>iosamap</string>
+		<string>amapuri</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Aevis 需要使用麦克风：你可以直接说话和 TA 聊天，也能和 TA 实时通话。</string>
