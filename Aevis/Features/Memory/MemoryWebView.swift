@@ -14,11 +14,6 @@ struct MemoryWebView: View {
     @ObservedObject private var memory = MemoryStore.shared
     @ObservedObject private var settings = AppSettings.shared
 
-    /// 归一化坐标。键是记忆 id。
-    @State private var positions: [String: CGPoint] = [:]
-    /// 上一次算布局时用的 id 列表 —— 拓扑没变就不重算。
-    @State private var lastIDs: [String] = []
-
     /// 当前选中的节点。选中后高亮它和它的一级邻居。
     @State private var selectedID: String?
 
@@ -42,14 +37,11 @@ struct MemoryWebView: View {
         .navigationTitle("记忆网")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .onAppear { rebuildLayout() }
         .onChange(of: memory.items.count) { _, _ in
             reloadSelection()
-            rebuildLayout()
         }
         .onChange(of: memory.items.map { $0.id }) { _, _ in
             reloadSelection()
-            rebuildLayout()
         }
     }
 
@@ -88,6 +80,10 @@ struct MemoryWebView: View {
             Canvas { context, size in
                 renderWeb(in: &context, size: size)
             }
+            // ⚠️ 拓扑（哪条连哪条）一变就整块重建 Canvas —— 双保险：
+            //    即便 SwiftUI 因为闭包不可比较而对这个 Canvas 判"没变"，
+            //    换个 id 也一定会重画。
+            .id(layoutSignature)
             .contentShape(Rectangle())
             .gesture(dragGesture)
             .simultaneousGesture(magnifyGesture)
@@ -281,11 +277,12 @@ struct MemoryWebView: View {
 
     /// 点画布：落在某个节点附近就选中它，点空白就取消选中。
     private func handleTap(_ point: CGPoint, size: CGSize) {
+        let points = layoutPositions(memory.items)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         var hit: String?
         var best = CGFloat.greatestFiniteMagnitude
         for item in memory.items {
-            guard let node = screenPoint(item.id, size: size, center: center) else { continue }
+            guard let node = screenPoint(item.id, in: points, size: size, center: center) else { continue }
             let dx = node.x - point.x
             let dy = node.y - point.y
             let distance = (dx * dx + dy * dy).squareRoot()
@@ -308,6 +305,7 @@ struct MemoryWebView: View {
         let items = memory.items
         guard !items.isEmpty else { return }
 
+        let points = layoutPositions(items)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let accent = settings.accentColor
         let alive = Set(items.map { $0.id })
@@ -322,12 +320,12 @@ struct MemoryWebView: View {
         // 1) 线先画，压在节点下面。
         var painted = Set<String>()
         for item in items {
-            guard let from = screenPoint(item.id, size: size, center: center) else { continue }
+            guard let from = screenPoint(item.id, in: points, size: size, center: center) else { continue }
             for other in item.linkIDs where alive.contains(other) {
                 let key = item.id < other ? item.id + "|" + other : other + "|" + item.id
                 if painted.contains(key) { continue }
                 painted.insert(key)
-                guard let to = screenPoint(other, size: size, center: center) else { continue }
+                guard let to = screenPoint(other, in: points, size: size, center: center) else { continue }
 
                 var alpha = 0.30
                 var width: CGFloat = 1
@@ -349,7 +347,7 @@ struct MemoryWebView: View {
 
         // 2) 节点。
         for item in items {
-            guard let point = screenPoint(item.id, size: size, center: center) else { continue }
+            guard let point = screenPoint(item.id, in: points, size: size, center: center) else { continue }
             let active = selected == nil || item.id == selected || neighbors.contains(item.id)
             let nodeAlpha = active ? 1.0 : 0.22
             let radius = nodeRadius(for: item) * zoom
@@ -386,8 +384,9 @@ struct MemoryWebView: View {
     }
 
     /// 归一化坐标 → 屏幕坐标（乘画布尺寸 + 绕中心缩放 + 平移）。
-    private func screenPoint(_ id: String, size: CGSize, center: CGPoint) -> CGPoint? {
-        guard let normalized = positions[id] else { return nil }
+    private func screenPoint(_ id: String, in points: [String: CGPoint],
+                             size: CGSize, center: CGPoint) -> CGPoint? {
+        guard let normalized = points[id] else { return nil }
         let baseX = normalized.x * size.width
         let baseY = normalized.y * size.height
         return CGPoint(
@@ -415,25 +414,55 @@ struct MemoryWebView: View {
         }
     }
 
+    /// 布局缓存 —— **故意不用 `@State`**。
+    ///
+    /// ⚠️⚠️ 2026-10-06 踩的坑：原来坐标只放在 `@State positions` 里、靠
+    /// `.onAppear { rebuildLayout() }` 去填，结果 CI 截图里**画布一片空白**
+    /// （框架、图例、"4 条"全在，就是画布空）。原因是 `Canvas` 的 renderer 是
+    /// `@escaping` 闭包：第一帧拿到的 `self` 是坐标还没算出来的那一版，而
+    /// "算完再重绘一帧"这条时序不可控 —— 渲染绝不能依赖它。
+    /// ⇒ 放进进程级缓存，**画的时候当场取就有**。
+    private enum LayoutCache {
+        static var signature: String = ""
+        static var store: [String: CGPoint] = [:]
+
+        /// 缓存键 = **每条记忆的 id 加上它的连线**。
+        /// ⚠️ 不能只认 id：**织网只改连线、不改条数**，只认 id 的话
+        /// "重新织网"之后坐标不会重算，新线永远画不出来。
+        static func signature(of items: [MemoryItem]) -> String {
+            items
+                .map { $0.id + ">" + $0.linkIDs.sorted().joined(separator: ",") }
+                .joined(separator: "|")
+        }
+
+        static func positions(for items: [MemoryItem],
+                              build: ([MemoryItem]) -> [String: CGPoint]) -> [String: CGPoint] {
+            let sig = signature(of: items)
+            if sig == signature, !store.isEmpty { return store }
+            signature = sig
+            store = build(items)
+            return store
+        }
+    }
+
+    /// 渲染 / 命中测试**统一**走这个 —— 保证拿到的坐标一定算好了。
+    private func layoutPositions(_ items: [MemoryItem]) -> [String: CGPoint] {
+        LayoutCache.positions(for: items) { list in
+            list.count > 300 ? ringLayout(list) : forceLayout(list)
+        }
+    }
+
+    /// 当前拓扑的签名，给 `.id(...)` 用（见 `webCanvas`）。
+    private var layoutSignature: String {
+        LayoutCache.signature(of: memory.items)
+    }
+
     // MARK: - 布局
 
     private func reloadSelection() {
         if let selectedID, !memory.items.contains(where: { $0.id == selectedID }) {
             self.selectedID = nil
         }
-    }
-
-    private func rebuildLayout() {
-        let items = memory.items
-        let ids = items.map { $0.id }
-        if ids == lastIDs && !positions.isEmpty { return }
-        lastIDs = ids
-
-        guard !items.isEmpty else {
-            positions = [:]
-            return
-        }
-        positions = items.count > 300 ? ringLayout(items) : forceLayout(items)
     }
 
     /// 超过 300 条时用这个 —— 简单圆环，算得飞快，不会把界面卡住。
