@@ -148,6 +148,13 @@ jobs:
       #    unzip 出来的就是这两项，**不要再套一层 `ish-rootfs/`**。
       # ⚠️ 失败一律 `exit 1`，**不许静默继续**（否则会去编一个缺 vendor 的包）。
       - name: Fetch iSH vendor (libaevisish.a + rootfs)
+        # ⚠️ 必须显式给 gh 传 token：`gh` **不会**自己拿到 GITHUB_TOKEN
+        #    （runner 上根本没有这个环境变量），不传的话
+        #    `gh release view` / `gh release list` 全部失败 ——
+        #    表现是「取源取不到、报错说没有 ish-sandbox release」，看着像 release
+        #    不存在，其实是没登录。2026-10-06 真栽过（run 145）。
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           DEST="/tmp/ishvendor"
@@ -160,12 +167,16 @@ jobs:
           SRC="fixed"
           if ! gh release view "$VENDOR_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             SRC="fallback"
-            # ⚠️ 不信任 `gh release list` 的默认排序：**自己按 run 号取最大**。
+            # ⚠️ 用 `--json tagName` 取，**不要**靠默认表格的 `$1`。
+            #    默认表格第一列是 TITLE 不是 TAG（且 TITLE 里可能有空格，
+            #    比如「失败日志 145」），列顺序是 gh 的内部实现、会变。
+            #    走 json 就是一行一个 tag，稳稳的。
             # ⚠️ limit 要给得够大：build-<n>/check-<n>/log-<n> 这类 release 每推一次
             #    至少多一个、会把列表挤满；limit 太小会漏掉较老的 ish-sandbox release
             #    （漏掉会走到下面的 `-z` 分支、明确报错，不会静默用错包）。
             VENDOR_TAG=$(gh release list --repo "${{ github.repository }}" --limit 300 \
-              | awk '$1 ~ /^ish-sandbox-macos-/ { n=$1; sub(/^ish-sandbox-macos-/,"",n); if (n+0 > best) { best=n+0; tag=$1 } } END { print tag }')
+              --json tagName --jq '.[].tagName' \
+              | awk '/^ish-sandbox-macos-/ { n=$1; sub(/^ish-sandbox-macos-/,"",n); if (n+0 > best) { best=n+0; tag=$1 } } END { print tag }')
             if [ -z "$VENDOR_TAG" ]; then
               echo "::error::VENDOR| 既没有固定 tag ish-vendor，也没有任何 ish-sandbox-macos-* release —— 先成功跑一轮 ish-sandbox.yml"
               exit 1
@@ -199,7 +210,10 @@ jobs:
           done
 
           # 4) 再逐文件校验解出来的七个文件（vendor.sha256 里除末行外的那些）
-          grep -v ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" > "$DEST/files.sha256"
+          #    ⚠️ 必须把 `#` 开头的说明行也滤掉：vendor.sha256 第一行是中文注释，
+          #       它既不是 tarball 那行、也不是校验行 —— 留着会被 `shasum -c`
+          #       判成「格式不对」，返回非 0（明明文件都对也红）。
+          grep -v ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" | grep -v '^#' > "$DEST/files.sha256"
           ( cd vendor/ish && shasum -a 256 -c "$DEST/files.sha256" ) \
             || { echo "::error::VENDOR| vendor 包内文件的 sha256 校验失败"; exit 1; }
 
