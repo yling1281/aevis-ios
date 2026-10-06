@@ -48,7 +48,7 @@ enum DeviceIdentity {
     /// （iPad 标识又多又杂）就退回 `iPhone` / `iPad` 这种**通用名** ——
     /// **绝不猜机型**（猜错比老实说"iPhone"更糟）。
     /// 机型表和机器标识都**复用现成的**，不另写一套 sysctl。
-    static let friendlyName: String = makeFriendlyName()
+    static let friendlyName: String = sanitize(makeFriendlyName())
 
     /// 网页上绑定的入口 —— 绑定**只在网页上做**，App 里不需要登录。
     /// 域名走 `AevisHosts`，别写死。
@@ -89,6 +89,36 @@ enum DeviceIdentity {
         #else
         return "iPhone"
         #endif
+    }
+
+    /// 🔴 **把设备名洗成纯 ASCII** —— 因为它会被塞进 HTTP 头。
+    ///
+    /// 为什么非洗不可：这个名字进了 `X-Aevis-Device-Name`（见
+    /// `AccountService.request()`），而 **HTTP 头只认 latin-1**。值里出现任何
+    /// 非 ASCII 字符，`URLRequest` 会在**每一个账号请求上**出错 ——
+    /// 不是"这台设备名显示不好看"，是"这个用户整个账号功能都用不了"。
+    /// 2026-10-06 用真请求打到服务器时当场撞出来（`UnicodeEncodeError: latin-1`），
+    /// 当时机型表里写着 `iPhone SE（第 2 代）`（全角括号 + 中文）。
+    /// 表里那两条已经改成 ASCII，这一层是**防回归兜底**：以后谁再往表里加中文名，
+    /// 顶多名字丑一点，不会把账号功能弄坏。
+    ///
+    /// 口径：先滤掉非 ASCII，再把多余空白并成一个空格、去掉首尾空白；
+    /// 全被滤空（比如名字整个是中文）就退回 `iPhone`，**绝不返回空串**
+    /// （空串会让请求头干脆不带上这台机器的名字）。
+    private static func sanitize(_ raw: String) -> String {
+        var ascii = ""
+        var lastWasSpace = false
+        for ch in raw where ch.isASCII {
+            if ch == " " {
+                if lastWasSpace { continue }
+                lastWasSpace = true
+            } else {
+                lastWasSpace = false
+            }
+            ascii.append(ch)
+        }
+        let trimmed = ascii.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? "iPhone" : trimmed
     }
 
     /// `AEVIS9F2A4C317B3E` → `AEVIS-9F2A-4C31-7B3E`

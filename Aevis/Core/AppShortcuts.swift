@@ -480,6 +480,16 @@ enum AevisDevice {
     /// ⚠️ **只放有把握的型号。** 表里没有的一律退回显示机器标识 ——
     ///    猜错一个名字（比如把 16 Plus 说成 16 Pro）比显示 `iPhone17,4` 更糟。
     ///    iPad 的标识又多又杂，这里**故意不收**，iPad 上就显示 `iPad…` 原始标识。
+    ///
+    /// 🔴🔴 **这张表里的值必须是纯 ASCII，一个中文都别放。**
+    ///    这里出来的名字会被塞进 HTTP 头 `X-Aevis-Device-Name` 发给账号服务器
+    ///    （见 `DeviceIdentity.friendlyName` / `AccountService.request()`），
+    ///    而 **HTTP 头只认 latin-1** —— 值里有非 ASCII 字符，`URLRequest` 会在
+    ///    **每一个账号请求上**出错，表现是「这几款机型登不上账号 / 一直转圈」。
+    ///    2026-10-06 真验出来过：原本写着 `iPhone SE（第 2 代）`（全角括号 + 中文），
+    ///    机器是 SE 2/3 的用户一点就中。已改成 `iPhone SE (2nd gen)`。
+    ///    兜底在 `DeviceIdentity.sanitize`，但**别指望它** —— 那里是把中文字符**删掉**，
+    ///    出来的是「iPhone SE 2」这种半截名字，能用但不好看。
     private static let names: [String: String] = [
         "iPhone8,1": "iPhone 6s", "iPhone8,2": "iPhone 6s Plus", "iPhone8,4": "iPhone SE",
         "iPhone9,1": "iPhone 7", "iPhone9,3": "iPhone 7",
@@ -490,12 +500,12 @@ enum AevisDevice {
         "iPhone11,8": "iPhone XR", "iPhone11,2": "iPhone XS",
         "iPhone11,4": "iPhone XS Max", "iPhone11,6": "iPhone XS Max",
         "iPhone12,1": "iPhone 11", "iPhone12,3": "iPhone 11 Pro",
-        "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE（第 2 代）",
+        "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE (2nd gen)",
         "iPhone13,1": "iPhone 12 mini", "iPhone13,2": "iPhone 12",
         "iPhone13,3": "iPhone 12 Pro", "iPhone13,4": "iPhone 12 Pro Max",
         "iPhone14,4": "iPhone 13 mini", "iPhone14,5": "iPhone 13",
         "iPhone14,2": "iPhone 13 Pro", "iPhone14,3": "iPhone 13 Pro Max",
-        "iPhone14,6": "iPhone SE（第 3 代）",
+        "iPhone14,6": "iPhone SE (3rd gen)",
         "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus",
         "iPhone15,2": "iPhone 14 Pro", "iPhone15,3": "iPhone 14 Pro Max",
         "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
