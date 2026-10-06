@@ -297,7 +297,13 @@ jobs:
                 -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64 \
               2>&1 | tee "$LOGS/host-setup.log"
             rc=${PIPESTATUS[0]}; set -e
-            [ "$rc" = 0 ] || { echo "::error::meson setup 失败（rc=$rc），日志 $LOGS/host-setup.log"; exit "$rc"; }
+            [ "$rc" = 0 ] || {
+              echo "::error::HOSTBUILD| meson setup 失败 rc=$rc"
+              tail -n 10 "$LOGS/host-setup.log" 2>/dev/null \
+                | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+                | while IFS= read -r l; do echo "::error::HOSTBUILD| $l"; done || true
+              exit "$rc"
+            }
           else
             echo "复用已有 native 构建目录（跳过 setup）" | tee "$LOGS/host-setup.log"
           fi
@@ -306,13 +312,25 @@ jobs:
           env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
             ninja -C "$BUILD" cpu-offsets.h 2>&1 | tee "$LOGS/host-offsets.log"
           rc=${PIPESTATUS[0]}; set -e
-          [ "$rc" = 0 ] || { echo "::error::ninja cpu-offsets.h 失败（rc=$rc），日志 $LOGS/host-offsets.log"; exit "$rc"; }
+          [ "$rc" = 0 ] || {
+            echo "::error::HOSTBUILD| ninja cpu-offsets.h 失败 rc=$rc"
+            tail -n 10 "$LOGS/host-offsets.log" 2>/dev/null \
+              | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+              | while IFS= read -r l; do echo "::error::HOSTBUILD| $l"; done || true
+            exit "$rc"
+          }
 
           set +e
           env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
             ninja -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/host-ninja.log"
           rc=${PIPESTATUS[0]}; set -e
-          [ "$rc" = 0 ] || { echo "::error::ninja tools/fakefsify ish 失败（rc=$rc），日志 $LOGS/host-ninja.log"; exit "$rc"; }
+          [ "$rc" = 0 ] || {
+            echo "::error::HOSTBUILD| ninja tools/fakefsify ish 失败 rc=$rc"
+            tail -n 10 "$LOGS/host-ninja.log" 2>/dev/null \
+              | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+              | while IFS= read -r l; do echo "::error::HOSTBUILD| $l"; done || true
+            exit "$rc"
+          }
 
           cp "$BUILD/tools/fakefsify" "$SBX/out/fakefsify"
           cp "$BUILD/ish" "$SBX/out/ish"
@@ -520,6 +538,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
           mkdir -p "$SBX/out"
@@ -591,13 +610,27 @@ jobs:
                    "$SBX/out/timings.txt" "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
             [ -f "$f" ] && ATTACH+=("$f")
           done
-          if [ "${#ATTACH[@]}" -gt 0 ]; then
-            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" "${ATTACH[@]}" \
-              || echo "::warning::Release 上传没成功，不影响构建结论"
-          else
-            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" \
-              || echo "::warning::Release 上传没成功，不影响构建结论"
+
+          # 兜底概括注解：只要 host 工具那步没产出 fakefsify/ish，就抛一条。
+          # （注解是唯一「不需要仓库管理员权限、用 API 就能读回来」的通道。）
+          if [ ! -f "$SBX/out/fakefsify" ] || [ ! -f "$SBX/out/ish" ]; then
+            echo "::error::HOSTTOOLS| host 工具构建失败（没有产出 fakefsify/ish），详见附件 logs.tgz / host-ninja.log"
           fi
+
+          # ⚠️ 必须带 --repo：本 workflow 没有 actions/checkout，$GITHUB_WORKSPACE
+          #    不是一个 git 仓库，gh 推断不出仓库名会直接失败（上一轮就是这样被静默吞掉的）。
+          # ⚠️ 失败不再用 `|| echo warning` 吞掉 —— 改成抛注解，让报错能被读到。
+          ROUT=""
+          if [ "${#ATTACH[@]}" -gt 0 ]; then
+            ROUT="$(gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --notes-file "$REPORT" "${ATTACH[@]}" 2>&1)" || {
+              echo "::error::RELEASE| gh release create 失败: $(printf '%s' "$ROUT" | head -c 300 | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/::/∶∶/g')"
+            }
+          else
+            ROUT="$(gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --notes-file "$REPORT" 2>&1)" || {
+              echo "::error::RELEASE| gh release create 失败: $(printf '%s' "$ROUT" | head -c 300 | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/::/∶∶/g')"
+            }
+          fi
+          [ -z "$ROUT" ] || echo "gh release 输出：$ROUT"
 
       # —— 13. 保存缓存（只在成功时保存，避免把半截构建目录写进不可变缓存）——
       # ⚠️ `continue-on-error: true` 是必须的：本 workflow 的缓存 key 不含 run 维度，
@@ -710,12 +743,24 @@ jobs:
               -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64 \
               2>&1 | tee "$LOGS/linux-setup.log"
             rc=${PIPESTATUS[0]}; set -e
-            [ "$rc" = 0 ] || { echo "::error::meson setup 失败（rc=$rc），日志 $LOGS/linux-setup.log"; exit "$rc"; }
+            [ "$rc" = 0 ] || {
+              echo "::error::LINUXBUILD| meson setup 失败 rc=$rc"
+              tail -n 10 "$LOGS/linux-setup.log" 2>/dev/null \
+                | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+                | while IFS= read -r l; do echo "::error::LINUXBUILD| $l"; done || true
+              exit "$rc"
+            }
           fi
           set +e
           ninja -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/linux-ninja.log"
           rc=${PIPESTATUS[0]}; set -e
-          [ "$rc" = 0 ] || { echo "::error::ninja tools/fakefsify ish 失败（rc=$rc），日志 $LOGS/linux-ninja.log"; exit "$rc"; }
+          [ "$rc" = 0 ] || {
+            echo "::error::LINUXBUILD| ninja tools/fakefsify ish 失败 rc=$rc"
+            tail -n 10 "$LOGS/linux-ninja.log" 2>/dev/null \
+              | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+              | while IFS= read -r l; do echo "::error::LINUXBUILD| $l"; done || true
+            exit "$rc"
+          }
 
           cp "$BUILD/tools/fakefsify" "$SBX/out/fakefsify"
           cp "$BUILD/ish" "$SBX/out/ish"
@@ -872,6 +917,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
           mkdir -p "$SBX/out"
@@ -937,10 +983,23 @@ jobs:
                    "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
             [ -f "$f" ] && ATTACH+=("$f")
           done
-          if [ "${#ATTACH[@]}" -gt 0 ]; then
-            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" "${ATTACH[@]}" \
-              || echo "::warning::Release 上传没成功，不影响构建结论"
-          else
-            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" \
-              || echo "::warning::Release 上传没成功，不影响构建结论"
+
+          # 兜底概括注解：只要 host 工具那步没产出 fakefsify/ish，就抛一条。
+          if [ ! -f "$SBX/out/fakefsify" ] || [ ! -f "$SBX/out/ish" ]; then
+            echo "::error::LINUXHOSTTOOLS| host 工具构建失败（没有产出 fakefsify/ish），详见附件 logs.tgz / linux-ninja.log"
           fi
+
+          # ⚠️ 必须带 --repo：本 workflow 没有 actions/checkout，$GITHUB_WORKSPACE
+          #    不是一个 git 仓库，gh 推断不出仓库名会直接失败（上一轮就是这样被静默吞掉的）。
+          # ⚠️ 失败不再用 `|| echo warning` 吞掉 —— 改成抛注解，让报错能被读到。
+          ROUT=""
+          if [ "${#ATTACH[@]}" -gt 0 ]; then
+            ROUT="$(gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --notes-file "$REPORT" "${ATTACH[@]}" 2>&1)" || {
+              echo "::error::RELEASE| gh release create 失败: $(printf '%s' "$ROUT" | head -c 300 | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/::/∶∶/g')"
+            }
+          else
+            ROUT="$(gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --notes-file "$REPORT" 2>&1)" || {
+              echo "::error::RELEASE| gh release create 失败: $(printf '%s' "$ROUT" | head -c 300 | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/::/∶∶/g')"
+            }
+          fi
+          [ -z "$ROUT" ] || echo "gh release 输出：$ROUT"

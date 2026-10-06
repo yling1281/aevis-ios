@@ -106,7 +106,15 @@ struct AevisApp: App {
                     AgreementView()
                 }
             }
-            .animation(.easeInOut(duration: 0.28), value: agreement.accepted)
+            // 🔴 故意**不**给这一层挂 `.animation`（早先挂过 `.easeInOut(0.28)`）。
+            //
+            // 原因：同意那一刻是 `if / else` 把**整棵子树**换掉；一旦挂动画，
+            // 旧的 `AgreementView` 会在层级里多留 0.28s（默认是透明度过渡）。
+            // 而它自带**不透明**的 `AevisBackground`（`.ignoresSafeArea()`）——
+            // 残留期间它会盖在主界面之上，把这 0.28s 内的点击全吃掉；
+            // 移动过渡被打断时还可能留下"幽灵层"一直挡着，表现就是
+            // 「界面看得见、一个按钮都点不动」。协议页 → 主界面是一次性切换，
+            // **硬切**即可，本来也不需要过渡。
         }
     }
 

@@ -28,9 +28,27 @@ extension View {
                 : AnyShapeStyle(.regularMaterial)
 
             self
+                // 🔴🔴 下面三层的 `.allowsHitTesting(false)` **一个都不能删**！
+                //
+                // 2026-10-06 事故（0.0.110）：给「加厚毛玻璃」加了一层
+                // `.overlay(RoundedRectangle().fill(LinearGradient(...)))` 做顶部高光 ——
+                // 那是一个**填充**形状，而 `.overlay` 是**盖在内容上面**的。
+                // SwiftUI 里填充形状（以及 `Color`）**参与命中测试**，
+                // 于是它把整张卡片的点击、长按、滚动**全吃掉了**。
+                //
+                // 症状：老板装完 0.0.110 后「用户协议划不动」「一个按钮都点不动」——
+                // `aevisGlass` 是全 App 唯一的卡片入口（203 处 / 58 个文件），
+                // 所以等于**整机所有可点的地方一起失效**（登录页、设备码页、
+                // 设置页、聊天页…）。
+                //
+                // ⚠️ 为什么 CI 截图没抓到：截图只反映「渲染」，命中测试坏了
+                //    截图**完全看不出来**（图是好的，就是点不进去）。
+                // ⚠️ 老代码那层是 `strokeBorder` —— 只有那 0.5pt 的**边框**有命中区，
+                //    所以从没出过这个问题。**改成 `fill` 就会出事。**
                 .background(
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(material)
+                        .allowsHitTesting(false)
                 )
                 // 顶部内高光：光像从上面打进来，玻璃才「厚」
                 .overlay(
@@ -42,6 +60,7 @@ extension View {
                                 endPoint: .center
                             )
                         )
+                        .allowsHitTesting(false)
                 )
                 // 双色高光描边：顶部亮边 + 底部暗边 —— 这一笔最像真玻璃
                 .overlay(
@@ -58,18 +77,21 @@ extension View {
                             ),
                             lineWidth: 1
                         )
+                        .allowsHitTesting(false)
                 )
-                // 柔光外阴影：玻璃微微浮起来
+                // 柔光外阴影：玻璃微微浮起来（阴影本来就不参与命中测试，不用管）
                 .shadow(color: Color.black.opacity(0.07), radius: 8, x: 0, y: 3)
         } else {
             self
                 .background(
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(Color.primary.opacity(0.055))
+                        .allowsHitTesting(false)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                        .allowsHitTesting(false)
                 )
         }
     }

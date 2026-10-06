@@ -66,12 +66,18 @@ struct AgreementView: View {
         }
         .alert("需要同意本协议才能使用 Aevis。", isPresented: $showDeclineAlert) {
             Button("退出 App", role: .destructive) {
+                BlackBox.tap("协议 · 退出 App")
                 // 不上架 App Store，按老板要求「不同意即退出」：
                 // 这是侧载分发的软件，用户在确认后直接结束进程。
                 exit(0)
             }
-            Button("返回", role: .cancel) { }
+            Button("返回", role: .cancel) {
+                BlackBox.tap("协议 · 返回")
+            }
         }
+        // 进这一页也记一笔 —— 项目约定：进了哪一屏、点了哪个按键都要能查。
+        //（见 `BlackBoxUI.swift`。之前这一屏完全没有记录，出问题查不到现场。）
+        .aevisScreen("用户协议")
     }
 
     // MARK: - 标题
@@ -110,7 +116,9 @@ struct AgreementView: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
-            Button {
+            // ⚠️ 用 `LoggedButton`：点击**一定会先记一笔**再执行
+            //（比 `.aevisTap` 稳，见 `BlackBoxUI.swift`）。下次出问题就有现场。
+            LoggedButton("协议 · 同意并继续") {
                 agreement.accept()
             } label: {
                 Text("同意并继续")
@@ -125,7 +133,7 @@ struct AgreementView: View {
             }
             .buttonStyle(.plain)
 
-            Button {
+            LoggedButton("协议 · 不同意") {
                 showDeclineAlert = true
             } label: {
                 Text("不同意")

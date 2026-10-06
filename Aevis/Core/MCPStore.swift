@@ -71,11 +71,40 @@ final class MCPStore: ObservableObject {
 
     // MARK: - 增删改
 
+    /// 加一台**普通 MCP 服务器**（不是电脑）。
+    ///
+    /// 两件事，都是被真事逼出来的：
+    ///
+    /// ① **按 url 去重** —— 同一台服务器只留一条。否则用户在「一起玩」页点两次
+    ///    「加进外接工具」，清单里就会长出两条一模一样的「我的世界」。
+    ///    地址已在列表里 ⇒ **复用那一条**（沿用它的 id，别 append 第二条），
+    ///    把这次传进来的名字/请求头覆盖上去、并打开开关。
+    ///
+    /// ② 加完**立刻连一次**（对齐 `addComputer`）—— 只 append 不连的话，
+    ///    本次会话拿不到它的工具，要等 App 下次启动才生效，用户看着像"点了没反应"。
     @discardableResult
     func add(name: String, url: String, headerLines: String) -> MCPServerConfig {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let index = servers.firstIndex(where: {
+            $0.url.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
+        }) {
+            var merged = MCPServerConfig(name: name, url: url, headerLines: headerLines)
+            merged.id = servers[index].id        // 沿用原来的 id，别换新的（否则就是第二条了）
+            merged.enabled = true
+            servers[index] = merged
+            persist()
+            clients[merged.id] = nil
+            tools.removeAll { $0.serverID == merged.id }
+            status[merged.id] = "配置更新了，正在重连…"
+            Task { await connect(merged) }
+            return merged
+        }
+
         let server = MCPServerConfig(name: name, url: url, headerLines: headerLines)
         servers.append(server)
         persist()
+        Task { await connect(server) }
         return server
     }
 
