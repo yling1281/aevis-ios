@@ -27,6 +27,40 @@
 #    必须能同时提供「对应源码」——即该 commit 的 iSH 源码本身（公开仓库，可直接
 #    clone）＋ 可复现的构建方式（就是本文件）。GPL-3.0 与 GPL-3.0 相互兼容。
 #    参考项目 Kelivo 的脚本是 AGPL-3.0，本文件**没有逐行复制**它，只参考了做法。
+#
+#  ---------------------------------------------------------------------------
+#  构建期补丁（**必读**：这两处是 pinned commit 自身的可移植性缺陷，上游没修；
+#  我们在「取到源码之后、编译之前」用脚本改两行 —— 不 fork、不 vendor、不改上游）
+#  ---------------------------------------------------------------------------
+#  补丁 1  kernel/native_offload.c:714
+#          `posix_spawn_file_actions_addchdir(&actions, host_cwd)` 是 POSIX.1-2024
+#          的正式名字，glibc 认；**Apple SDK 只提供 `..._addchdir_np`**
+#          （见 MacOSX15.5.sdk/usr/include/spawn.h:176）
+#          ⇒ macOS host 构建报 `error: call to undeclared function
+#             'posix_spawn_file_actions_addchdir'`（run #3 host-ninja.log）。
+#          ⚠️ 这一处**只影响 macOS host 工具**：同文件把这段代码包在
+#             `#if TARGET_OS_OSX`（`#define HAS_POSIX_SPAWN 1`）里，
+#             iOS 目标 TARGET_OS_OSX=0 ⇒ 整段不编 ⇒ iOS 静态库一直是绿的。
+#          改法：调用点换成 `_np` 变体（语义完全一致）。
+#  补丁 2  main.c:8
+#          `#include <mach/mach.h>` 是**死引用** —— 整个 main.c（162 行）里除这
+#          一行再没有任何 mach 符号（`grep -E 'mach_|vm_|CF[A-Z]'` 为空）。
+#          Linux runner 没有这个头 ⇒ `fatal error: mach/mach.h: No such file
+#          or directory`（run #3 linux-ninja.log）。
+#          改法：用 `#if defined(__APPLE__)` 包起来，Apple 上行为完全不变。
+#  ✅ 已核对「Linux 侧除了补丁 2 没有别的坑」：
+#     - `app/hook.c`（CoreFoundation + mach-o）**不在 meson 的 src 列表里**，不参与构建；
+#     - `kernel/resource.c` 的 `<mach/mach.h>` 有 `#elif __APPLE__` 守卫；
+#     - `kernel/log.c` 的 CoreFoundation 只在 `-Dlog_handler=nslog` 时才引入，
+#       而 host 构建用的是默认 `log_handler=dprintf` ⇒ 不引入；
+#     - `platform/linux.c` 存在，且 `platform/` 是按 `host_machine.system()` 选的。
+#  ⚠️ 补丁是**文本级、幂等**的（`sed` 只换调用点、`awk` 只包一行 include），
+#     每轮都重新 clone 再打，不依赖 CI 缓存；两个 job 用的是**逐字相同**的补丁脚本。
+#     GPL 合规仍以 pinned commit 的源码本身为准。
+#  ⚠️ 为什么不用 `perl -pi` 也不写 `sed -i`：开发机是 Windows Git Bash，
+#     ① 没有 perl ⇒ 补丁脚本在本地上推前**一次都验不了**（本文件严禁「没验就上」）；
+#     ② BSD sed 与 GNU sed 的 `-i` 语法不同 ⇒ 同一条命令过不了两个 runner。
+#     所以统一「sed/awk 输出到 mktemp 再 mv」，本机与两个 runner 行为一致。
 #  ============================================================================
 
 name: iSH Sandbox (manual)
@@ -158,6 +192,53 @@ jobs:
           fi
           echo "源码文件数: $(find "$SBX/src/ish" -type f | wc -l | tr -d ' ')"
           echo "phase fetch: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 3b. 上游补丁（两处，缘由见文件头「构建期补丁」）——
+      #   ⚠️ 必须放在**任何编译步骤之前**：libish.a、iOS 静态库与 host 工具都吃这棵源码树。
+      #   ⚠️ 两个 job 里这段脚本**逐字相同**，保证两条线编的是同一份源码。
+      #   ⚠️ 只用 `sed` / `awk`，**不用 perl** —— 开发机（Windows Git Bash）没有 perl，
+      #      用了就没法在上推之前先本地跑一遍验证；sed/awk 两边都有。
+      #      并且**不用 `sed -i`**（BSD 与 GNU 的 -i 语法不同），改成「写临时文件再 mv」。
+      - name: Patch iSH source (portability)
+        run: |
+          set -euo pipefail
+          SRC="$SBX/src/ish"
+
+          # 补丁 1：native_offload.c 的 posix_spawn_file_actions_addchdir → _np
+          #         （Apple SDK 只有 _np；不换就 `error: call to undeclared function`）
+          F="$SRC/kernel/native_offload.c"
+          n_before="$(grep -c 'posix_spawn_file_actions_addchdir(' "$F" || true)"
+          tmp="$(mktemp)"
+          sed 's|posix_spawn_file_actions_addchdir(|posix_spawn_file_actions_addchdir_np(|g' \
+            "$F" > "$tmp"
+          mv "$tmp" "$F"
+          n_after="$(grep -c 'posix_spawn_file_actions_addchdir(' "$F" || true)"
+          n_np="$(grep -c 'posix_spawn_file_actions_addchdir_np(' "$F" || true)"
+          echo "patch1 native_offload.c: addchdir( $n_before -> $n_after ; addchdir_np( = $n_np"
+          [ "$n_after" = "0" ] || { echo "::error::PATCH| native_offload.c 里还有 addchdir( 没换掉"; exit 1; }
+          [ "$n_np" -ge 1 ]    || { echo "::error::PATCH| native_offload.c 里没有 addchdir_np( —— 补丁没生效"; exit 1; }
+          grep -n 'addchdir' "$F"
+
+          # 补丁 2：main.c 的死引用 <mach/mach.h> 用 #if defined(__APPLE__) 包起来
+          #         （Linux runner 没这个头；Apple 上行为完全不变）
+          F="$SRC/main.c"
+          n_before2="$(grep -c '^#include <mach/mach.h>$' "$F" || true)"
+          tmp="$(mktemp)"
+          # ⚠️ `prev != "#if defined(__APPLE__)"` 是**幂等**用的：第二遍跑的时候
+          #    上一行已经是 `#if defined(__APPLE__)`，就不会再包一层。
+          awk '{ if ($0 == "#include <mach/mach.h>" && prev != "#if defined(__APPLE__)") {
+                   print "#if defined(__APPLE__)"; print; print "#endif"
+                 } else { print }
+                 prev = $0 }' "$F" > "$tmp"
+          mv "$tmp" "$F"
+          # 数「#if defined(__APPLE__) / #include <mach/mach.h> / #endif」这个三层块出现了几次
+          n_wrap="$(awk 'a == "#if defined(__APPLE__)" && b == "#include <mach/mach.h>" && $0 == "#endif" { n++ } { a = b; b = $0 } END { print n + 0 }' "$F")"
+          echo "patch2 main.c: mach include 原 $n_before2 处 -> 包裹块 = $n_wrap"
+          [ "$n_before2" -ge 1 ] || { echo "::error::PATCH| main.c 里没找到 `<mach/mach.h>` 那一行"; exit 1; }
+          [ "$n_wrap" = "1" ]    || { echo "::error::PATCH| main.c 的包裹块 = $n_wrap（应为 1）"; exit 1; }
+          echo "--- main.c 前 12 行 ---"
+          sed -n '1,12p' "$F"
+          echo "补丁完成。"
 
       # —— 4. 编 iOS 真机 arm64 静态库 ——
       #   交叉编译文件用 iphoneos SDK，部署目标 iOS $IOS_MIN，host_machine 声明为
@@ -320,9 +401,11 @@ jobs:
             exit "$rc"
           }
 
+          # ⚠️ `-k 0`（keep-going）：上游是别人写的代码，第一处报错后面往往还藏着
+          #    第二处。不加就是「修一处、等 20 分钟、再发现下一处」；加了就一次全暴露。
           set +e
           env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
-            ninja -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/host-ninja.log"
+            ninja -k 0 -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/host-ninja.log"
           rc=${PIPESTATUS[0]}; set -e
           [ "$rc" = 0 ] || {
             echo "::error::HOSTBUILD| ninja tools/fakefsify ish 失败 rc=$rc"
@@ -374,9 +457,34 @@ jobs:
           rm -rf "$TREE"; mkdir -p "$TREE"
           tar -xzf "$TARBALL" -C "$TREE"
 
-          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$TREE/etc/resolv.conf"
-          printf 'https://dl-cdn.alpinelinux.org/alpine/v%s/main\nhttps://dl-cdn.alpinelinux.org/alpine/v%s/community\n' \
-            "$ALPINE_SERIES" "$ALPINE_SERIES" > "$TREE/etc/apk/repositories"
+          # —— 容器内部一律走国内源（老板口径：「Linux 就是自带容器」——
+          #    容器里要下东西，得让它自己从国内云拉，不依赖我们这边的网络）——
+          # ① DNS：阿里 + 腾讯 + 114（别再用 1.1.1.1/8.8.8.8，国内解析又慢又不稳）
+          printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 114.114.114.114\n' \
+            > "$TREE/etc/resolv.conf"
+          # ② apk 源：清华 TUNA 主 + 阿里云备 + 官方兜底（apk 按行顺序找）。
+          #    ⚠️ 只放 2 个国内源是**刻意的**：`apk update` 会把列出的每个仓库索引都拉一遍，
+          #       源越多每次更新越慢（社区索引就有好几 MB）。排在前面的是国内，够用了；
+          #       真要再加，把中科大那两行注释放开即可。
+          #    ✅ 证书没问题：minirootfs 自带 /etc/ssl/certs/ca-certificates.crt（222 KB）
+          #    ✅ 签名没问题：自带 /etc/apk/keys/*（5 把）+ /usr/share/apk/keys/*（18 把）
+          {
+            for M in \
+              "https://mirrors.tuna.tsinghua.edu.cn/alpine" \
+              "https://mirrors.aliyun.com/alpine"; do
+              printf '%s/v%s/main\n%s/v%s/community\n' "$M" "$ALPINE_SERIES" "$M" "$ALPINE_SERIES"
+            done
+            # "https://mirrors.ustc.edu.cn/alpine"   # ← 想再加一个国内源就把这两行放开
+            printf 'https://dl-cdn.alpinelinux.org/alpine/v%s/main\nhttps://dl-cdn.alpinelinux.org/alpine/v%s/community\n' \
+              "$ALPINE_SERIES" "$ALPINE_SERIES"
+          } > "$TREE/etc/apk/repositories"
+          # ③ pip 源：清华主 + 阿里/腾讯备（下面已经删掉 EXTERNALLY-MANAGED，pip 直接用）
+          printf '[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\nextra-index-url = https://mirrors.aliyun.com/pypi/simple/\n                  https://mirrors.cloud.tencent.com/pypi/simple/\n' \
+            > "$TREE/etc/pip.conf"
+          # ④ npm 源：npmmirror（阿里）。全局 /etc/npmrc 与 root 的 ~/.npmrc 各放一份。
+          printf 'registry=https://registry.npmmirror.com\n' > "$TREE/etc/npmrc"
+          mkdir -p "$TREE/root"
+          printf 'registry=https://registry.npmmirror.com\n' > "$TREE/root/.npmrc"
           find "$TREE/usr/lib" -name EXTERNALLY-MANAGED -delete 2>/dev/null || true
           mkdir -p "$TREE/dev" "$TREE/proc" "$TREE/sys" "$TREE/tmp" "$TREE/run" "$TREE/root" "$TREE/home"
 
@@ -401,31 +509,51 @@ jobs:
       # —— 8. 冒烟测试：用 host 版 ish 真的把 Alpine 跑起来 ——
       #   这是「不只是编出来、而是真的能跑」的硬证据。失败只告警、不挂整个 job
       #   （真机上的行为才是最终标准，这里只是提前发现问题）。
-      - name: Smoke test - boot Alpine under host iSH
+      - name: Smoke test - boot Alpine + verify in-container mirrors
         if: ${{ inputs.host_only != true }}
         continue-on-error: true
         run: |
           set -uo pipefail
           ISH="$SBX/out/ish"
           FAKEFS="$SBX/alpine-fakefs"
-          LOG="$SBX/out/ish-smoke.log"
-          "$ISH" -f "$FAKEFS" /bin/sh -c 'echo AEVIS_ISH_SMOKE_OK; cat /etc/alpine-release; uname -m' > "$LOG" 2>&1 &
-          PID=$!
-          for _ in $(seq 1 90); do
-            kill -0 "$PID" 2>/dev/null || break
-            sleep 1
-          done
-          if kill -0 "$PID" 2>/dev/null; then
-            echo "冒烟测试超时（90s），杀掉"
-            kill -9 "$PID" 2>/dev/null || true
-          fi
-          echo "----- ish smoke output -----"
-          cat "$LOG" 2>/dev/null || true
-          if grep -q AEVIS_ISH_SMOKE_OK "$LOG" 2>/dev/null; then
-            echo "冒烟测试：OK"
-          else
-            echo "::warning::host ish 冒烟测试没打印 OK（见上面日志）"
-          fi
+
+          # 跑一条「容器内命令」，硬限时（macOS runner 没有 GNU `timeout`，自己数秒）。
+          run_probe () {
+            name="$1"; limit="$2"; log="$3"; cmd="$4"
+            : > "$log"
+            "$ISH" -f "$FAKEFS" /bin/sh -c "$cmd" >> "$log" 2>&1 &
+            pid=$!
+            i=0
+            while [ "$i" -lt "$limit" ]; do
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 1
+              i=$((i + 1))
+            done
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "[$name] 超时（${limit}s），杀掉"
+              kill -9 "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            fi
+            echo "----- $name -> $log -----"
+            cat "$log" 2>/dev/null || true
+          }
+
+          # 探针 1：容器到底跑不跑得起来（这是「不只是编出来、而是真能跑」的硬证据）。
+          run_probe "boot" 90 "$SBX/out/ish-smoke.log" \
+            'echo AEVIS_ISH_SMOKE_OK; cat /etc/alpine-release; uname -m'
+
+          # 探针 2（老板口径「Linux 就是自带容器」）：容器能不能**自己从国内源下东西**。
+          #   真的 `apk update` + `apk add bash`（几百 KB），证据落 ish-mirror.log。
+          #   ⚠️ 它会改动 alpine-fakefs，但 zip 在上一步就已经打好了 ⇒ 不会污染产物。
+          run_probe "mirror" 240 "$SBX/out/ish-mirror.log" \
+            'cat /etc/resolv.conf; grep -m1 tuna /etc/apk/repositories; apk update; apk add --no-cache bash; bash --version | head -1; echo AEVIS_ISH_MIRROR_OK'
+
+          ok=1
+          grep -q AEVIS_ISH_SMOKE_OK "$SBX/out/ish-smoke.log" 2>/dev/null \
+            || { echo "::warning::host ish 冒烟测试没打印 OK（见 ish-smoke.log）"; ok=0; }
+          grep -q AEVIS_ISH_MIRROR_OK "$SBX/out/ish-mirror.log" 2>/dev/null \
+            || { echo "::warning::容器里没能从国内源装成包（见 ish-mirror.log）"; ok=0; }
+          if [ "$ok" = 1 ]; then echo "冒烟 + 容器内国内源下载：OK"; fi
 
       # —— 9. 验收：逐个检查产物 + 打印大小 + 打印分步耗时 ——
       - name: Validate artifacts and report sizes/timings
@@ -592,6 +720,11 @@ jobs:
             echo '```'
             tail -40 "$SBX/out/ish-smoke.log" 2>/dev/null || echo "(没有冒烟日志)"
             echo '```'
+            echo ""
+            echo "## 容器内「自己从国内源下东西」证据（apk update / apk add bash）"
+            echo '```'
+            tail -60 "$SBX/out/ish-mirror.log" 2>/dev/null || echo "(没有 mirror 日志)"
+            echo '```'
             show_log "host 工具环境 (host-env.log)" "$SBX/out/host-env.log"
             show_log "host meson setup (host-setup.log)" "$SBX/out/host-setup.log"
             show_log "host ninja cpu-offsets.h (host-offsets.log)" "$SBX/out/host-offsets.log"
@@ -607,6 +740,7 @@ jobs:
           ATTACH=()
           for f in "$SBX/out/logs.tgz" "$SBX/out/host-env.log" "$SBX/out/host-setup.log" \
                    "$SBX/out/host-offsets.log" "$SBX/out/host-ninja.log" "$SBX/out/meson-log.txt" \
+                   "$SBX/out/ish-smoke.log" "$SBX/out/ish-mirror.log" \
                    "$SBX/out/timings.txt" "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
             [ -f "$f" ] && ATTACH+=("$f")
           done
@@ -717,6 +851,53 @@ jobs:
           fi
           echo "phase fetch: ${SECONDS}s" | tee -a "$SBX/timings.txt"
 
+      # —— 3b. 上游补丁（两处，缘由见文件头「构建期补丁」）——
+      #   ⚠️ 必须放在**任何编译步骤之前**：libish.a、iOS 静态库与 host 工具都吃这棵源码树。
+      #   ⚠️ 两个 job 里这段脚本**逐字相同**，保证两条线编的是同一份源码。
+      #   ⚠️ 只用 `sed` / `awk`，**不用 perl** —— 开发机（Windows Git Bash）没有 perl，
+      #      用了就没法在上推之前先本地跑一遍验证；sed/awk 两边都有。
+      #      并且**不用 `sed -i`**（BSD 与 GNU 的 -i 语法不同），改成「写临时文件再 mv」。
+      - name: Patch iSH source (portability)
+        run: |
+          set -euo pipefail
+          SRC="$SBX/src/ish"
+
+          # 补丁 1：native_offload.c 的 posix_spawn_file_actions_addchdir → _np
+          #         （Apple SDK 只有 _np；不换就 `error: call to undeclared function`）
+          F="$SRC/kernel/native_offload.c"
+          n_before="$(grep -c 'posix_spawn_file_actions_addchdir(' "$F" || true)"
+          tmp="$(mktemp)"
+          sed 's|posix_spawn_file_actions_addchdir(|posix_spawn_file_actions_addchdir_np(|g' \
+            "$F" > "$tmp"
+          mv "$tmp" "$F"
+          n_after="$(grep -c 'posix_spawn_file_actions_addchdir(' "$F" || true)"
+          n_np="$(grep -c 'posix_spawn_file_actions_addchdir_np(' "$F" || true)"
+          echo "patch1 native_offload.c: addchdir( $n_before -> $n_after ; addchdir_np( = $n_np"
+          [ "$n_after" = "0" ] || { echo "::error::PATCH| native_offload.c 里还有 addchdir( 没换掉"; exit 1; }
+          [ "$n_np" -ge 1 ]    || { echo "::error::PATCH| native_offload.c 里没有 addchdir_np( —— 补丁没生效"; exit 1; }
+          grep -n 'addchdir' "$F"
+
+          # 补丁 2：main.c 的死引用 <mach/mach.h> 用 #if defined(__APPLE__) 包起来
+          #         （Linux runner 没这个头；Apple 上行为完全不变）
+          F="$SRC/main.c"
+          n_before2="$(grep -c '^#include <mach/mach.h>$' "$F" || true)"
+          tmp="$(mktemp)"
+          # ⚠️ `prev != "#if defined(__APPLE__)"` 是**幂等**用的：第二遍跑的时候
+          #    上一行已经是 `#if defined(__APPLE__)`，就不会再包一层。
+          awk '{ if ($0 == "#include <mach/mach.h>" && prev != "#if defined(__APPLE__)") {
+                   print "#if defined(__APPLE__)"; print; print "#endif"
+                 } else { print }
+                 prev = $0 }' "$F" > "$tmp"
+          mv "$tmp" "$F"
+          # 数「#if defined(__APPLE__) / #include <mach/mach.h> / #endif」这个三层块出现了几次
+          n_wrap="$(awk 'a == "#if defined(__APPLE__)" && b == "#include <mach/mach.h>" && $0 == "#endif" { n++ } { a = b; b = $0 } END { print n + 0 }' "$F")"
+          echo "patch2 main.c: mach include 原 $n_before2 处 -> 包裹块 = $n_wrap"
+          [ "$n_before2" -ge 1 ] || { echo "::error::PATCH| main.c 里没找到 `<mach/mach.h>` 那一行"; exit 1; }
+          [ "$n_wrap" = "1" ]    || { echo "::error::PATCH| main.c 的包裹块 = $n_wrap（应为 1）"; exit 1; }
+          echo "--- main.c 前 12 行 ---"
+          sed -n '1,12p' "$F"
+          echo "补丁完成。"
+
       - name: Build host tools (fakefsify, ish)
         run: |
           set -euo pipefail
@@ -751,8 +932,9 @@ jobs:
               exit "$rc"
             }
           fi
+          # ⚠️ `-k 0`（keep-going）：同 macOS 那条线，一次把所有编译错误暴露完。
           set +e
-          ninja -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/linux-ninja.log"
+          ninja -k 0 -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/linux-ninja.log"
           rc=${PIPESTATUS[0]}; set -e
           [ "$rc" = 0 ] || {
             echo "::error::LINUXBUILD| ninja tools/fakefsify ish 失败 rc=$rc"
@@ -808,9 +990,34 @@ jobs:
           rm -rf "$TREE"; mkdir -p "$TREE"
           tar -xzf "$TARBALL" -C "$TREE"
 
-          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$TREE/etc/resolv.conf"
-          printf 'https://dl-cdn.alpinelinux.org/alpine/v%s/main\nhttps://dl-cdn.alpinelinux.org/alpine/v%s/community\n' \
-            "$ALPINE_SERIES" "$ALPINE_SERIES" > "$TREE/etc/apk/repositories"
+          # —— 容器内部一律走国内源（老板口径：「Linux 就是自带容器」——
+          #    容器里要下东西，得让它自己从国内云拉，不依赖我们这边的网络）——
+          # ① DNS：阿里 + 腾讯 + 114（别再用 1.1.1.1/8.8.8.8，国内解析又慢又不稳）
+          printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 114.114.114.114\n' \
+            > "$TREE/etc/resolv.conf"
+          # ② apk 源：清华 TUNA 主 + 阿里云备 + 官方兜底（apk 按行顺序找）。
+          #    ⚠️ 只放 2 个国内源是**刻意的**：`apk update` 会把列出的每个仓库索引都拉一遍，
+          #       源越多每次更新越慢（社区索引就有好几 MB）。排在前面的是国内，够用了；
+          #       真要再加，把中科大那两行注释放开即可。
+          #    ✅ 证书没问题：minirootfs 自带 /etc/ssl/certs/ca-certificates.crt（222 KB）
+          #    ✅ 签名没问题：自带 /etc/apk/keys/*（5 把）+ /usr/share/apk/keys/*（18 把）
+          {
+            for M in \
+              "https://mirrors.tuna.tsinghua.edu.cn/alpine" \
+              "https://mirrors.aliyun.com/alpine"; do
+              printf '%s/v%s/main\n%s/v%s/community\n' "$M" "$ALPINE_SERIES" "$M" "$ALPINE_SERIES"
+            done
+            # "https://mirrors.ustc.edu.cn/alpine"   # ← 想再加一个国内源就把这两行放开
+            printf 'https://dl-cdn.alpinelinux.org/alpine/v%s/main\nhttps://dl-cdn.alpinelinux.org/alpine/v%s/community\n' \
+              "$ALPINE_SERIES" "$ALPINE_SERIES"
+          } > "$TREE/etc/apk/repositories"
+          # ③ pip 源：清华主 + 阿里/腾讯备（下面已经删掉 EXTERNALLY-MANAGED，pip 直接用）
+          printf '[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\nextra-index-url = https://mirrors.aliyun.com/pypi/simple/\n                  https://mirrors.cloud.tencent.com/pypi/simple/\n' \
+            > "$TREE/etc/pip.conf"
+          # ④ npm 源：npmmirror（阿里）。全局 /etc/npmrc 与 root 的 ~/.npmrc 各放一份。
+          printf 'registry=https://registry.npmmirror.com\n' > "$TREE/etc/npmrc"
+          mkdir -p "$TREE/root"
+          printf 'registry=https://registry.npmmirror.com\n' > "$TREE/root/.npmrc"
           find "$TREE/usr/lib" -name EXTERNALLY-MANAGED -delete 2>/dev/null || true
           mkdir -p "$TREE/dev" "$TREE/proc" "$TREE/sys" "$TREE/tmp" "$TREE/run" "$TREE/root" "$TREE/home"
 
@@ -832,30 +1039,50 @@ jobs:
           ( cd "$FAKEFS" && zip -qry "$SBX/out/alpine-rootfs.zip" . -x '*.db-shm' -x '*.db-wal' )
           echo "phase linux-rootfs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
 
-      - name: Smoke test - boot Alpine under host iSH
+      - name: Smoke test - boot Alpine + verify in-container mirrors
         continue-on-error: true
         run: |
           set -uo pipefail
           ISH="$SBX/out/ish"
           FAKEFS="$SBX/alpine-fakefs"
-          LOG="$SBX/out/ish-smoke.log"
-          "$ISH" -f "$FAKEFS" /bin/sh -c 'echo AEVIS_ISH_SMOKE_OK; cat /etc/alpine-release; uname -m' > "$LOG" 2>&1 &
-          PID=$!
-          for _ in $(seq 1 90); do
-            kill -0 "$PID" 2>/dev/null || break
-            sleep 1
-          done
-          if kill -0 "$PID" 2>/dev/null; then
-            echo "冒烟测试超时（90s），杀掉"
-            kill -9 "$PID" 2>/dev/null || true
-          fi
-          echo "----- ish smoke output -----"
-          cat "$LOG" 2>/dev/null || true
-          if grep -q AEVIS_ISH_SMOKE_OK "$LOG" 2>/dev/null; then
-            echo "冒烟测试：OK"
-          else
-            echo "::warning::host ish 冒烟测试没打印 OK（见上面日志）"
-          fi
+
+          # 跑一条「容器内命令」，硬限时（runner 上没有 GNU `timeout` 就自己数秒）。
+          run_probe () {
+            name="$1"; limit="$2"; log="$3"; cmd="$4"
+            : > "$log"
+            "$ISH" -f "$FAKEFS" /bin/sh -c "$cmd" >> "$log" 2>&1 &
+            pid=$!
+            i=0
+            while [ "$i" -lt "$limit" ]; do
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 1
+              i=$((i + 1))
+            done
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "[$name] 超时（${limit}s），杀掉"
+              kill -9 "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            fi
+            echo "----- $name -> $log -----"
+            cat "$log" 2>/dev/null || true
+          }
+
+          # 探针 1：容器到底跑不跑得起来。
+          run_probe "boot" 90 "$SBX/out/ish-smoke.log" \
+            'echo AEVIS_ISH_SMOKE_OK; cat /etc/alpine-release; uname -m'
+
+          # 探针 2（老板口径「Linux 就是自带容器」）：容器能不能**自己从国内源下东西**。
+          #   真的 `apk update` + `apk add bash`（几百 KB），证据落 ish-mirror.log。
+          #   ⚠️ 它会改动 alpine-fakefs，但 zip 在上一步就已经打好了 ⇒ 不会污染产物。
+          run_probe "mirror" 240 "$SBX/out/ish-mirror.log" \
+            'cat /etc/resolv.conf; grep -m1 tuna /etc/apk/repositories; apk update; apk add --no-cache bash; bash --version | head -1; echo AEVIS_ISH_MIRROR_OK'
+
+          ok=1
+          grep -q AEVIS_ISH_SMOKE_OK "$SBX/out/ish-smoke.log" 2>/dev/null \
+            || { echo "::warning::host ish 冒烟测试没打印 OK（见 ish-smoke.log）"; ok=0; }
+          grep -q AEVIS_ISH_MIRROR_OK "$SBX/out/ish-mirror.log" 2>/dev/null \
+            || { echo "::warning::容器里没能从国内源装成包（见 ish-mirror.log）"; ok=0; }
+          if [ "$ok" = 1 ]; then echo "冒烟 + 容器内国内源下载：OK"; fi
 
       - name: Validate and report sizes/timings
         run: |
@@ -969,6 +1196,11 @@ jobs:
             echo '```'
             tail -40 "$SBX/out/ish-smoke.log" 2>/dev/null || echo "(没有冒烟日志)"
             echo '```'
+            echo ""
+            echo "## 容器内「自己从国内源下东西」证据（apk update / apk add bash）"
+            echo '```'
+            tail -60 "$SBX/out/ish-mirror.log" 2>/dev/null || echo "(没有 mirror 日志)"
+            echo '```'
             show_log "linux/arm64 环境 (linux-env.log)" "$SBX/out/linux-env.log"
             show_log "meson setup (linux-setup.log)" "$SBX/out/linux-setup.log"
             show_log "ninja fakefsify/ish (linux-ninja.log)" "$SBX/out/linux-ninja.log"
@@ -980,6 +1212,7 @@ jobs:
           ATTACH=()
           for f in "$SBX/out/logs.tgz" "$SBX/out/linux-env.log" "$SBX/out/linux-setup.log" \
                    "$SBX/out/linux-ninja.log" "$SBX/out/meson-log.txt" "$SBX/out/timings.txt" \
+                   "$SBX/out/ish-smoke.log" "$SBX/out/ish-mirror.log" \
                    "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
             [ -f "$f" ] && ATTACH+=("$f")
           done
