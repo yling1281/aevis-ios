@@ -350,7 +350,15 @@ targets:
         # ⚠️ `[sdk=iphoneos*]` 条件**必须加**：`libaevisish.a` 只有 iphoneos/arm64
         #    切片，模拟器构建（build-ipa.yml 的模拟器自检那步）链它必然失败。
         #    限定只在真机 SDK 链，模拟器那条线就照旧不受影响。
-        OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) -laevisish"
+        #
+        # ⚠️ `-lsqlite3` **也是必须的**，别以为「只要链上 libaevisish.a 就够了」：
+        #    iSH 的 fakefs 用 sqlite3 存整个假文件系统（`fs/fake-db.c`、
+        #    `fs/fake-migrate.c`、`fs/fake-rebuild.c`），**30 个 `_sqlite3_*`
+        #    符号是外部依赖**、不随 .a 一起进来。少了它报的是
+        #    「Undefined symbols for architecture arm64: _sqlite3_bind_blob …」。
+        #    `libsqlite3.tbd` 就在 iPhoneOS SDK 里（系统库），写名字即可、不用给路径。
+        # 2026-10-06 真栽过一次（run 146）。
+        OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) -laevisish -lsqlite3"
       configs:
         # 显式定义 DEBUG，别依赖 Xcode 默认模板 ——
         # DemoSeed 里的 #if DEBUG 要靠它，CI 截图自检也靠它。
