@@ -36,18 +36,30 @@ name: iSH Sandbox (manual)
 #    否则每轮源码推送都会连带重编一遍 iSH，代价太大。
 on:
   workflow_dispatch:
+    inputs:
+      host_only:
+        description: "只跑 host 工具构建（快速诊断，约 10-15 分钟）"
+        type: boolean
+        default: false
   push:
     paths:
       - '.github/workflows/ish-sandbox.yml'
       - 'ish-sandbox/**'
 
-# 同一分支上避免并发跑重活。
+# ⚠️ **不要**把 group 写成固定值（比如按分支名）——
+#    改本文件时会连着触发两轮（旧版 + 新版），固定 group 会让第二轮**排队等第一轮跑完全程**
+#    （各 50 分钟 ⇒ 白白多等一小时）。用 run_id 每轮各跑各的；本 workflow 是手动的，
+#    不存在"被普通推送重复触发"的浪费问题。
 concurrency:
-  group: ish-sandbox-${{ github.ref }}
+  group: ish-sandbox-${{ github.run_id }}
   cancel-in-progress: false
 
+# ⚠️ 必须给写权限：最后要把「分步耗时 / 产物大小 / 校验结果」发布成 Release。
+#    为什么非要走 Release —— 开发机是 Windows、既没有 gh 也没有 token，
+#    **job 日志和 artifact 都读不到**；而未认证的 Release API 是公开可读的，
+#    是唯一能把这些数字取回来的通道。
 permissions:
-  contents: read
+  contents: write
 
 env:
   SBX: ${{ github.workspace }}/ish-sandbox
@@ -73,7 +85,7 @@ jobs:
       - name: Runner info
         run: |
           set -euo pipefail
-          mkdir -p "$SBX" "$SBX/out" "$SBX/build" "$SBX/.cache"
+          mkdir -p "$SBX" "$SBX/out" "$SBX/build" "$SBX/.cache" "$SBX/logs"
           : > "$SBX/timings.txt"
           echo "runner.os   = ${RUNNER_OS:-?}"
           echo "runner.arch = ${RUNNER_ARCH:-?}"
@@ -152,6 +164,7 @@ jobs:
       #   darwin/aarch64（这样 meson 会挑 platform/darwin.c 与 guest-arm64/gadgets-aarch64）。
       #   🔴 只编 arm64 device slice：不编 x86_64 simulator（asbestos 没有 x86_64 gadgets）。
       - name: Build iOS static libraries (device, arm64)
+        if: ${{ inputs.host_only != true }}
         run: |
           set -euo pipefail
           SECONDS=0
@@ -203,6 +216,7 @@ jobs:
       # —— 5. 编 guest VDSO（aarch64 Linux ELF）——
       #   这个目标其实会随 libish.a 一起编出来，这里单独跑一次只为单独计时。
       - name: Build guest VDSO (aarch64 Linux ELF)
+        if: ${{ inputs.host_only != true }}
         run: |
           set -euo pipefail
           SECONDS=0
@@ -217,23 +231,89 @@ jobs:
       #   fakefsify 把 minirootfs 转成 iSH 的 fakefs（data/ + meta.db）；
       #   ish 是能在 macOS 上直接跑沙箱的 CLI（后面拿来做冒烟测试、打 rootfs）。
       #   ⚠️ native 构建要用 **macOS SDK**，并清掉 Xcode 注入的 IPHONEOS_DEPLOYMENT_TARGET。
+      #   ⚠️ 三条命令各自 tee 到 $SBX/logs/，失败照样让整步失败（不用 || true）——
+      #      开发机读不到 job 日志，这些文件会由第 12 步带到 Release 上。
       - name: Build host tools (fakefsify, ish)
         run: |
           set -euo pipefail
           SECONDS=0
           SRC="$SBX/src/ish"
           BUILD="$SBX/build/native"
+          LOGS="$SBX/logs"
           HOST_SDK="$(xcrun --sdk macosx --show-sdk-path)"
           export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          mkdir -p "$LOGS"
+
+          # —— 诊断：先把环境摸清楚，全部落盘 ——
+          {
+            echo "=== host 工具构建环境 ==="
+            echo "meson  --version : $(meson --version 2>&1)"
+            echo "ninja  --version : $(ninja --version 2>&1)"
+            echo "clang  --version : $(clang --version 2>&1 | head -1)"
+            echo "xcrun macosx SDK : $HOST_SDK"
+            echo "brew --prefix libarchive              : $(brew --prefix libarchive 2>&1)"
+            echo "pkg-config --modversion libarchive    : $(pkg-config --modversion libarchive 2>&1)"
+            echo "pkg-config --variable=libdir libarchive: $(pkg-config --variable=libdir libarchive 2>&1)"
+            echo "PKG_CONFIG_PATH (before)              : ${PKG_CONFIG_PATH:-<unset>}"
+            echo "--- ls -la /opt/homebrew/opt/libarchive/lib /opt/homebrew/opt/libarchive/include ---"
+            ls -la /opt/homebrew/opt/libarchive/lib /opt/homebrew/opt/libarchive/include 2>&1 || true
+            echo "--- ls -la /opt/homebrew/opt/libarchive/lib/pkgconfig ---"
+            ls -la /opt/homebrew/opt/libarchive/lib/pkgconfig 2>&1 || true
+          } 2>&1 | tee "$LOGS/host-env.log"
+
+          # libarchive 是 fakefsify 唯一的外部依赖，而它在 macOS 上是 keg-only：
+          # Homebrew **不会**把它挂进 pkg-config 的默认搜索路径。找不到 libarchive，
+          # tools/meson.build 就干脆不生成 fakefsify 目标 ⇒ ninja 报 unknown target。
+          # ⚠️ meson **没有** `--pkg-config-path` 这个命令行开关（查过 msetup.py，确实没有）；
+          #    正规做法是内置选项 `-Dpkg_config_path=...`，这里再 export 环境变量兜一层。
+          LIBARCHIVE_PREFIX="$(brew --prefix libarchive 2>/dev/null || true)"
+          LIBARCHIVE_PC=""
+          if [ -n "$LIBARCHIVE_PREFIX" ] && [ -d "$LIBARCHIVE_PREFIX/lib/pkgconfig" ]; then
+            LIBARCHIVE_PC="$LIBARCHIVE_PREFIX/lib/pkgconfig"
+          fi
+          if [ -n "$LIBARCHIVE_PC" ]; then
+            export PKG_CONFIG_PATH="$LIBARCHIVE_PC:${PKG_CONFIG_PATH:-}"
+          fi
+          # meson 会用「内置选项 pkg_config_path」**覆盖**继承来的 PKG_CONFIG_PATH，
+          # 所以上面那句 export 只对下面这条 shell 诊断命令有效；真正喂给 meson 的
+          # 是 -Dpkg_config_path。拼成一个变量，路径为空时就不传这个参数
+          # （避免 `-Dpkg_config_path=` 这种空值形态）。
+          PC_ARG=""
+          if [ -n "$LIBARCHIVE_PC" ]; then
+            PC_ARG="-Dpkg_config_path=$LIBARCHIVE_PC"
+          fi
+          echo "libarchive pkgconfig dir = ${LIBARCHIVE_PC:-<not found>}"
+          echo "PKG_CONFIG_PATH (after)  = ${PKG_CONFIG_PATH:-<unset>}"
+          echo "pkg-config --modversion libarchive (after) = $(pkg-config --modversion libarchive 2>&1 || true)"
+
+          # —— 三条命令，各自 tee 落盘；失败时按原状 exit（日志已落盘）——
           if [ ! -f "$BUILD/build.ninja" ]; then
             rm -rf "$BUILD"; mkdir -p "$BUILD"
+            set +e
             env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
               meson setup "$BUILD" "$SRC" \
+                ${PC_ARG} \
                 --buildtype=release \
-                -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64
+                -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64 \
+              2>&1 | tee "$LOGS/host-setup.log"
+            rc=${PIPESTATUS[0]}; set -e
+            [ "$rc" = 0 ] || { echo "::error::meson setup 失败（rc=$rc），日志 $LOGS/host-setup.log"; exit "$rc"; }
+          else
+            echo "复用已有 native 构建目录（跳过 setup）" | tee "$LOGS/host-setup.log"
           fi
-          env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" ninja -C "$BUILD" cpu-offsets.h
-          env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" ninja -C "$BUILD" tools/fakefsify ish
+
+          set +e
+          env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+            ninja -C "$BUILD" cpu-offsets.h 2>&1 | tee "$LOGS/host-offsets.log"
+          rc=${PIPESTATUS[0]}; set -e
+          [ "$rc" = 0 ] || { echo "::error::ninja cpu-offsets.h 失败（rc=$rc），日志 $LOGS/host-offsets.log"; exit "$rc"; }
+
+          set +e
+          env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+            ninja -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/host-ninja.log"
+          rc=${PIPESTATUS[0]}; set -e
+          [ "$rc" = 0 ] || { echo "::error::ninja tools/fakefsify ish 失败（rc=$rc），日志 $LOGS/host-ninja.log"; exit "$rc"; }
+
           cp "$BUILD/tools/fakefsify" "$SBX/out/fakefsify"
           cp "$BUILD/ish" "$SBX/out/ish"
           chmod +x "$SBX/out/fakefsify" "$SBX/out/ish"
@@ -244,6 +324,7 @@ jobs:
       #   → 解包 → 写 /etc/resolv.conf、/etc/apk/repositories、删 EXTERNALLY-MANAGED（放开 pip）
       #   → 重新打包 → fakefsify 转成 fakefs（data/ + meta.db）→ zip。
       - name: Prepare Alpine aarch64 rootfs (fakefs)
+        if: ${{ inputs.host_only != true }}
         run: |
           set -euo pipefail
           SECONDS=0
@@ -303,6 +384,7 @@ jobs:
       #   这是「不只是编出来、而是真的能跑」的硬证据。失败只告警、不挂整个 job
       #   （真机上的行为才是最终标准，这里只是提前发现问题）。
       - name: Smoke test - boot Alpine under host iSH
+        if: ${{ inputs.host_only != true }}
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -329,6 +411,7 @@ jobs:
 
       # —— 9. 验收：逐个检查产物 + 打印大小 + 打印分步耗时 ——
       - name: Validate artifacts and report sizes/timings
+        if: ${{ inputs.host_only != true }}
         run: |
           set -euo pipefail
           OUT="$SBX/out"
@@ -377,6 +460,19 @@ jobs:
           du -h "$OUT"/* 2>/dev/null | sort -h > "$OUT/sizes.txt" || true
           echo "(字节级大小见 sizes.txt)"
 
+          # 把「架构 / 体积」证据落盘，供最后的 Release 报告取用（开发机读不到 job 日志）。
+          {
+            echo "== file =="
+            file "$OUT"/libish.a "$OUT"/libish_emu.a "$OUT"/libfakefs.a \
+                 "$OUT"/libvdso.so.elf "$OUT"/fakefsify "$OUT"/ish 2>&1
+            echo "== lipo =="
+            lipo -info "$OUT"/libish.a 2>&1
+            echo "== sizes (bytes) =="
+            ls -l "$OUT" 2>&1
+            echo "== rootfs 大小 =="
+            du -sh "$SBX/alpine-fakefs/data" "$SBX/alpine-fakefs/meta.db" 2>&1
+          } > "$OUT/arch.txt" 2>&1 || true
+
           echo ""
           [ "$fail" = 0 ] || { echo "::error::产物验收未通过"; exit 1; }
           echo "全部验收项通过。"
@@ -412,9 +508,105 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # —— 12. 保存缓存（只在成功时保存，避免把半截构建目录写进不可变缓存）——
+      # —— 12. 把「分步耗时 / 产物大小 / 校验结果 / 失败日志」发布成 Release ——
+      # 为什么非要这一步：开发机是 Windows、**既没有 gh 也没有 token**，
+      #   job 日志和 artifact 都读不到；而未认证的 Release API 是公开可读的，
+      #   这是唯一能把数字取回来的通道。
+      # `if: always()` —— **失败时更要出报告**：`timings.txt` 是一路 `tee -a` 累积的，
+      #   它能直接指出「卡在哪一步、前面各步花了多久」。
+      # 本步同时把 host 工具构建的失败日志（$SBX/logs/* ＋ meson-log.txt）收拢、
+      #   贴进报告正文，并作为附件传上去 —— 这是这一轮改动的核心目的。
+      - name: Publish report to Releases
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$SBX/out"
+
+          # —— 收拢日志：runner 上的 logs/ → out/，并打一个 logs.tgz ——
+          for f in host-env.log host-setup.log host-offsets.log host-ninja.log; do
+            [ -f "$SBX/logs/$f" ] && cp "$SBX/logs/$f" "$SBX/out/$f"
+          done
+          if [ -f "$SBX/build/native/meson-logs/meson-log.txt" ]; then
+            cp "$SBX/build/native/meson-logs/meson-log.txt" "$SBX/out/meson-log.txt"
+          fi
+          STAGE="$SBX/logstage"
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          if [ -d "$SBX/logs" ]; then cp -R "$SBX/logs/." "$STAGE/" 2>/dev/null || true; fi
+          [ -f "$SBX/out/meson-log.txt" ] && cp "$SBX/out/meson-log.txt" "$STAGE/meson-log.txt"
+          tar -czf "$SBX/out/logs.tgz" -C "$STAGE" . 2>/dev/null || echo "::warning::logs.tgz 打包失败"
+
+          show_log () {
+            echo ""
+            echo "## $1（最后 150 行）"
+            echo '```'
+            if [ -f "$2" ]; then tail -150 "$2"; else echo "(缺失：$2)"; fi
+            echo '```'
+          }
+
+          REPORT="$SBX/out/REPORT.md"
+          {
+            echo "# iSH sandbox build report — run #${{ github.run_number }}"
+            echo ""
+            echo "- job 结论: **${{ job.status }}**"
+            echo "- iSH 源码: \`${ISH_REPO}\` @ \`${ISH_SHA}\` （GPL-3.0）"
+            echo "- Alpine: ${ALPINE_VERSION} aarch64"
+            echo "- runner: ${{ runner.os }} / ${{ runner.arch }}"
+            echo ""
+            echo "## 分步耗时"
+            echo '```'
+            cat "$SBX/timings.txt" 2>/dev/null || echo "(timings.txt 没生成 —— 说明很早就挂了)"
+            echo '```'
+            echo ""
+            echo "## 产物大小"
+            echo '```'
+            ls -lh "$SBX/out" 2>/dev/null || echo "(out/ 是空的)"
+            echo '```'
+            echo ""
+            echo "## 架构 / 体积证据"
+            echo '```'
+            cat "$SBX/out/arch.txt" 2>/dev/null || echo "(arch.txt 没生成)"
+            echo '```'
+            echo ""
+            echo "## 冒烟测试日志（host iSH 真的把 Alpine 跑起来）"
+            echo '```'
+            tail -40 "$SBX/out/ish-smoke.log" 2>/dev/null || echo "(没有冒烟日志)"
+            echo '```'
+            show_log "host 工具环境 (host-env.log)" "$SBX/out/host-env.log"
+            show_log "host meson setup (host-setup.log)" "$SBX/out/host-setup.log"
+            show_log "host ninja cpu-offsets.h (host-offsets.log)" "$SBX/out/host-offsets.log"
+            show_log "host ninja fakefsify/ish (host-ninja.log)" "$SBX/out/host-ninja.log"
+            show_log "meson 内部日志 (meson-log.txt)" "$SBX/out/meson-log.txt"
+          } > "$REPORT"
+          cat "$REPORT"
+
+          # 只 attach 真实存在的文件：缺文件绝不能因此让这一步失败。
+          # ⚠️ tag 改成 ish-sandbox-macos-<run>（下面第二个 job 用 ish-sandbox-linuxarm-<run>，
+          #    两个 job 不能抢同一个 tag）。
+          TAG="ish-sandbox-macos-${{ github.run_number }}"
+          ATTACH=()
+          for f in "$SBX/out/logs.tgz" "$SBX/out/host-env.log" "$SBX/out/host-setup.log" \
+                   "$SBX/out/host-offsets.log" "$SBX/out/host-ninja.log" "$SBX/out/meson-log.txt" \
+                   "$SBX/out/timings.txt" "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
+            [ -f "$f" ] && ATTACH+=("$f")
+          done
+          if [ "${#ATTACH[@]}" -gt 0 ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" "${ATTACH[@]}" \
+              || echo "::warning::Release 上传没成功，不影响构建结论"
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" \
+              || echo "::warning::Release 上传没成功，不影响构建结论"
+          fi
+
+      # —— 13. 保存缓存（只在成功时保存，避免把半截构建目录写进不可变缓存）——
+      # ⚠️ `continue-on-error: true` 是必须的：本 workflow 的缓存 key 不含 run 维度，
+      #    先用 `host_only=true` 跑一轮诊断、再跑一轮全量时，全量那轮会 **restore 到同一个 key**
+      #    ⇒ `actions/cache/save` 报 "Cache already exists" 并 **exit 1** ⇒ 把明明构建成功的
+      #    一轮标成失败（假红灯）。加了这个就不会。
       - name: Save build cache
         if: success()
+        continue-on-error: true
         uses: actions/cache/save@v4
         with:
           path: |
@@ -422,3 +614,333 @@ jobs:
             ish-sandbox/build/native
             ish-sandbox/.cache
           key: ish-sandbox-${{ runner.os }}-${{ hashFiles('.github/workflows/ish-sandbox.yml') }}
+
+  # ==========================================================================
+  #  第二条线（独立 job）：在 Linux / arm64 上产 fakefsify + ish + alpine-rootfs.zip
+  #  --------------------------------------------------------------------------
+  #  为什么加它：
+  #   - macOS 那条线里「编 iOS 静态库」已证明能过；剩下的 host 工具
+  #     （fakefsify / ish）其实与平台无关，在 host==guest==aarch64 的 Linux runner 上
+  #     更贴近上游官方 CI 的环境（上游 ci.yml 就是在 ubuntu 上跑
+  #     `meson build -Dengine=asbestos -Dkernel=ish && ninja -C build`）。
+  #   - 两条线互不阻塞：macOS 那条卡住了，这条照样能把可用的 rootfs 交出来。
+  #  ⚠️ 这里**不**编 iOS 静态库 —— 那是 macOS 那条线的活。
+  #  ⚠️ 不出 vdso（用不到）；只编 tools/fakefsify 与 ish 两个目标。
+  # ==========================================================================
+  build-rootfs-linux-arm:
+    name: Build rootfs on linux/arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+
+    steps:
+      - name: Runner info
+        run: |
+          set -euo pipefail
+          mkdir -p "$SBX" "$SBX/out" "$SBX/build" "$SBX/.cache" "$SBX/logs"
+          : > "$SBX/timings.txt"
+          echo "runner.os = ${RUNNER_OS:-?}"
+          echo "runner.arch = ${RUNNER_ARCH:-?}"
+          echo "uname -m  = $(uname -m)"
+          uname -a
+          nproc
+          free -h || true
+
+      # libsqlite3-dev 是 meson.build 里 cc.find_library('sqlite3') 要的；
+      # libarchive-dev 给 fakefsify；clang/lld 给 guest VDSO（libish 依赖它）。
+      - name: Install build tools (apt)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build libarchive-dev pkg-config libsqlite3-dev clang lld zip unzip
+          echo "meson:      $(meson --version)"
+          echo "ninja:      $(ninja --version)"
+          echo "cc:         $(cc --version 2>&1 | head -1)"
+          echo "libarchive: $(pkg-config --modversion libarchive 2>&1)"
+          echo "phase apt: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      - name: Fetch iSH source (pinned commit)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          mkdir -p "$SBX/src"
+          rm -rf "$SBX/src/ish"
+          git init -q "$SBX/src/ish"
+          git -C "$SBX/src/ish" remote add origin "$ISH_REPO"
+          git -C "$SBX/src/ish" config advice.detachedHead false
+          if git -C "$SBX/src/ish" fetch -q --depth 1 origin "$ISH_SHA"; then
+            echo "直接取到 pinned SHA"
+            git -C "$SBX/src/ish" checkout -q FETCH_HEAD
+          else
+            echo "取不到单个 SHA，退回取分支历史再 checkout"
+            git -C "$SBX/src/ish" fetch -q origin "$ISH_BRANCH"
+            git -C "$SBX/src/ish" checkout -q "$ISH_SHA"
+          fi
+          GOT="$(git -C "$SBX/src/ish" rev-parse HEAD)"
+          echo "checked out: $GOT"
+          if [ "$GOT" != "$ISH_SHA" ]; then
+            echo "::error::pinned SHA 不一致：期望 $ISH_SHA，实际 $GOT"
+            exit 1
+          fi
+          echo "phase fetch: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      - name: Build host tools (fakefsify, ish)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          SRC="$SBX/src/ish"
+          BUILD="$SBX/build/native"
+          LOGS="$SBX/logs"
+          mkdir -p "$LOGS"
+          {
+            echo "=== linux/arm64 host 工具构建环境 ==="
+            echo "uname -m : $(uname -m)"
+            echo "meson    : $(meson --version 2>&1)"
+            echo "ninja    : $(ninja --version 2>&1)"
+            echo "cc       : $(cc --version 2>&1 | head -1)"
+            echo "clang    : $(clang --version 2>&1 | head -1)"
+            echo "pkg-config --modversion libarchive : $(pkg-config --modversion libarchive 2>&1)"
+          } 2>&1 | tee "$LOGS/linux-env.log"
+
+          if [ ! -f "$BUILD/build.ninja" ]; then
+            rm -rf "$BUILD"; mkdir -p "$BUILD"
+            set +e
+            meson setup "$BUILD" "$SRC" \
+              --buildtype=release \
+              -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64 \
+              2>&1 | tee "$LOGS/linux-setup.log"
+            rc=${PIPESTATUS[0]}; set -e
+            [ "$rc" = 0 ] || { echo "::error::meson setup 失败（rc=$rc），日志 $LOGS/linux-setup.log"; exit "$rc"; }
+          fi
+          set +e
+          ninja -C "$BUILD" tools/fakefsify ish 2>&1 | tee "$LOGS/linux-ninja.log"
+          rc=${PIPESTATUS[0]}; set -e
+          [ "$rc" = 0 ] || { echo "::error::ninja tools/fakefsify ish 失败（rc=$rc），日志 $LOGS/linux-ninja.log"; exit "$rc"; }
+
+          cp "$BUILD/tools/fakefsify" "$SBX/out/fakefsify"
+          cp "$BUILD/ish" "$SBX/out/ish"
+          chmod +x "$SBX/out/fakefsify" "$SBX/out/ish"
+          file "$SBX/out/fakefsify" "$SBX/out/ish" || true
+          echo "phase linux-host-tools: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      - name: Prepare Alpine aarch64 rootfs (fakefs)
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          # Ubuntu 上多半有 sha256sum、没有 shasum；macOS 上反过来。两种都兼容。
+          sha256_of () {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+          FAKEFSIFY="$SBX/out/fakefsify"
+          TARBALL="$SBX/.cache/alpine-minirootfs-${ALPINE_VERSION}-aarch64.tar.gz"
+          mkdir -p "$SBX/.cache" "$SBX/out"
+          if [ ! -s "$TARBALL" ]; then
+            ok=0
+            for M in \
+              "https://mirrors.aliyun.com/alpine" \
+              "https://mirrors.tuna.tsinghua.edu.cn/alpine" \
+              "https://mirrors.ustc.edu.cn/alpine" \
+              "https://dl-cdn.alpinelinux.org/alpine"; do
+              URL="$M/v${ALPINE_SERIES}/releases/aarch64/alpine-minirootfs-${ALPINE_VERSION}-aarch64.tar.gz"
+              echo "download: $URL"
+              if curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 300 -o "$TARBALL" "$URL"; then
+                ok=1; break
+              fi
+            done
+            [ "$ok" = 1 ] || { echo "::error::minirootfs 在所有镜像都下不动"; exit 1; }
+          else
+            echo "使用缓存的 minirootfs"
+          fi
+          GOT="$(sha256_of "$TARBALL")"
+          echo "minirootfs sha256 = $GOT"
+          [ "$GOT" = "$ALPINE_SHA256" ] || { echo "::error::sha256 校验失败（期望 $ALPINE_SHA256）"; exit 1; }
+
+          TREE="$SBX/alpine-tree"
+          rm -rf "$TREE"; mkdir -p "$TREE"
+          tar -xzf "$TARBALL" -C "$TREE"
+
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$TREE/etc/resolv.conf"
+          printf 'https://dl-cdn.alpinelinux.org/alpine/v%s/main\nhttps://dl-cdn.alpinelinux.org/alpine/v%s/community\n' \
+            "$ALPINE_SERIES" "$ALPINE_SERIES" > "$TREE/etc/apk/repositories"
+          find "$TREE/usr/lib" -name EXTERNALLY-MANAGED -delete 2>/dev/null || true
+          mkdir -p "$TREE/dev" "$TREE/proc" "$TREE/sys" "$TREE/tmp" "$TREE/run" "$TREE/root" "$TREE/home"
+
+          CONFIG_TAR="$SBX/.cache/alpine-configured.tar.gz"
+          rm -f "$CONFIG_TAR"
+          tar -czf "$CONFIG_TAR" -C "$TREE" .
+
+          FAKEFS="$SBX/alpine-fakefs"
+          rm -rf "$FAKEFS"
+          "$FAKEFSIFY" "$CONFIG_TAR" "$FAKEFS"
+          [ -d "$FAKEFS/data" ]   || { echo "::error::fakefsify 没产出 data/"; exit 1; }
+          [ -f "$FAKEFS/meta.db" ] || { echo "::error::fakefsify 没产出 meta.db"; exit 1; }
+          [ -e "$FAKEFS/data/bin/sh" ] || { echo "::error::fakefs 里没有 /bin/sh"; exit 1; }
+
+          printf 'alpine-%s-r1\n' "$ALPINE_VERSION" > "$FAKEFS/.version"
+          printf 'aarch64\n' > "$FAKEFS/.arch"
+
+          rm -f "$SBX/out/alpine-rootfs.zip"
+          ( cd "$FAKEFS" && zip -qry "$SBX/out/alpine-rootfs.zip" . -x '*.db-shm' -x '*.db-wal' )
+          echo "phase linux-rootfs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      - name: Smoke test - boot Alpine under host iSH
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ISH="$SBX/out/ish"
+          FAKEFS="$SBX/alpine-fakefs"
+          LOG="$SBX/out/ish-smoke.log"
+          "$ISH" -f "$FAKEFS" /bin/sh -c 'echo AEVIS_ISH_SMOKE_OK; cat /etc/alpine-release; uname -m' > "$LOG" 2>&1 &
+          PID=$!
+          for _ in $(seq 1 90); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "冒烟测试超时（90s），杀掉"
+            kill -9 "$PID" 2>/dev/null || true
+          fi
+          echo "----- ish smoke output -----"
+          cat "$LOG" 2>/dev/null || true
+          if grep -q AEVIS_ISH_SMOKE_OK "$LOG" 2>/dev/null; then
+            echo "冒烟测试：OK"
+          else
+            echo "::warning::host ish 冒烟测试没打印 OK（见上面日志）"
+          fi
+
+      - name: Validate and report sizes/timings
+        run: |
+          set -euo pipefail
+          OUT="$SBX/out"
+          fail=0
+          echo "===== 产物大小 (artifact sizes) ====="
+          for f in fakefsify ish alpine-rootfs.zip; do
+            if [ -e "$OUT/$f" ]; then
+              printf '  %-18s %s\n' "$f" "$(du -h "$OUT/$f" | cut -f1)"
+            else
+              printf '  %-18s MISSING\n' "$f"
+              fail=1
+            fi
+          done
+          echo "  rootfs data/      $(du -sh "$SBX/alpine-fakefs/data" 2>/dev/null | cut -f1)"
+          echo "  rootfs meta.db    $(du -h "$SBX/alpine-fakefs/meta.db" 2>/dev/null | cut -f1)"
+          echo "--- host tools ---"
+          file "$OUT/fakefsify" "$OUT/ish" 2>&1 || true
+
+          echo ""
+          echo "===== rootfs zip 内容检查 ====="
+          # 先落盘再 grep（同 macOS 那条线：`unzip -l | grep -q` 会被 SIGPIPE + pipefail 误判）。
+          LIST="$SBX/zip-listing.txt"
+          unzip -l "$OUT/alpine-rootfs.zip" > "$LIST"
+          grep -E '(^| )data/|meta\.db' "$LIST" | head -5 || true
+          grep -q 'data/'   "$LIST" || { echo "::error::zip 里没有 data/";   fail=1; }
+          grep -q 'meta.db' "$LIST" || { echo "::error::zip 里没有 meta.db"; fail=1; }
+
+          {
+            echo "== uname =="
+            uname -a
+            echo "== file =="
+            file "$OUT"/fakefsify "$OUT"/ish "$OUT"/alpine-rootfs.zip 2>&1
+            echo "== sizes (bytes) =="
+            ls -l "$OUT" 2>&1
+            echo "== rootfs 大小 =="
+            du -sh "$SBX/alpine-fakefs/data" "$SBX/alpine-fakefs/meta.db" 2>&1
+          } > "$OUT/arch.txt" 2>&1 || true
+
+          echo ""
+          echo "===== 分步耗时 (phase timings) ====="
+          cat "$SBX/timings.txt" | tee "$OUT/timings.txt"
+          du -h "$OUT"/* 2>/dev/null | sort -h > "$OUT/sizes.txt" || true
+
+          [ "$fail" = 0 ] || { echo "::error::产物验收未通过"; exit 1; }
+          echo "全部验收项通过。"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-sandbox-linuxarm-${{ github.run_number }}
+          path: ish-sandbox/out/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish report to Releases
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$SBX/out"
+          for f in linux-env.log linux-setup.log linux-ninja.log; do
+            [ -f "$SBX/logs/$f" ] && cp "$SBX/logs/$f" "$SBX/out/$f"
+          done
+          if [ -f "$SBX/build/native/meson-logs/meson-log.txt" ]; then
+            cp "$SBX/build/native/meson-logs/meson-log.txt" "$SBX/out/meson-log.txt"
+          fi
+          STAGE="$SBX/logstage"
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          if [ -d "$SBX/logs" ]; then cp -R "$SBX/logs/." "$STAGE/" 2>/dev/null || true; fi
+          [ -f "$SBX/out/meson-log.txt" ] && cp "$SBX/out/meson-log.txt" "$STAGE/meson-log.txt"
+          tar -czf "$SBX/out/logs.tgz" -C "$STAGE" . 2>/dev/null || echo "::warning::logs.tgz 打包失败"
+
+          show_log () {
+            echo ""
+            echo "## $1（最后 150 行）"
+            echo '```'
+            if [ -f "$2" ]; then tail -150 "$2"; else echo "(缺失：$2)"; fi
+            echo '```'
+          }
+
+          REPORT="$SBX/out/REPORT.md"
+          {
+            echo "# iSH sandbox (linux/arm64) report — run #${{ github.run_number }}"
+            echo ""
+            echo "- job 结论: **${{ job.status }}**"
+            echo "- iSH 源码: \`${ISH_REPO}\` @ \`${ISH_SHA}\` （GPL-3.0）"
+            echo "- Alpine: ${ALPINE_VERSION} aarch64"
+            echo "- runner: ${{ runner.os }} / ${{ runner.arch }}"
+            echo ""
+            echo "## 分步耗时"
+            echo '```'
+            cat "$SBX/timings.txt" 2>/dev/null || echo "(timings.txt 没生成 —— 说明很早就挂了)"
+            echo '```'
+            echo ""
+            echo "## 产物大小"
+            echo '```'
+            ls -lh "$SBX/out" 2>/dev/null || echo "(out/ 是空的)"
+            echo '```'
+            echo ""
+            echo "## 架构 / 体积证据"
+            echo '```'
+            cat "$SBX/out/arch.txt" 2>/dev/null || echo "(arch.txt 没生成)"
+            echo '```'
+            echo ""
+            echo "## 冒烟测试日志（host iSH 真的把 Alpine 跑起来）"
+            echo '```'
+            tail -40 "$SBX/out/ish-smoke.log" 2>/dev/null || echo "(没有冒烟日志)"
+            echo '```'
+            show_log "linux/arm64 环境 (linux-env.log)" "$SBX/out/linux-env.log"
+            show_log "meson setup (linux-setup.log)" "$SBX/out/linux-setup.log"
+            show_log "ninja fakefsify/ish (linux-ninja.log)" "$SBX/out/linux-ninja.log"
+            show_log "meson 内部日志 (meson-log.txt)" "$SBX/out/meson-log.txt"
+          } > "$REPORT"
+          cat "$REPORT"
+
+          TAG="ish-sandbox-linuxarm-${{ github.run_number }}"
+          ATTACH=()
+          for f in "$SBX/out/logs.tgz" "$SBX/out/linux-env.log" "$SBX/out/linux-setup.log" \
+                   "$SBX/out/linux-ninja.log" "$SBX/out/meson-log.txt" "$SBX/out/timings.txt" \
+                   "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
+            [ -f "$f" ] && ATTACH+=("$f")
+          done
+          if [ "${#ATTACH[@]}" -gt 0 ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" "${ATTACH[@]}" \
+              || echo "::warning::Release 上传没成功，不影响构建结论"
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$REPORT" \
+              || echo "::warning::Release 上传没成功，不影响构建结论"
+          fi
