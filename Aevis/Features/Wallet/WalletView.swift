@@ -445,7 +445,7 @@ struct WalletView: View {
     }
 
     /// 开关走自定义 Binding：打开时带上当前额度/周期**真正开通**，关闭就关。
-    private func closePayToggle(dir: WalletStore.ClosePayDirection,
+    private func closePayToggle(dir: ClosePayDirection,
                                 limitText: String) -> Binding<Bool> {
         Binding(
             get: {
@@ -467,7 +467,7 @@ struct WalletView: View {
     }
 
     /// 一组亲密付：标题 + 开关 +（开通时）额度 / 周期 / 本期进度。
-    private func closePayGroup(dir: WalletStore.ClosePayDirection,
+    private func closePayGroup(dir: ClosePayDirection,
                                title: String,
                                limitText: Binding<String>) -> some View {
         let enabled = (dir == .mine) ? wallet.closePayMineEnabled : wallet.closePayTaEnabled
@@ -535,7 +535,7 @@ struct WalletView: View {
         }
     }
 
-    private func setClosePayPeriod(_ dir: WalletStore.ClosePayDirection, period: String) {
+    private func setClosePayPeriod(_ dir: ClosePayDirection, period: String) {
         if dir == .mine {
             wallet.closePayMinePeriod = period
         } else {
@@ -543,7 +543,7 @@ struct WalletView: View {
         }
     }
 
-    private func applyClosePayLimit(_ text: String, to dir: WalletStore.ClosePayDirection) {
+    private func applyClosePayLimit(_ text: String, to dir: ClosePayDirection) {
         let cleaned = text.replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespaces)
         guard let value = Double(cleaned), value > 0 else { return }
@@ -678,7 +678,7 @@ struct WalletView: View {
             proxyNote = "先填个金额（比如 38）。"
             return
         }
-        let dir: WalletStore.ClosePayDirection = (proxyWho == "ta") ? .ta : .mine
+        let dir: ClosePayDirection = (proxyWho == "ta") ? .ta : .mine
         let paid = wallet.proxyPay(dir, amount: value, reason: "")
         guard paid > 0 else {
             let left = (dir == .mine) ? wallet.myBalance : wallet.taBalance

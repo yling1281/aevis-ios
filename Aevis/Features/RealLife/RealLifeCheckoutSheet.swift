@@ -184,7 +184,9 @@ struct CheckoutSheet: View {
 
             Divider()
 
-            amountRow("应付", "¥" + RealLifeFormat.money(payable), emphasize: true)
+            // ⚠️ 这个重载的第二个位置参数是「右侧小字」(hint)，不是金额 ——
+            //    金额那个形参带 `value:` 标签，漏了标签就变成"少传了 value"的编译错误。
+            amountRow("应付", "", value: "¥" + RealLifeFormat.money(payable), emphasize: true)
         }
         .padding(14)
         .aevisGlass(cornerRadius: 18)

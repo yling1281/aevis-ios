@@ -403,7 +403,7 @@ enum WalletTools {
     ///    就会**悄悄从用户钱包扣钱**（用户一查余额立刻发现）。现在返回 `nil`，
     ///    调用方必须**拒绝执行并让模型说清方向**。
     ///
-    /// ⚠️ 和 `WalletStore.ClosePayDirection` 一一对应，别在工具里再各写一套。
+    /// ⚠️ 和 `ClosePayDirection` 一一对应，别在工具里再各写一套。
     private static func direction(_ raw: Any?) -> ClosePayDirection? {
         let text = (raw as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)

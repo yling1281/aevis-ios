@@ -44,9 +44,11 @@ enum RealLifeFormat {
 
     /// 订单「应付」= 商品小计（`order.total`）+ 配送费。
     ///
-    /// 数据层的 `placeOrder` 只把**商品小计**写进 `order.total`（冻结口径，不许改），
-    /// 配送费不落盘；这里按 `shop.deliveryFee` **现取后加**，
-    /// 保证「结算页看到的应付」和「订单页显示的合计」是**同一个数**。
+    /// ⚠️ 数据层的 `placeOrder` 只把**商品小计**写进 `order.total` —— 这是冻结口径。
+    ///    配送费另外**快照**进 `Order.deliveryFee`（2026-10-06 补的），
+    ///    要显示/对账一律用 `order.amountPaid` 或 `order.total + order.deliveryFee`，
+    ///    **别回头查店铺**（查不到就会凭空少一笔，跟钱包扣的对不上）。
+    ///    这个函数只剩**结算页**在用（那时还没落单、拿不到 `Order`）。
     static func payable(_ total: Double, deliveryFee: Double) -> Double {
         ((total + deliveryFee) * 100).rounded() / 100
     }
