@@ -21,6 +21,7 @@
 #   wechat_bind.sh qrcode        取绑定二维码（POST get_bot_qrcode）
 #   wechat_bind.sh status        查一次扫码状态（票从 ticket.txt 读）
 #   wechat_bind.sh poll          长轮询（宿主用 nohup … & 拉起来，本进程常驻）
+#   wechat_bind.sh send          发一条消息（请求体从 send_body.json 读）
 #   wechat_bind.sh stop          让 poll 循环退出
 #
 # 所有产物都在 /root/wechat/ 下（iSH 的 fakefs 会持久化，重装 App 后还在）：
@@ -31,6 +32,8 @@
 #   cursor.txt     增量游标 get_updates_buf（落盘 ⇒ 断了能接着拉）
 #   ticket.txt     当前二维码票（status 用）
 #   token.txt / uin.txt   宿主写进来的凭证
+#   send_body.json   宿主拼好的 sendmessage 请求体（本脚本**不解析**，原样 -d @ 发出去）
+#   send_result.json sendmessage 的原始响应
 #   frozen         打上就是「账号被冻结（ret=-14）」，宿主看到就停轮询
 #   stop           poll 循环看到它就退出
 # =============================================================================
@@ -45,6 +48,8 @@ CURSOR="$DIR/cursor.txt"
 TICKET="$DIR/ticket.txt"
 TOKENFILE="$DIR/token.txt"
 UINFILE="$DIR/uin.txt"
+SENDBODY="$DIR/send_body.json"
+SENDRESULT="$DIR/send_result.json"
 FROZEN="$DIR/frozen"
 STOP="$DIR/stop"
 BODY="$DIR/req.json"
@@ -167,6 +172,25 @@ case "$1" in
     log "poll 结束"
     ;;
 
+  send)
+    ensure_curl || exit 1
+    rm -f "$SENDRESULT"
+    code=$(curl -sS -m 30 -X POST \
+        -H "Authorization: Bearer $(uniq_token)" \
+        -H "AuthorizationType: ilink_bot_token" \
+        -H "iLink-App-Id: bot" \
+        -H "iLink-App-ClientVersion: 1" \
+        -H "X-WECHAT-UIN: $(uniq_uin)" \
+        -H "Content-Type: application/json" \
+        -d @"$SENDBODY" \
+        -o "$SENDRESULT" -w '%{http_code}' \
+        "$BASE/ilink/bot/sendmessage" 2>>"$LOG")
+    log "sendmessage http=$code"
+    if [ -f "$SENDRESULT" ]; then log "body: $(cat "$SENDRESULT")"; fi
+    echo "http_code=$code"
+    if [ -f "$SENDRESULT" ]; then cat "$SENDRESULT"; fi
+    ;;
+
   stop)
     mkdir -p "$DIR"
     : > "$STOP"
@@ -174,6 +198,6 @@ case "$1" in
     ;;
 
   *)
-    echo "用法：wechat_bind.sh install|net|qrcode|status|poll|stop"
+    echo "用法：wechat_bind.sh install|net|qrcode|status|poll|send|stop"
     ;;
 esac

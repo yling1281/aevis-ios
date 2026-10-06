@@ -26,6 +26,7 @@ struct DiscoverView: View {
     @State private var showMC = false
     @State private var showRealLife = false
     @State private var showHerPhone = false
+    @State private var showBrowser = false
 
     var body: some View {
         NavigationStack {
@@ -58,6 +59,11 @@ struct DiscoverView: View {
                         // ⭐ 一起玩《我的世界》（2026-10-04 从电脑版同步过来）。
                         entry("一起玩", "gamecontroller", "选个人设，陪你在《我的世界》里过一天") {
                             showMC = true
+                        }
+                        // ⭐ 2026-10-06：内置浏览器 —— 页内能上网，看到好的点右上角
+                        //    「纸飞机」就发给 ta。入口放在发现页第一张卡。
+                        entry("浏览器", "safari", "打开网页，看到好的就发给\(Pronoun.current)") {
+                            showBrowser = true
                         }
                     }
                     card {
@@ -125,6 +131,22 @@ struct DiscoverView: View {
             .sheet(isPresented: $showHerPhone) {
                 // HerPhoneView 自带 NavigationStack + 「关闭」，同样**别再套**。
                 HerPhoneView()
+            }
+            .sheet(isPresented: $showBrowser) {
+                // 内置浏览器。它自己的标题栏 / 返回键**只在被导航壳包住时才成立**
+                //（`InAppBrowserView` 里用的是 `.navigationTitle` / `.navigationBarTitleDisplayMode`），
+                // 所以这里必须给它一个 NavigationStack —— 同上面 MusicView 那一条。
+                //
+                // ⚠️ 它自己**没有任何关闭按钮**（原来只在被 push 时靠系统返回键）。
+                //    放进 sheet 后，没有这一颗「关闭」老板就永远退不出去 —— 必须在导航栏补。
+                NavigationStack {
+                    InAppBrowserView(start: nil, title: "浏览器")
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { showBrowser = false }
+                            }
+                        }
+                }
             }
             .onAppear {
                 applyLaunchOptions()

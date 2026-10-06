@@ -485,7 +485,10 @@ final class QQBotService: ObservableObject {
         // 用户这句记进 App 的聊天记录（role = .user 是「我」说的话）。
         // 放在 guard 之后：只有确定是「跟ta聊天」（不是「注册」那种指令）才记。
         await MainActor.run {
-            ChatStore.shared.append(ChatMessage(role: .user, text: text), for: ownerID)
+            // ⚠️ 打上 `source = "qq"` —— 这样「ta 的小手机」里那个 QQ 页
+            //    只挑 QQ 通道的消息显示，不会和微信 / App 里自己聊的混在一起。
+            ChatStore.shared.append(
+                ChatMessage(role: .user, text: text, source: "qq"), for: ownerID)
         }
 
         var history = baseHistory
@@ -521,8 +524,10 @@ final class QQBotService: ObservableObject {
         guard !cleaned.isEmpty else { return nil }
 
         // ta的回复也写回 App 的聊天记录（role = .assistant 是 ta 说的话）。
+        // ⚠️ 同样打上 `source = "qq"`。
         await MainActor.run {
-            ChatStore.shared.append(ChatMessage(role: .assistant, text: cleaned), for: ownerID)
+            ChatStore.shared.append(
+                ChatMessage(role: .assistant, text: cleaned, source: "qq"), for: ownerID)
         }
 
         // 聊够一段就顺手提炼长期记忆（和 App 里聊天后那一步一样）。

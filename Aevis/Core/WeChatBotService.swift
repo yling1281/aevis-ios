@@ -81,6 +81,12 @@ final class WeChatBotService: ObservableObject {
         var from: String
         var text: String
         var at: Date
+        /// 这条消息的**发送者 id**（回发时当 `to_user_id` 用）。认不出就是 nil。
+        ///
+        /// ⚠️ 必须可选 + 带默认值 —— 现有构造点不许被改坏。
+        var peer: String? = nil
+        /// 这条消息带的 `context_token`。iLink 说回发时要**原样带回**；认不出就是 nil。
+        var context: String? = nil
     }
 
     @Published private(set) var state: State = .off
@@ -122,6 +128,8 @@ final class WeChatBotService: ObservableObject {
         static let ticket = "/root/wechat/ticket.txt"
         static let token = "/root/wechat/token.txt"
         static let uin = "/root/wechat/uin.txt"
+        static let sendBody = "/root/wechat/send_body.json"
+        static let sendResult = "/root/wechat/send_result.json"
         static let frozen = "/root/wechat/frozen"
         static let stop = "/root/wechat/stop"
         static let keepalive = "/root/wechat/keepalive.txt"
@@ -131,6 +139,10 @@ final class WeChatBotService: ObservableObject {
     private var polling = false
     private var readOffset = 0
     private var readerTask: Task<Void, Never>?
+    /// 最近一次入站消息的发送者 id（`send` 拿它当收件人）。**不是** `@Published`，界面不读。
+    private var lastPeer = ""
+    /// 最近一次入站消息带的 `context_token`（`send` 有就原样带上）。**不是** `@Published`。
+    private var lastContext = ""
 
     private init() {}
 
@@ -452,6 +464,21 @@ final class WeChatBotService: ObservableObject {
             added.append(contentsOf: Self.messages(from: obj))
         }
         guard !added.isEmpty else { return }
+
+        // ⭐ 把这些消息也落进 App 的聊天记录（用户要的：「点微信能看到我俩真实的聊天记录」）。
+        //
+        // ⚠️ **方向不猜**：`getupdates` 拿到的是**用户发给 bot 的**消息，
+        //    所以一律 `role: .user`。本通道目前**只有收、没有发**（这个类里
+        //    没有任何发送方法），这里记的全是「用户发给 ta 的」。
+        // ⚠️ `readOnce()` 已经是 `@MainActor`，直接写 `ChatStore` 是安全的 ——
+        //    **不要**再套一层 `DispatchQueue.main.async`。
+        // ⚠️ 打上 `source = "wechat"`，让微信页只挑本通道的消息显示。
+        // ⚠️ `readOffset` 是「从文件当前末尾增量读」，所以这里只记新来的，不刷历史。
+        let ownerID = PersonaStore.shared.active?.id
+        for item in added {
+            ChatStore.shared.append(
+                ChatMessage(role: .user, text: item.text, source: "wechat"), for: ownerID)
+        }
 
         let existing = incoming
         setIncoming(added.reversed() + existing)   // 新的排在上面

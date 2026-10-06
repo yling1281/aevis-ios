@@ -104,15 +104,29 @@ private struct HerAppSectionLabel: View {
 
 // MARK: - 微信 / QQ
 
+/// `ChatMessage.source` 里用的通道 key —— 和 `HerChatPlatform.rawValue` 是**同一套**
+/// （`"wechat"` / `"qq"`）。微信页 / QQ 页各自按它过滤，只看本平台的消息。
+fileprivate extension HerChatPlatform {
+    var sourceKey: String { rawValue }
+}
+
 /// 「微信 / QQ」—— 她的会话列表 + 只读聊天记录。
 ///
-/// 数据源是**真的** `ChatStore`（App 自己和 ta 的这条会话）。
+/// 数据源是**真的** `ChatStore`，但**按通道分开**：微信页只看 `source == "wechat"`
+/// 的消息，QQ 页只看 `source == "qq"` 的 —— 两边不再共用同一份内容，
+/// 也不再混进「App 里自己聊的」（那些 `source == nil`）。
 private struct HerChatAppPage: View {
 
     let app: HerApp
     let platform: HerChatPlatform
 
     @ObservedObject private var chat = ChatStore.shared
+    @ObservedObject private var settings = AppSettings.shared
+
+    /// 只看本平台的消息（微信 / QQ 各看各的）。
+    private var messages: [ChatMessage] {
+        chat.messages.filter { $0.source == platform.sourceKey }
+    }
 
     private var title: String { platform == .qq ? "QQ" : "微信" }
     private var tint: Color { platform == .qq ? Color.blue : Color.green }
@@ -127,7 +141,7 @@ private struct HerChatAppPage: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("这里是\(app.name)在「ta 的小手机」里的样子 —— 数据来自你和 ta 的真实聊天记录。")
+                Text(footnote)
                     .font(.aevis(11))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -182,14 +196,31 @@ private struct HerChatAppPage: View {
         .aevisGlass(cornerRadius: 16)
     }
 
-    /// 副标题：最后一条消息的摘要 + 时间。
+    /// 底下那行说明 —— **如实**：微信这条目前只有「你在微信里发给 ta 的」，
+    /// QQ 那条是双向的，别把没接上的功能说成接上了。
+    private var footnote: String {
+        if platform == .qq {
+            return "这里显示你和 ta 在「\(app.name)」里互发的消息（去设置里开了 QQ 通道后开始记）。"
+        }
+        return "这里显示你在「\(app.name)」里发给 ta 的消息（扫码绑定后开始记）。"
+    }
+
+    /// 副标题：本平台最后一条消息的摘要 + 时间。
     private var subtitle: String {
-        guard let last = chat.messages.last(where: {
+        guard let last = messages.last(where: {
             !$0.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }) else {
-            return "还没有聊过"
+            return emptySubtitle
         }
         return "\(last.previewText) · \(HerAppLaunchFormat.relative(last.date))"
+    }
+
+    /// 一条消息都没有时，副标题说清是「还没绑定」还是「绑了还没收到」。
+    private var emptySubtitle: String {
+        if platform == .qq {
+            return settings.qqBridgeEnabled ? "还没有收到消息" : "还没开 QQ 通道"
+        }
+        return settings.weChatBotToken.isEmpty ? "还没绑定微信机器人" : "还没有收到消息"
     }
 
     /// 用系统去开**真的**微信 / QQ。
@@ -208,12 +239,13 @@ private struct HerChatLogPage: View {
     let platform: HerChatPlatform
 
     @ObservedObject private var chat = ChatStore.shared
+    @ObservedObject private var settings = AppSettings.shared
 
     private var title: String { platform == .qq ? "QQ" : "微信" }
 
-    /// 有内容的那些消息，最新的 80 条。
+    /// 本平台有内容的那些消息，最新的 80 条。
     private var visibleMessages: [ChatMessage] {
-        let list = chat.messages.filter {
+        let list = chat.messages.filter { $0.source == platform.sourceKey }.filter {
             !$0.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         return Array(list.suffix(80))
@@ -223,10 +255,7 @@ private struct HerChatLogPage: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 if visibleMessages.isEmpty {
-                    Text("还没有聊过。")
-                        .font(.aevis(13))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 30)
+                    emptyState
                 } else {
                     ForEach(visibleMessages) { message in
                         bubble(message)
@@ -238,6 +267,33 @@ private struct HerChatLogPage: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// 空状态 —— **说人话**：分清「还没绑定」和「绑了但还没收到消息」，
+    /// 而不是一句「还没有聊过」糊过去（那会让人以为功能坏了）。
+    private var emptyState: some View {
+        Text(emptyText)
+            .font(.aevis(13))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 24)
+            .padding(.top, 30)
+    }
+
+    private var emptyText: String {
+        switch platform {
+        case .wechat:
+            if settings.weChatBotToken.isEmpty {
+                return "还没绑定微信机器人。绑定之后，你在微信里发给 ta 的消息会出现在这里。"
+            }
+            return "已经绑定了，还没收到消息。你在微信里给 ta 发一条试试。"
+        case .qq:
+            if settings.qqBridgeEnabled {
+                return "QQ 通道开着。你和 ta 在 QQ 里的消息会出现在这里。"
+            }
+            return "还没开 QQ 通道。去「设置」里打开 QQ 通道，之后你们在 QQ 里的消息会出现在这里。"
+        }
     }
 
     /// 一条只读气泡。`ta` 的话在左、我的话在右。

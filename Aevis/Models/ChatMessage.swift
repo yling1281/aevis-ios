@@ -63,6 +63,11 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     /// 转账 / 红包内容。只有 `kind == .transfer` 才有。
     var transfer: Transfer? = nil
 
+    /// 这条消息是从哪个通道传进来的。
+    /// `nil` = App 里自己聊的（默认）；`"wechat"` = 微信 ClawBot 通道；`"qq"` = QQ 通道。
+    /// ⚠️ 和 `imageData`/`callSeconds` 一个套路：**可选 + 有默认值** ⇒ 老存档缺这个键就是 nil，不会读崩。
+    var source: String? = nil
+
     /// 这条消息带的一张图（已经压过的 JPEG）。
     ///
     /// **图只在这台手机上显示，不会发给模型** —— 她收到的是从图里 OCR 出来的
