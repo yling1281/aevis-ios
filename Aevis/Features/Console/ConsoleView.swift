@@ -42,13 +42,13 @@ struct ConsoleView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("清空") {
                     lines.removeAll()
-                    append(Self.welcome, kind: .note)
+                    append(provider.welcome, kind: .note)
                 }
             }
         }
         .onAppear {
             if lines.isEmpty {
-                append(Self.welcome, kind: .note)
+                append(provider.welcome, kind: .note)
             }
         }
     }
@@ -227,14 +227,4 @@ struct ConsoleView: View {
     private func append(_ text: String, kind: ConsoleLine.Kind) {
         lines.append(ConsoleLine(text: text, kind: kind))
     }
-
-    private static let welcome = """
-    欢迎。这里的命令会真的执行，不是演示。
-
-    所有文件都在 App 自己的工作目录里，`..` 也出不去 ——
-    这样\(Pronoun.current)帮你整理文件时，不可能误删手机上的东西。
-
-    想接真 Alpine Linux（能 apk 装包、跑 python/node）的话，
-    需要把它的 rootfs 编进 App，那是后面的事。输 help 看现在能做什么。
-    """
 }

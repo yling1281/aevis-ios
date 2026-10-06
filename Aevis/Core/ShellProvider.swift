@@ -26,6 +26,14 @@ protocol ShellProvider {
     var availability: String { get }
     var isAvailable: Bool { get }
 
+    /// 命令台打开时显示在输出区的那段开场说明。
+    ///
+    /// ⚠️ **必须由 provider 自己给，不能写成界面里的死文本**：
+    ///    以前 ConsoleView 里有一段共用的 `welcome`，结果真 Linux 都进安装包了、
+    ///    界面上还在说「想接真 Linux…那是后面的事」—— **自己打自己的脸**
+    ///    （2026-10-06 看 51-console 截图发现的）。谁在跑就由谁说自己的话。
+    var welcome: String { get }
+
     /// 执行一条命令。
     func run(_ command: String) async -> CommandResult
     /// 当前工作目录（用于提示符）。
@@ -41,8 +49,37 @@ final class BuiltinShell: ShellProvider {
     static let shared = BuiltinShell()
 
     let displayName = "内置命令台"
-    var availability: String { "可用。不是真 Linux —— 支持文件、文本、网络这些常用命令。" }
     var isAvailable: Bool { true }
+
+    /// ⚠️ 这个 `availability` 其实是**回落态**的话术，会出现在两种场合：
+    ///    ① 模拟器（`libaevisish.a` 没有模拟器切片，真 Linux 根本不存在）；
+    ///    ② 真机上真 Linux 起不来（`failed` / `dead`）。
+    ///    ②那种情况必须**把原因带出来** —— 否则用户在真机上只看得到
+    ///    「内置命令台」，永远不知道真 Linux 那边失了什么手。
+    var availability: String {
+        #if targetEnvironment(simulator)
+        return "可用。不是真 Linux —— 支持文件、文本、网络这些常用命令。"
+            + "（模拟器上跑不了真 Linux，真机才有。）"
+        #else
+        return "可用。不是真 Linux —— 支持文件、文本、网络这些常用命令。"
+            + "真 Linux 的状态：\(AlpineRuntime.shared.statusText)"
+        #endif
+    }
+
+    var welcome: String {
+        """
+        欢迎。这里的命令会真的执行，不是演示。
+
+        所有文件都在 App 自己的工作目录里，`..` 也出不去 ——
+        这样\(Pronoun.current)帮你整理文件时，不可能误删手机上的东西。
+
+        但这不是真 Linux：apk 装包、跑 python / node 都做不到。
+        真 Alpine Linux 已经跟着安装包一起发下来了，只是它只在真机上
+        跑得起来。你现在看到这段，说明这台设备正用着内置命令台
+        （上面那行会写真 Linux 到底是什么状态）。
+        输 help 看内置命令台现在能做什么。
+        """
+    }
 
     private(set) var currentPath = "/"
     private let root: URL
@@ -433,6 +470,26 @@ final class AlpineShell: ShellProvider {
         #else
         return AlpineRuntime.shared.statusText
         #endif
+    }
+
+    var welcome: String {
+        // ⚠️ 别在这里用 `**加粗**` / 星号强调：这段是走 `Text(String)` 显示的，
+        //    不做 markdown 解析（R17），星号会原样露出来。反引号同理照显 ——
+        //    命令台本来就是等宽字体，反引号当引注反而看得清，保留。
+        """
+        欢迎。这是真的 Alpine Linux —— 一整个 Linux 跑在 App 里。
+
+        它自带 apk 包管理器：`apk add python3`、`apk add nodejs`、`apk add git`
+        装完就能跑（走 Alpine 官方源 / 清华、阿里镜像，需要联网）。
+        装过的东西会留在手机里，下次打开还在。
+
+        几条实话，免得到时候以为坏了：
+        · 命令之间不共享 cd / export —— 每条命令都是新开的子 shell。
+          想连着做几件事就写成一条：`cd /tmp && ls -la`
+        · 需要键盘输入的程序用不了（vi、passwd、不带参数的 python）。
+        · 第一次执行会先把系统铺开，要等几秒；装包会更慢（在下载）。
+        输 help 看这个命令台现在能做什么。
+        """
     }
 
     /// ⚠️ 固定是 `/`：命令被包在子 shell 里跑，`cd` / `export` **不跨命令保持**，
