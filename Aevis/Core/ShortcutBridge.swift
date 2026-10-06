@@ -101,13 +101,18 @@ enum ShortcutBridge {
     // 但**快捷指令可以**（里面有一个「锁定屏幕」动作），所以绕法是：
     // 让用户做一个叫「锁屏」的快捷指令，我们用 URL scheme 把它跑起来。
 
+    /// 默认名 —— 用户在自己「快捷指令」里该叫什么名字。
+    /// **同名就不用回来填**；想换别的名字，才需要在设置里改。
+    static let defaultLockShortcutName = "锁屏"
+    static let defaultScreenTimeShortcutName = "屏幕使用时间"
+
     /// 跑用户做好的「锁屏」快捷指令。返回一句给用户看的话。
+    ///
+    /// 名字**空就回退默认名**「锁屏」—— 用户按默认名做一条就不用填。
     static func lockScreenViaShortcut() -> String {
-        let name = AppSettings.shared.lockShortcutName
+        let raw = AppSettings.shared.lockShortcutName
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else {
-            return "还没填「锁屏」快捷指令的名字。去设置 →「系统」里填一下。"
-        }
+        let name = raw.isEmpty ? defaultLockShortcutName : raw
         guard isShortcutsAvailable else {
             return "这台设备上跑不了快捷指令。"
         }
@@ -121,11 +126,9 @@ enum ShortcutBridge {
     /// 数据不是我们取的 —— 是那个快捷指令跑完，再用 `aevis://screentime?...`
     /// 打开回来告诉我们的（见 AevisBridge）。
     static func requestScreenTimeViaShortcut() -> String {
-        let name = AppSettings.shared.screenTimeShortcutName
+        let raw = AppSettings.shared.screenTimeShortcutName
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else {
-            return "还没填「屏幕使用时间」快捷指令的名字。"
-        }
+        let name = raw.isEmpty ? defaultScreenTimeShortcutName : raw
         guard isShortcutsAvailable else {
             return "这台设备上跑不了快捷指令。"
         }
@@ -137,7 +140,7 @@ enum ShortcutBridge {
 
     static let lockScreenNote = """
     iOS 不允许 App 主动锁屏，但**快捷指令可以** —— 它里面有一个「锁定屏幕」动作。
-    做法：在「快捷指令」里做一个指令，放一个「锁定屏幕」动作，把名字填在上面。
-    之后你说一声、或点按钮，就会跳到快捷指令把它执行掉（锁上再回 Aevis 就行）。
+    做法：在「快捷指令」里建一条指令，放一个「锁定屏幕」动作，**名字就叫「锁屏」**。
+    同名就不用回来填 —— 想换别的名字，才需要在上面改。
     """
 }

@@ -48,9 +48,10 @@ final class ScreenTimeInsight: ObservableObject {
     }
 
     static let explanation = """
-    这个数据我们自己取不到 —— 它属于苹果的「家庭控制」，要单独的权限。
+    这个数据我们自己取不到 —— 它属于苹果的「家庭控制」，要单独的权限（卡的是**签名**，不是代码）。
     做法是让**快捷指令**帮你取，最后加一步「打开 URL」填：
     aevis://screentime?minutes=213&top=微信,抖音
+    ⚠️ 能自动读屏幕使用时间的系统动作**只有 iOS 26 及以上才有**（英文名 Get App & Website Data）；更低的版本没有，只能手填一个数字。
     收到之后\(Pronoun.current)会一直记得，你问\(Pronoun.current)「我今天刷了多久手机」\(Pronoun.current)能答上来。
     """
 

@@ -134,23 +134,6 @@ struct SystemBridgeCard: View {
 
             rule
 
-            // ——— 通用快捷指令 ———
-
-            shortcutRow(
-                symbol: "wand.and.stars",
-                title: "常用快捷指令",
-                value: settings.shortcutName,
-                key: "any",
-                action: {
-                    let name = settings.shortcutName
-                    note = ShortcutBridge.runShortcut(named: name)
-                        ? "跑了「\(name)」。"
-                        : "没跑起来，检查名字。"
-                }
-            )
-
-            rule
-
             // ——— 回主界面 ———
 
             HStack(spacing: 10) {
@@ -217,7 +200,7 @@ struct SystemBridgeCard: View {
         switch editingKey {
         case "lock": settings.lockShortcutName = value
         case "screentime": settings.screenTimeShortcutName = value
-        default: settings.shortcutName = value
+        default: break
         }
         note = value.isEmpty ? "已清空。" : "保存了。"
         editingKey = ""

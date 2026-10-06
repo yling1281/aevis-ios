@@ -17,7 +17,7 @@ import UIKit
 ///
 /// ## 三条硬规矩（错了就**静默失效**，界面上什么都看不出来）
 /// 1. 每个 phrase **必须含 `\(.applicationName)`**，否则那条动作不会出现在「快捷指令」里；
-/// 2. 一个 App 最多 **10** 条（Apple 建议 2–5 条），这里放 6 条；
+/// 2. 一个 App 最多 **10** 条（Apple 建议 2–5 条），这里放 7 条；
 /// 3. 这些动作**不能被 `shortcuts://run-shortcut?name=` 按名字调** —— 那条 URL 只认
 ///    用户自己库里的快捷指令。所以 Aevis 要用它们，只能在自己的代码里直接读
 ///    （下面这些 intent 就是把"读"这一步做进了 App 自己）。
@@ -207,6 +207,50 @@ struct ReportHealthIntent: AppIntent {
     }
 }
 
+// MARK: - 上报屏幕使用时间
+
+/// 屏幕使用时间的**接收端**：让用户在系统「快捷指令」里把上游动作（系统「屏幕使用时间」
+/// 那一类动作，或者干脆自己手填一个数字）的结果**直接拖进这个动作的参数**，灌进 App。
+///
+/// 为什么只能这样（和 `ReportHealthIntent` 是**同一个道理**）：**Aevis 自己读不了**屏幕
+/// 使用时间 —— 这数据属于苹果的「家庭控制」（Family Controls），要单独的 entitlement，
+/// 而侧载重签用的描述文件里**没有**它；更要命的是没权限时调它的框架**不是返回「没权限」
+/// 而是直接崩**。卡的是**签名**，不是**代码** —— 代码写得再对，签名不到位就是拿不到。
+/// 所以路子只能是：**系统快捷指令自己读 / 用户自己填，再把结果喂给我们**；我们当好「接收端」。
+///
+/// ⚠️ 屏幕使用时间的**官方快捷指令动作在不同 iOS 版本上不一定有** —— 所以这个动作
+///    同时**必须能接「手填」的数字**：`minutes` 就是个普通的 `Int` 参数，可以在快捷指令里
+///    点进去手输，也可以把上游变量拖进来，两条路都通。
+///
+/// 参数为什么是 `String?`/`Int`（而不是直接调 API）：只有参数是「可拖入的变量」，
+/// 快捷指令里才能把上游动作的输出拖进来。解析、落库**一律交给
+/// `ScreenTimeInsight.ingest`**（它会读 `minutes`/`top` 两个键，返回一句给用户看的话），
+/// 这里**不自己解析数字、不自己写 UserDefaults**。
+struct ReportScreenTimeIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "把屏幕使用时间发给 Aevis"
+
+    @Parameter(title: "总分钟数")
+    var minutes: Int
+
+    @Parameter(title: "用得最多的 App")
+    var top: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("把\(\.$minutes)分钟的屏幕使用时间发给 Aevis")
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        // `ScreenTimeInsight.latest` 是 `@Published`，必须在主线程上写
+        // （iOS 26 从后台线程写会硬崩；同文件其它 intent 全是 `await MainActor.run { … }` 这个写法）。
+        // 解析 + 落库全在 `ingest` 里，我们只负责把参数递进去、把回话原样吐出来。
+        let note = await MainActor.run {
+            ScreenTimeInsight.ingest(["minutes": "\(minutes)", "top": top ?? ""])
+        }
+        return .result(dialog: "\(note)")
+    }
+}
+
 // MARK: - 出厂预置
 
 /// 把上面的 intent 变成「快捷指令」里 Aevis 分类下的动作。
@@ -269,6 +313,15 @@ struct AevisAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "上报健康",
             systemImageName: "heart.fill"
+        )
+        AppShortcut(
+            intent: ReportScreenTimeIntent(),
+            phrases: [
+                "把屏幕使用时间发给\(.applicationName)",
+                "用\(.applicationName)记一下屏幕使用时间"
+            ],
+            shortTitle: "上报屏幕时间",
+            systemImageName: "hourglass"
         )
     }
 }

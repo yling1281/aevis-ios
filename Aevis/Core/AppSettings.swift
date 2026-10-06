@@ -432,7 +432,6 @@ final class AppSettings: ObservableObject {
         static let aiToolsDisabled = "aevis.aiToolsDisabled"
         static let companionEnabled = "aevis.companionEnabled"
         static let companionInterval = "aevis.companionInterval"
-        static let shortcutName = "aevis.shortcutName"
         /// 打开 App 先进哪个 tab（通讯录 / 聊天 / 发现 / 我）。
         static let defaultTab = "aevis.defaultTab"
         static let lockShortcutName = "aevis.lockShortcutName"
@@ -1217,11 +1216,6 @@ final class AppSettings: ObservableObject {
 
     // MARK: - 系统桥接
 
-    /// 用户自己做好的快捷指令名字（锁屏、开 App 这类）。
-    @Published var shortcutName: String {
-        didSet { UserDefaults.standard.set(shortcutName, forKey: Key.shortcutName) }
-    }
-
     /// 「锁屏」快捷指令的名字 —— iOS 不让 App 锁屏，只能靠它。
     @Published var lockShortcutName: String {
         didSet { UserDefaults.standard.set(lockShortcutName, forKey: Key.lockShortcutName) }
@@ -1661,7 +1655,6 @@ final class AppSettings: ObservableObject {
         disabledToolCategories = defaults.stringArray(forKey: Key.aiToolsDisabled) ?? []
         companionEnabled = defaults.object(forKey: Key.companionEnabled) as? Bool ?? false
         companionInterval = defaults.object(forKey: Key.companionInterval) as? Double ?? 20
-        shortcutName = defaults.string(forKey: Key.shortcutName) ?? ""
         defaultTab = defaults.string(forKey: Key.defaultTab) ?? "contacts"
         lockShortcutName = defaults.string(forKey: Key.lockShortcutName) ?? ""
         screenTimeShortcutName = defaults.string(forKey: Key.screenTimeShortcutName) ?? ""

@@ -6,18 +6,22 @@
 #
 #  产物（上传为 artifact）：
 #    - libish.a / libish_emu.a / libfakefs.a   iOS 真机 arm64 静态库
+#    - libaevisish.a                           上面三个合并成一个（App 只链这一个）
+#    - ish_embed.h                             Aevis 嵌入层对外的唯一头（App 侧用）
 #    - vdso/arm64/libvdso.so.elf               guest aarch64 Linux ELF
 #    - fakefsify / ish                         macOS host 工具（打 rootfs / 跑沙箱用）
 #    - alpine-rootfs.zip                       Alpine aarch64 fakefs（data/ + meta.db）
+#    - alpine-rootfs.tar.gz                    同一份 fakefs 的 tar 形态（App 要目录）
 #
 #  ⚠️ **产物必须公开发布，不能只留在 Actions artifact 里**。
 #     原因：开发机是 Windows，`actions/upload-artifact` 的产物**下载需要 token**，
 #     而本机既没有 gh 也没有 token ⇒ 那五个文件在开发机上**永远拿不到**，
 #     等于白编。所以本 workflow 会把它们打进 `ish-vendor.tar.gz` 并**作为 Release
 #     附件**（未认证即可下载）挂出去，供 App 的构建链（build-ipa.yml）自行取用。
-#     `ish-vendor.tar.gz` 解包后是平铺的五个文件：
+#     `ish-vendor.tar.gz` 解包后是平铺的七个文件：
 #         libish.a  libish_emu.a  libfakefs.a  libvdso.so.elf  alpine-rootfs.zip
-#     ⚠️ 只有五个文件**齐全**时才生成（缺一个就整包不发），避免下游拿到残缺包。
+#         libaevisish.a  ish_embed.h
+#     ⚠️ 只有七个文件**齐全**时才生成（缺一个就整包不发），避免下游拿到残缺包。
 #
 #  ---------------------------------------------------------------------------
 #  上游来源与许可证（合规记录）
@@ -80,6 +84,21 @@
 #     每轮都重新 clone 再打，不依赖 CI 缓存；打完后每条都自带「生效/幂等」校验，
 #     不满足就 `::error::PATCH|` 挂掉整步（绝不静默带着半截补丁去编译）。
 #     GPL 合规仍以 pinned commit 的源码本身为准。
+#  ---------------------------------------------------------------------------
+#  补丁 4（**Aevis 自己的东西，不是上游缺陷**）：把嵌入层三个文件塞进源码树
+#  ---------------------------------------------------------------------------
+#  本 workflow **没有 actions/checkout**（刻意的，见 env.SBX_CACHE_REV 那段），
+#  所以这里用 GitHub contents API 按**精确 sha** 从本仓库取 `ish-embed/` 下三个文件：
+#      ish-embed/ish_embed.h              → $SRC/aevis_ish_embed.h
+#      ish-embed/ish_embed.c              → $SRC/aevis_ish_embed.c
+#      ish-embed/aevis_ish_embed_selftest.c → $SRC/aevis_ish_embed_selftest.c
+#  （`ish_embed.c` 里 `#include "aevis_ish_embed.h"`，所以落地时统一带 aevis_ 前缀。）
+#  然后在 $SRC/meson.build 里做**两处**插入（都用 awk，幂等 + 生效校验）：
+#      ① src=[...] 里 'util/fchdir.c', 之后加 'aevis_ish_embed.c',（编进 libish）
+#      ② `if not meson.is_cross_build()` 块里 ish 可执行之后加一个自检可执行
+#  同时把 ish_embed.h 留一份到 $SBX/out/，供 App 侧下载。
+#  ⚠️ 取文件**必须硬拦**（取不到就别继续）——否则后面全是假绿。
+#  ⚠️ 请求必须带 Authorization（github.token），否则会撞 60 次/小时的匿名限额。
 #  ---------------------------------------------------------------------------
 #  ⚠️ 为什么不再保留 Linux/arm64 那条线（run #4 的实测结论，**别再试**）
 #  ---------------------------------------------------------------------------
@@ -202,7 +221,13 @@ jobs:
       #   ⚠️ key 是「runner.os + 手动常量 SBX_CACHE_REV」——**故意不用 hashFiles**，
       #      原因见文件头 `env.SBX_CACHE_REV` 那段（本 workflow 没有 checkout，
       #      hashFiles 恒为空串、永远不会失效）。改了补丁就手动把那个常量 +1。
-      # 缓存内容：两个 meson 构建目录 + Alpine 包缓存（源码 clone 每次重来，很便宜）。
+      # 缓存内容：三个 meson 构建目录 + Alpine 包缓存（源码 clone 每次重来，很便宜）。
+      #   ⚠️ 关于 `build/assert`（断言版宿主自检用的构建目录）——**故意不靠提 SBX_CACHE_REV**：
+      #      提 rev 会换掉整个 cache key ⇒ 现成的暖缓存（build/ios-iphoneos + build/native）
+      #      全部作废 ⇒ 下一轮变成几十分钟的全冷构建，得不偿失。
+      #      所以这里只把 build/assert **追加进 path 列表**：它第一轮冷编几分钟，
+      #      之后每轮都命中；万一将来有人因别的原因提了 rev，它也会自然一起进缓存。
+      #      ⇒ 这不是「忘了提 rev」，是刻意的取舍。
       - name: Restore build cache
         id: cache
         uses: actions/cache/restore@v4
@@ -210,6 +235,7 @@ jobs:
           path: |
             ish-sandbox/build/ios-iphoneos
             ish-sandbox/build/native
+            ish-sandbox/build/assert
             ish-sandbox/.cache
           key: ish-sandbox-${{ runner.os }}-rev${{ env.SBX_CACHE_REV }}
 
@@ -245,12 +271,19 @@ jobs:
           echo "源码文件数: $(find "$SBX/src/ish" -type f | wc -l | tr -d ' ')"
           echo "phase fetch: ${SECONDS}s" | tee -a "$SBX/timings.txt"
 
-      # —— 3b. 上游补丁（两处，缘由见文件头「构建期补丁」）——
+      # —— 3b. 上游补丁（三处，缘由见文件头「构建期补丁」）——
       #   ⚠️ 必须放在**任何编译步骤之前**：libish.a、iOS 静态库与 host 工具都吃这棵源码树。
       #   ⚠️ 只用 `sed` / `awk`，**不用 perl** —— 开发机（Windows Git Bash）没有 perl，
       #      用了就没法在上推之前先本地跑一遍验证；sed/awk 两边都有。
       #      并且**不用 `sed -i`**（BSD 与 GNU 的 -i 语法不同），改成「写临时文件再 mv」。
-      - name: Patch iSH source (3 portability fixes)
+      - name: Patch iSH source (3 portability fixes + Aevis embed wiring)
+        env:
+          # 补丁 4 要从**本仓库**按精确 sha 取 ish-embed/ 下三个文件，走 GitHub contents API。
+          # ⚠️ 必须带 token，否则会撞「匿名 60 次/小时」限额而静默失败。
+          # 用 env 传（而不是把 ${{ github.token }} 直接塞进脚本正文），与后面 Publish 步骤保持同一风格。
+          AEVIS_GH_TOKEN: ${{ github.token }}
+          AEVIS_GH_SHA: ${{ github.sha }}
+          AEVIS_GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           SRC="$SBX/src/ish"
@@ -316,7 +349,84 @@ jobs:
           [ "$n3_new" -ge 1 ]   || { echo "::error::PATCH| kernel/uname.c 的 snprintf 补丁没生效"; exit 1; }
           grep -n 'hostname' "$F"
 
-          echo "三处补丁全部完成。"
+          echo "三处上游补丁全部完成。"
+
+          # ==================================================================
+          # 补丁 4：把 Aevis 嵌入层三个文件塞进源码树，并登记进 meson
+          #   ⚠️ 本 workflow 没有 actions/checkout（刻意的），所以走 GitHub
+          #      contents API 按**精确 sha** 从本仓库取（见文件头「补丁 4」）。
+          #   ⚠️ 请求必须带 Authorization（$AEVIS_GH_TOKEN），否则撞匿名限额。
+          #   ⚠️ 取不到就**硬拦**（后面全是假绿），并退回 main 时在日志里说明。
+          # ==================================================================
+          API="https://api.github.com/repos/${AEVIS_GH_REPO}/contents/ish-embed"
+
+          # 取一个文件；先按 $AEVIS_GH_SHA，失败退回 main（并打印说明）。
+          fetch_embed () {
+            rel="$1"; dest="$2"
+            for REF in "$AEVIS_GH_SHA" "main"; do
+              [ -n "$REF" ] || continue
+              url="${API}/${rel}?ref=${REF}"
+              if curl -fsSL \
+                   -H "Authorization: Bearer ${AEVIS_GH_TOKEN}" \
+                   -H "Accept: application/vnd.github.raw" \
+                   -o "$dest" "$url"; then
+                echo "  fetched ish-embed/${rel} @ ${REF} ($(wc -c < "$dest" | tr -d ' ') bytes)"
+                return 0
+              fi
+              echo "  ⚠️ 取 ish-embed/${rel} @ ${REF} 失败，换下一个 ref 再试"
+            done
+            return 1
+          }
+
+          fetch_embed "ish_embed.h"                "$SRC/aevis_ish_embed.h"          \
+            || { echo "::error::PATCH| 从仓库取 ish-embed/ish_embed.h 失败（缺 token / 权限？）"; exit 1; }
+          fetch_embed "ish_embed.c"                "$SRC/aevis_ish_embed.c"          \
+            || { echo "::error::PATCH| 从仓库取 ish-embed/ish_embed.c 失败"; exit 1; }
+          fetch_embed "aevis_ish_embed_selftest.c" "$SRC/aevis_ish_embed_selftest.c" \
+            || { echo "::error::PATCH| 从仓库取 ish-embed/aevis_ish_embed_selftest.c 失败"; exit 1; }
+          for f in "$SRC/aevis_ish_embed.h" "$SRC/aevis_ish_embed.c" "$SRC/aevis_ish_embed_selftest.c"; do
+            [ -s "$f" ] || { echo "::error::PATCH| 取回来的 $f 是空的"; exit 1; }
+          done
+          echo "patch4: 三个嵌入层文件已落进源码树"
+
+          # —— 4a. meson.build：src=[...] 里 'util/fchdir.c', 之后插入 'aevis_ish_embed.c', ——
+          #   （awk 里的 \047 就是单引号本身，避免在单引号 shell 串里再嵌单引号）
+          MB="$SRC/meson.build"
+          [ -f "$MB" ] || { echo "::error::PATCH| 没有 $MB"; exit 1; }
+          n_embed="$(grep -c "^ *'aevis_ish_embed\.c'," "$MB" || true)"
+          if [ "$n_embed" = "0" ]; then
+            tmp="$(mktemp)"
+            awk '{ print }
+                 (!done && $0 ~ /util\/fchdir\.c/) { print "        \047aevis_ish_embed.c\047,"; done=1 }' \
+              "$MB" > "$tmp"
+            mv "$tmp" "$MB"
+          fi
+          n_embed="$(grep -c "^ *'aevis_ish_embed\.c'," "$MB" || true)"
+          [ "$n_embed" = "1" ] \
+            || { echo "::error::PATCH| meson.build 里 'aevis_ish_embed.c' 出现 $n_embed 次（应为 1）"; exit 1; }
+          echo "patch4a: meson.build src[] 已插入 'aevis_ish_embed.c'（$n_embed 处）"
+
+          # —— 4b. meson.build：ish 可执行之后加自检可执行（只在 native 构建里）——
+          n_selftest="$(grep -c 'aevis_ish_embed_selftest' "$MB" || true)"
+          if [ "$n_selftest" = "0" ]; then
+            tmp="$(mktemp)"
+            awk '{ print }
+                 (!done2 && $0 ~ /executable/ && $0 ~ /main\.c/) { print "        executable(\047aevis_ish_embed_selftest\047, [\047aevis_ish_embed_selftest.c\047], dependencies: ish)"; done2=1 }' \
+              "$MB" > "$tmp"
+            mv "$tmp" "$MB"
+          fi
+          n_selftest="$(grep -c 'aevis_ish_embed_selftest' "$MB" || true)"
+          [ "$n_selftest" = "1" ] \
+            || { echo "::error::PATCH| meson.build 里 aevis_ish_embed_selftest 出现 $n_selftest 次（应为 1）"; exit 1; }
+          echo "patch4b: meson.build 已加自检可执行（$n_selftest 处）"
+
+          # —— 4c. 留一份头文件在 out/，供 App 侧（build-ipa.yml）下载 ——
+          mkdir -p "$SBX/out"
+          cp "$SRC/aevis_ish_embed.h" "$SBX/out/ish_embed.h"
+
+          echo "--- meson.build 里与 aevis 相关的行（人眼核对）---"
+          grep -n 'aevis_ish_embed' "$MB"
+          echo "补丁 4 完成（三个文件 + meson 两处插入 + out/ish_embed.h）。"
 
       # —— 4. 编 iOS 真机 arm64 静态库 ——
       #   交叉编译文件用 iphoneos SDK，部署目标 iOS $IOS_MIN，host_machine 声明为
@@ -371,6 +481,41 @@ jobs:
             cp "$BUILD/$f" "$SBX/out/$f"
           done
           echo "phase ios-libs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 4b. 把三个 iOS 静态库合并成一个 libaevisish.a（App 侧只链这一个）——
+      #   为什么合并：App 工程里链 4 个 .a（libish + libish_emu + libfakefs + 自己）
+      #   更容易漏、而且 Clang 对静态库之间的循环引用要靠 -force_load 折腾；
+      #   合成一个 .a 后 App 侧只要一条 -laevisish。
+      #   ⚠️ 合并后**必须逐个核心符号验一遍**，否则链接期才会炸（发现太晚）。
+      - name: Merge iOS static libs into libaevisish.a
+        if: ${{ inputs.host_only != true }}
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          OUT="$SBX/out"
+          for f in libish.a libish_emu.a libfakefs.a; do
+            [ -f "$OUT/$f" ] || { echo "::error::MERGE| 缺少 $OUT/$f，没法合并"; exit 1; }
+          done
+          rm -f "$OUT/libaevisish.a"
+          # macOS 自带 libtool：-static 做「把多个归档并成一个」。
+          libtool -static -o "$OUT/libaevisish.a" \
+            "$OUT/libish.a" "$OUT/libish_emu.a" "$OUT/libfakefs.a"
+          file "$OUT/libaevisish.a"
+          lipo -info "$OUT/libaevisish.a"
+          lipo -info "$OUT/libaevisish.a" | grep -q arm64 \
+            || { echo "::error::MERGE| libaevisish.a 不是 arm64"; exit 1; }
+
+          # —— 符号校验：嵌入层 + 内核 + 文件系统，缺任何一个都得在**这里**挂掉 ——
+          SYMS="$(nm -gU "$OUT/libaevisish.a" 2>/dev/null || nm "$OUT/libaevisish.a")"
+          fail=0
+          for s in _aevis_ish_boot _task_run_current _mount_root _create_piped_stdio _do_execve _fakefs; do
+            n="$(printf '%s\n' "$SYMS" | grep -c "${s}\$" || true)"
+            echo "  symbol ${s} = ${n}"
+            [ "$n" -ge 1 ] || { echo "::error::MERGE| libaevisish.a 缺少符号 ${s}"; fail=1; }
+          done
+          [ "$fail" = 0 ] || exit 1
+          echo "phase merge-libs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
 
       # —— 5. 编 guest VDSO（aarch64 Linux ELF）——
       #   这个目标其实会随 libish.a 一起编出来，这里单独跑一次只为单独计时。
@@ -582,6 +727,14 @@ jobs:
 
           rm -f "$SBX/out/alpine-rootfs.zip"
           ( cd "$FAKEFS" && zip -qry "$SBX/out/alpine-rootfs.zip" . -x '*.db-shm' -x '*.db-wal' )
+
+          # —— 同一份 fakefs 再出一个 **tar** 形态（App 侧要的是目录）——
+          #   App 的接线要的是「解包即目录」，tar.gz 天生如此；zip 也保留不动。
+          #   ⚠️ 必须**在这里**（冒烟/mirror 测试之前）打，否则会把 apk add 的改动也裹进去。
+          rm -f "$SBX/out/alpine-rootfs.tar.gz"
+          tar -czf "$SBX/out/alpine-rootfs.tar.gz" -C "$FAKEFS" \
+            --exclude='*.db-shm' --exclude='*.db-wal' .
+          echo "  alpine-rootfs.tar.gz = $(du -h "$SBX/out/alpine-rootfs.tar.gz" | cut -f1)"
           echo "phase rootfs: ${SECONDS}s" | tee -a "$SBX/timings.txt"
 
       # —— 8. 冒烟测试：用 host 版 ish 真的把 Alpine 跑起来 ——
@@ -633,6 +786,191 @@ jobs:
             || { echo "::warning::容器里没能从国内源装成包（见 ish-mirror.log）"; ok=0; }
           if [ "$ok" = 1 ]; then echo "冒烟 + 容器内国内源下载：OK"; fi
 
+      # —— 8b. 嵌入层端到端自检（**本轮改动的验收**）——
+      #   真编出一个宿主可执行、真把 Alpine 跑起来、真跑命令、真读回输出与退出码。
+      #   ⚠️ 失败**硬拦**（不像冒烟那样 continue-on-error）。
+      #   ⚠️ 日志先写进 $SBX/out/，第 12 步（if: always）会把它带进 Release ——
+      #      开发机读不到 job 日志，只能靠未认证可读的 Release 附件把证据取回来。
+      - name: Run embedded-API self-test
+        if: ${{ inputs.host_only != true }}
+        run: |
+          set -uo pipefail
+          SECONDS=0
+          BUILD="$SBX/build/native"
+          OUT="$SBX/out"
+          LOG="$OUT/ish-embed-selftest.log"
+          : > "$LOG"
+          HOST_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+
+          # 用与 host 工具**同一套** native 构建目录编自检可执行
+          # （meson.build 已在 3b 补过，ninja 会先自动 reconfigure 再编）。
+          if ! env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+               ninja -C "$BUILD" aevis_ish_embed_selftest >> "$LOG" 2>&1; then
+            echo "::error::ISH-EMBED| ninja aevis_ish_embed_selftest 失败（见 ish-embed-selftest.log）"
+            tail -n 40 "$LOG" 2>/dev/null \
+              | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+              | while IFS= read -r l; do echo "::error::ISH-EMBED| $l"; done || true
+            exit 1
+          fi
+          BIN="$BUILD/aevis_ish_embed_selftest"
+          [ -x "$BIN" ] || { echo "::error::ISH-EMBED| 没编出 $BIN"; exit 1; }
+
+          # 用**发货用的** alpine-rootfs.tar.gz 解出一份干净 rootfs
+          # （$SBX/alpine-fakefs 已被上面的冒烟/mirror 测试改过，不能拿来当基准；
+          #   自检必须跑在「和发给 App 的那份一模一样的」rootfs 上）。
+          ROOTFS="$SBX/alpine-fakefs-embed"
+          rm -rf "$ROOTFS"; mkdir -p "$ROOTFS"
+          if ! tar -xzf "$OUT/alpine-rootfs.tar.gz" -C "$ROOTFS"; then
+            echo "::error::ISH-EMBED| 解 alpine-rootfs.tar.gz 失败"; exit 1
+          fi
+          [ -d "$ROOTFS/data" ] && [ -f "$ROOTFS/meta.db" ] \
+            || { echo "::error::ISH-EMBED| 解出的 rootfs 不是 data/ + meta.db 形态"; exit 1; }
+          TMPD="$SBX/tmp-embed"; mkdir -p "$TMPD"
+
+          echo "--- running self-test ---" >> "$LOG"
+          # 硬限时（macOS runner 没有 GNU `timeout`，自己数秒；自检内部也有 30s/60s 超时）
+          "$BIN" "$ROOTFS" "$TMPD" >> "$LOG" 2>&1 &
+          pid=$!
+          i=0
+          while [ "$i" -lt 600 ]; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+            i=$((i + 1))
+          done
+          rc=0
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::ISH-EMBED| 自检超时（600s），杀掉"
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            rc=124
+          else
+            wait "$pid"; rc=$?
+          fi
+          cat "$LOG"
+          echo "self-test exit=$rc"
+
+          if [ "$rc" != 0 ] || ! grep -q 'AEVIS_ISH_EMBED_SELFTEST_OK' "$LOG"; then
+            echo "::error::ISH-EMBED| 嵌入层自检失败 exit=$rc（详见 ish-embed-selftest.log，已随 Release 附件发出）"
+            exit 1
+          fi
+          echo "嵌入层自检：OK"
+          echo "phase ish-embed-selftest: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
+      # —— 8b. 断言版宿主自检：同一份自检源，用 -Db_ndebug=false 另编一遍再跑 ——
+      #   为什么非要有这一条：上面那条宿主构建是 --buildtype=release ⇒ NDEBUG 被定义
+      #   ⇒ 宿主这边 assert 也是**死代码**。「argv 单 NUL 越界」那类 bug，恰恰只有
+      #   开断言才抓得到（release 下静默、碰巧能跑）。这条红了**就是我们的锅**，
+      #   别急着怀疑 iSH —— 审计线已把 85 条 assert 全扫过，这条路径上没有会自己为假的上游断言。
+      #   ⚠️ 自解一份**独立**的干净 rootfs（不共用 release 自检那份 —— 那份已被跑过
+      #      一堆命令、状态被改过；两次 boot 各用各的，结果才可复现）。
+      #   ⚠️ **不要**为此提 SBX_CACHE_REV（取舍见上面 Restore build cache 那段注释）。
+      - name: Run embedded-API self-test (assert build)
+        if: ${{ inputs.host_only != true }}
+        run: |
+          set -uo pipefail
+          SECONDS=0
+          SRC="$SBX/src/ish"
+          ABUILD="$SBX/build/assert"
+          OUT="$SBX/out"
+          LOG="$OUT/ish-embed-selftest-assert.log"
+          : > "$LOG"
+          HOST_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+
+          # libarchive：与 `Build host tools` 那一步同一套探测（assert 构建其实不编
+          # fakefsify，但 meson setup 得能过；找不到也只是跳过 fakefsify 目标，不致命）。
+          LIBARCHIVE_PREFIX="$(brew --prefix libarchive 2>/dev/null || true)"
+          PC_ARG=""
+          if [ -n "$LIBARCHIVE_PREFIX" ] && [ -d "$LIBARCHIVE_PREFIX/lib/pkgconfig" ]; then
+            PC_ARG="-Dpkg_config_path=$LIBARCHIVE_PREFIX/lib/pkgconfig"
+          fi
+
+          # 断言版配置 = 照抄 `Build host tools`，只把 release 换 debugoptimized，
+          # 并显式 -Db_ndebug=false 把 NDEBUG 钉死为「不定义」（debugoptimized 默认
+          # b_ndebug=if-release 本就不定义，显式加是为了将来谁改了默认也不塌）。
+          if [ ! -f "$ABUILD/build.ninja" ]; then
+            rm -rf "$ABUILD"; mkdir -p "$ABUILD"
+            if ! env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+                 meson setup "$ABUILD" "$SRC" \
+                   ${PC_ARG} \
+                   --buildtype=debugoptimized -Db_ndebug=false \
+                   -Dlog= -Dkernel=ish -Dengine=asbestos -Dguest_arch=arm64 \
+                 >> "$LOG" 2>&1; then
+              echo "::error::ISH-EMBED-ASSERT| meson setup(assert) 失败"
+              tail -n 40 "$LOG" 2>/dev/null \
+                | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+                | while IFS= read -r l; do echo "::error::ISH-EMBED-ASSERT| $l"; done || true
+              exit 1
+            fi
+          else
+            echo "复用已有 assert 构建目录（跳过 setup）" >> "$LOG"
+          fi
+
+          # cpu-offsets.h 先单独生成（与 `Build host tools` 同序，便于一眼定位失败）。
+          if ! env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+               ninja -C "$ABUILD" cpu-offsets.h >> "$LOG" 2>&1; then
+            echo "::error::ISH-EMBED-ASSERT| ninja cpu-offsets.h(assert) 失败"
+            tail -n 40 "$LOG" 2>/dev/null \
+              | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+              | while IFS= read -r l; do echo "::error::ISH-EMBED-ASSERT| $l"; done || true
+            exit 1
+          fi
+          if ! env -u IPHONEOS_DEPLOYMENT_TARGET SDKROOT="$HOST_SDK" \
+               ninja -C "$ABUILD" aevis_ish_embed_selftest >> "$LOG" 2>&1; then
+            echo "::error::ISH-EMBED-ASSERT| ninja aevis_ish_embed_selftest(assert) 失败"
+            tail -n 40 "$LOG" 2>/dev/null \
+              | sed -e 's/%/%25/g' -e 's/::/∶∶/g' \
+              | while IFS= read -r l; do echo "::error::ISH-EMBED-ASSERT| $l"; done || true
+            exit 1
+          fi
+          BIN="$ABUILD/aevis_ish_embed_selftest"
+          [ -x "$BIN" ] || { echo "::error::ISH-EMBED-ASSERT| 没编出 $BIN"; exit 1; }
+
+          # 自解一份**独立**的干净 rootfs（不共用 release 自检那份：它已被跑过命令、
+          # 状态被改过；两次 boot 各用各的，结果才可复现）。
+          ROOTFS="$SBX/alpine-fakefs-assert"
+          rm -rf "$ROOTFS"; mkdir -p "$ROOTFS"
+          if ! tar -xzf "$OUT/alpine-rootfs.tar.gz" -C "$ROOTFS" >> "$LOG" 2>&1; then
+            echo "::error::ISH-EMBED-ASSERT| 解 alpine-rootfs.tar.gz 失败"; exit 1
+          fi
+          [ -d "$ROOTFS/data" ] && [ -f "$ROOTFS/meta.db" ] \
+            || { echo "::error::ISH-EMBED-ASSERT| 解出的 rootfs 不是 data/ + meta.db 形态"; exit 1; }
+          TMPD="$SBX/tmp-embed-assert"; mkdir -p "$TMPD"
+
+          echo "--- running self-test (assert build) ---" >> "$LOG"
+          # 硬限时（同 release 那条：macOS runner 无 GNU timeout，自己数秒）
+          "$BIN" "$ROOTFS" "$TMPD" >> "$LOG" 2>&1 &
+          pid=$!
+          i=0
+          while [ "$i" -lt 600 ]; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+            i=$((i + 1))
+          done
+          rc=0
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::ISH-EMBED-ASSERT| 自检超时（600s），杀掉"
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            rc=124
+          else
+            wait "$pid"; rc=$?
+          fi
+          cat "$LOG"
+          echo "assert self-test exit=$rc"
+
+          # 验收闸门（硬拦）：正例 + 负例都必须绿。
+          if [ "$rc" != 0 ] || ! grep -q 'AEVIS_ISH_EMBED_SELFTEST_OK' "$LOG"; then
+            echo "::error::ISH-EMBED-ASSERT| 断言版嵌入层自检失败 exit=$rc（详见 ish-embed-selftest-assert.log）"
+            exit 1
+          fi
+          if ! grep -q 'AEVIS_ISH_EMBED_NEGATIVE_OK' "$LOG"; then
+            echo "::error::ISH-EMBED-ASSERT| 缺 AEVIS_ISH_EMBED_NEGATIVE_OK —— 负例没跑到"
+            exit 1
+          fi
+          echo "断言版嵌入层自检：OK（含负例）"
+          echo "phase ish-embed-selftest-assert: ${SECONDS}s" | tee -a "$SBX/timings.txt"
+
       # —— 9. 验收：逐个检查产物 + 打印大小 + 打印分步耗时 ——
       - name: Validate artifacts and report sizes/timings
         if: ${{ inputs.host_only != true }}
@@ -642,11 +980,12 @@ jobs:
           fail=0
 
           echo "===== 产物大小 (artifact sizes) ====="
-          for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf fakefsify ish alpine-rootfs.zip; do
+          for f in libish.a libish_emu.a libfakefs.a libaevisish.a ish_embed.h \
+                   libvdso.so.elf fakefsify ish alpine-rootfs.zip alpine-rootfs.tar.gz; do
             if [ -e "$OUT/$f" ]; then
-              printf '  %-18s %s\n' "$f" "$(du -h "$OUT/$f" | cut -f1)"
+              printf '  %-22s %s\n' "$f" "$(du -h "$OUT/$f" | cut -f1)"
             else
-              printf '  %-18s MISSING\n' "$f"
+              printf '  %-22s MISSING\n' "$f"
               fail=1
             fi
           done
@@ -655,7 +994,7 @@ jobs:
 
           echo ""
           echo "===== 架构检查 (arch check) ====="
-          for f in libish.a libish_emu.a libfakefs.a; do
+          for f in libish.a libish_emu.a libfakefs.a libaevisish.a; do
             echo "--- $f ---"
             file "$OUT/$f"
             lipo -info "$OUT/$f"
@@ -803,6 +1142,16 @@ jobs:
             echo '```'
             tail -60 "$SBX/out/ish-mirror.log" 2>/dev/null || echo "(没有 mirror 日志)"
             echo '```'
+            echo ""
+            echo "## 嵌入层自检（宿主可执行真跑 Alpine：命令 + 输出 + 退出码）"
+            echo '```'
+            tail -80 "$SBX/out/ish-embed-selftest.log" 2>/dev/null || echo "(没有嵌入层自检日志)"
+            echo '```'
+            echo ""
+            echo "## 嵌入层自检·断言版（-Db_ndebug=false：负例 + 上游 assert 必须全绿）"
+            echo '```'
+            tail -80 "$SBX/out/ish-embed-selftest-assert.log" 2>/dev/null || echo "(没有断言版自检日志)"
+            echo '```'
             show_log "host 工具环境 (host-env.log)" "$SBX/out/host-env.log"
             show_log "host meson setup (host-setup.log)" "$SBX/out/host-setup.log"
             show_log "host ninja cpu-offsets.h (host-offsets.log)" "$SBX/out/host-offsets.log"
@@ -817,7 +1166,9 @@ jobs:
           VENDOR_DIR="$SBX/out/ish-vendor"
           rm -rf "$VENDOR_DIR"; mkdir -p "$VENDOR_DIR"
           VENDOR_MISSING=""
-          for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf alpine-rootfs.zip; do
+          # ⚠️ 现在是**七个**文件：五个原始产物 + 合并后的 libaevisish.a + 嵌入层头文件。
+          for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf alpine-rootfs.zip \
+                   libaevisish.a ish_embed.h; do
             if [ -f "$SBX/out/$f" ]; then
               cp "$SBX/out/$f" "$VENDOR_DIR/$f"
             else
@@ -826,12 +1177,13 @@ jobs:
           done
           rm -f "$SBX/out/ish-vendor.tar.gz" "$SBX/out/vendor.sha256"
           if [ -z "$VENDOR_MISSING" ]; then
-            # ⚠️ 用 `-C "$VENDOR_DIR" .` 打成**平铺**包：下游 `tar xzf` 出来就是五个文件，
+            # ⚠️ 用 `-C "$VENDOR_DIR" .` 打成**平铺**包：下游 `tar xzf` 出来就是七个文件，
             #    不带 `ish-vendor/` 这层目录 —— 免得 App 工程里多一层路径要维护。
             ( cd "$VENDOR_DIR" && tar -czf "$SBX/out/ish-vendor.tar.gz" . )
             {
               echo "# ish-vendor.tar.gz 内容校验（App 侧可据此核对）"
-              for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf alpine-rootfs.zip; do
+              for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf alpine-rootfs.zip \
+                       libaevisish.a ish_embed.h; do
                 printf '%s  %s\n' "$(shasum -a 256 "$VENDOR_DIR/$f" | cut -d' ' -f1)" "$f"
               done
               printf '%s  %s\n' "$(shasum -a 256 "$SBX/out/ish-vendor.tar.gz" | cut -d' ' -f1)" "ish-vendor.tar.gz"
@@ -849,11 +1201,14 @@ jobs:
           ATTACH=()
           for f in "$SBX/out/logs.tgz" "$SBX/out/host-env.log" "$SBX/out/host-setup.log" \
                    "$SBX/out/host-offsets.log" "$SBX/out/host-ninja.log" "$SBX/out/meson-log.txt" \
-                   "$SBX/out/ish-smoke.log" "$SBX/out/ish-mirror.log" \
+                   "$SBX/out/ish-smoke.log" "$SBX/out/ish-mirror.log" "$SBX/out/ish-embed-selftest.log" \
+                   "$SBX/out/ish-embed-selftest-assert.log" \
                    "$SBX/out/timings.txt" "$SBX/out/arch.txt" "$SBX/out/sizes.txt" \
                    "$SBX/out/ish-vendor.tar.gz" "$SBX/out/vendor.sha256" \
                    "$SBX/out/libish.a" "$SBX/out/libish_emu.a" "$SBX/out/libfakefs.a" \
-                   "$SBX/out/libvdso.so.elf" "$SBX/out/alpine-rootfs.zip"; do
+                   "$SBX/out/libaevisish.a" "$SBX/out/ish_embed.h" \
+                   "$SBX/out/libvdso.so.elf" "$SBX/out/alpine-rootfs.zip" \
+                   "$SBX/out/alpine-rootfs.tar.gz"; do
             [ -f "$f" ] && ATTACH+=("$f")
           done
 
@@ -891,6 +1246,7 @@ jobs:
           path: |
             ish-sandbox/build/ios-iphoneos
             ish-sandbox/build/native
+            ish-sandbox/build/assert
             ish-sandbox/.cache
           key: ish-sandbox-${{ runner.os }}-rev${{ env.SBX_CACHE_REV }}
 
