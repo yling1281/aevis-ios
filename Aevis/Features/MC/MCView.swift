@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// 一个可以一起玩的「她」。
+/// 一个可以一起玩的「ta」。
 ///
 /// ⚠️ 现在用的是**本地假数据** —— 数据源抽在 `MCPersonaSource` 后面，
 ///    以后换成真的接口只改那一处的实现，这一页一行都不用动。
 struct MCPersona: Identifiable, Hashable {
     var id: String
     var name: String
-    /// 一句话说她是哪种玩家。
+    /// 一句话说ta是哪种玩家。
     var tagline: String
 }
 
@@ -49,7 +49,7 @@ enum MCBridge {
     static let selectedKey = "aevis.mc.selectedPersona"
 }
 
-/// 「一起玩」—— 选个人设，看她陪你在《我的世界》里干什么。
+/// 「一起玩」—— 选个人设，看ta陪你在《我的世界》里干什么。
 ///
 /// 用户 2026-10-04：看完电脑版之后要「手机端也同步这些」。
 struct MCView: View {
@@ -72,7 +72,7 @@ struct MCView: View {
 
     private var taName: String {
         let name = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     private var personas: [MCPersona] { source.personas() }
@@ -147,7 +147,7 @@ struct MCView: View {
     }
 
     private var statusLine: String {
-        shePlaying ? "她正在游戏里等你。" : "选一种玩法，进游戏就是她陪着你。"
+        shePlaying ? "\(Pronoun.current)正在游戏里等你。" : "选一种玩法，进游戏就是\(Pronoun.current)陪着你。"
     }
 
     // MARK: - 选人设
@@ -215,7 +215,7 @@ struct MCView: View {
 
     private var connectCard: some View {
         VStack(alignment: .leading, spacing: 11) {
-            Text("连上她的服务器")
+            Text("连上\(Pronoun.current)的服务器")
                 .font(.aevis(12.5, weight: .medium))
                 .foregroundStyle(.secondary)
 
@@ -251,7 +251,7 @@ struct MCView: View {
                 Button {
                     connect(probe: true)
                 } label: {
-                    Text("看她忙不忙")
+                    Text("看\(Pronoun.current)忙不忙")
                         .font(.aevis(14))
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
@@ -271,7 +271,7 @@ struct MCView: View {
             Button {
                 adoptIntoHands()
             } label: {
-                Text(alreadyAdopted ? "已经加进「MCP 外接工具」了" : "把这台服务器加进她的外接工具")
+                Text(alreadyAdopted ? "已经加进「MCP 外接工具」了" : "把这台服务器加进\(Pronoun.current)的外接工具")
                     .font(.aevis(12.5))
                     .foregroundStyle(alreadyAdopted ? Color.secondary : accent)
             }
@@ -291,11 +291,11 @@ struct MCView: View {
 
     private var liveCard: some View {
         VStack(alignment: .leading, spacing: 11) {
-            Text("让灵动岛知道她在玩")
+            Text("让灵动岛知道\(Pronoun.current)在玩")
                 .font(.aevis(12.5, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            Text("她进游戏的时候，灵动岛上会亮一句「正在玩《我的世界》」；退出来就收掉。")
+            Text("\(Pronoun.current)进游戏的时候，灵动岛上会亮一句「正在玩《我的世界》」；退出来就收掉。")
                 .font(.aevis(12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -347,7 +347,7 @@ struct MCView: View {
 
     // MARK: - 动作
 
-    /// 连一次服务器。`probe` 为真时顺带问一句「她现在在不在玩」。
+    /// 连一次服务器。`probe` 为真时顺带问一句「ta现在在不在玩」。
     private func connect(probe: Bool) {
         guard !busy else { return }
         busy = true
@@ -414,7 +414,7 @@ struct MCView: View {
         _ = mcp.add(name: MCBridge.serverName,
                     url: MCBridge.serverURL,
                     headerLines: MCBridge.headerLine)
-        status = "加好了 —— 她的工具清单里就多了这台服务器。"
+        status = "加好了 —— \(Pronoun.current)的工具清单里就多了这台服务器。"
     }
 
     private func startPlaying() {

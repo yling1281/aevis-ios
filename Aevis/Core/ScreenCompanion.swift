@@ -8,7 +8,7 @@ import SwiftUI
 import UIKit
 #endif
 
-/// 录屏陪伴：她「看着」你在干什么。
+/// 录屏陪伴：ta「看着」你在干什么。
 ///
 /// **两条通道**，能力完全不同，所以必须分开说清楚：
 ///
@@ -19,9 +19,9 @@ import UIKit
 ///
 /// 2. **App 内**（兜底）—— `RPScreenRecorder.startCapture`。
 ///    不用扩展、不需要额外签名，但**只看得到 Aevis 自己**的界面，
-///    切出去她就看不见了。留着是因为万一扩展因为签名装不上，至少还有一条路。
+///    切出去ta就看不见了。留着是因为万一扩展因为签名装不上，至少还有一条路。
 ///
-/// 两条可以同时开，文字汇到一起给她。
+/// 两条可以同时开，文字汇到一起给ta。
 final class ScreenCompanion: ObservableObject {
     static let shared = ScreenCompanion()
 
@@ -54,7 +54,7 @@ final class ScreenCompanion: ObservableObject {
     /// 备用通道**收到过东西**没有。收到过就说明这条路是通的。
     @Published private(set) var linkSeen = false
 
-    /// 她「看到」的内容（两条通道合在一起，新的在前）。
+    /// ta「看到」的内容（两条通道合在一起，新的在前）。
     @Published private(set) var observations: [String] = []
     @Published private(set) var lastSeen = ""
     @Published var errorText: String?
@@ -62,12 +62,12 @@ final class ScreenCompanion: ObservableObject {
     /// App 内通道每隔多少秒看一眼。系统级那个间隔由扩展自己定（4 秒）。
     @Published var interval: Double = 20
 
-    /// 认出新内容时回调（用来顺手告诉她）。
+    /// 认出新内容时回调（用来顺手告诉ta）。
     var onObservation: ((String) -> Void)?
 
     /// 这台设备能不能用 App 内抓帧。**每次现问**，不在初始化里取 ——
     /// ReplayKit 的 `shared()` 有线程要求，而这个单例可能从后台线程第一次被拿到
-    /// （她的工具就可能在后台线程问它）。
+    /// （ta的工具就可能在后台线程问它）。
     var isInAppAvailable: Bool {
         RPScreenRecorder.shared().isAvailable
     }
@@ -324,7 +324,7 @@ final class ScreenCompanion: ObservableObject {
     // MARK: - 给用户看的实情
 
     /// 一行说清「现在到底在不在工作」。
-    /// 用户反馈过「开了录屏她还是看不到」—— 光一个开关判断不出断在哪一环，
+    /// 用户反馈过「开了录屏ta还是看不到」—— 光一个开关判断不出断在哪一环，
     /// 所以把两条通道各自的进度都摊开。
     var diagnostics: String {
         var lines: [String] = []
@@ -382,14 +382,14 @@ final class ScreenCompanion: ObservableObject {
     /// 系统级那条该怎么开 —— 直接抄。
     static let howToStart = """
     点下面的「开始录屏」，系统会弹出列表，选「Aevis 录屏」。
-    ⚠️ 控制中心那个录屏按钮是「系统录屏」：它把视频存进相册，她看不到。
-    两个都会亮红点，但只有「Aevis 录屏」会把画面给到她（只在本机认文字，不存相册）。
-    选对之后切到微信、抖音，她照样看得到。
+    ⚠️ 控制中心那个录屏按钮是「系统录屏」：它把视频存进相册，\(Pronoun.current)看不到。
+    两个都会亮红点，但只有「Aevis 录屏」会把画面给到\(Pronoun.current)（只在本机认文字，不存相册）。
+    选对之后切到微信、抖音，\(Pronoun.current)照样看得到。
     """
 
-    /// 屏幕上没有文字的内容（图片、视频）她认不出来 —— 这是 OCR 的边界，不是 bug。
+    /// 屏幕上没有文字的内容（图片、视频）ta认不出来 —— 这是 OCR 的边界，不是 bug。
     static let ocrLimit = """
-    她看到的是屏幕上的文字，所以图片、视频里的内容她看不到。
+    \(Pronoun.current)看到的是屏幕上的文字，所以图片、视频里的内容\(Pronoun.current)看不到。
     这样也不用把画面传出去，隐私留在本机。
     """
 }

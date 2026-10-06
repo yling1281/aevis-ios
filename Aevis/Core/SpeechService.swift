@@ -32,13 +32,13 @@ enum TTSError: LocalizedError {
     }
 }
 
-/// 让 TA 开口说话。
+/// 让 ta 开口说话。
 ///
 /// 两种来源：
 /// - 系统音色：AVSpeechSynthesizer，免费、离线、不花钱
 /// - 外部 API：任何 OpenAI 兼容的 `/audio/speech`，音色更自然，按量计费
 ///
-/// 外接失败会自动退回系统音色，不会让 TA 突然哑掉。
+/// 外接失败会自动退回系统音色，不会让 ta 突然哑掉。
 ///
 /// ## ⚠️ 为什么是 `NSObject`、为什么实现了两个 delegate
 /// 说话**必须**换音频类别（`.spokenAudio`），一换，系统就不认音乐是

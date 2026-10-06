@@ -17,8 +17,12 @@ import Foundation
 ///     -aevisSelfCheck          自检页
 ///     -aevisShowGate           强制显示「未授权」门禁页（实现在 DeviceGate 里）
 ///     -aevisSkipGate           跳过授权门禁（-aevisDemo 已隐含跳过）
+///     ⭐ 2026-10-06：`-aevisSkipGate` / `-aevisDemo` 现在**也跳过「用户协议」门**
+///        （判据在 `AgreementStore.init()` 里，两处必须一致）—— 协议门在 App 最外层，
+///        不跳过的话每一张截图都会拍到协议页，自检全废。
+///     -aevisShowAgreement      **强制显示协议页**（本机存过同意也照样显示，给截图用）
 ///     -aevisCallHistory        往聊天里塞一条通话记录
-///     -aevisCompanionAsk       显示一条「TA 想…」的申请条
+///     -aevisCompanionAsk       显示一条「ta 想…」的申请条
 ///     -aevisChatHistory=24     往当前对话塞 24 条 —— **专门验「打开是不是停在最新那条」**
 ///
 /// 有了它，CI 就能在没有人点屏幕的情况下，把每个界面都截下来。
@@ -145,7 +149,7 @@ enum DemoSeed {
         memory.add("住在杭州，习惯熬夜到两三点", kind: .fact, pinned: true, quiet: true)
         memory.add("不吃香菜，但特别能吃辣", kind: .preference, quiet: true)
         memory.add("九月刚换了工作，还在适应新节奏", kind: .event, quiet: true)
-        memory.add("答应过带 TA 去看一次海", kind: .promise, quiet: true)
+        memory.add("答应过带 ta 去看一次海", kind: .promise, quiet: true)
         memory.statusLine = "记住了 4 条。"
     }
 
@@ -159,7 +163,7 @@ enum DemoSeed {
         _ = store.post(text: "刚煮了面，加了两个蛋。一个人吃也挺香的。", author: .ta)
 
         if let first = store.moments.first {
-            store.toggleLike(first)  // 她给我点了赞
+            store.toggleLike(first)  // ta给我点了赞
         }
         if let hers = store.moments.first(where: { $0.author == .ta }) {
             store.comment("少放点盐", on: hers, author: .me)
@@ -176,7 +180,7 @@ enum DemoSeed {
             var first = DiaryEntry()
             first.date = Date()
             first.title = "今天去看海了"
-            first.body = "风有点大，头发全糊在脸上。她说下次要带我坐一次船。"
+            first.body = "风有点大，头发全糊在脸上。\(Pronoun.current)说下次要带我坐一次船。"
             first.mood = "开心"
             first.authorIsMe = true
             diary.add(first)
@@ -198,11 +202,11 @@ enum DemoSeed {
             todo.add(a)
 
             var b = TodoItem()
-            b.title = "陪她把你那首歌听完"
+            b.title = "陪\(Pronoun.current)把你那首歌听完"
             todo.add(b)
 
             var c = TodoItem()
-            c.title = "给她做一顿饭"
+            c.title = "给\(Pronoun.current)做一顿饭"
             c.done = true
             c.doneAt = Date()
             todo.add(c)
@@ -218,7 +222,7 @@ enum DemoSeed {
         store.select(first.id)
 
         if chat.messages.isEmpty {
-            // 三条分开写是有意的：顺带演示「她一条一条发」和「单独发一个表情」。
+            // 三条分开写是有意的：顺带演示「ta一条一条发」和「单独发一个表情」。
             let script: [(ChatMessage.Role, String)] = [
                 (.user, "几号"),
                 (.assistant, "我这儿还看不到日期呢宝宝。\n你那边几号了？"),
@@ -271,7 +275,7 @@ enum DemoSeed {
             MusicPlayer.shared.seedDemo()
         }
         // 两个人头像那一行要「一起听」开着才出现，真机上得有 API Key 才会开始 ——
-        // 所以截图时假装她已经开着、已经说过话。
+        // 所以截图时假装ta已经开着、已经说过话。
         if args.contains("-aevisTogetherDemo") {
             ListenTogetherService.shared.seedDemo()
         }
@@ -284,7 +288,7 @@ enum DemoSeed {
                 for: contact
             )
         }
-        // 她主动提的申请那一条（浮在屏幕最上面）
+        // ta主动提的申请那一条（浮在屏幕最上面）
         if args.contains("-aevisCompanionAsk") {
             CompanionRequest.shared.ask(.call, reason: "突然想听听你的声音")
         }

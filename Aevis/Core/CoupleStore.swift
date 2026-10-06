@@ -18,7 +18,7 @@ struct Anniversary: Codable, Identifiable, Equatable {
     /// 每年重复 —— 生日、周年这种。不重复的过完就一直是「已过 N 天」。
     var yearly: Bool = false
     var note: String = ""
-    /// 是 TA 自己在聊天里加的（界面上标一下，用户才知道这条哪来的）。
+    /// 是 ta 自己在聊天里加的（界面上标一下，用户才知道这条哪来的）。
     var byAI: Bool = false
 }
 
@@ -69,7 +69,7 @@ extension Anniversary {
 /// **按联系人分开存** —— 跟记忆 / 朋友圈一个道理：通讯录里有好几个人时，
 /// 换个人不该看到上一个人的纪念日。切人由 `PersonaStore.broadcastSwitch` 统一通知。
 ///
-/// 「绑定情侣」= 给当前这个 TA 设一个**在一起的开始日**。
+/// 「绑定情侣」= 给当前这个 ta 设一个**在一起的开始日**。
 /// 绑定之后情侣空间顶上就有「在一起第 N 天」，
 /// 不绑定则只有一个「绑定情侣」按钮 —— 倒数日本身不依赖绑定，随时能用。
 final class CoupleStore: ObservableObject {
@@ -206,7 +206,7 @@ final class CoupleStore: ObservableObject {
 
     // MARK: - 给模型看的那段
 
-    /// 一段纯文本，喂给模型 —— 让她知道纪念日，聊天时能自然提起。
+    /// 一段纯文本，喂给模型 —— 让ta知道纪念日，聊天时能自然提起。
     func injectedLines() -> [String] {
         var lines: [String] = []
         if let days = daysTogether, let since = togetherSince {

@@ -5,7 +5,7 @@ import SwiftUI
 /// 用户原话（2026-10-01）：「情侣空间倒数日，你写代码呀。
 /// 倒数日可以自己添加情侣空间，也可以绑定情侣」。
 ///
-/// 这一屏只管**现在正在聊的那个 TA**：换联系人 = 换一套
+/// 这一屏只管**现在正在聊的那个 ta**：换联系人 = 换一套
 /// （数据在 `CoupleStore` 里按联系人分开存）。
 ///
 /// ⚠️ 倒数日和「绑定情侣」是**两件独立的事**：
@@ -35,7 +35,7 @@ struct CoupleSpaceView: View {
 
     private var taName: String {
         let name = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     private var myName: String {
@@ -259,7 +259,7 @@ struct CoupleSpaceView: View {
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         if item.byAI {
-                            Text("TA 加的")
+                            Text("ta 加的")
                                 .font(.aevis(9.5))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 5)
@@ -437,7 +437,7 @@ private struct AnniversaryEditor: View {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 8) {
                         label("是什么日子")
-                        TextField("比如：TA 的生日", text: $title)
+                        TextField("比如：ta 的生日", text: $title)
                             .font(.aevis(15))
                             .padding(.horizontal, 13)
                             .padding(.vertical, 11)

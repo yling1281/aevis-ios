@@ -12,7 +12,7 @@ final class BridgeInbox: ObservableObject {
 
     static let shared = BridgeInbox()
 
-    /// 快捷指令送来一句话要问她。聊天页取走后会自动发出去。
+    /// 快捷指令送来一句话要问ta。聊天页取走后会自动发出去。
     @Published var ask: String?
 
     /// 弹出实时通话界面。
@@ -21,7 +21,7 @@ final class BridgeInbox: ObservableObject {
     /// 弹出一起听面板。
     @Published var openListen = false
 
-    /// 让她放这首歌（歌名或关键词）。
+    /// 让ta放这首歌（歌名或关键词）。
     @Published var playQuery: String?
 
     private init() {}

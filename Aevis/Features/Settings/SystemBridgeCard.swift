@@ -266,7 +266,7 @@ struct SystemBridgeCard: View {
     // MARK: - 外面来的信息
     //
     // 位置、电量、步数这些 Aevis 自己读不到（iOS 不让 App 在后台读），
-    // 但快捷指令读得到。跑完用「打开 URL」发回来，她聊天时就知道了。
+    // 但快捷指令读得到。跑完用「打开 URL」发回来，ta聊天时就知道了。
 
     private var ambientSection: some View {
         VStack(alignment: .leading, spacing: 10) {

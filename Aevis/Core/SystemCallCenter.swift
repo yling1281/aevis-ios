@@ -25,8 +25,8 @@ import LiveCommunicationKit
 /// | **收来电** `reportNewIncomingConversation` | ✅ **必须**（文档原话：不报告系统会**杀掉 App**） |
 /// | **主动拨出** `StartConversationAction` | ❌ **不要** |
 ///
-/// 我们走的是"**你拨给 TA**"这条 —— 不需要推送服务器、不需要后端、不需要上架。
-/// 「她打给你」那条走的是**本地通知**（见 `ProactiveService`），不是这条路：
+/// 我们走的是"**你拨给 ta**"这条 —— 不需要推送服务器、不需要后端、不需要上架。
+/// 「ta打给你」那条走的是**本地通知**（见 `ProactiveService`），不是这条路：
 /// 侧载包没有 APNs 付费账号，`reportNewIncomingConversation` 根本喂不到我们手上。
 ///
 /// ## ⚠️ 这里是**包装层**，不是功能本身
@@ -164,7 +164,7 @@ final class SystemCallCenter {
     private static let handleValue = "aevis-call"
 
     /// 系统界面里显示的"对方名字"（人设名），拨号时记下来给 `Handle` 用。
-    private var displayName = "TA"
+    private var displayName = "ta"
 
     /// 上一次调出系统界面**失败**的原因（成功就是 nil）。
     ///
@@ -187,7 +187,7 @@ final class SystemCallCenter {
     // MARK: - 拨出
 
     func start(displayName: String) {
-        self.displayName = displayName.isEmpty ? "TA" : displayName
+        self.displayName = displayName.isEmpty ? "ta" : displayName
         lastFailure = nil
         BlackBox.log("📞 系统通话界面：请求调出（\(self.displayName)）")
 
@@ -362,7 +362,7 @@ final class SystemCallCenter {
     }
 
     /// 系统那边（锁屏 / 灵动岛上的"结束"按钮）把通话挂了。
-    /// **必须把我们的通话一起收掉** —— 不然麦克风还开着，她会继续听你说。
+    /// **必须把我们的通话一起收掉** —— 不然麦克风还开着，ta会继续听你说。
     fileprivate func systemDidEnd() {
         teardown()
         // ⚠️ 必须带 `fromSystem: true`：带上它才会发信号，把**通话页**也收掉。
@@ -442,7 +442,7 @@ extension SystemCallCenter: ConversationManagerDelegate {
         Task { @MainActor in
             BlackBox.log("📞 系统通话界面：音频会话已激活")
             // ⚠️ 系统很可能顺手把会话类别改成它自己那套，而我们这边正靠
-            //    `.playAndRecord` 收着麦克风 —— 被改掉就是「她听不见你说话了」。
+            //    `.playAndRecord` 收着麦克风 —— 被改掉就是「ta听不见你说话了」。
             //    补一次。（只在通话进行中生效，挂断后是空操作。）
             CallService.shared.reassertAudioIfActive()
         }

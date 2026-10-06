@@ -7,18 +7,28 @@ struct AevisApp: App {
     @StateObject private var settings = AppSettings.shared
     @StateObject private var chat = ChatStore.shared
 
+    /// 协议同意状态。**整个 App 最外层的门禁**（见 `body`）：
+    /// 没同意时只渲染 `AgreementView`，主界面压根不构造。
+    /// 用 `@StateObject` 而不是 `@ObservedObject`：它是 App 生命周期的常驻对象，
+    /// 点「同意」后这里一变，`body` 立刻切过去。
+    @StateObject private var agreement = AgreementStore.shared
+
+    /// 「同意之后那批冷启动逻辑」只做一次的闸。见 `startServices()`。
+    @State private var didStartServices = false
+
     /// App 在前台 / 后台的状态 —— 回到前台时要把灵动岛的活动接上。
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // 提前把用户导入过的字体注册好，免得第一帧找不到字体而回退成系统字体。
+        //（协议页自己也要用这套字体，所以它**必须**留在同意之前。）
         _ = FontStore.shared
 
-        // ⚠️ 播放器是 `@MainActor` 的单例，**在 init 里就把它建出来**。
-        // 不这么做的话，它会在"第一个碰到 MusicPlayer.shared 的线程"上构造 ——
-        // 而那个线程可能是后台（比如音乐工具那条路），于是 AVAudioSession
-        // 和远程控制中心都会在非主线程被配置。这里先钉死在主线程。
-        _ = MusicPlayer.shared
+        // ⚠️ 播放器（`MusicPlayer.shared`）**原来在这里构造** —— 已搬到 `startServices()`：
+        //    构造它就会配置 `AVAudioSession` 和远程控制中心，而那属于"用户同意协议
+        //    之后才该发生"的事（老板：不同意不准打开，音频会话也不该先起来）。
+        //    线程安全性不变：`startServices()` 由 `RootView` 的 `.task` 触发，
+        //    一样在主线程上跑，不会退化成后台线程构造。
 
         // 黑匣子：记下"上一次是怎么结束的"。**必须最早调** ——
         // 越早开始记，越能抓到启动阶段的问题。
@@ -52,6 +62,72 @@ struct AevisApp: App {
         //    漏了这一步，通知上根本不会出现打字框（而且不报错，只是悄悄没有）。
         ProactiveService.registerCategories()
 
+        // ⚠️ 下面这批"要连网 / 开音频 / 开同步"的冷启动逻辑**已经从这里搬走了** ——
+        //    它们现在只在**用户同意协议之后**才跑，见 `startServices()`。
+        //    （老板 2026-10-06：「不同意不准打开」——那就不该在用户同意前
+        //      偷偷去连账号后端、开灵动岛挂机态、接电脑端聊天、把聊天记录传上网盘。）
+        //    搬走的是：播放器构造（会开音频会话）、账号后端对齐（`syncEndpoint`）、
+        //    灵动岛同步、电脑端聊天通道（`PairChatBridge` / `PairChannel`）、
+        //    聊天记录同步（`AutoSync`）。
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            // 🔴 协议门禁 —— **全 App 最外层的一次判断**。
+            //
+            // 老板 2026-10-06：「打开 app 要同意协议，不同意不准打开」。
+            // 没同意时**只**渲染 `AgreementView`：`RootView` 根本不会构造，
+            // 于是它上面挂的那些冷启动 `.task` / `.onAppear`（门禁轮询、回前台恢复、
+            // 朋友圈补发…）一条都不会跑 —— 这才叫"真的用不了"。
+            // 刻意**不用** sheet / fullScreenCover：那种能被下拉划走。
+            Group {
+                if agreement.accepted {
+                    RootView()
+                        .environmentObject(personaStore)
+                        .environmentObject(settings)
+                        .environmentObject(chat)
+                        .task { startServices() }
+                        .onChange(of: scenePhase) { _, phase in
+                            // 回到前台：把灵动岛的活动接上（挂了超过 8 小时就被系统收了，
+                            // 得重开一个挂机态）。详见 `LiveIslandCenter.sync()`。
+                            guard phase == .active else { return }
+                            LiveIslandCenter.shared.sync()
+                            // 顺手对一次「远端有没有改接口地址」—— 改完**不用重启 App**，
+                            // 切回前台就生效（「不发新包直接切换」）。
+                            Task { await AevisApp.applyEndpointOverride() }
+                        }
+                } else {
+                    AgreementView()
+                }
+            }
+            .animation(.easeInOut(duration: 0.28), value: agreement.accepted)
+        }
+    }
+
+    // MARK: - 同意之后才跑的冷启动
+
+    /// 同意协议之后才跑的、那批"要连网 / 开音频 / 开同步"的冷启动逻辑。
+    ///
+    /// ⚠️ 原来它们直接写在 `init()` 里 —— 那样**没同意协议也会跑**：
+    ///    会去连账号后端、开灵动岛挂机态、接电脑端聊天通道、把聊天记录同步到网盘。
+    ///    老板要的是"不同意就不准打开"，那就不能背着用户先把这些做掉。
+    ///    ⇒ 搬到这里，由 `RootView` 的 `.task` 触发；而 `RootView` 只有同意了才会被构造。
+    ///
+    /// ⚠️ `didStartServices` 钉住"整个 App 生命周期只做一次"：
+    ///    `.task` 会随视图重建重跑，而下面这些 `start()` 有的挂监听、有的连线路，
+    ///    重复跑会重复占资源。
+    private func startServices() {
+        guard !didStartServices else { return }
+        didStartServices = true
+
+        // 播放器是 `@MainActor` 的单例，**先在主线程上把它建出来** ——
+        // 不这么做的话，它会在"第一个碰到 MusicPlayer.shared 的线程"上构造，
+        // 而那个线程可能是后台（比如音乐工具那条路），于是 `AVAudioSession`
+        // 和远程控制中心都会在非主线程被配置。
+        //（原在 `init()` 里做；搬家后位置变了，但"主线程"这个前提没变 ——
+        //  `.task` 体跑在主线程上。而未同意时它不会被构造 ⇒ 音频会话也不会先起来。）
+        _ = MusicPlayer.shared
+
         // 账号后端：**先拉远端配置，再定线路**。
         // 结果写回 `AppSettings.accountServerURL` —— 各处的接口请求读的都是它，
         // 改这一处全跟着走（`AccountService` / `DeviceGate` / `DiagUploader`）。
@@ -62,8 +138,6 @@ struct AevisApp: App {
         Task { @MainActor in LiveIslandCenter.shared.sync() }
 
         // ⭐ 生态第二期（电脑端聊天）：配过电脑就把那条数据通道接上。
-        // ⚠️ 放在 `init` 里而不是 `.onAppear` —— SwiftUI 的 onAppear 会随视图重建
-        //    反复触发，而这两件事要的是"整个 App 生命周期只做一次"。
         // 没配过电脑的话它俩**什么也不做**（不建连接、不占资源）。
         PairChatBridge.shared.start()
         PairChannel.shared.autoStart()
@@ -77,24 +151,6 @@ struct AevisApp: App {
         // ⚠️ 条件不满足时（没登录 / 没连网盘 / 开关关了）它只是把状态标成"没在同步"，
         //    不会去连网、不会去读聊天记录。
         AutoSync.shared.start()
-    }
-
-    var body: some Scene {
-        WindowGroup {
-            RootView()
-                .environmentObject(personaStore)
-                .environmentObject(settings)
-                .environmentObject(chat)
-                .onChange(of: scenePhase) { _, phase in
-                    // 回到前台：把灵动岛的活动接上（挂了超过 8 小时就被系统收了，
-                    // 得重开一个挂机态）。详见 `LiveIslandCenter.sync()`。
-                    guard phase == .active else { return }
-                    LiveIslandCenter.shared.sync()
-                    // 顺手对一次「远端有没有改接口地址」—— 改完**不用重启 App**，
-                    // 切回前台就生效（「不发新包直接切换」）。
-                    Task { await AevisApp.applyEndpointOverride() }
-                }
-        }
     }
 
     // MARK: - 接口地址

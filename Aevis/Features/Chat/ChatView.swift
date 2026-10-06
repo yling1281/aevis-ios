@@ -432,6 +432,12 @@ struct ChatView: View {
                                 transferDetail = message
                             }
                             .id(message.id)
+                        } else if message.kind == .herPhone {
+                            // ⭐ 她的小手机：她在自己手机上动了一下（打开了某个 App）。
+                            //   画成一张小卡片，气质跟旁边的转账卡一致。
+                            HerPhoneBubble(appName: message.herAppName ?? "",
+                                           action: message.herAction ?? message.text)
+                                .id(message.id)
                         } else {
                             MessageBubble(
                                 message: message,
@@ -661,7 +667,7 @@ struct ChatView: View {
     /// 配色 / 字体 / 圆角全部照 `CallRecordBubble` 那套抄，不自造视觉语言。
     private func toolTraceRow(_ title: String) -> some View {
         HStack(spacing: 5) {
-            Text("🔧")
+            Image(systemName: "wrench.and.screwdriver.fill")
                 .font(.aevis(11))
             Text(title)
                 .font(.aevis(12))
@@ -696,7 +702,7 @@ struct ChatView: View {
                     if showEmojiPanel { showMorePanel = false }
                 }
             } label: {
-                Text(showEmojiPanel ? "⌨️" : "😊")
+                Image(systemName: showEmojiPanel ? "keyboard" : "face.smiling")
                     .font(.aevis(settings.simpleMode ? 20 : 18))
                     .frame(width: settings.simpleMode ? 38 : 34,
                            height: settings.simpleMode ? 38 : 34)

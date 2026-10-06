@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 她自己拨过来时，从顶上滑进来的那一张「来电卡」。
+/// ta自己拨过来时，从顶上滑进来的那一张「来电卡」。
 ///
 /// ## 用户 2026-10-01 要的
 /// 「当有主动来电时，先将 APP 推到主界面，然后他再来电，APP 自动退出。」
@@ -14,21 +14,21 @@ import SwiftUI
 /// 万一系统把它摘了，用户点"接听"会卡在原地，比不做还糟）。
 ///
 /// 所以这里退一步，做一个**在系统允许范围内最像来电**的东西：
-/// 悬在整个界面上方的一张卡，有头像、有名字、有她的话，两个按钮「接听 / 先不了」。
+/// 悬在整个界面上方的一张卡，有头像、有名字、有ta的话，两个按钮「接听 / 先不了」。
 /// 接通之后走的是和别处**完全一样**的那条路（`AppRouter.startCall()` →
 /// `CallService.start()` → 苹果的 `LiveCommunicationKit` 界面）。
 ///
-/// 换句话说：这一段补上的是"她**能**打过来"这件事本身。
+/// 换句话说：这一段补上的是"ta**能**打过来"这件事本身。
 /// 以前 `ask_to_call` 那条工具是发得出来的，但 `CompanionRequestBar` 那张小条
 /// 夹在聊天页顶上，一翻页就看不见了 —— 一条会响的来电通知还得靠 `callEnabled`
-/// （默认关）才有。所以她其实**几乎从没**真的打过来过。这张卡把它变成了真的。
+/// （默认关）才有。所以ta其实**几乎从没**真的打过来过。这张卡把它变成了真的。
 ///
 /// ## 为什么不用 `.alert`
 /// `.alert` 是系统样式，长得像"权限申请"，不像"有人在给你打电话"。
 /// 而且系统弹窗会吃掉背景手势，用户想边看边决定都做不到。
 struct IncomingCallCard: View {
 
-    /// 她打过来时说的那句话（`CompanionRequest.Item.reason`）。
+    /// ta打过来时说的那句话（`CompanionRequest.Item.reason`）。
     let reason: String
     /// 打给谁 —— 用当前联系人，跟通话页里那个名字是同一个来源。
     let persona: Persona
@@ -86,7 +86,7 @@ struct IncomingCallCard: View {
                 )
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(persona.name.isEmpty ? "TA" : persona.name)
+                Text(persona.name.isEmpty ? "ta" : persona.name)
                     .font(.aevis(17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)

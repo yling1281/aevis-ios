@@ -40,7 +40,7 @@ struct MemoryItem: Codable, Identifiable, Equatable {
 /// 长期记忆库。
 ///
 /// 三件事：
-/// 1. **自动提炼** —— 聊够一段就让她把「值得长期记住」的挑出来存下；
+/// 1. **自动提炼** —— 聊够一段就让ta把「值得长期记住」的挑出来存下；
 /// 2. **手动管理** —— 能加、能改、能删、能钉；
 /// 3. **备份** —— 导出成 JSON，也留本地快照，能一键恢复。
 ///
@@ -51,7 +51,7 @@ final class MemoryStore: ObservableObject {
     /// 当前联系人的长期记忆（老入口，保持不变）。
     @Published private(set) var items: [MemoryItem] = []
 
-    /// 每个人的记忆分开放 —— 不然换了人之后她还会「记得」上一个人的事，
+    /// 每个人的记忆分开放 —— 不然换了人之后ta还会「记得」上一个人的事，
     /// 那比不记得更糟。
     private var byOwner: [UUID: [MemoryItem]] = [:]
     private var owner: UUID?
@@ -220,7 +220,7 @@ final class MemoryStore: ObservableObject {
     // MARK: - 注入
 
     /// 给模型看的那一段。钉住的排前面，总量有上限 ——
-    /// 记忆太多会挤掉真正的对话，反而让她变笨。
+    /// 记忆太多会挤掉真正的对话，反而让ta变笨。
     func injectedLines(limit: Int = 60, characterBudget: Int = 2400) -> [String] {
         guard !items.isEmpty else { return [] }
 
@@ -253,7 +253,7 @@ final class MemoryStore: ObservableObject {
         let pending = messages.count - extractedUpTo
         guard force || pending >= threshold else { return }
 
-        // 只把最近这段给她看，不用把整段历史塞进去
+        // 只把最近这段给ta看，不用把整段历史塞进去
         let window = messages.suffix(max(threshold, 12))
             .filter { !$0.text.isEmpty }
         guard window.count >= 4 else { return }

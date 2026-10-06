@@ -67,14 +67,6 @@ enum ShortcutBridge {
         #endif
     }
 
-    /// 打开抖音（装了就打开，没装就是 false）。
-    @discardableResult
-    static func openDouyin() -> Bool {
-        if open("snssdk1128://") { return true }
-        // 退而求其次：网页版
-        return open("https://www.douyin.com")
-    }
-
     // MARK: - 回主界面
 
     /// 能不能回主界面。用系统内部的 `suspend` 选择器 ——

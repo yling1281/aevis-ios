@@ -4,7 +4,7 @@ import Foundation
 import UIKit
 #endif
 
-/// TA 的性别认同。不设定或无性别时，界面统一用中性的「TA」。
+/// ta 的性别认同。不设定或无性别时，界面统一用中性的「ta」。
 enum GenderIdentity: String, Codable, CaseIterable, Identifiable {
     case unspecified
     case female
@@ -22,12 +22,12 @@ enum GenderIdentity: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// 界面里指代 TA 的词。
+    /// 界面里指代 ta 的词。
     var pronoun: String {
         switch self {
         case .female: return "她"
         case .male: return "他"
-        case .genderless, .unspecified: return "TA"
+        case .genderless, .unspecified: return "ta"
         }
     }
 
@@ -46,7 +46,7 @@ enum GenderIdentity: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// TA 是谁 —— 完全由使用者定义，App 不内置任何固定人设。
+/// ta 是谁 —— 完全由使用者定义，App 不内置任何固定人设。
 struct Persona: Codable, Equatable {
     var name: String = ""
     var gender: GenderIdentity = .unspecified
@@ -58,7 +58,7 @@ struct Persona: Codable, Equatable {
     var avatarSeed: Int = 0
     /// ⭐ 2026-10-04 新增：**个性标签**（「嘴硬心软」「夜猫子」这种几个字的短签）。
     ///
-    /// 用在她资料页上，让她一眼有个性。**不给默认值以外的东西** ——
+    /// 用在ta资料页上，让ta一眼有个性。**不给默认值以外的东西** ——
     /// 老存档里没有这个字段，走 `decodeIfPresent` 就是空数组，等于没加。
     var tags: [String] = []
 
@@ -68,7 +68,7 @@ struct Persona: Codable, Equatable {
 
     var pronoun: String { gender.pronoun }
 
-    /// 拼成给模型的人设提示词。人设越具体，TA 的表现越稳定。
+    /// 拼成给模型的人设提示词。人设越具体，ta 的表现越稳定。
     var systemPrompt: String {
         var lines: [String] = []
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -135,9 +135,9 @@ struct Persona: Codable, Equatable {
 
         // 「心里话」—— 用户 2026-10-04 点名要的（「…还有他的心里话之类的」）。
         //
-        // ⚠️ 这是一个**输出格式约定**，不是能力接线：让她在一个「只有我们能看见」的行里
+        // ⚠️ 这是一个**输出格式约定**，不是能力接线：让ta在一个「只有我们能看见」的行里
         //    写下当下的心情和那句没说出口的话。手机侧由 `MoodStore.consume(_:)`
-        //    把这一行抠掉、存成她此刻的心情，界面上再显示在资料页（见 `PersonaSheet`）。
+        //    把这一行抠掉、存成ta此刻的心情，界面上再显示在资料页（见 `PersonaSheet`）。
         //
         // ⚠️ 标记的形状必须一字不差：括号是 `〔` `〕`，分隔符是**全角竖线 `｜`**（U+FF5C）。
         //    半角 `|` 长在正文里太常见，`consume` 那边会认错。两边改形状要一起改。
@@ -161,7 +161,7 @@ struct Persona: Codable, Equatable {
         """)
 
         // 表情怎么发，让表情包自己说 —— 用户关掉表情开关时提示词里也就不提了，
-        // 免得她发一堆没人认得出的方括号。
+        // 免得ta发一堆没人认得出的方括号。
         //
         // ⚠️ `promptNote` 是**实例**属性（它要读单例上的 `items` 才能列出库存清单），
         //    所以必须走 `.shared.` —— 写成 `EmojiPack.promptNote` 编不过。
@@ -170,9 +170,9 @@ struct Persona: Codable, Equatable {
         }
 
         // 「AI 权限」被关掉的能力，必须**明说**。
-        // ⚠️ 不说会怎样：工具压根没发给她 ⇒ 她不知道自己不能做 ⇒ 用户一句「放首歌」
-        //    她就顺口「好呀，正在放～」。那正是用户最恨的"假装完成"。
-        //    （工具照发、只在调用时拒绝，也治不了这个 —— 她压根不会去调一个看不见的工具。）
+        // ⚠️ 不说会怎样：工具压根没发给ta ⇒ ta不知道自己不能做 ⇒ 用户一句「放首歌」
+        //    ta就顺口「好呀，正在放～」。那正是用户最恨的"假装完成"。
+        //    （工具照发、只在调用时拒绝，也治不了这个 —— ta压根不会去调一个看不见的工具。）
         if !DeviceTools.masterEnabled {
             lines.append("""
             对方把「AI 权限」整个关掉了 —— 你现在没有任何动手的能力
@@ -190,16 +190,16 @@ struct Persona: Codable, Equatable {
             }
         }
 
-        // 她**自己的那张歌单** —— 用户 2026-10-02 特意要的：
+        // ta**自己的那张歌单** —— 用户 2026-10-02 特意要的：
         // 「原理是在你的网易云添加一个歌单是属于他的」。
         //
         // ⚠️ 为什么不写这一句就白做：歌单是**真的**建在他的网易云账号里的
-        //    （打开的网易云就能看见），而 `save_to_her_playlist` 这个工具她本来
-        //    也拿得到。但她会把它当成一个普通工具名，不会觉得"这是我的地方" ——
+        //    （打开的网易云就能看见），而 `save_to_her_playlist` 这个工具ta本来
+        //    也拿得到。但ta会把它当成一个普通工具名，不会觉得"这是我的地方" ——
         //    而用户要的恰恰就是那点意思。所以这一段是**产品语义**，不是功能接线。
         //
         // ⚠️ 三个前提缺一不可：总开关开着、音乐这一类没被关、而且他确实登录了
-        //    网易云（没登录的话那张歌单根本不存在，说了她就会去编）。
+        //    网易云（没登录的话那张歌单根本不存在，说了ta就会去编）。
         if AppSettings.shared.isToolOn(.music), NeteaseClient.shared.isLoggedIn {
             lines.append("""
             你在他的网易云里有一张自己的歌单，叫「\(HerPlaylist.displayName(for: self))」。
@@ -337,7 +337,9 @@ final class PersonaStore: ObservableObject {
         // ⭐ 2026-10-04：日记 / 待办也是「按人分开存」的，删联系人时一起清掉。
         DiaryStore.shared.forget(id)
         TodoStore.shared.forget(id)
-        // ⭐ 2026-10-04：心情是「跟着这个人走」的 —— 删了人，她此刻的心情一并清掉。
+        // ⭐ 2026-10：ta的小手机（装的 App + 动态）也是「按人分开存」的，一起清掉。
+        HerPhoneStore.shared.forget(id)
+        // ⭐ 2026-10-04：心情是「跟着这个人走」的 —— 删了人，ta此刻的心情一并清掉。
         MoodStore.shared.clear()
 
         if activeID == id || activeID == nil {
@@ -347,7 +349,7 @@ final class PersonaStore: ObservableObject {
         save()
     }
 
-    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间 / 日记 / 待办）。
+    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间 / 日记 / 待办 / ta的小手机）。
     ///
     /// **集中在这一处**：以后再加「按人分开存」的东西时，
     /// 只要往这里加一行，就不会出现「换了人但某一块没跟着切」。
@@ -358,6 +360,7 @@ final class PersonaStore: ObservableObject {
         CoupleStore.shared.setOwner(id)
         DiaryStore.shared.setOwner(id)
         TodoStore.shared.setOwner(id)
+        HerPhoneStore.shared.setOwner(id)
     }
 
     /// 搬家恢复完之后，把四家一起切到搬过来的那个人。
@@ -478,7 +481,7 @@ final class PersonaStore: ObservableObject {
         broadcastSwitch(to: activeID)
     }
 
-    /// 老版本只有一个「她」，存在 `aevis-persona.json` 里。
+    /// 老版本只有一个「ta」，存在 `aevis-persona.json` 里。
     /// **不能丢** —— 搬成第一个联系人，顺便把老的对话记录认到这个人名下。
     private func migrateFromSinglePersona() {
         let base = Self.baseDirectory()

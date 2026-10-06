@@ -61,7 +61,7 @@ enum PCAgent {
 
     /// 前台应用的包名 → 人看得懂的名字。
     ///
-    /// 直接把 `com.tencent.mobileqq` 摆出来，用户没法一眼确认「她现在到底在不在 QQ 里」，
+    /// 直接把 `com.tencent.mobileqq` 摆出来，用户没法一眼确认「ta现在到底在不在 QQ 里」，
     /// 而这恰恰是他唯一关心的那件事。认不出来的原样显示 —— 总比编一个错的好。
     static func friendlyApp(_ package: String) -> String {
         let name = package.trimmingCharacters(in: .whitespacesAndNewlines)

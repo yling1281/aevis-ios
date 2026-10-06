@@ -8,13 +8,13 @@ import Foundation
 ///
 /// 这么分有两个原因：
 /// ① 老板定的「**模型钱玩家自己出**」—— key 在手机上，电脑端不用再配一遍；
-/// ② 她在手机上有记忆、有工具、有情侣空间；电脑端要是自己再实现一套，
+/// ② ta在手机上有记忆、有工具、有情侣空间；电脑端要是自己再实现一套，
 ///    就会"变成另一个人"——**同一份账**才是这个功能的意义。
 ///
 /// ## 协议（都装在 `relay` 信封的 `data` 里）
 /// 手机 → 电脑：
 /// ```
-/// {"k":"state", "owner":"<uuid>", "name":"她", "messages":[…]}
+/// {"k":"state", "owner":"<uuid>", "name":"ta", "messages":[…]}
 /// {"k":"append","owner":"<uuid>", "msg":{…}}
 /// {"k":"typing","on":true|false}
 /// {"k":"delta", "text":"半句"}
@@ -29,7 +29,7 @@ import Foundation
 /// ```
 ///
 /// ## ⚠️ 为什么 `done` 要带 `id`、`append` 也要带 `id`
-/// 她的回复**同时**走两条路：`ChatStore.append` 触发 `append` 推送，
+/// ta的回复**同时**走两条路：`ChatStore.append` 触发 `append` 推送，
 /// 以及这里手动发一条 `done`。两条的顺序不保证（都在主线程，但电脑那边是网络）。
 /// 所以两边都带 `id`，**电脑端按 id 去重** —— 这样不管谁先到都不会冒出两个气泡。
 final class PairChatBridge {
@@ -38,7 +38,7 @@ final class PairChatBridge {
     private init() {}
 
     private var started = false
-    /// 她正在回这一句（同时只允许一句 —— 跟上手机上的行为一致）。
+    /// ta正在回这一句（同时只允许一句 —— 跟上手机上的行为一致）。
     private var generating = false
     /// 电脑那边正在看哪个会话。
     private var peerOwner: UUID?
@@ -90,7 +90,7 @@ final class PairChatBridge {
         guard !text.isEmpty else { return }
 
         guard let owner = PersonaStore.shared.activeID else {
-            PairChannel.shared.send(["k": "error", "message": "手机上还没有选中的 TA。"])
+            PairChannel.shared.send(["k": "error", "message": "手机上还没有选中的 ta。"])
             return
         }
 
@@ -111,7 +111,7 @@ final class PairChatBridge {
         guard PairChannel.shared.state == .online else { return }
         // 电脑自己发来的那条：不回推
         if echoBack.remove(message.id) != nil { return }
-        // 流式期间的"空占位"（她还在想）不推 —— 那不是一句话
+        // 流式期间的"空占位"（ta还在想）不推 —— 那不是一句话
         if message.role == .assistant, message.text.isEmpty { return }
         // 只同步电脑正在看的那个会话
         let target = owner ?? PersonaStore.shared.activeID
@@ -147,10 +147,10 @@ final class PairChatBridge {
     private static func displayName(_ contact: Contact?) -> String {
         let name = contact?.persona.name
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return name.isEmpty ? "她" : name
+        return name.isEmpty ? Pronoun.current : name
     }
 
-    // MARK: - 让她回
+    // MARK: - 让ta回
 
     /// 在手机上把这句话生成出回复，**流式**回传给电脑。
     ///
@@ -158,7 +158,7 @@ final class PairChatBridge {
     ///    一次性给一整段就没了那个味道（`ChatView` 在手机上也是流式）。
     private func generate(owner: UUID) {
         guard !generating else {
-            PairChannel.shared.send(["k": "error", "message": "她还在回上一句…"])
+            PairChannel.shared.send(["k": "error", "message": "\(Pronoun.current)还在回上一句…"])
             return
         }
         generating = true
@@ -173,7 +173,7 @@ final class PairChatBridge {
 
             var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
             context.append(contentsOf: CoupleStore.shared.injectedLines())
-            // 跟 QQ 那条一个套路（见 `QQBotService`）：让她知道现在是在**电脑上**说话。
+            // 跟 QQ 那条一个套路（见 `QQBotService`）：让ta知道现在是在**电脑上**说话。
             context.append("现在你在电脑上跟他说话（手机放在一边没动）。"
                            + "回复要短、要像平时发消息那样，别写成一大段。")
 

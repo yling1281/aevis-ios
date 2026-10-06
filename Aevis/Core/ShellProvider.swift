@@ -17,7 +17,7 @@ struct CommandResult {
 /// 执行层的接口。
 ///
 /// **为什么要有这层抽象**：真 Alpine（iSH）那套是周级工作量，得把整个 C 代码搬进来编译，
-/// 而它一旦接上，命令台的界面、她调用命令的方式都不该跟着改。
+/// 而它一旦接上，命令台的界面、ta调用命令的方式都不该跟着改。
 /// 所以界面和工具只依赖这个协议 —— 以后把 AlpineShell 挂上来就行。
 protocol ShellProvider {
     /// 给人看的名字，显示在命令台里。
@@ -424,11 +424,11 @@ enum Shell {
     }
 }
 
-// MARK: - 让她也能用命令台
+// MARK: - 让ta也能用命令台
 
 extension DeviceTools {
 
-    /// 命令台对她来说就是「一只手」：需要读写文件、批量处理文本、抓页面原文时用。
+    /// 命令台对ta来说就是「一只手」：需要读写文件、批量处理文本、抓页面原文时用。
     static var shellTool: DeviceTool {
         DeviceTool(
             name: "run_command",

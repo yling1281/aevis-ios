@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 import UIKit
 #endif
 
-/// 创造/修改 TA。首次打开时走这里，之后从设置里也能随时改。
+/// 创造/修改 ta。首次打开时走这里，之后从设置里也能随时改。
 struct PersonaEditorView: View {
     @EnvironmentObject private var personaStore: PersonaStore
 
@@ -179,10 +179,10 @@ struct PersonaEditorView: View {
         VStack(spacing: 16) {
             if isFirstRun {
                 AevisOrb()
-                Text("先把 TA 创造出来")
+                Text("先把 ta 创造出来")
                     .font(.aevis(26, weight: .semibold))
                     .multilineTextAlignment(.center)
-                Text("Aevis 不预设任何人格，也不预设性别。TA 叫什么、是男是女还是没有性别、什么长相、怎么说话，都由你决定。下面每一项之后都能改。")
+                Text("Aevis 不预设任何人格，也不预设性别。ta 叫什么、是男是女还是没有性别、什么长相、怎么说话，都由你决定。下面每一项之后都能改。")
                     .font(.aevis(14))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -285,7 +285,7 @@ struct PersonaEditorView: View {
             }
             .pickerStyle(.segmented)
 
-            Text("决定界面里用「她」「他」还是「TA」来称呼，也会告诉模型 TA 该怎么定位自己。")
+            Text("决定界面里用「她」「他」还是「ta」来称呼，也会告诉模型 ta 该怎么定位自己。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -337,7 +337,7 @@ struct PersonaEditorView: View {
 
                 Button("试听") {
                     SpeechService.shared.speak(
-                        "你好呀，我是\(draft.name.isEmpty ? "TA" : draft.name)。",
+                        "你好呀，我是\(draft.name.isEmpty ? "ta" : draft.name)。",
                         voiceIdentifier: draft.voiceIdentifier,
                         rate: 0.48
                     )
@@ -411,7 +411,7 @@ struct PersonaEditorView: View {
     }
 
     /// 角色卡里带的开场白，保存后成为第一条消息 ——
-    /// 这样一进去就有一句她在说话，不是空白的对话框。
+    /// 这样一进去就有一句ta在说话，不是空白的对话框。
     /// 只在对话框是空的时候放，免得插进已经聊了一半的对话里。
     private func commitFirstMessage() {
         guard let text = pendingFirstMessage,

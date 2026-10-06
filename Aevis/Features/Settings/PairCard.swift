@@ -206,7 +206,7 @@ struct PairCard: View {
                 .padding(.top, 13)
                 .padding(.bottom, 13)
 
-            Text("⚠️ 授权 = 把那台电脑交给你现在用的她。"
+            Text("⚠️ 授权 = 把那台电脑交给你现在用的\(Pronoun.current)。"
                  + "屏幕上出现你不认识的二维码时，别授权。")
                 .font(.aevis(11))
                 .foregroundStyle(.tertiary)

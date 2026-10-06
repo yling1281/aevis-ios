@@ -6,8 +6,8 @@ import UIKit
 
 /// 表情包。
 ///
-/// 想解决的是三件事：她能发表情、发表情时看着顺眼、以及**你从微信 / QQ
-/// 复制过来的表情她也能看懂**。
+/// 想解决的是三件事：ta能发表情、发表情时看着顺眼、以及**你从微信 / QQ
+/// 复制过来的表情ta也能看懂**。
 ///
 /// ## 为什么内置的是「表情名 → 表情符号」，而不是微信 / QQ 的那套图
 ///
@@ -20,6 +20,15 @@ import UIKit
 ///   **文件名就是表情名**（`微笑.png` → `[微笑]`），导入之后就用你的图。
 ///
 /// 这样既绕开了版权，也正好落在那条原则上：能交给用户自定义的，就别替他定死。
+///
+/// ## 分类口径（2026-10-06 改）
+///
+/// 老板原话：「表情包不要你那样子分类，分类的话，是**黄脸**一个那些」。
+/// 所以分类改成**系统键盘那套口径**（CLDR / Apple 的 emoji 分组）：
+/// 常用 / 笑脸与人物 / 动物与自然 / 食物与饮料 / 活动 / 旅行与地点 / 物件 / 符号 / 旗帜；
+/// 用户自上传的「我的」单独一类、排在最前。
+///
+/// ⚠️ 内置的全是 **Unicode emoji 字符**，不打包任何微信 / QQ 的版权图片。
 final class EmojiPack: ObservableObject {
 
     static let shared = EmojiPack()
@@ -33,8 +42,8 @@ final class EmojiPack: ObservableObject {
         var emoji: String
         /// 自定义图片的文件名；有值就优先用图片
         var imageFile: String?
-        /// 归到哪一套（经典 / 心情 / 恋爱 / 动物日常 / 搞怪 / 我的）。
-        var packID: String = "classic"
+        /// 归到哪一套。内置套见 `packOrder`，用户自上传的归 `custom`。
+        var packID: String = "smileys"
 
         var id: String { name }
         var isCustom: Bool { imageFile != nil }
@@ -42,7 +51,7 @@ final class EmojiPack: ObservableObject {
 
     // MARK: - 一套表情
 
-    /// 一套表情。内置 5 套 + 自定义「我的」永远最后。
+    /// 一套表情。内置 9 类 + 自定义「我的」永远排最前。
     struct Pack: Identifiable {
         let id: String
         let name: String
@@ -51,72 +60,154 @@ final class EmojiPack: ObservableObject {
         var names: [String]
     }
 
+    /// 「常用」那一类。**这里的 id 故意写成 `classic`**：
+    /// 面板 `EmojiPanelView` 的默认选中项是硬编码的 `"classic"`，而面板 UI 这轮
+    /// 冻结不许动，所以让「常用」沿用这个 id —— 这样默认一打开就是「常用」这一类，
+    /// 不用去改面板。显示名仍然是「常用」（见 `packName`）。
+    static let frequentPackID = "classic"
+
     /// 内置套的顺序，界面按它排。
-    static let packOrder: [String] = ["classic", "mood", "love", "animal", "silly"]
+    static let packOrder: [String] = [
+        frequentPackID,   // 常用
+        "smileys",        // 笑脸与人物
+        "animals",        // 动物与自然
+        "food",           // 食物与饮料
+        "activity",       // 活动
+        "travel",         // 旅行与地点
+        "objects",        // 物件
+        "symbols",        // 符号
+        "flags"           // 旗帜
+    ]
 
     /// 套 id → 显示名。
     static func packName(_ id: String) -> String {
         switch id {
-        case "classic": return "经典"
-        case "mood": return "心情"
-        case "love": return "恋爱"
-        case "animal": return "动物日常"
-        case "silly": return "搞怪"
+        case frequentPackID: return "常用"
+        case "smileys": return "笑脸与人物"
+        case "animals": return "动物与自然"
+        case "food": return "食物与饮料"
+        case "activity": return "活动"
+        case "travel": return "旅行与地点"
+        case "objects": return "物件"
+        case "symbols": return "符号"
+        case "flags": return "旗帜"
         case "custom": return "我的"
         default: return id
         }
     }
 
+    /// 「常用」这一类里放哪些表情（按顺序）。**同一条表情会同时出现在「常用」
+    /// 和它自己的分类里** —— 跟系统键盘的「最近使用」一个意思。
+    ///
+    /// 这里写的是**名字**，取的时候从已建好的 `items` 里按名字找。
+    static let frequentNames: [String] = [
+        "微笑", "大笑", "呲牙", "偷笑", "笑哭", "可爱", "调皮", "得意", "酷", "害羞",
+        "馋", "委屈", "难过", "大哭", "捂脸", "思考", "赞", "强", "OK", "加油",
+        "抱抱", "亲亲", "爱心", "心碎", "玫瑰", "礼物", "蛋糕", "咖啡", "干杯", "火",
+        "太阳", "月亮", "星星", "狗头", "猫", "熊猫", "花", "拳头", "鼓掌", "握手"
+    ]
+
     // MARK: - 内置表
     //
-    // 名字取自微信和 QQ 两家的常用表情。两家的名字本来就大量重合
-    // （`[微笑]` `[呲牙]` `[大哭]` 这些是一样的），所以合并成一张表。
-    // 三元组是 (套 id, 名字, 表情)；每名字只归一套，总数 148。
+    // 名字取自微信和 QQ 两家的常用表情，合并成一张表（两家的名字大量重合）。
+    // 三元组是 (套 id, 名字, 表情)；每名字只归一套，全是 **Unicode emoji 字符**。
+    // 分类口径见文件头的说明。
 
     private static let builtin: [(String, String, String)] = [
-        // —— 经典 ——
-        ("classic", "微笑", "😊"), ("classic", "大笑", "😄"), ("classic", "呲牙", "😁"), ("classic", "偷笑", "🤭"),
-        ("classic", "害羞", "😊"), ("classic", "憨笑", "😄"), ("classic", "可爱", "🥰"), ("classic", "调皮", "😜"),
-        ("classic", "疑问", "❓"), ("classic", "思考", "🤔"), ("classic", "握手", "🤝"), ("classic", "合十", "🙏"),
-        ("classic", "鞠躬", "🙇"), ("classic", "鼓掌", "👏"), ("classic", "加油", "💪"), ("classic", "奋斗", "💪"),
-        ("classic", "强壮", "💪"), ("classic", "强", "👍"), ("classic", "赞", "👍"), ("classic", "弱", "👎"),
-        ("classic", "差劲", "👎"), ("classic", "OK", "👌"), ("classic", "好的", "👌"), ("classic", "明白", "👌"),
-        ("classic", "拒绝", "🙅"), ("classic", "耶", "✌️"), ("classic", "胜利", "✌️"), ("classic", "抱拳", "🙏"),
-        ("classic", "拳头", "👊"), ("classic", "挥手", "👋"), ("classic", "再见", "👋"), ("classic", "回头", "👀"),
-        ("classic", "围观", "👀"), ("classic", "哭笑不得", "😂"), ("classic", "太阳", "☀️"), ("classic", "月亮", "🌙"),
-        ("classic", "星星", "⭐"), ("classic", "闪电", "⚡"), ("classic", "礼物", "🎁"), ("classic", "蛋糕", "🎂"),
-        ("classic", "咖啡", "☕"), ("classic", "奶茶", "🧋"), ("classic", "啤酒", "🍺"), ("classic", "干杯", "🍻"),
-        ("classic", "饭", "🍚"), ("classic", "足球", "⚽"), ("classic", "篮球", "🏀"), ("classic", "乒乓", "🏓"),
-        ("classic", "火", "🔥"), ("classic", "吃面", "🍜"), ("classic", "吃糖", "🍬"), ("classic", "饮料", "🥤"),
-        ("classic", "香槟", "🍾"), ("classic", "泳池", "🏊"), ("classic", "跑步", "🏃"), ("classic", "骑车", "🚴"),
-        ("classic", "飞机", "✈️"), ("classic", "笑脸", "🌝"), ("classic", "药丸", "💊"), ("classic", "微笑面对", "🙂"),
-        ("classic", "小手", "🤚"), ("classic", "举手", "🙋"), ("classic", "拒绝三连", "🙅"), ("classic", "点头", "🙆"),
-        // —— 心情 ——
-        ("mood", "馋", "😋"), ("mood", "得意", "😎"), ("mood", "酷", "😎"), ("mood", "傲慢", "😤"),
-        ("mood", "白眼", "🙄"), ("mood", "鄙视", "😒"), ("mood", "无语", "😑"), ("mood", "尴尬", "😅"),
-        ("mood", "流汗", "😅"), ("mood", "擦汗", "😓"), ("mood", "冷汗", "😰"), ("mood", "惊恐", "😱"),
-        ("mood", "震惊", "😲"), ("mood", "发呆", "😳"), ("mood", "困", "😪"), ("mood", "睡", "😴"),
-        ("mood", "哈欠", "🥱"), ("mood", "委屈", "🥺"), ("mood", "可怜", "🥺"), ("mood", "难过", "😔"),
-        ("mood", "失望", "😞"), ("mood", "苦涩", "😖"), ("mood", "快哭了", "😖"), ("mood", "大哭", "😭"),
-        ("mood", "流泪", "😭"), ("mood", "发怒", "😡"), ("mood", "咒骂", "🤬"), ("mood", "抓狂", "😫"),
-        ("mood", "折磨", "😩"), ("mood", "晕", "😵"), ("mood", "惊喜", "🤩"), ("mood", "激动", "🤩"),
-        ("mood", "捂脸", "🤦"), ("mood", "撇嘴", "😖"), ("mood", "囧", "😅"), ("mood", "悠闲", "😌"),
-        ("mood", "天啊", "😱"), ("mood", "哇", "😲"), ("mood", "嗯哼", "😤"), ("mood", "发抖", "🥶"),
-        ("mood", "困倦", "😩"), ("mood", "不耐烦", "😒"), ("mood", "扶额", "🤦"),
-        // —— 恋爱 ——
-        ("love", "心碎", "💔"), ("love", "期待", "🥰"), ("love", "爱心", "❤️"), ("love", "示爱", "❤️"),
-        ("love", "爱你", "😘"), ("love", "亲亲", "😘"), ("love", "飞吻", "😘"), ("love", "抱抱", "🤗"),
-        ("love", "拥抱", "🤗"), ("love", "比心", "🫶"), ("love", "玫瑰", "🌹"), ("love", "凋谢", "🥀"),
-        // —— 动物日常 ——
-        ("animal", "摸鱼", "🐟"), ("animal", "狗头", "🐶"), ("animal", "旺柴", "🐶"), ("animal", "猪头", "🐷"),
-        // —— 搞怪 ——
-        ("silly", "吐舌", "😝"), ("silly", "坏笑", "😏"), ("silly", "勾引", "😏"), ("silly", "裂开", "💔"),
-        ("silly", "疯了", "🤪"), ("silly", "骷髅", "💀"), ("silly", "闭嘴", "🤐"), ("silly", "嘘", "🤫"),
-        ("silly", "磕头", "🙇"), ("silly", "偷看", "👀"), ("silly", "吃瓜", "🍉"), ("silly", "抠鼻", "🤧"),
-        ("silly", "打脸", "🫲"), ("silly", "六六六", "🤙"), ("silly", "炸弹", "💣"), ("silly", "便便", "💩"),
-        ("silly", "刀", "🔪"), ("silly", "转圈", "🌀"), ("silly", "敲打", "🔨"), ("silly", "月亮脸", "🌚"),
-        ("silly", "菜刀", "🔪"), ("silly", "嘿嘿", "😁"), ("silly", "嘿嘿嘿", "😏"), ("silly", "装死", "🙃"),
-        ("silly", "倒立", "🙃")
+        // —— 笑脸与人物（黄脸 / 手 / 人）——
+        ("smileys", "微笑", "😊"), ("smileys", "大笑", "😄"), ("smileys", "呲牙", "😁"), ("smileys", "偷笑", "🤭"),
+        ("smileys", "笑哭", "😂"), ("smileys", "可爱", "🥰"), ("smileys", "调皮", "😜"), ("smileys", "坏笑", "😏"),
+        ("smileys", "害羞", "😊"), ("smileys", "馋", "😋"), ("smileys", "得意", "😎"), ("smileys", "酷", "😎"),
+        ("smileys", "白眼", "🙄"), ("smileys", "鄙视", "😒"), ("smileys", "无语", "😑"), ("smileys", "尴尬", "😅"),
+        ("smileys", "流汗", "😅"), ("smileys", "擦汗", "😓"), ("smileys", "惊恐", "😱"), ("smileys", "震惊", "😲"),
+        ("smileys", "困", "😪"), ("smileys", "睡", "😴"), ("smileys", "委屈", "🥺"), ("smileys", "难过", "😔"),
+        ("smileys", "失望", "😞"), ("smileys", "大哭", "😭"), ("smileys", "流泪", "😭"), ("smileys", "发怒", "😡"),
+        ("smileys", "咒骂", "🤬"), ("smileys", "抓狂", "😫"), ("smileys", "晕", "😵"), ("smileys", "惊喜", "🤩"),
+        ("smileys", "捂脸", "🤦"), ("smileys", "悠闲", "😌"), ("smileys", "天啊", "😱"),
+        ("smileys", "疑惑", "🤔"), ("smileys", "思考", "🤔"),
+        ("smileys", "花痴", "😍"), ("smileys", "亲亲", "😘"), ("smileys", "爱你", "😘"), ("smileys", "飞吻", "😘"),
+        ("smileys", "害怕", "😨"), ("smileys", "微笑面对", "🙂"), ("smileys", "无奈", "😔"),
+        ("smileys", "惊讶", "😮"), ("smileys", "庆祝", "🥳"), ("smileys", "抱拳", "🙏"),
+        ("smileys", "合十", "🙏"), ("smileys", "握手", "🤝"), ("smileys", "鞠躬", "🙇"), ("smileys", "鼓掌", "👏"),
+        ("smileys", "加油", "💪"), ("smileys", "奋斗", "💪"), ("smileys", "赞", "👍"), ("smileys", "强", "👍"),
+        ("smileys", "弱", "👎"), ("smileys", "OK", "👌"), ("smileys", "拒绝", "🙅"), ("smileys", "耶", "✌️"),
+        ("smileys", "胜利", "✌️"), ("smileys", "拳头", "👊"), ("smileys", "挥手", "👋"), ("smileys", "再见", "👋"),
+        ("smileys", "围观", "👀"), ("smileys", "偷看", "👀"), ("smileys", "举手", "🙋"), ("smileys", "点头", "🙆"),
+        ("smileys", "比心", "🫶"), ("smileys", "六六六", "🤙"), ("smileys", "抱抱", "🤗"), ("smileys", "拥抱", "🤗"),
+        ("smileys", "点赞", "👍"),
+
+        // —— 动物与自然 ——
+        ("animals", "狗头", "🐶"), ("animals", "猫", "🐱"), ("animals", "狮子", "🦁"), ("animals", "猪头", "🐷"),
+        ("animals", "兔子", "🐰"), ("animals", "熊猫", "🐼"), ("animals", "狐狸", "🦊"), ("animals", "青蛙", "🐸"),
+        ("animals", "企鹅", "🐧"), ("animals", "小鸟", "🐦"), ("animals", "猫头鹰", "🦉"), ("animals", "独角兽", "🦄"),
+        ("animals", "蜜蜂", "🐝"), ("animals", "蝴蝶", "🦋"), ("animals", "蜗牛", "🐌"), ("animals", "鱼", "🐟"),
+        ("animals", "摸鱼", "🐟"), ("animals", "海豚", "🐬"), ("animals", "鲸鱼", "🐳"), ("animals", "乌龟", "🐢"),
+        ("animals", "花", "🌸"), ("animals", "玫瑰", "🌹"),
+        ("animals", "凋谢", "🥀"), ("animals", "向日葵", "🌻"), ("animals", "四叶草", "🍀"), ("animals", "树", "🌳"),
+        ("animals", "蘑菇", "🍄"), ("animals", "叶子", "🍃"), ("animals", "火", "🔥"), ("animals", "太阳", "☀️"),
+        ("animals", "月亮", "🌙"), ("animals", "月亮脸", "🌝"), ("animals", "新月脸", "🌚"), ("animals", "星星", "⭐"),
+        ("animals", "闪", "✨"), ("animals", "雪花", "❄️"), ("animals", "云", "☁️"), ("animals", "雨", "🌧️"),
+        ("animals", "闪电", "⚡"), ("animals", "彩虹", "🌈"), ("animals", "浪", "🌊"), ("animals", "地球", "🌍"),
+
+        // —— 食物与饮料 ——
+        ("food", "蛋糕", "🎂"), ("food", "咖啡", "☕"), ("food", "奶茶", "🧋"), ("food", "啤酒", "🍺"),
+        ("food", "干杯", "🍻"), ("food", "米饭", "🍚"), ("food", "面条", "🍜"), ("food", "糖", "🍬"),
+        ("food", "糖葫芦", "🍡"), ("food", "饮料", "🥤"), ("food", "香槟", "🍾"), ("food", "西瓜", "🍉"),
+        ("food", "苹果", "🍎"), ("food", "葡萄", "🍇"), ("food", "草莓", "🍓"), ("food", "桃子", "🍑"),
+        ("food", "菠萝", "🍍"), ("food", "玉米", "🌽"), ("food", "披萨", "🍕"), ("food", "汉堡", "🍔"),
+        ("food", "薯条", "🍟"), ("food", "热狗", "🌭"), ("food", "寿司", "🍣"), ("food", "饺子", "🥟"),
+        ("food", "冰淇淋", "🍦"), ("food", "甜甜圈", "🍩"), ("food", "饼干", "🍪"), ("food", "巧克力", "🍫"),
+        ("food", "爆米花", "🍿"), ("food", "鸡蛋", "🥚"), ("food", "奶酪", "🧀"), ("food", "面包", "🍞"),
+        ("food", "鸡腿", "🍗"), ("food", "牛排", "🥩"), ("food", "葡萄酒", "🍷"), ("food", "牛奶", "🥛"),
+
+        // —— 活动 ——
+        ("activity", "足球", "⚽"), ("activity", "篮球", "🏀"), ("activity", "乒乓", "🏓"), ("activity", "羽毛球", "🏸"),
+        ("activity", "网球", "🎾"), ("activity", "台球", "🎱"), ("activity", "跑步", "🏃"), ("activity", "骑车", "🚴"),
+        ("activity", "游泳", "🏊"), ("activity", "滑雪", "🎿"), ("activity", "爬山", "🧗"), ("activity", "举重", "🏋️"),
+        ("activity", "瑜伽", "🧘"), ("activity", "跳舞", "💃"), ("activity", "唱歌", "🎤"), ("activity", "吉他", "🎸"),
+        ("activity", "钢琴", "🎹"), ("activity", "打鼓", "🥁"), ("activity", "小号", "🎺"), ("activity", "游戏手柄", "🎮"),
+        ("activity", "骰子", "🎲"), ("activity", "奖杯", "🏆"), ("activity", "奖牌", "🏅"), ("activity", "冠军", "🥇"),
+        ("activity", "派对", "🎉"), ("activity", "烟花", "🎆"), ("activity", "气球", "🎈"), ("activity", "礼物", "🎁"),
+        ("activity", "靶心", "🎯"), ("activity", "电影", "🎬"), ("activity", "画画", "🎨"), ("activity", "圣诞树", "🎄"),
+
+        // —— 旅行与地点 ——
+        ("travel", "飞机", "✈️"), ("travel", "火箭", "🚀"), ("travel", "汽车", "🚗"), ("travel", "出租车", "🚕"),
+        ("travel", "公交车", "🚌"), ("travel", "火车", "🚆"), ("travel", "高铁", "🚄"), ("travel", "地铁", "🚇"),
+        ("travel", "自行车", "🚲"), ("travel", "摩托车", "🏍️"), ("travel", "船", "🚢"), ("travel", "帆船", "⛵"),
+        ("travel", "直升机", "🚁"), ("travel", "飞碟", "🛸"), ("travel", "滑板", "🛹"), ("travel", "地图", "🗺️"),
+        ("travel", "指南针", "🧭"), ("travel", "帐篷", "⛺"), ("travel", "山", "⛰️"), ("travel", "雪山", "🏔️"),
+        ("travel", "火山", "🌋"), ("travel", "沙滩", "🏖️"), ("travel", "海岛", "🏝️"), ("travel", "城市", "🏙️"),
+        ("travel", "桥", "🌉"), ("travel", "摩天轮", "🎡"), ("travel", "过山车", "🎢"), ("travel", "自由女神", "🗽"),
+        ("travel", "城堡", "🏰"), ("travel", "房子", "🏠"),
+
+        // —— 物件 ——
+        ("objects", "手机", "📱"), ("objects", "电脑", "💻"), ("objects", "键盘", "⌨️"), ("objects", "鼠标", "🖱️"),
+        ("objects", "电话", "☎️"), ("objects", "灯泡", "💡"), ("objects", "电池", "🔋"), ("objects", "插头", "🔌"),
+        ("objects", "相机", "📷"), ("objects", "电视", "📺"), ("objects", "手表", "⌚"), ("objects", "闹钟", "⏰"),
+        ("objects", "锤子", "🔨"), ("objects", "扳手", "🔧"), ("objects", "刀", "🔪"), ("objects", "炸弹", "💣"),
+        ("objects", "盾", "🛡️"), ("objects", "钥匙", "🔑"), ("objects", "锁", "🔒"), ("objects", "放大镜", "🔍"),
+        ("objects", "药丸", "💊"), ("objects", "书", "📖"),
+        ("objects", "文件夹", "📁"), ("objects", "日历", "📅"), ("objects", "邮件", "✉️"), ("objects", "包裹", "📦"),
+        ("objects", "钱", "💰"), ("objects", "信用卡", "💳"), ("objects", "购物车", "🛒"), ("objects", "剪刀", "✂️"),
+        ("objects", "眼镜", "👓"), ("objects", "雨伞", "☂️"), ("objects", "王冠", "👑"), ("objects", "戒指", "💍"),
+        ("objects", "口红", "💄"), ("objects", "背包", "🎒"), ("objects", "鞋子", "👟"), ("objects", "垃圾桶", "🗑️"),
+
+        // —— 符号 ——
+        ("symbols", "爱心", "❤️"), ("symbols", "橙心", "🧡"), ("symbols", "黄心", "💛"), ("symbols", "绿心", "💚"),
+        ("symbols", "蓝心", "💙"), ("symbols", "紫心", "💜"), ("symbols", "黑心", "🖤"), ("symbols", "白心", "🤍"),
+        ("symbols", "心碎", "💔"), ("symbols", "闪心", "💖"), ("symbols", "对勾", "✅"),
+        ("symbols", "叉", "❌"), ("symbols", "疑问", "❓"), ("symbols", "感叹", "❗"), ("symbols", "警告", "⚠️"),
+        ("symbols", "禁止", "🚫"), ("symbols", "闪闪", "💫"), ("symbols", "钻石", "💎"), ("symbols", "音乐", "🎵"),
+        ("symbols", "音符", "🎶"), ("symbols", "喇叭", "📢"), ("symbols", "静音", "🔇"), ("symbols", "铃铛", "🔔"),
+        ("symbols", "加", "➕"), ("symbols", "减", "➖"), ("symbols", "100分", "💯"), ("symbols", "无限", "♾️"),
+        ("symbols", "循环", "🔄"), ("symbols", "回收", "♻️"),
+
+        // —— 旗帜 ——
+        ("flags", "白旗", "🏳️"), ("flags", "彩虹旗", "🏳️🌈"), ("flags", "黑旗", "🏴"), ("flags", "海盗旗", "🏴☠️"),
+        ("flags", "红旗", "🚩"), ("flags", "终点旗", "🏁"), ("flags", "中国", "🇨🇳"), ("flags", "美国", "🇺🇸"),
+        ("flags", "日本旗", "🇯🇵"), ("flags", "韩国", "🇰🇷"), ("flags", "英国", "🇬🇧"), ("flags", "法国", "🇫🇷"),
+        ("flags", "德国", "🇩🇪"), ("flags", "意大利", "🇮🇹"), ("flags", "西班牙", "🇪🇸"), ("flags", "俄罗斯", "🇷🇺"),
+        ("flags", "加拿大", "🇨🇦"), ("flags", "澳大利亚", "🇦🇺"), ("flags", "巴西", "🇧🇷"), ("flags", "新加坡", "🇸🇬")
     ]
 
     // MARK: - 状态
@@ -188,21 +279,37 @@ final class EmojiPack: ObservableObject {
     /// 内置表情的条数（界面拿来说"内置了多少个"）。
     static var builtinCount: Int { builtin.count }
 
-    /// 全部套：5 内置套按顺序 + 「我的」永远最后。
+    /// 全部套：自定义「我的」永远在最前，其后是 9 个内置分类。
     var packs: [Pack] {
-        var result = Self.packOrder.map { id in
-            Pack(id: id, name: Self.packName(id), isCustom: false, names: items(inPack: id).map(\.name))
-        }
-        result.append(
+        var result: [Pack] = [
             Pack(id: "custom", name: Self.packName("custom"), isCustom: true,
                  names: items(inPack: "custom").map(\.name))
-        )
+        ]
+        result.append(contentsOf: Self.packOrder.map { id in
+            Pack(id: id, name: Self.packName(id), isCustom: false,
+                 names: items(inPack: id).map(\.name))
+        })
         return result
     }
 
     /// 按套取表情；`query` 非空时再按名字模糊过滤（空串返回全套）。
+    ///
+    /// 特殊：「常用」这一类不按 `packID` 取，而是从**所有**表情里挑出常被用到的
+    /// 那批（见 `frequentNames`）—— 跟系统键盘的「最近使用」一个意思：同一条表情
+    /// 既在「常用」里，也在它自己的分类里。
     func items(inPack id: String, matching query: String = "") -> [Item] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if id == Self.frequentPackID {
+            var byName: [String: Item] = [:]
+            for item in items { byName[item.name] = item }
+            var result = Self.frequentNames.compactMap { byName[$0] }
+            if !trimmed.isEmpty {
+                result = result.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+            }
+            return result
+        }
+
         var result = items.filter { $0.packID == id }
         if !trimmed.isEmpty {
             result = result.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
@@ -463,16 +570,16 @@ final class EmojiPack: ObservableObject {
         rebuild()
     }
 
-    // MARK: - 给她看的说明
+    // MARK: - 给ta看的说明
 
-    /// 拼进系统提示词的一段话 —— 不告诉她规矩，她就会乱用。
+    /// 拼进系统提示词的一段话 —— 不告诉ta规矩，ta就会乱用。
     /// 按用户设置的「表情发送频率」给出三档不同的话。
     ///
     /// ⚠️ **一定要把库里有什么原样列出来**（见 `inventory`）。
     ///    用户 2026-10-01 的原话：「你要让他去使用表情包库。**如果有的话就发出来，
     ///    没有的话就不发**」。
-    ///    以前这里只举了「[微笑]、[呲牙]」两个例子，于是她只会发这两个 ——
-    ///    库里明明有一百多个，她一个都不会用。而且她**不知道什么名字是没有的**，
+    ///    以前这里只举了「[微笑]、[呲牙]」两个例子，于是ta只会发这两个 ——
+    ///    库里明明有一百多个，ta一个都不会用。而且ta**不知道什么名字是没有的**，
     ///    会现编一个「[无语]」「[汗]」出来，渲染时匹配不到，方括号就原样显示在气泡里。
     ///
     /// ⚠️ 同样是**实例**属性（要读 `items`）。调用处是
@@ -510,9 +617,9 @@ final class EmojiPack: ObservableObject {
 
     /// 库里所有**现在真的能渲染出东西**的表情名 + 分类，按名字排好、逗号分隔。
     ///
-    /// 内置的 148 个加上用户自己导入的，一份给模型看的清单。
+    /// 内置的几百个加上用户自己导入的，一份给模型看的清单。
     /// 注意这里读的是 `items`（已经过 `rebuild()`），所以用户删掉的内置表情
-    /// 不会出现在清单里 —— 她不会去发一个发不出来的名字。
+    /// 不会出现在清单里 —— ta不会去发一个发不出来的名字。
     ///
     /// ⚠️ 是**实例**属性不是 `static` —— `items` 挂在单例上，写成 static 取不到它
     ///    （CI 上就是这么挂的：`instance member 'items' cannot be used on type`）。

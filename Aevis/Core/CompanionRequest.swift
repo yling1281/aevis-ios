@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 「TA 想主动做点什么」—— 打电话、看你的屏幕、一起听歌。
+/// 「ta 想主动做点什么」—— 打电话、看你的屏幕、一起听歌。
 ///
 /// ## 用户要的（2026-09-26）
 /// 「AI 也可以主动的去申请……屏幕共享之类的，**我们能用的东西它都能自动申请**」。
@@ -11,17 +11,17 @@ import SwiftUI
 /// - 屏幕共享必须走系统那个录屏弹窗，**只有你手指点得动**；
 /// - 一起听会开始出声。
 ///
-/// 所以设计成：**她提出 → 界面上浮出一条申请 → 你点了才真的开始**。
+/// 所以设计成：**ta提出 → 界面上浮出一条申请 → 你点了才真的开始**。
 /// 这跟那条最高优先的产品原则也是一路的（不拿我们的标准去安排用户的标准）——
-/// 她想做什么尽管提，做不做由你定。
+/// ta想做什么尽管提，做不做由你定。
 ///
-/// 顺带一个好处：她"提了什么、你为什么点了同意"这件事本身就有陪伴感，
+/// 顺带一个好处：ta"提了什么、你为什么点了同意"这件事本身就有陪伴感，
 /// 比默默开始更像真的有人在问你。
 final class CompanionRequest: ObservableObject {
 
     static let shared = CompanionRequest()
 
-    /// 她想做的事都在这儿登记。加新能力就往这个枚举里加一条。
+    /// ta想做的事都在这儿登记。加新能力就往这个枚举里加一条。
     enum Kind: String, Identifiable {
         case call
         case screenShare
@@ -29,7 +29,7 @@ final class CompanionRequest: ObservableObject {
 
         var id: String { rawValue }
 
-        /// 界面上那句主文案 —— 用她的口吻，不是系统提示的口吻。
+        /// 界面上那句主文案 —— 用ta的口吻，不是系统提示的口吻。
         var title: String {
             switch self {
             case .call: return "想给你打个电话"
@@ -42,7 +42,7 @@ final class CompanionRequest: ObservableObject {
         var acceptTitle: String {
             switch self {
             case .call: return "接听"
-            case .screenShare: return "让她看"
+            case .screenShare: return "让\(Pronoun.current)看"
             case .listenTogether: return "一起听"
             }
         }
@@ -59,23 +59,23 @@ final class CompanionRequest: ObservableObject {
     struct Item: Identifiable, Equatable {
         let id = UUID()
         var kind: Kind
-        /// 她自己写的理由（一句话）。空着就不显示。
+        /// ta自己写的理由（一句话）。空着就不显示。
         var reason: String
         var at = Date()
     }
 
     /// 现在挂着的那条申请。
     ///
-    /// **同一时刻只留一条** —— 攒一堆申请比不弹还烦，而且她会显得很吵。
+    /// **同一时刻只留一条** —— 攒一堆申请比不弹还烦，而且ta会显得很吵。
     /// 正在挂着的时候再来申请就不覆盖（先来后到，你把手上这条处理完再说）。
     @Published var pending: Item?
 
-    /// 上一次被拒绝的是哪种，多久之前 —— 短时间内不让她反复提同一件事。
+    /// 上一次被拒绝的是哪种，多久之前 —— 短时间内不让ta反复提同一件事。
     private var lastDeclined: (kind: Kind, at: Date)?
 
     private init() {}
 
-    /// 她提出申请。
+    /// ta提出申请。
     func ask(_ kind: Kind, reason: String) {
         guard pending == nil else { return }
 

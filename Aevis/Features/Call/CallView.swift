@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 实时通话界面。
 ///
-/// 全屏 + 深色，就是通话该有的样子：她在那儿，你说话，她回话。
-/// 屏幕下方实时显示**她听到的内容**，这样没听清的时候你能看见她听到了什么。
+/// 全屏 + 深色，就是通话该有的样子：ta在那儿，你说话，ta回话。
+/// 屏幕下方实时显示**ta听到的内容**，这样没听清的时候你能看见ta听到了什么。
 struct CallView: View {
     @ObservedObject private var call = CallService.shared
     @ObservedObject private var listen = ListenService.shared
@@ -16,7 +16,7 @@ struct CallView: View {
     ///
     /// 用户 2026-10-01：「第三个的话呢，可以加点功能」。
     /// 麦克风在吵的地方根本不好使（地铁、风大、旁边有人），
-    /// 而「电话里说不出话」会让她显得很笨 —— 留一个能打字的入口。
+    /// 而「电话里说不出话」会让ta显得很笨 —— 留一个能打字的入口。
     @State private var draft = ""
     @FocusState private var typing: Bool
 
@@ -71,7 +71,7 @@ struct CallView: View {
 
     private var topBar: some View {
         VStack(spacing: 6) {
-            Text(persona.name.isEmpty ? "TA" : persona.name)
+            Text(persona.name.isEmpty ? "ta" : persona.name)
                 .font(.aevis(22, weight: .semibold))
                 .foregroundStyle(.primary)
 
@@ -111,7 +111,7 @@ struct CallView: View {
         }
     }
 
-    // MARK: - 中间：她 + 波形
+    // MARK: - 中间：ta + 波形
 
     private var portrait: some View {
         VStack(spacing: 18) {
@@ -168,7 +168,7 @@ struct CallView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // 苹果那套来电界面没弹出来时，把她为什么没弹**说出来**。
+            // 苹果那套来电界面没弹出来时，把ta为什么没弹**说出来**。
             //
             // 用户 2026-10-01 报「电话弹窗不知道为什么弹不了」—— 以前这里失败
             // 只在黑匣子里留一行，他点了打电话看到的就是"什么都没发生"。
@@ -190,9 +190,9 @@ struct CallView: View {
             }
 
             // ⚠️ 顺序很重要：**先看 `lastSaid`，再看 `thinking`**。
-            //    她的话现在（2026-10-01）是**边收边显示**的 —— 流式的第一个字一到，
+            //    ta的话现在（2026-10-01）是**边收边显示**的 —— 流式的第一个字一到，
             //    `lastSaid` 就不空了。这时候再显示「正在想…」的转圈，
-            //    等于把她刚开始说的字盖掉，那几秒看起来还是"卡住"。
+            //    等于把ta刚开始说的字盖掉，那几秒看起来还是"卡住"。
             if !call.lastSaid.isEmpty {
                 Text(call.lastSaid)
                     .font(.aevis(14))
@@ -211,7 +211,7 @@ struct CallView: View {
                 }
             }
 
-            // 你正在说的 —— 让她听到了什么，你看得见
+            // 你正在说的 —— 让ta听到了什么，你看得见
             if !call.listeningText.isEmpty {
                 Text("「\(call.listeningText)」")
                     .font(.aevis(12.5))
@@ -234,7 +234,7 @@ struct CallView: View {
     /// 通话里那个输入框 —— 说不出口的可以打出来。
     ///
     /// 和说话**走的是同一条路**（`CallService.send` → 同一个 `respond`），
-    /// 所以她该记得的照样记得、该落进聊天记录的照样落。
+    /// 所以ta该记得的照样记得、该落进聊天记录的照样落。
     private var inputBar: some View {
         HStack(spacing: 10) {
             TextField("打字说…", text: $draft, axis: .vertical)

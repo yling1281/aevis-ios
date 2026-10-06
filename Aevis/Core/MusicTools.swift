@@ -1,17 +1,17 @@
 import Foundation
 
 /// 音乐相关的手：找歌、放歌、控制播放、读当前歌词、
-/// 看用户的音乐库（喜欢 / 最近 / 歌单）、把歌收进她的歌单。
+/// 看用户的音乐库（喜欢 / 最近 / 歌单）、把歌收进ta的歌单。
 ///
-/// 有了这几个，「一起听」才成立 —— 她能知道现在放到哪一句，
+/// 有了这几个，「一起听」才成立 —— ta能知道现在放到哪一句，
 /// 才能就着歌词跟你说话，而不是只会"正在播放"。
 ///
 /// 用户 2026-10-02 把权限这条点名说清楚了：
 /// 「给 AI 的权限就是你可以让他切歌……可以让他暂停……有他喜欢的也可以」。
 /// 所以这一版补了三样、修了一处真假完成：
 ///   1. `music_control` 多了 `seek`（跳着听）
-///   2. 新增 `my_music` —— 她能看见**你喜欢什么、最近在听什么、有哪些歌单**
-///   3. 新增 `save_to_her_playlist` —— 她能把歌收进「她的歌单」
+///   2. 新增 `my_music` —— ta能看见**你喜欢什么、最近在听什么、有哪些歌单**
+///   3. 新增 `save_to_her_playlist` —— ta能把歌收进「ta的歌单」
 ///   4. `play_music` 的 `song_id` 以前是当关键词搜的，**根本放不出来**，已修
 extension DeviceTools {
 
@@ -62,7 +62,7 @@ extension DeviceTools {
             name: "play_music",
             title: "放起了音乐",
             description: """
-            让她真的开始放歌。
+            ta真的开始放歌。
             · 给 keyword → 搜第一首放
             · 给 song_id → 精确放那一首
             · 给 source → 把**整个列表**当成播放队列放，这样之后「下一首 / 上一首」才有歌可换：
@@ -91,7 +91,7 @@ extension DeviceTools {
             //
             // ⚠️ 这条路是「让 AI 切歌」能不能成立的关键：
             //    以前不管放什么，队列里永远只有**一首**（`play([picked])`），
-            //    所以「下一首」按下去什么都不会发生 —— 她嘴上说"给你换一首"，
+            //    所以「下一首」按下去什么都不会发生 —— ta嘴上说"给你换一首"，
             //    实际是空转。整张列表进队列之后 next/previous 才真的有意义。
             if let raw = (args["source"] as? String)?.trimmingCharacters(in: .whitespaces),
                !raw.isEmpty {
@@ -141,7 +141,7 @@ extension DeviceTools {
                    !id.isEmpty {
                     // 🔴 这里原来写的是 `search(id, limit: 1)` —— 把一串**数字当关键词去搜**，
                     //    永远搜不到东西。后果很具体：模型从 `my_music` 里拿到了正确的
-                    //    song_id，却怎么也放不出来，于是"她放了我收藏的那首"成了空话。
+                    //    song_id，却怎么也放不出来，于是"ta放了我收藏的那首"成了空话。
                     track = try await NeteaseClient.shared.track(id: id)
                 } else if let keyword = args["keyword"] as? String, !keyword.isEmpty {
                     track = try await NeteaseClient.shared.search(keyword, limit: 1).first
@@ -251,7 +251,7 @@ extension DeviceTools {
             description: """
             读当前正在放的那首歌的歌词，以及现在唱到哪一句。
             用户问「这首歌唱到哪了」「这歌词什么意思」时用它 ——
-            这也是「一起听」的依据：你可以就着现在这一句跟她聊。
+            这也是「一起听」的依据：你可以就着现在这一句跟ta聊。
             """,
             parameters: emptyParameters()
         ) { _ in
@@ -333,19 +333,19 @@ extension DeviceTools {
         }
     }
 
-    /// 把一首歌收进「她的歌单」。
+    /// 把一首歌收进「ta的歌单」。
     ///
     /// ## 这个歌单在哪儿（用户点名的做法，别改成"App 内部自嗨"）
-    /// 它**真的建在用户自己的网易云账号里**，名字是「<她的名字>的歌单」。
+    /// 它**真的建在用户自己的网易云账号里**，名字是「<ta的名字>的歌单」。
     /// 用户原话：「原理是在你的网易云添加一个歌单是属于他的，但是在这个……
     /// App 里面，这个歌单显示的是 AI 的账号和他的歌单」。
-    /// 所以：打开网易云能看见、能自己往里加歌；App 里那一条显示成「她的歌单」。
+    /// 所以：打开网易云能看见、能自己往里加歌；App 里那一条显示成「ta的歌单」。
     private static var saveToHerPlaylistTool: DeviceTool {
         DeviceTool(
             name: "save_to_her_playlist",
-            title: "收进了她的歌单",
+            title: "收进了\(Pronoun.current)的歌单",
             description: """
-            把一首歌收进「她的歌单」（在用户自己的网易云账号里，没有就会自动建一个）。
+            把一首歌收进「ta的歌单」（在用户自己的网易云账号里，没有就会自动建一个）。
             用户说「这首真好听，你收起来」「你收藏一下这首」时用它。
             ⚠️ 这是**写操作**，会真的改动用户的网易云 —— 只有他明确说要收藏时才用，
             别自己顺手收藏。

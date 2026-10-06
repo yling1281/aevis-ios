@@ -13,7 +13,7 @@ import UIKit
 /// 所以它在后台、在锁屏都能继续放（音频会话设成 `.playback`）。
 ///
 /// 锁屏和灵动岛要显示的东西都通过 `MPNowPlayingInfoCenter` 发布，
-/// 她之后要做灵动岛，直接用这里的数据就行。
+/// ta之后要做灵动岛，直接用这里的数据就行。
 ///
 /// ## ⚠️ 为什么整个类都是 `@MainActor`（2026-09-26 修的真凶）
 /// 在这之前它**没有任何线程归属**。而调用方是这么写的：
@@ -48,12 +48,12 @@ final class MusicPlayer: NSObject, ObservableObject {
 
     /// 留一句话给界面显示。
     /// `errorText` 保持只读（免得各处乱改它），只在这里开一个写入口 ——
-    /// 快捷指令让她放歌时，「没登录」「没找到」这些得说出来。
+    /// 快捷指令让ta放歌时，「没登录」「没找到」这些得说出来。
     func note(_ text: String?) {
         errorText = text
     }
 
-    /// 换歌时回调，给「一起听」用 —— 她可以就着这首歌说点什么。
+    /// 换歌时回调，给「一起听」用 —— ta可以就着这首歌说点什么。
     var onTrackChanged: ((MusicTrack) -> Void)?
 
     private var player: AVPlayer?
@@ -505,7 +505,7 @@ final class MusicPlayer: NSObject, ObservableObject {
         return lines.lastIndex(where: { $0.time <= progress + 0.2 })
     }
 
-    /// 当前这一句歌词（去掉时间轴）。她可以就着这句吐槽。
+    /// 当前这一句歌词（去掉时间轴）。ta可以就着这句吐槽。
     var currentLyricLine: String? {
         guard let index = lyricCursor else { return nil }
         return lyricLines[index].text

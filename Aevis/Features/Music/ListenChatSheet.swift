@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 一起听的时候，跟他/她**互相打字**的那个界面。
+/// 一起听的时候，跟他/ta**互相打字**的那个界面。
 ///
 /// 用户原话（2026-09-30）：「我们不能两个人互相打字聊天，要加一个输入框，
 /// 能互相打字聊天的」。
@@ -14,7 +14,7 @@ import SwiftUI
 /// ## 和「聊天」页的关系
 /// **不是**另一个聊天页：这里打的字会同步进正式聊天记录
 /// （见 `ListenTogetherService.send`），所以关掉播放器之后这段对话还在，
-/// 她回到聊天页也记得。这一层只是"一边听歌一边打字的那个窗口"。
+/// ta回到聊天页也记得。这一层只是"一边听歌一边打字的那个窗口"。
 struct ListenChatSheet: View {
     @ObservedObject private var together = ListenTogetherService.shared
     @ObservedObject private var player = MusicPlayer.shared
@@ -27,7 +27,7 @@ struct ListenChatSheet: View {
     @FocusState private var inputFocused: Bool
 
     private var persona: Persona { personaStore.persona }
-    private var name: String { persona.name.isEmpty ? "TA" : persona.name }
+    private var name: String { persona.name.isEmpty ? "ta" : persona.name }
 
     var body: some View {
         ZStack {
@@ -119,7 +119,7 @@ struct ListenChatSheet: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 6)
             }
-            // 新的一行、或者她正在吐的那半句变长了，都往下贴
+            // 新的一行、或者ta正在吐的那半句变长了，都往下贴
             .onChange(of: together.chatLines.count) { _, _ in
                 scrollDown(proxy)
             }
@@ -174,7 +174,7 @@ struct ListenChatSheet: View {
     }
 
     private func bubbleBody(_ line: ListenTogetherService.Line) -> some View {
-        // 空的那条 = 她还在想。放三个点，不要空着一块白。
+        // 空的那条 = ta还在想。放三个点，不要空着一块白。
         let text = line.text.isEmpty ? "…" : line.text
 
         return Text(text)
@@ -193,7 +193,7 @@ struct ListenChatSheet: View {
                     )
             )
             .contentShape(Rectangle())
-            // 点她的话就念出来 —— 跟播放器里那个小喇叭一个规矩
+            // 点ta的话就念出来 —— 跟播放器里那个小喇叭一个规矩
             .onTapGesture {
                 guard !line.mine, !line.text.isEmpty else { return }
                 together.speak(line.text)

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 「主动消息」设置卡片：让 TA 自己找你，还能推到 Bark。
+/// 「主动消息」设置卡片：让 ta 自己找你，还能推到 Bark。
 struct ProactiveSettingsCard: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var personaStore = PersonaStore.shared
@@ -16,13 +16,13 @@ struct ProactiveSettingsCard: View {
         VStack(alignment: .leading, spacing: 0) {
             title("主动消息")
 
-            toggleRow("让 TA 主动找你", subtitle: "打开后会用系统通知，App 没开也照样到点弹出来", isOn: $settings.proactiveEnabled)
+            toggleRow("让 ta 主动找你", subtitle: "打开后会用系统通知，App 没开也照样到点弹出来", isOn: $settings.proactiveEnabled)
 
-            // ⭐ 「她趁你不在时打给你」（用户 2026-10-01：「苹果系统来电界面，
+            // ⭐ 「ta趁你不在时打给你」（用户 2026-10-01：「苹果系统来电界面，
             //    然后第一个也要」）。
             //
             // ⚠️ 它**不在下面那个 `if` 里面** —— 和总开关是**并列**的两个开关。
-            //    有人只想接她电话、不想收她消息；也有人反过来。
+            //    有人只想接ta电话、不想收ta消息；也有人反过来。
             //    藏进总开关里的话，"只想来电"那拨人永远打不开它，
             //    而总开关关着的时候这一条也关不掉（那更糟）。
             rule
@@ -59,7 +59,7 @@ struct ProactiveSettingsCard: View {
             guard on else { return }
             Task { await reschedule(regenerate: true) }
         }
-        // 「她打给你」单独一条 —— **和上面那个总开关分开两处**，
+        // 「ta打给你」单独一条 —— **和上面那个总开关分开两处**，
         // 因为它是独立的开关（关掉总开关不该把它一起关掉，反过来也一样）。
         .onChange(of: settings.callEnabled) { _, on in
             note = nil
@@ -142,11 +142,11 @@ struct ProactiveSettingsCard: View {
         }
     }
 
-    // MARK: - 她会说什么
+    // MARK: - ta会说什么
 
     private var linesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            label("她会说什么")
+            label("\(Pronoun.current)会说什么")
 
             if settings.proactiveLines.isEmpty {
                 Text("还没有准备话术。点下面按钮让\(Pronoun.current)写一批。")
@@ -197,8 +197,8 @@ struct ProactiveSettingsCard: View {
             }
 
             Text(settings.isConfigured
-                 ? "话术由她按自己的人设写，存在这台手机上。主动消息在后台不会调用模型 —— 所以是「提前写好、到点取用」。"
-                 : "还没填 API Key，先用内置的几句通用话术。填上 Key 之后可以让她按自己的人设写。")
+                 ? "话术由\(Pronoun.current)按自己的人设写，存在这台手机上。主动消息在后台不会调用模型 —— 所以是「提前写好、到点取用」。"
+                 : "还没填 API Key，先用内置的几句通用话术。填上 Key 之后可以让\(Pronoun.current)按自己的人设写。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -256,7 +256,7 @@ struct ProactiveSettingsCard: View {
                 Text("Bark 是另一个 App 提供的推送通道：走它的话，消息会留在 Bark 的历史里。"
                      + "但它需要 App 正在运行才发得出去，所以真正的定时仍然靠上面的本地通知。"
                      + "另外 —— Bark 弹出来的通知，左上角写的是 Bark 这个 App 的名字，"
-                     + "那是它改不了的。想让通知看起来就是 TA 发给你的（带 TA 的头像、"
+                     + "那是它改不了的。想让通知看起来就是 ta 发给你的（带 ta 的头像、"
                      + "还能直接在通知上回一句），就把 Bark 关掉，用上面的本地通知。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)

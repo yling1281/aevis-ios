@@ -7,13 +7,13 @@ import UIKit
 
 /// 朋友圈。原生实现，不接任何第三方。
 ///
-/// 两个人：我，和 TA。
-/// 她能自己发（打开 App 时补发 / 聊天里被要求发 / 也能回我的评论）。
+/// 两个人：我，和 ta。
+/// ta能自己发（打开 App 时补发 / 聊天里被要求发 / 也能回我的评论）。
 struct MomentsView: View {
     @ObservedObject private var moments = MomentStore.shared
     @ObservedObject private var personaStore = PersonaStore.shared
     @ObservedObject private var settings = AppSettings.shared
-    /// 我的名字 / 头像 / 个性签名 —— 「我在 TA 朋友圈里的样子」。
+    /// 我的名字 / 头像 / 个性签名 —— 「我在 ta 朋友圈里的样子」。
     @ObservedObject private var profile = ProfileStore.shared
 
     @Environment(\.dismiss) private var dismiss
@@ -142,7 +142,7 @@ struct MomentsView: View {
                         Button {
                             Task { await askHerToPost() }
                         } label: {
-                            Label("让 TA 发一条", systemImage: "sparkles")
+                            Label("让 ta 发一条", systemImage: "sparkles")
                         }
                         .disabled(busy || !settings.isConfigured)
 
@@ -334,7 +334,7 @@ struct MomentsView: View {
         pendingImage = nil
         note = nil
 
-        // 我发完她就来看一眼：点赞 + 评论。条数由设置控制，不会一口气刷一屏。
+        // 我发完ta就来看一眼：点赞 + 评论。条数由设置控制，不会一口气刷一屏。
         let config = settings.llm
         let who = persona
         let memory = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
@@ -359,8 +359,8 @@ struct MomentsView: View {
                 .font(mfont(16, weight: .medium))
                 .foregroundStyle(.primary)
             Text(settings.momentsEnabled
-                 ? "她过一会儿就会发一条。你也可以先发。"
-                 : "在设置里打开「让她自己发」，她就会时不时发一条。")
+                 ? "\(Pronoun.current)过一会儿就会发一条。你也可以先发。"
+                 : "在设置里打开「让\(Pronoun.current)自己发」，\(Pronoun.current)就会时不时发一条。")
                 .font(mfont(13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -508,12 +508,12 @@ struct MomentsView: View {
             let mine = ProfileStore.shared.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
             return mine.isEmpty ? "我" : mine
         }
-        return persona.name.isEmpty ? "TA" : persona.name
+        return persona.name.isEmpty ? "ta" : persona.name
     }
 
     // MARK: - 动作
 
-    /// 评完之后让她回一句 —— 说了要有反应，不是自己对着墙说话。
+    /// 评完之后让ta回一句 —— 说了要有反应，不是自己对着墙说话。
     private func submitComment() {
         guard let moment = commentingOn else { return }
         let text = commentDraft

@@ -24,6 +24,17 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         /// 音频在 `voiceData`，时长在 `voiceDuration`。文字版还在对应的
         /// 那条 `.text` 里，所以这一条不进模型、也不参与去重。
         case voice
+        /// ⭐ 老板 2026-10：她在**自己的小手机**上做了一件事（打开了某个 App）。
+        ///
+        /// 记在聊天流里，好让"我"这边看得到「她刚打开了淘宝」——
+        /// 这就是老板要的"两边同步"的观感。人话写在 `text` 里、这一条**要发给模型**
+        /// （她得知道自己手机上刚才做了什么），`herAppName` / `herAction` 只负责界面怎么画。
+        ///
+        /// ⚠️ `Kind` 是 `String` 原始值的 `Codable`：**新增 case 是安全的** ——
+        ///    老存档里只有 text/call/transfer/voice 四个值，多一个 case 不影响它们解码。
+        ///    （反向不成立：含 `.herPhone` 的**新存档**用**老版本** App 读会解不出来 ——
+        ///     这是"新功能往前加"无法避免的，所以别改现有 4 个 case 的名字。）
+        case herPhone
     }
 
     /// 转账 / 红包这一条的内容。
@@ -66,6 +77,14 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     /// 这条语音有多长（秒），气泡上要显示。
     var voiceDuration: Double? = nil
 
+    /// 「小手机」那条消息用：她打开了哪个 App（用来取图标 + 写卡片文案）。
+    ///
+    /// ⚠️ 声明成可选并给默认值 —— 老存档里没有这个键，缺了就是 nil，
+    ///    **不会读崩**（跟 `transfer` / `imageData` 一个套路）。
+    var herAppName: String? = nil
+    /// 「小手机」那条消息用：她的动作，如"打开了 淘宝"。
+    var herAction: String? = nil
+
     /// 转账那条消息**给模型看的那句人话**。
     ///
     /// 气泡本身是画出来的（读 `transfer`），这句话只负责两件事：
@@ -88,7 +107,17 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         // 转账要让她知道（「我给你转了 12 块」这种事必须进上下文）；
         // 通话记录只给眼睛看。
         if kind == .transfer { return true }
+        // ⭐ 小手机那条也要发：让她"记得自己刚在手机上干了什么"，
+        //   这样对话才有真实感（人话已经在 `text` 里）。
+        if kind == .herPhone { return true }
         return kind == .text && !text.isEmpty
+    }
+
+    /// 「小手机」那条消息**给模型看 / 卡片显示**的那句人话。
+    /// 例如 `"她打开了 淘宝"`。
+    static func herPhoneLine(action: String) -> String {
+        let trimmed = action.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "她动了动自己的小手机。" : "她\(trimmed)。"
     }
 
     /// 会话列表那一行显示什么。
@@ -100,6 +129,11 @@ struct ChatMessage: Codable, Identifiable, Equatable {
             guard let info = transfer else { return text }
             let tag = info.isRedPacket ? "红包" : "转账"
             return "[\(tag) ¥\(String(format: "%.2f", info.amount))]"
+        }
+        // ⭐ 小手机：会话列表显示成 `[小手机] 她打开了 淘宝`。
+        if kind == .herPhone {
+            let action = herAction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return action.isEmpty ? "[小手机]" : "[小手机] 她\(action)"
         }
         if imageData != nil { return "[图片]" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)

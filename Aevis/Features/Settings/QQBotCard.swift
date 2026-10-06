@@ -8,7 +8,7 @@ import SwiftUI
 /// - **这张卡**走官方机器人：平台替你登录，App 只是个 HTTPS + WebSocket 客户端 ——
 ///   **完全在手机上跑，不用电脑、不用服务器、不会过期**
 ///
-/// 代价也说清楚：她在 QQ 上是**一个独立的号**，不是他本人的号；
+/// 代价也说清楚：ta在 QQ 上是**一个独立的号**，不是他本人的号；
 /// 而且只能被动回复（别人先说话）。这些必须写在界面上，不能让人自己去猜。
 struct QQBotCard: View {
 
@@ -189,7 +189,7 @@ struct QQBotCard: View {
                     .font(.aevis(15))
                 Text(settings.qqBotKeepAlive
                      ? "开着。你在 QQ 里跟它说话时 App 在后台，靠这个才不掉线（代价：费电）"
-                     : "关着。省电，但你切到 QQ 之后她就不回你了")
+                     : "关着。省电，但你切到 QQ 之后\(Pronoun.current)就不回你了")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -299,14 +299,14 @@ struct QQBotCard: View {
             Text("1. 手机或电脑打开 q.qq.com，QQ 扫码登录（个人主体 + 实名）\n"
                  + "2. 创建一个机器人，拿到 AppID 和 AppSecret，填到上面\n"
                  + "3. 点「测试连接」，通了再点「连上」\n"
-                 + "4. 在 QQ 里找到这个机器人，跟它说话 —— 她就会用你设的人设回你")
+                 + "4. 在 QQ 里找到这个机器人，跟它说话 —— \(Pronoun.current)就会用你设的人设回你")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("说清楚两件事：\(Pronoun.current)在 QQ 上是一个独立的号，不是你本人的 QQ；"
                  + "而且平台的规矩是只能被动回复 —— 你（或者群里 @ 它）先说话，它才能回。"
-                 + "想要「她替我收发我自己的 QQ」，那得是外面跑 OneBot 那条路。")
+                 + "想要「\(Pronoun.current)替我收发我自己的 QQ」，那得是外面跑 OneBot 那条路。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

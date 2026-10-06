@@ -7,7 +7,7 @@ import UIKit
 
 /// 「我」是谁 —— 名字和头像。
 ///
-/// 和 TA 的人设**分开存**：改我的名字不该动到她，反之也一样。
+/// 和 ta 的人设**分开存**：改我的名字不该动到ta，反之也一样。
 /// 用户原话：「我的话也能改头像、改名称、改气泡。」
 final class ProfileStore: ObservableObject {
     static let shared = ProfileStore()
@@ -23,7 +23,7 @@ final class ProfileStore: ObservableObject {
     /// 个性签名。朋友圈里挂在我名字下面那句。
     ///
     /// ⚠️ 和「封面上的那句话」（`AppSettings.momentSignature`）**不是一回事**：
-    ///    · 这一句是**我**的签名，跟着我走（TA 的朋友圈里、我的资料里都显示这句）
+    ///    · 这一句是**我**的签名，跟着我走（ta 的朋友圈里、我的资料里都显示这句）
     ///    · 那一句是他给朋友圈**封面**配的说明文字
     ///    用户 2026-09-28 要的是这个「个性签名」。
     @Published var signature: String {

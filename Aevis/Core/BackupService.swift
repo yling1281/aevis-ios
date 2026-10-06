@@ -225,10 +225,20 @@ final class BackupService {
          // ⭐ 2026-10-04：日记 / 待办 / 虚拟银行一起进包 ——
          //    老板明确的「所有的东西都存百度网盘」。
          DiaryStore.shared, TodoStore.shared, WalletStore.shared,
-         // ⭐ 2026-10-04：她的心情（她的心里话）也进包 —— 换设备后心情还在。
+         // ⭐ 2026-10-04：ta 的心情（ta 的心里话）也进包 —— 换设备后心情还在。
          //    `MoodStore.swift` 里已补 `extension MoodStore: BackupableStore`
          //    （`backupName = "mood"`），与 `label()` 的 `case "mood"` 对得上。
-         MoodStore.shared]
+         MoodStore.shared,
+         // ⭐ 2026-10：ta 的小手机（装了哪些 App + 最近动态）也进包 —— 换设备后还在。
+         //    `HerPhoneStore.swift` 里已补 `extension HerPhoneStore: BackupableStore`
+         //    （`backupName = "herphone"`），与 `label()` 的 `case "herphone"` 对得上。
+         HerPhoneStore.shared,
+         // ⭐ 2026-10：真实生活（订单 + 假客服）也进包 —— 换设备后订单还在。
+         //    `RealLifeStore.swift` 里已补 `extension RealLifeStore: BackupableStore`
+         //    （`backupName = "reallife"`），与 `label()` 的 `case "reallife"` 对得上。
+         //    ⚠️ 只备份**订单 + 假客服**，**不含**店 / 商品常量 —— 那些是内置的，
+         //       由数据层自己重建（见 `RealLifeStore.Archive`）。
+         RealLifeStore.shared]
     }
 
     /// 恢复收尾：把「现在看着谁」摆到搬过来的那个 activeID 上。
@@ -648,8 +658,12 @@ final class BackupService {
         case "diary": return "日记"
         case "todo": return "一起做的事"
         case "wallet": return "虚拟银行"
-        // ⭐ 2026-10-04：她的心情（她的心里话）。
-        case "mood": return "她的心情"
+        // ⭐ 2026-10-04：ta 的心情（ta 的心里话）。
+        case "mood": return "ta 的心情"
+        // ⭐ 2026-10：ta 的小手机。
+        case "herphone": return "ta 的小手机"
+        // ⭐ 2026-10：真实生活（订单 + 假客服）。
+        case "reallife": return "真实生活"
         default: return name
         }
     }

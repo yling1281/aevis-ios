@@ -33,7 +33,7 @@ struct DiaryView: View {
 
     private var taName: String {
         let name = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     private var canSeeContent: Bool { !diary.hasPin || unlocked }
@@ -342,7 +342,7 @@ private struct DiaryEditor: View {
 
     private var taName: String {
         let name = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     init(original: DiaryEntry,

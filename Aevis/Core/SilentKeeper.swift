@@ -5,7 +5,7 @@ import Foundation
 ///
 /// ## 为什么非要有它
 /// 他在 **QQ** 里跟机器人聊天时，我们这个 App 正好在**后台** ——
-/// 而 iOS 会把后台 App 挂起，WebSocket 一断她就哑了。整个功能就没意义了。
+/// 而 iOS 会把后台 App 挂起，WebSocket 一断ta就哑了。整个功能就没意义了。
 ///
 /// iOS 上唯一能让 App 长期待在后台的办法是**在后台放音频**
 /// （Info.plist 里的 `UIBackgroundModes = [audio]`）。
@@ -51,7 +51,7 @@ final class SilentKeeper {
             isRunning = true
         } catch {
             // 保活失败**不该影响别的功能**：静默放弃。
-            // 表现就是"切到后台之后她就不回了"，界面上的状态会如实显示断开。
+            // 表现就是"切到后台之后ta就不回了"，界面上的状态会如实显示断开。
             isRunning = false
         }
     }

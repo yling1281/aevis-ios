@@ -110,3 +110,11 @@
 42-diary       -aevisDemo -aevisOpenTab=discover -aevisOpenDiary
 43-todo        -aevisDemo -aevisOpenTab=discover -aevisOpenTodo
 44-mc          -aevisDemo -aevisOpenTab=discover -aevisOpenMC
+
+# ⭐ 2026-10-06：用户协议门 + 真实生活 + ta 的小手机。
+#    ⚠️ 45 那条**故意只带 -aevisShowAgreement、不带 -aevisDemo** ——
+#       跳过分支会顺手把"已同意"写进 UserDefaults，带了就再也看不到协议页了。
+#       （所以名字里也写死"强制显示"，跟 01-onboarding 的 -aevisShowGate 一个路子。）
+45-agreement   -aevisShowAgreement
+46-reallife    -aevisDemo -aevisOpenTab=discover -aevisOpenRealLife
+47-herphone    -aevisDemo -aevisOpenTab=discover -aevisOpenHerPhone

@@ -50,7 +50,7 @@ struct ContactsView: View {
                 Button("删除", role: .destructive) { confirmDelete() }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
-                Text("TA 的人设、聊天记录、记忆和朋友圈都会一起删掉，不能撤销。")
+                Text("ta 的人设、聊天记录、记忆和朋友圈都会一起删掉，不能撤销。")
             }
         }
     }

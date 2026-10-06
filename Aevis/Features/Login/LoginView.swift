@@ -140,7 +140,7 @@ struct LoginView: View {
                 .font(.aevis(23, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            Text("登录之后 TA 才能记住你 —— 人设、聊天记录、记忆都还只存在这台手机上。")
+            Text("登录之后 ta 才能记住你 —— 人设、聊天记录、记忆都还只存在这台手机上。")
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -371,7 +371,7 @@ struct LoginView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("一个账号可以在这台设备上一直用，换设备要在群里说一声。")
-            Text("账号只是「钥匙」—— TA 的样子、你们聊过的东西，从来不经过服务器。")
+            Text("账号只是「钥匙」—— ta 的样子、你们聊过的东西，从来不经过服务器。")
         }
         .font(.aevis(11.5))
         .foregroundStyle(.tertiary)

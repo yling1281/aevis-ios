@@ -16,14 +16,16 @@ struct DiscoverView: View {
     @ObservedObject private var wallet = WalletStore.shared
     @ObservedObject private var diary = DiaryStore.shared
     @ObservedObject private var todo = TodoStore.shared
+    @ObservedObject private var herPhone = HerPhoneStore.shared
 
     @State private var showMusic = false
-    @State private var showDouyin = false
     @State private var showCouple = false
     @State private var showWallet = false
     @State private var showDiary = false
     @State private var showTodo = false
     @State private var showMC = false
+    @State private var showRealLife = false
+    @State private var showHerPhone = false
 
     var body: some View {
         NavigationStack {
@@ -58,8 +60,6 @@ struct DiscoverView: View {
                             showMC = true
                         }
                     }
-                    // ⚠️ 抖音**永远不显示**（用户 2026-09-28：「抖音关掉」）。
-                    //    抖音的代码没删：哪天想放开，把那段 entry 加回来即可。
                     card {
                         // ⭐ 2026-10-04：虚拟银行搬进发现页（以前只藏在聊天页加号里），
                         //    并且跟聊天记录一起进网盘备份。
@@ -71,6 +71,15 @@ struct DiscoverView: View {
                         }
                         entry("一起做的事", "checklist", todoLine) {
                             showTodo = true
+                        }
+                        // ⭐ 2026-10-06：真实生活（逛店 / 点外卖）。这一页的物流进度
+                        //    是**跟着时钟自己往前走**的，停在那儿就能看见它推进。
+                        entry("真实生活", "takeoutbag.and.cup.and.straw", realLifeLine) {
+                            showRealLife = true
+                        }
+                        // ⭐ 2026-10-06：ta 的小手机 —— 看 ta 装了哪些 App、刚才在干什么。
+                        entry("ta 的小手机", "iphone.gen3", herPhoneLine) {
+                            showHerPhone = true
                         }
                     }
                     // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
@@ -96,9 +105,6 @@ struct DiscoverView: View {
                 // CoupleSpaceView 自带 NavigationStack。
                 CoupleSpaceView()
             }
-            .sheet(isPresented: $showDouyin) {
-                DouyinBrowserView()
-            }
             .sheet(isPresented: $showWallet) {
                 WalletView()
             }
@@ -110,6 +116,15 @@ struct DiscoverView: View {
             }
             .sheet(isPresented: $showMC) {
                 MCView()
+            }
+            .sheet(isPresented: $showRealLife) {
+                // RealLifeView 自带 `.aevisScreen("真实生活")`（返回 + 关闭），
+                // 这里**别再套 NavigationStack**（套了会多一层壳）。
+                RealLifeView()
+            }
+            .sheet(isPresented: $showHerPhone) {
+                // HerPhoneView 自带 NavigationStack + 「关闭」，同样**别再套**。
+                HerPhoneView()
             }
             .onAppear {
                 applyLaunchOptions()
@@ -125,6 +140,8 @@ struct DiscoverView: View {
         if args.contains("-aevisOpenDiary") { showDiary = true }
         if args.contains("-aevisOpenTodo") { showTodo = true }
         if args.contains("-aevisOpenMC") { showMC = true }
+        if args.contains("-aevisOpenRealLife") { showRealLife = true }
+        if args.contains("-aevisOpenHerPhone") { showHerPhone = true }
         #endif
     }
 
@@ -140,7 +157,7 @@ struct DiscoverView: View {
     }
 
     private var musicLine: String {
-        player.current?.display ?? "搜歌、放歌，让她跟着一起听"
+        player.current?.display ?? "搜歌、放歌，让 ta 跟着一起听"
     }
 
     private var coupleLine: String {
@@ -162,6 +179,15 @@ struct DiscoverView: View {
         if todo.items.isEmpty { return "想一起做的事，都写在这儿" }
         if todo.openCount == 0 { return "清单上这些都做完啦" }
         return "还有 \(todo.openCount) 件等着一起做"
+    }
+
+    private var realLifeLine: String {
+        "点外卖、买东西，进度跟着时钟走"
+    }
+
+    private var herPhoneLine: String {
+        let count = herPhone.apps.count
+        return count == 0 ? "看 ta 的手机装了啥、刚才在干什么" : "看 ta 的手机，已经装了 \(count) 个 App"
     }
 
     // MARK: - 零件

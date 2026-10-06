@@ -25,9 +25,17 @@ struct WalletView: View {
     @State private var isRedPacket = false
     @State private var note: String?
 
+    // 虚拟银行 / 亲密付 / 代付的输入与提示（全是本页局部状态）
+    @State private var bankAmountText = ""
+    @State private var closePayMineLimitText = ""
+    @State private var closePayTaLimitText = ""
+    @State private var proxyAmountText = ""
+    @State private var proxyWho = "mine"
+    @State private var proxyNote: String?
+
     private var personaName: String {
         let name = personaStore.persona.name
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     var body: some View {
@@ -47,6 +55,10 @@ struct WalletView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 4)
                     }
+
+                    bankSection
+                    closePaySection
+                    proxyPaySection
 
                     statement
 
@@ -76,8 +88,8 @@ struct WalletView: View {
 
     // MARK: - 我的余额
     //
-    // ⚠️ #24（用户 2026-09-30）：钱包页**不再显示 TA 的余额** ——
-    //    看 TA 的钱包改成从聊天页右上角「TA 的资料」里点进去。
+    // ⚠️ #24（用户 2026-09-30）：钱包页**不再显示 ta 的余额** ——
+    //    看 ta 的钱包改成从聊天页右上角「ta 的资料」里点进去。
 
     private var balances: some View {
         balanceCard(title: "我的钱包", value: wallet.myBalance, mine: true)
@@ -206,7 +218,7 @@ struct WalletView: View {
     // ⭐ 2026-10-01 新增。用户要的「银行卡」那个感觉 —— 光有余额不够，
     //    得能看见**钱去哪儿了**。
     //
-    // ⚠️ 这里只列**我的收支**（`delta != 0`）：她收下我的转账、她自己的余额变多，
+    // ⚠️ 这里只列**我的收支**（`delta != 0`）：ta收下我的转账、ta自己的余额变多，
     //    都**不进这张表**。理由写在 `WalletStore.acceptIncoming` 上 ——
     //    流水讲的是"我这边进出了多少"，把别人的余额混进来只会越看越糊涂。
 
@@ -228,7 +240,7 @@ struct WalletView: View {
             .padding(.bottom, 4)
 
             if wallet.entries.isEmpty {
-                Text("还没有进出账。你给 TA 转一笔，或者等 TA 给你转 —— "
+                Text("还没有进出账。你给 ta 转一笔，或者等 ta 给你转 —— "
                      + "两边都是真的动余额。")
                     .font(.aevis(12.5))
                     .foregroundStyle(.secondary)
@@ -254,18 +266,22 @@ struct WalletView: View {
     }
 
     private func statementRow(_ entry: WalletStore.Entry) -> some View {
-        let income = WalletStore.isIncome(entry)
         return HStack(spacing: 10) {
-            Image(systemName: income ? "arrow.down.left" : "arrow.up.right")
+            Image(systemName: Self.entryIcon(entry))
                 .font(.aevis(12, weight: .medium))
-                .foregroundStyle(income ? Color.red : Color.secondary)
+                .foregroundStyle(Self.entryTint(entry))
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.note)
-                    .font(.aevis(13.5))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(entry.note)
+                        .font(.aevis(13.5))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let source = entry.source, !source.isEmpty {
+                        sourceBadge(source)
+                    }
+                }
                 Text(WalletStore.shortTime(entry.date))
                     .font(.aevis(11))
                     .foregroundStyle(.tertiary)
@@ -274,12 +290,404 @@ struct WalletView: View {
             Spacer(minLength: 8)
 
             // 进账用红色、出账用正文色 —— 微信零钱明细也是这个读法。
+            // ⚠️「ta的卡 / 共享金库」那几笔**不动我的余额**，用次级色区分，
+            //    免得把"+88（打到ta的卡）"误当成自己钱包涨了。
             Text(WalletStore.signedMoney(entry.delta))
                 .font(.aevisMono(13.5))
-                .foregroundStyle(income ? Color.red : Color.primary)
+                .foregroundStyle(Self.entryTint(entry))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
+    }
+
+    /// 流水行左边的小图标：ta自己挣的 / 共享金库的用「银行」，我的进出发用箭头。
+    private static func entryIcon(_ entry: WalletStore.Entry) -> String {
+        if entry.side == "her" || entry.side == "shared" { return "building.columns" }
+        return WalletStore.isIncome(entry) ? "arrow.down.left" : "arrow.up.right"
+    }
+
+    /// 流水金额的颜色：我的进账红、我的出账正文色；ta / 共享的一律次级色。
+    private static func entryTint(_ entry: WalletStore.Entry) -> Color {
+        if entry.side == "her" || entry.side == "shared" { return Color.secondary }
+        return WalletStore.isIncome(entry) ? Color.red : Color.primary
+    }
+
+    /// 来源小标签（"每日发放" / "工资" / "亲密付" / "代付" …）。
+    private func sourceBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.aevis(10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
+            )
+    }
+
+    // MARK: - 虚拟银行（每日发放）
+    //
+    // ⭐ 2026-10-05：老板要的「虚拟银行」—— 每天固定发一笔钱，金额他设，
+    //    可以打到ta的卡 / 打到我的卡 / 两张卡都发，还能进「家庭共享金库」。
+
+    private static let bankTargets = ["her", "me", "both"]
+
+    private func bankTargetLabel(_ target: String) -> String {
+        switch target {
+        case "me": return "打到我的卡"
+        case "both": return "两张都发"
+        default: return "打到\(personaName)的卡"
+        }
+    }
+
+    private var bankSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("虚拟银行 · 每日发放")
+                    .font(.aevis(13, weight: .medium))
+                Spacer(minLength: 8)
+                Toggle("", isOn: $wallet.bankEnabled)
+                    .labelsHidden()
+            }
+
+            Text("每天自动发一笔钱到你选的卡。只在本机模拟，不接真银行。")
+                .font(.aevis(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                Text("每日金额")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text("¥")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("88", text: $bankAmountText)
+                    .font(.aevis(15, weight: .medium))
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 96)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(Self.bankTargets, id: \.self) { target in
+                    Button {
+                        wallet.bankTarget = target
+                    } label: {
+                        Text(bankTargetLabel(target))
+                            .font(.aevis(12.5, weight: wallet.bankTarget == target ? .semibold : .regular))
+                            .foregroundStyle(wallet.bankTarget == target ? Color.primary : Color.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.primary.opacity(wallet.bankTarget == target ? 0.10 : 0))
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("家庭共享（发进共用金库）")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Toggle("", isOn: $wallet.bankShared)
+                    .labelsHidden()
+            }
+
+            if wallet.bankShared {
+                HStack(spacing: 8) {
+                    Text("共享金库余额")
+                        .font(.aevis(12))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(WalletStore.money(wallet.sharedBalance))
+                        .font(.aevisMono(13))
+                        .foregroundStyle(.primary)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: wallet.didGrantToday ? "checkmark.circle.fill" : "clock")
+                    .font(.aevis(12, weight: .medium))
+                    .foregroundStyle(wallet.didGrantToday ? Color.green : Color.secondary)
+                Text(wallet.didGrantToday ? "今天已经发过啦" : "今天还没发")
+                    .font(.aevis(12))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+            }
+        }
+        .padding(14)
+        .aevisGlass(cornerRadius: 18)
+        .onAppear {
+            if bankAmountText.isEmpty { bankAmountText = Self.shortMoney(wallet.bankAmount) }
+        }
+        .onChange(of: bankAmountText) { _, newValue in
+            let cleaned = newValue.replacingOccurrences(of: ",", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            if let value = Double(cleaned), value >= 0, value != wallet.bankAmount {
+                wallet.bankAmount = value
+            }
+        }
+    }
+
+    // MARK: - 亲密付（双向）
+
+    private static let closePayPeriods = ["month", "day"]
+
+    private func closePayProgress(used: Double, limit: Double) -> Double {
+        guard limit > 0 else { return 0 }
+        return min(max(used / limit, 0), 1)
+    }
+
+    /// 开关走自定义 Binding：打开时带上当前额度/周期**真正开通**，关闭就关。
+    private func closePayToggle(dir: WalletStore.ClosePayDirection,
+                                limitText: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                dir == .mine ? wallet.closePayMineEnabled : wallet.closePayTaEnabled
+            },
+            set: { on in
+                guard on else {
+                    wallet.closeClosePay(dir)
+                    return
+                }
+                let cleaned = limitText.replacingOccurrences(of: ",", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                let typed = Double(cleaned) ?? 0
+                let fallback = (dir == .mine) ? wallet.closePayMineLimit : wallet.closePayTaLimit
+                let period = (dir == .mine) ? wallet.closePayMinePeriod : wallet.closePayTaPeriod
+                wallet.openClosePay(dir, limit: typed > 0 ? typed : fallback, period: period)
+            }
+        )
+    }
+
+    /// 一组亲密付：标题 + 开关 +（开通时）额度 / 周期 / 本期进度。
+    private func closePayGroup(dir: WalletStore.ClosePayDirection,
+                               title: String,
+                               limitText: Binding<String>) -> some View {
+        let enabled = (dir == .mine) ? wallet.closePayMineEnabled : wallet.closePayTaEnabled
+        let limit = (dir == .mine) ? wallet.closePayMineLimit : wallet.closePayTaLimit
+        let used = (dir == .mine) ? wallet.closePayMineUsed : wallet.closePayTaUsed
+        let period = (dir == .mine) ? wallet.closePayMinePeriod : wallet.closePayTaPeriod
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.aevis(12.5, weight: .medium))
+                Spacer(minLength: 8)
+                Toggle("", isOn: closePayToggle(dir: dir, limitText: limitText.wrappedValue))
+                    .labelsHidden()
+            }
+
+            if enabled {
+                HStack(spacing: 6) {
+                    Text("额度")
+                        .font(.aevis(12))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text("¥")
+                        .font(.aevis(15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("2000", text: limitText)
+                        .font(.aevis(15, weight: .medium))
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 96)
+                }
+
+                HStack(spacing: 6) {
+                    ForEach(Self.closePayPeriods, id: \.self) { item in
+                        Button {
+                            setClosePayPeriod(dir, period: item)
+                        } label: {
+                            Text(item == "day" ? "每日" : "每月")
+                                .font(.aevis(12.5, weight: period == item ? .semibold : .regular))
+                                .foregroundStyle(period == item ? Color.primary : Color.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.primary.opacity(period == item ? 0.10 : 0))
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text("本期已用")
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text("\(WalletStore.money(used)) / \(WalletStore.money(limit))")
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: closePayProgress(used: used, limit: limit))
+                }
+            }
+        }
+    }
+
+    private func setClosePayPeriod(_ dir: WalletStore.ClosePayDirection, period: String) {
+        if dir == .mine {
+            wallet.closePayMinePeriod = period
+        } else {
+            wallet.closePayTaPeriod = period
+        }
+    }
+
+    private func applyClosePayLimit(_ text: String, to dir: WalletStore.ClosePayDirection) {
+        let cleaned = text.replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Double(cleaned), value > 0 else { return }
+        if dir == .mine {
+            if value != wallet.closePayMineLimit { wallet.closePayMineLimit = value }
+        } else if value != wallet.closePayTaLimit {
+            wallet.closePayTaLimit = value
+        }
+    }
+
+    private var closePaySection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("亲密付")
+                .font(.aevis(13, weight: .medium))
+
+            Text("开个额度，刷卡方花钱就从付款方的余额里扣；每期额度用完就等下一期。")
+                .font(.aevis(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            closePayGroup(dir: .mine,
+                          title: "我给\(Pronoun.current)开的（\(Pronoun.current)花、我付）",
+                          limitText: $closePayMineLimitText)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+
+            closePayGroup(dir: .ta,
+                          title: "\(Pronoun.current)给我开的（我花、\(Pronoun.current)付）",
+                          limitText: $closePayTaLimitText)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+        }
+        .padding(14)
+        .aevisGlass(cornerRadius: 18)
+        .onAppear {
+            // 进来先按周期检查一次 —— 免得界面上"本期已用"还停在上一期的数字。
+            wallet.resetClosePayPeriodIfNeeded()
+            if closePayMineLimitText.isEmpty {
+                closePayMineLimitText = Self.shortMoney(wallet.closePayMineLimit)
+            }
+            if closePayTaLimitText.isEmpty {
+                closePayTaLimitText = Self.shortMoney(wallet.closePayTaLimit)
+            }
+        }
+        .onChange(of: closePayMineLimitText) { _, newValue in
+            applyClosePayLimit(newValue, to: .mine)
+        }
+        .onChange(of: closePayTaLimitText) { _, newValue in
+            applyClosePayLimit(newValue, to: .ta)
+        }
+    }
+
+    // MARK: - 代付（双向）
+
+    private static let proxyWhoKeys = ["mine", "ta"]
+
+    private func proxyLabel(_ key: String) -> String {
+        key == "ta" ? "\(Pronoun.current)替我付" : "我替\(Pronoun.current)付"
+    }
+
+    private var proxyPaySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("代付")
+                .font(.aevis(13, weight: .medium))
+            Text("一次性，从付款方的余额扣，不占亲密付额度。")
+                .font(.aevis(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                ForEach(Self.proxyWhoKeys, id: \.self) { key in
+                    Button {
+                        proxyWho = key
+                    } label: {
+                        Text(proxyLabel(key))
+                            .font(.aevis(12.5, weight: proxyWho == key ? .semibold : .regular))
+                            .foregroundStyle(proxyWho == key ? Color.primary : Color.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.primary.opacity(proxyWho == key ? 0.10 : 0))
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text("¥")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("金额", text: $proxyAmountText)
+                    .font(.aevis(15, weight: .medium))
+                    .keyboardType(.decimalPad)
+                Spacer(minLength: 8)
+                Button {
+                    doProxyPay()
+                } label: {
+                    Text("代付")
+                        .font(.aevis(13.5, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .aevisGlass(cornerRadius: 12)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let proxyNote {
+                Text(proxyNote)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .aevisGlass(cornerRadius: 18)
+    }
+
+    private func doProxyPay() {
+        let cleaned = proxyAmountText.replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Double(cleaned), value > 0 else {
+            proxyNote = "先填个金额（比如 38）。"
+            return
+        }
+        let dir: WalletStore.ClosePayDirection = (proxyWho == "ta") ? .ta : .mine
+        let paid = wallet.proxyPay(dir, amount: value, reason: "")
+        guard paid > 0 else {
+            let left = (dir == .mine) ? wallet.myBalance : wallet.taBalance
+            let payer = (dir == .mine) ? "我" : Pronoun.current
+            proxyNote = "\(payer)的钱包不够 \(WalletStore.money(value))（剩 \(WalletStore.money(left))）。"
+            return
+        }
+        proxyNote = "已代付 \(WalletStore.money(paid))。"
+        proxyAmountText = ""
     }
 
     // MARK: - 动作
@@ -312,12 +720,12 @@ struct WalletView: View {
         let id = chat.appendTransfer(info)
 
         // ⭐ 转账**当场生效、当场收工**：钱已经从「我」这边扣掉、气泡也落地了。
-        //    「她收不收」是她的反应，跟转账本身是两件事 —— 让她想一下再定，
-        //    所以先回去（用户在聊天页等她的回话，跟微信一样自然）。
+        //    「ta收不收」是ta的反应，跟转账本身是两件事 —— 让ta想一下再定，
+        //    所以先回去（用户在聊天页等ta的回话，跟微信一样自然）。
         //
         // ⚠️ 以前这里是 `sleep(1.3s)` + `Double.random(in: 0..<1) < 0.85`：
-        //    那个"她在犹豫"是假的，而且**她的人设完全不参与** ——
-        //    你写「这是给你买药的钱」，她照样有 15% 概率给你退回来。
+        //    那个"ta在犹豫"是假的，而且**ta的人设完全不参与** ——
+        //    你写「这是给你买药的钱」，ta照样有 15% 概率给你退回来。
         dismiss()
 
         Task { @MainActor in
@@ -334,11 +742,11 @@ struct WalletView: View {
         }
     }
 
-    // MARK: - 她的决定（收 / 不收）
+    // MARK: - ta的决定（收 / 不收）
     //
-    // ⭐ 2026-10-01：让**她自己**看一眼再定，而不是掷骰子。
+    // ⭐ 2026-10-01：让**ta自己**看一眼再定，而不是掷骰子。
     //    用户这次要的整句话是「能让 AI **真的**给内置的虚拟银行卡打钱」——
-    //    「真的」两个字同样适用于"她怎么回应"，不只是余额有没有动。
+    //    「真的」两个字同样适用于"ta怎么回应"，不只是余额有没有动。
     //
     // ⚠️ 失败（没配 Key / 网络不通 / 输出看不懂）退回老办法。
     //    绝不能因为模型没答上，就让钱**卡在半路**（气泡一直挂着「待收款」）。
@@ -348,7 +756,7 @@ struct WalletView: View {
         var line: String
     }
 
-    /// 问她一句，让她决定收不收、顺带回一句话。
+    /// 问ta一句，让ta决定收不收、顺带回一句话。
     @MainActor
     private static func askHerAbout(_ amount: Double,
                                     note: String,
@@ -377,8 +785,8 @@ struct WalletView: View {
                 config: config,
                 systemPrompt: persona.systemPrompt,
                 history: [ChatMessage(role: .user, text: instruction)],
-                // 让她带着"纪念日 / 在一起多少天"看这件事 ——
-                // 纪念日当天的转账和普通日子，她的反应本来就该不一样。
+                // 让ta带着"纪念日 / 在一起多少天"看这件事 ——
+                // 纪念日当天的转账和普通日子，ta的反应本来就该不一样。
                 memory: CoupleStore.shared.injectedLines()
             ) {
                 collected += piece
@@ -388,12 +796,12 @@ struct WalletView: View {
             return rollDice()
         }
 
-        // ⭐ 先剥掉末尾的心情标记再解析她的答复 ——
-        //    不然标记会被当成"她想说的话"拼进那句里、露给用户。
+        // ⭐ 先剥掉末尾的心情标记再解析ta的答复 ——
+        //    不然标记会被当成"ta想说的话"拼进那句里、露给用户。
         return parseDecision(MoodStore.shared.consume(collected)) ?? rollDice()
     }
 
-    /// 认她给的答复。**宽容**一点 —— 她不一定会老老实实守格式。
+    /// 认ta给的答复。**宽容**一点 —— ta不一定会老老实实守格式。
     private static func parseDecision(_ raw: String) -> Decision? {
         let lines = raw.split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -424,11 +832,11 @@ struct WalletView: View {
         return Decision(accept: false, line: declineLines.randomElement()!)
     }
 
-    /// 她收下时随口回的那句。
+    /// ta收下时随口回的那句。
     private static let acceptLines = [
         "收到啦，谢谢～", "好呀，收下了", "谢谢宝贝！", "那我就不客气啦", "收到，爱你"
     ]
-    /// 她不肯收、把钱退回来时说的那句。
+    /// ta不肯收、把钱退回来时说的那句。
     private static let declineLines = [
         "这个就不收啦，心意领了", "不用啦，你自己留着花", "哎呀，这次先不要啦", "退给你啦，别破费"
     ]
@@ -514,7 +922,7 @@ struct TransferDetailSheet: View {
 
     private var personaName: String {
         let name = personaStore.persona.name
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     private var detailStatus: String {
@@ -556,7 +964,7 @@ struct TransferDetailSheet: View {
                     .foregroundStyle(.secondary)
 
                 // 别人转给我的、还没收 → 给个「收下」。
-                // ⚠️ 只能是**她的转账**：我自己转出去的没有"收下"这回事；
+                // ⚠️ 只能是**ta的转账**：我自己转出去的没有"收下"这回事；
                 //    已退回的也没有（钱早退回去了）。
                 if !isMine, !info.accepted, !info.declined {
                     Button {

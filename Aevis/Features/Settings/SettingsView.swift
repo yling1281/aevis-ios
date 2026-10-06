@@ -72,7 +72,7 @@ struct SettingsView: View {
                 Button("清空", role: .destructive) { chat.clear() }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("TA 会忘掉你们聊过的一切。这个操作不能撤销。")
+                Text("ta 会忘掉你们聊过的一切。这个操作不能撤销。")
             }
         }
     }
@@ -125,7 +125,7 @@ struct SettingsView: View {
             CardSection(id: "power", title: "能力",
                         // 「AI 权限」排在最前：它是这一组的总闸，
                         // 其余那些能力都归它管，放中间会让人以为只是并列的一项。
-                        keys: ["aitools", "companion", "baidupan", "music", "douyin",
+                        keys: ["aitools", "companion", "baidupan", "music",
                                "qqbot", "qq", "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
                         keys: ["account", "device", "pair", "share", "about"])
@@ -155,7 +155,6 @@ struct SettingsView: View {
         case "proactive": ProactiveSettingsCard()
         case "voice": VoiceSettingsCard()
         case "music": musicCard
-        case "douyin": DouyinCard()
         case "console": consoleCard
         case "model": modelCard
         case "search": searchCard
@@ -219,11 +218,11 @@ struct SettingsView: View {
         if folded.contains(id) { folded.remove(id) } else { folded.insert(id) }
     }
 
-    // MARK: - TA
+    // MARK: - ta
 
     private var personaCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cardTitle("TA")
+            cardTitle("ta")
 
             NavigationLink {
                 PersonaEditorView(isFirstRun: false)
@@ -823,7 +822,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("必应是默认。加了别的源之后，如果那个页面抓不出结果列表，\(Pronoun.current)会直接把正文读给你 —— 不会白跑一趟。")
+                Text("必应是默认，前一个引擎搜不到会自动换下一个兜底。你自己加的源排在最前，全都抓不出结果时，\(Pronoun.current)会把正文读给你 —— 不会白跑一趟。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1082,7 +1081,7 @@ struct SettingsView: View {
         Task { @MainActor in
             do {
                 let reply = try await LLMService.probe(config: config)
-                testResult = "连接正常，TA 说：「\(reply)」"
+                testResult = "连接正常，ta 说：「\(reply)」"
             } catch {
                 testResult = error.localizedDescription
             }

@@ -122,7 +122,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             // **两条通道都发**：
             // - 容器那条：签名里的应用组对得上时才有用（进程退出后还能翻历史）
             // - 环回那条：不依赖任何签名能力 —— 应用组对不上时全靠它
-            //   （症状就是「列表里有 Aevis 录屏，她却看不到屏幕」）
+            //   （症状就是「列表里有 Aevis 录屏，ta却看不到屏幕」）
             ScreenShareStore.shared.append(text)
             ExtensionLink.post(.entry(text))
             report(running: true, frames: snapshot.0, hits: snapshot.1)

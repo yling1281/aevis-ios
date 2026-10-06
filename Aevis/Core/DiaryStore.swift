@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 用户 2026-10-04 看完电脑版新界面之后说：「手机端也同步这些」——
 /// 日记就是其中一块。**两个人写在同一个本子里**，靠 `authorIsMe` 区分
-/// 「我写的 / TA 写的」。
+/// 「我写的 / ta 写的」。
 ///
 /// ⚠️ `date` **只取年月日** —— 跟 `Anniversary` 一个道理：
 ///    日记是按天翻的，时分秒没有意义，留着只会让「今天」这条排得乱七八糟。
@@ -16,7 +16,7 @@ struct DiaryEntry: Codable, Identifiable, Equatable {
     var body: String = ""
     /// 心情，一个短词或一个表情。可以不写。
     var mood: String?
-    /// true = 我写的；false = TA 写的。列表里据此标一下。
+    /// true = 我写的；false = ta 写的。列表里据此标一下。
     var authorIsMe: Bool = true
     /// 上锁的那几篇：列表里只露标题，正文要点开验证才看得到。
     ///

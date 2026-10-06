@@ -48,7 +48,7 @@ final class ScreenShareStore {
 
     // MARK: - 数据
 
-    /// 她「看到」的一条。
+    /// ta「看到」的一条。
     struct Entry: Codable {
         var text: String
         var at: Date

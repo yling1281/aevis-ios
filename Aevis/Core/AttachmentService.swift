@@ -17,7 +17,7 @@ import UIKit
 /// OCR 用系统的 **Vision**：离线、免费、不用额外接口，
 /// 而且中文识别质量比大多数第三方 API 好。
 /// 取出的文字会**直接放进输入框**，用户可以在后面接着写指令 ——
-/// 这样她收到的是「图片里的文字 + 你要我干什么」，而不是一张她看不见的图。
+/// 这样ta收到的是「图片里的文字 + 你要我干什么」，而不是一张ta看不见的图。
 enum AttachmentService {
 
     /// 单次附件的字数上限。太长会把上下文撑爆，而且模型也读不完。
@@ -278,7 +278,7 @@ enum AttachmentService {
     // MARK: - 组装
 
     /// 把附件内容包成一段可以直接放进输入框的文字。
-    /// 刻意用显眼的分隔，让她一眼看出哪部分是"看到的东西"、哪部分是要做的事。
+    /// 刻意用显眼的分隔，让ta一眼看出哪部分是"看到的东西"、哪部分是要做的事。
     static func composerBlock(_ text: String, source: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }

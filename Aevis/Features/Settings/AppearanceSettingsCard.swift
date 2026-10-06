@@ -293,7 +293,7 @@ struct AppearanceSettingsCard: View {
                 Spacer(minLength: 0)
             }
 
-            Text("会同时改变气泡、按钮、光晕背景和 TA 的默认颜色。")
+            Text("会同时改变气泡、按钮、光晕背景和 ta 的默认颜色。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -308,7 +308,7 @@ struct AppearanceSettingsCard: View {
                 }
             )) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("主题色跟着 TA 的头像走")
+                    Text("主题色跟着 ta 的头像走")
                         .font(.aevis(14))
                         .foregroundStyle(.primary)
                     Text(settings.dynamicAccent && settings.avatarTint == nil && PersonaStore.shared.avatarImage != nil

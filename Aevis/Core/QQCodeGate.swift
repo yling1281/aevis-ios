@@ -121,7 +121,7 @@ final class QQCodeGate {
         if let answer = QQBotCommands.reply(to: text) { return answer }
 
         guard let ticket = keywordArgument(in: text) else { return nil }
-        // 功能没开 = 不拦截，她照常聊天（免得没开的时候关键词变成一句固定回话）
+        // 功能没开 = 不拦截，ta照常聊天（免得没开的时候关键词变成一句固定回话）
         guard enabled else { return nil }
 
         guard !key.isEmpty else {
@@ -161,7 +161,7 @@ final class QQCodeGate {
     /// ## 关键行为（用户 2026-09-26 明确要的）
     /// 「@ 机器人的话，如果没有对指令，**就把指令发出来**」
     /// → 群里被 @ 到、但说的不是任何已知指令时，**兜底发指令列表**，
-    ///   而不是丢给她去闲聊。
+    ///   而不是丢给ta去闲聊。
     ///
     /// ⚠️ 这条兜底是**刻意的**：这个机器人现在是客服，不是群里的聊天搭子。
     /// 以后想让它既能当客服、又能在群里聊天，得加个开关 ——

@@ -4,10 +4,10 @@ import Foundation
 ///
 /// 这些东西 Aevis 自己拿不到 —— iOS 不让 App 后台读电量、读步数、读你现在在哪儿，
 /// 但**快捷指令可以**。所以它跑完之后用 `aevis://` 把结果发回来，存在这里，
-/// 她聊天的时候就知道「你现在在外面」「手机快没电了」。
+/// ta聊天的时候就知道「你现在在外面」「手机快没电了」。
 ///
 /// 每条都有保鲜期：位置和电量一小时后就不准了，日程可以管半天。
-/// 过期的不再喂给她 —— 不然她会拿着一周前的「你在公司」跟你说话。
+/// 过期的不再喂给ta —— 不然ta会拿着一周前的「你在公司」跟你说话。
 final class AmbientContext: ObservableObject {
 
     static let shared = AmbientContext()
@@ -45,7 +45,7 @@ final class AmbientContext: ObservableObject {
     ]
 
     @Published private(set) var entries: [Entry] = []
-    /// 最近一次收到的时间，界面上显示一下，让她知道这条是新的。
+    /// 最近一次收到的时间，界面上显示一下，让ta知道这条是新的。
     @Published var statusLine: String?
 
     private static let key = "aevis.ambientContext"
@@ -82,7 +82,7 @@ final class AmbientContext: ObservableObject {
         return "记下了\(Self.label(for: name))：\(value.prefix(24))"
     }
 
-    // MARK: - 给她
+    // MARK: - 给ta
 
     /// 还没过期的那些，拼成一行行给模型看。
     func digest() -> [String] {

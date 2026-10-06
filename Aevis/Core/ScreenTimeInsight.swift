@@ -11,7 +11,7 @@ import Foundation
 /// 1. 在「快捷指令」里做一个流程（自己看屏幕使用时间、手填、或用能取到的方式）
 /// 2. 最后加一步「打开 URL」，填：
 ///        `aevis://screentime?minutes=213&top=微信,抖音,浏览器`
-/// 3. 数据就到这儿了，她会一直记得，也能随口说出来
+/// 3. 数据就到这儿了，ta会一直记得，也能随口说出来
 ///
 /// 这条路能成立的关键，是 App 注册了 `aevis://` 这个 scheme，
 /// 并且实现了 `AevisBridge` 去接收 —— 没有那一步，快捷指令的输出**传不回来**
@@ -51,7 +51,7 @@ final class ScreenTimeInsight: ObservableObject {
     这个数据我们自己取不到 —— 它属于苹果的「家庭控制」，要单独的权限。
     做法是让**快捷指令**帮你取，最后加一步「打开 URL」填：
     aevis://screentime?minutes=213&top=微信,抖音
-    收到之后她会一直记得，你问她「我今天刷了多久手机」她能答上来。
+    收到之后\(Pronoun.current)会一直记得，你问\(Pronoun.current)「我今天刷了多久手机」\(Pronoun.current)能答上来。
     """
 
     // MARK: - 收数据
@@ -96,7 +96,7 @@ final class ScreenTimeInsight: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.key)
     }
 
-    // MARK: - 给她用
+    // MARK: - 给ta用
 
     /// 喂给模型的一段话。没有数据就返回空。
     func digest() -> String {

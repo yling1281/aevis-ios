@@ -23,11 +23,11 @@ import UIKit
 /// 1. **模糊放大的封面**当底子（歌是它的一部分，界面也是）
 /// 2. 中间一张**会慢慢转的唱片**，旁边搭一根唱针
 /// 3. **歌词**：当前那句大字，下一句小字
-/// 4. **两个人的头像**并排 —— 一起听的时候，你在左边、TA 在右边
+/// 4. **两个人的头像**并排 —— 一起听的时候，你在左边、ta 在右边
 ///
 /// 用户的原话：「模仿网易云的播放界面」「默认一起听，就是两个人的头像用那个」。
 ///
-/// 出厂就是**自动一起听**（`listenTogetherAutoStart`），但她不会自动念出来 ——
+/// 出厂就是**自动一起听**（`listenTogetherAutoStart`），但ta不会自动念出来 ——
 /// 歌在放，再叠一层人声就听不清了，想听哪句点小喇叭。
 struct PlayerView: View {
     @ObservedObject private var player = MusicPlayer.shared
@@ -47,6 +47,17 @@ struct PlayerView: View {
     ///    SwiftUI 只认最后一个，另一个会"点了没反应" —— 这是老坑，
     ///    靠着分开放才不用去写一层枚举来管。
     @State private var showChat = false
+
+    /// 当前皮肤。改动前这里整套配色是硬编码的深色，现在全部从它取。
+    ///
+    /// ⚠️ 用 `@State` 举着当前值（不每次从 `UserDefaults` 重读）——
+    ///    切换时先改这里、再写盘，视图立刻重绘。默认那套（深夜）的强调色是
+    ///    **实时**向 `AppSettings` 取的（见 `PlayerTheme.accent`），
+    ///    所以这里就算是快照，用户改全局主题色时它照样跟着变。
+    @State private var theme: PlayerTheme = PlayerTheme.current
+
+    /// 换皮肤那个小面板开没开。
+    @State private var showThemePicker = false
 
     private var persona: Persona { personaStore.persona }
 
@@ -90,14 +101,31 @@ struct PlayerView: View {
         .sheet(isPresented: $showSearch, onDismiss: { autoStartTogether() }) {
             MusicSearchSheet()
         }
-        .preferredColorScheme(.dark)
+        // 换皮肤。用系统那个 action sheet 就够了 —— 列一串预设、点一个立即生效，
+        // 不用自己搭 sheet，屏幕上也不多留一块常驻控件。
+        .confirmationDialog(
+            "播放器皮肤",
+            isPresented: $showThemePicker,
+            titleVisibility: .visible
+        ) {
+            ForEach(PlayerTheme.all) { item in
+                Button(item.id == theme.id ? "✓ \(item.name)" : item.name) {
+                    applyTheme(item)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(theme.tagline)
+        }
+        // 深色皮肤走 `.dark`、浅色皮肤（极简白 / 樱花）走 `.light`。
+        .preferredColorScheme(theme.scheme)
     }
 
     // MARK: - 底子：模糊封面
 
     private var backdrop: some View {
         ZStack {
-            Color.black
+            theme.background
 
             AsyncImage(url: player.current?.coverURL) { phase in
                 if case .success(let image) = phase {
@@ -110,15 +138,16 @@ struct PlayerView: View {
                 } else {
                     // 没封面时用主题色铺一层，仍然是那种「从封面里透出来的光」
                     LinearGradient(
-                        colors: [settings.accentColor.opacity(0.55), Color.black],
+                        colors: [theme.accent.opacity(0.55), theme.background],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 }
             }
 
-            // 压暗一层，保证白字压得住
-            Color.black.opacity(0.30)
+            // 压一层，保证字压得住。深色底上就是压暗、浅色底上就是提亮 ——
+            // 用底色本身来压，两种方向都自然。
+            theme.background.opacity(0.30)
         }
         .ignoresSafeArea()
     }
@@ -163,10 +192,10 @@ struct PlayerView: View {
                         Text("一起听")
                             .font(.aevis(11.5, weight: .medium))
                     }
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(theme.onBackground.opacity(0.85))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Capsule().fill(.white.opacity(0.14)))
+                    .background(Capsule().fill(theme.onBackground.opacity(0.14)))
                 }
 
                 HStack(spacing: 0) {
@@ -175,13 +204,27 @@ struct PlayerView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .font(.aevis(17, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(theme.onBackground.opacity(0.9))
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
                     Spacer(minLength: 8)
+
+                    // 换皮肤。放在右上这一排、**压得比别的控件淡**（0.55 不透明度），
+                    // 看一眼能发现、但不抢戏 —— 它是个「偶尔想起来才用」的入口。
+                    Button {
+                        BlackBox.tap("播放器 · 换皮肤")
+                        showThemePicker = true
+                    } label: {
+                        Image(systemName: "paintpalette")
+                            .font(.aevis(16, weight: .semibold))
+                            .foregroundStyle(theme.onBackground.opacity(0.55))
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
 
                     // 找歌。以前这块是个 `Color.clear` —— 只为了跟左边那个箭头等宽、
                     // 让歌名真的居中。现在正好拿它放放大镜：尺寸一样，居中不变，
@@ -192,7 +235,7 @@ struct PlayerView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.aevis(17, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(theme.onBackground.opacity(0.9))
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
@@ -203,17 +246,17 @@ struct PlayerView: View {
             if let track = player.current {
                 Text(track.title)
                     .font(.aevis(17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.onBackground)
                     .lineLimit(1)
 
                 Text(track.artist.isEmpty ? track.album : track.artist)
                     .font(.aevis(12.5))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(theme.onBackground.opacity(0.65))
                     .lineLimit(1)
             } else {
                 Text("还没在放歌")
                     .font(.aevis(17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.onBackground)
             }
         }
         .padding(.top, 6)
@@ -231,10 +274,10 @@ struct PlayerView: View {
         ZStack {
             ZStack {
                 Circle()
-                    .fill(.white.opacity(0.07))
+                    .fill(theme.primary.opacity(0.07))
 
                 Circle()
-                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(theme.primary.opacity(0.14), lineWidth: 1)
                     .padding(12)
 
                 coverLayer
@@ -253,7 +296,7 @@ struct PlayerView: View {
 
             // 唱针：在转就搭上去，暂停就抬起来
             Capsule()
-                .fill(.white.opacity(0.72))
+                .fill(theme.primary.opacity(0.72))
                 .frame(width: 6, height: discSize * 0.28)
                 .rotationEffect(.degrees(player.isPlaying ? 0 : -26), anchor: .top)
                 .offset(x: discSize * 0.28, y: -discSize * 0.40)
@@ -282,33 +325,38 @@ struct PlayerView: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    settings.accentColor.opacity(0.95),
-                    settings.accentColor.opacity(0.40)
+                    theme.accent.opacity(0.95),
+                    theme.accent.opacity(0.40)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             Image(systemName: "music.note")
                 .font(.aevis(46, weight: .light))
-                .foregroundStyle(.white.opacity(0.92))
+                // 深色皮肤压白、浅色皮肤压深，跟那张彩色的假封面拉开对比。
+                .foregroundStyle(
+                    theme.forcesDark
+                        ? Color.white.opacity(0.92)
+                        : theme.onBackground.opacity(0.85)
+                )
         }
     }
 
-    // MARK: - 歌词 + 她的话
+    // MARK: - 歌词 + ta的话
 
     private var lyricArea: some View {
         VStack(spacing: 11) {
             if let line = player.currentLyricLine {
                 Text(line)
                     .font(.aevis(21, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.lyricDone)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let next = player.nextLyricLine {
                     Text(next)
                         .font(.aevis(14))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.lyricWaiting)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -316,7 +364,7 @@ struct PlayerView: View {
             } else if player.current != nil {
                 Text(player.lyric.isEmpty ? "这首歌没有歌词" : "前奏…")
                     .font(.aevis(17, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(theme.onBackground.opacity(0.55))
             } else {
                 // 空界面上的这句话**能点** —— 它说的就是"去找一首"，
                 // 那就别让他再去找那个放大镜（右上角那个小图标不一定看得见）。
@@ -332,20 +380,20 @@ struct PlayerView: View {
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .foregroundStyle(.white.opacity(0.66))
+                    .foregroundStyle(theme.onBackground.opacity(0.66))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
 
-            // 她刚说的那句。**不自动念** —— 想听点小喇叭。
+            // ta刚说的那句。**不自动念** —— 想听点小喇叭。
             if let latest = together.herLines.first {
                 HStack(alignment: .top, spacing: 8) {
                     AevisAvatar(source: .ai, size: 22, seed: persona.avatarSeed)
 
                     Text(latest)
                         .font(.aevis(13.5))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(theme.onBackground.opacity(0.9))
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -354,7 +402,7 @@ struct PlayerView: View {
                     } label: {
                         Image(systemName: "speaker.wave.2")
                             .font(.aevis(12.5))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .foregroundStyle(theme.onBackground.opacity(0.75))
                     }
                     .buttonStyle(.plain)
                 }
@@ -362,7 +410,7 @@ struct PlayerView: View {
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.white.opacity(0.10))
+                        .fill(theme.onBackground.opacity(0.10))
                 )
             }
         }
@@ -372,24 +420,24 @@ struct PlayerView: View {
 
     // MARK: - 两个人的头像
 
-    /// 一起听开着才出现 —— 你在左、TA 在右。
+    /// 一起听开着才出现 —— 你在左、ta 在右。
     private var togetherRow: some View {
         HStack(spacing: 16) {
             avatarSlot(source: .me, title: "我")
             Image(systemName: "heart.fill")
                 .font(.aevis(13))
-                .foregroundStyle(.white.opacity(0.7))
-            avatarSlot(source: .ai, title: persona.name.isEmpty ? "TA" : persona.name)
+                .foregroundStyle(theme.onBackground.opacity(0.7))
+            avatarSlot(source: .ai, title: persona.name.isEmpty ? "ta" : persona.name)
         }
     }
 
     private func avatarSlot(source: AevisAvatar.Source, title: String) -> some View {
         VStack(spacing: 5) {
             AevisAvatar(source: source, size: 44, seed: persona.avatarSeed)
-                .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1.5))
+                .overlay(Circle().strokeBorder(theme.onBackground.opacity(0.35), lineWidth: 1.5))
             Text(title)
                 .font(.aevis(10.5))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(theme.onBackground.opacity(0.7))
                 .lineLimit(1)
         }
     }
@@ -409,7 +457,7 @@ struct PlayerView: View {
                 ),
                 in: 0...1
             )
-            .tint(.white.opacity(0.85))
+            .tint(theme.primary.opacity(0.85))
 
             HStack(spacing: 8) {
                 Text(Self.time(player.progress))
@@ -417,7 +465,7 @@ struct PlayerView: View {
                 Text(Self.time(player.duration))
             }
             .font(.aevisMono(10.5))
-            .foregroundStyle(.white.opacity(0.55))
+            .foregroundStyle(theme.onBackground.opacity(0.55))
         }
     }
 
@@ -434,9 +482,11 @@ struct PlayerView: View {
             } label: {
                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.aevis(26, weight: .medium))
-                    .foregroundStyle(.black.opacity(0.85))
+                    // 图标取**底色**：深色皮肤的主色是白 → 图标是深色，
+                    // 浅色皮肤的主色是近黑/玫粉 → 图标是浅色，两种都对得上。
+                    .foregroundStyle(theme.background.opacity(0.85))
                     .frame(width: 66, height: 66)
-                    .background(Circle().fill(.white.opacity(0.94)))
+                    .background(Circle().fill(theme.primary.opacity(0.94)))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -456,7 +506,7 @@ struct PlayerView: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.aevis(size, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(theme.onBackground.opacity(0.9))
                 .frame(width: 52, height: 52)
                 .contentShape(Rectangle())
         }
@@ -485,10 +535,10 @@ struct PlayerView: View {
                                 .font(.aevis(13, weight: .medium))
                                 .lineLimit(1)
                         }
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(theme.onBackground.opacity(0.92))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Capsule().fill(settings.accentColor.opacity(0.55)))
+                        .background(Capsule().fill(theme.accent.opacity(0.55)))
                     }
                     .buttonStyle(.plain)
 
@@ -499,10 +549,10 @@ struct PlayerView: View {
                             .font(.aevis(13, weight: .medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(theme.onBackground.opacity(0.9))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Capsule().fill(.white.opacity(0.14)))
+                            .background(Capsule().fill(theme.onBackground.opacity(0.14)))
                     }
                     .buttonStyle(.plain)
                     .disabled(together.thinking)
@@ -513,45 +563,45 @@ struct PlayerView: View {
                         Text("结束")
                             .font(.aevis(13))
                             .lineLimit(1)
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(theme.onBackground.opacity(0.65))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Capsule().fill(.white.opacity(0.08)))
+                            .background(Capsule().fill(theme.onBackground.opacity(0.08)))
                     }
                     .buttonStyle(.plain)
                 }
             } else {
-                // ⚠️ 这里原来是一个「同步听 / 她控制 / 一起听房间」的**形态选择器**。
+                // ⚠️ 这里原来是一个「同步听 / ta控制 / 一起听房间」的**形态选择器**。
                 //
                 //    2026-10-02 用户点名删掉：
-                //    「一点进去，不是有一个她控制，然后网易云一起听吗？那个就不要了」。
+                //    「一点进去，不是有一个ta控制，然后网易云一起听吗？那个就不要了」。
                 //
                 //    删得对 —— 那三个不是三种体验，是同一个体验的三个完成度：
                 //    「一起听房间」压根没接（界面上还写着"还没接"），
-                //    「她控制」的唯一实际效果是**让她整场不说话**。
+                //    「ta控制」的唯一实际效果是**让ta整场不说话**。
                 //    现在只剩一种，就没必要让他挑。这一句说明代替它。
                 Text("歌从这儿放，\(Pronoun.current)跟着一起听 —— 想切歌、暂停，直接跟\(Pronoun.current)说就行。")
                     .font(.aevis(11.5))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.onBackground.opacity(0.5))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Toggle(isOn: $settings.listenTogetherAutoStart) {
                     Text("放歌就一起听")
                         .font(.aevis(13))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(theme.onBackground.opacity(0.75))
                 }
-                .tint(settings.accentColor)
+                .tint(theme.accent)
 
                 Button {
                     startTogether()
                 } label: {
                     Text(settings.isConfigured ? "现在就开始一起听" : "要填了 API Key \(Pronoun.current)才会说话")
                         .font(.aevis(13, weight: .medium))
-                        .foregroundStyle(.white.opacity(settings.isConfigured ? 0.9 : 0.45))
+                        .foregroundStyle(theme.onBackground.opacity(settings.isConfigured ? 0.9 : 0.45))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 9)
-                        .background(Capsule().fill(.white.opacity(0.14)))
+                        .background(Capsule().fill(theme.onBackground.opacity(0.14)))
                 }
                 .buttonStyle(.plain)
                 .disabled(!settings.isConfigured)
@@ -560,7 +610,7 @@ struct PlayerView: View {
             if let status = together.statusLine {
                 Text(status)
                     .font(.aevis(11.5))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.onBackground.opacity(0.5))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -574,7 +624,7 @@ struct PlayerView: View {
 
     /// 打开播放器就顺手开始一起听 —— 用户要的「默认一起听」。
     ///
-    /// 两个前提缺一不可，否则她会一直报错或者干脆不说话：
+    /// 两个前提缺一不可，否则ta会一直报错或者干脆不说话：
     /// 开关开着、模型配好了。
     ///
     /// ⚠️ 以前还有第三道 `guard mode.isImplemented` —— 形态选择器删掉之后
@@ -596,20 +646,31 @@ struct PlayerView: View {
         )
     }
 
-    /// 给她的背景资料 —— **和聊天页同一套口径**（她那边有详细注释）。
+    /// 给ta的背景资料 —— **和聊天页同一套口径**（ta那边有详细注释）。
     ///
-    /// 以前这里只给长期记忆，于是"一起听"时她不知道你们的纪念日、
-    /// 不知道现在几点、在哪儿 —— 说话就比聊天页里那个她**笨一截**。
+    /// 以前这里只给长期记忆，于是"一起听"时ta不知道你们的纪念日、
+    /// 不知道现在几点、在哪儿 —— 说话就比聊天页里那个ta**笨一截**。
     /// 同一个人不该因为换了个页面就变得不认得你。
     private func backgroundKnowledge() -> [String] {
         var context = settings.memoryInjectEnabled ? MemoryStore.shared.injectedLines() : []
         // 情侣空间（在一起多少天 / 倒数日）**不挂记忆开关** ——
-        // 那是用户手填的硬事实，关掉记忆不等于让她忘了纪念日。
+        // 那是用户手填的硬事实，关掉记忆不等于让ta忘了纪念日。
         context.append(contentsOf: CoupleStore.shared.injectedLines())
         let screenTime = ScreenTimeInsight.shared.digest()
         if !screenTime.isEmpty { context.append(screenTime) }
         context.append(contentsOf: AmbientContext.shared.digest())
         return context
+    }
+
+    // MARK: - 皮肤
+
+    /// 换皮肤：先改本地状态（视图立刻重绘），再写盘（下次进来还是这套）。
+    ///
+    /// 顺序不能反 —— 先写盘的话，万一 `@State` 没更新，界面就停在旧皮肤上了。
+    private func applyTheme(_ newTheme: PlayerTheme) {
+        BlackBox.tap("播放器 · 换皮肤 · \(newTheme.name)")
+        theme = newTheme
+        PlayerTheme.set(newTheme)
     }
 
     // MARK: - 零件

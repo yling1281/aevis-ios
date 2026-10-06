@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 「陪伴」设置卡片：一起听、录屏陪伴、实时通话。
 ///
-/// 这三件事放一起，因为它们都是「她陪着你」的不同形态。
+/// 这三件事放一起，因为它们都是「ta陪着你」的不同形态。
 struct CompanionCard: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var together = ListenTogetherService.shared
@@ -37,7 +37,7 @@ struct CompanionCard: View {
                     title: "一起听",
                     detail: together.active
                         ? "进行中 · \(together.currentTrackTitle)"
-                        : (player.current?.display ?? "歌在这台手机上放，她跟着一起听")
+                        : (player.current?.display ?? "歌在这台手机上放，\(Pronoun.current)跟着一起听")
                 ) {
                     showPlayer = true
                 }
@@ -79,13 +79,13 @@ struct CompanionCard: View {
 
             rule
 
-            // ——— 她可以主动打给你 ———
+            // ——— ta可以主动打给你 ———
             //
             // 用户 2026-10-01：「不要让他束手束脚的，你要让他真的能动起来」。
-            // ⚠️ 和下面那张卡的「她趁你不在时打给你」（`callEnabled`）不是一回事：
-            //    那个是**通知**（你不在 App 里时收得到），这个是**她当场拨过来**。
+            // ⚠️ 和下面那张卡的「ta趁你不在时打给你」（`callEnabled`）不是一回事：
+            //    那个是**通知**（你不在 App 里时收得到），这个是**ta当场拨过来**。
             toggleRow(
-                "她可以主动打给你",
+                "\(Pronoun.current)可以主动打给你",
                 subtitle: "聊天聊到一半，\(Pronoun.current)可以自己拨过来 —— "
                     + "屏幕上方会弹一张来电卡，你点「接听」才真的接通。"
                     + "关掉之后，\(Pronoun.current)只能等你先开口要电话。",
@@ -94,14 +94,14 @@ struct CompanionCard: View {
 
             rule
 
-            // ——— 她的消息上灵动岛 ———
+            // ——— ta的消息上灵动岛 ———
             //
-            // 用户 2026-10-01：她回消息要弹到**灵动岛**上（＝老板要的"弹窗"）。
+            // 用户 2026-10-01：ta回消息要弹到**灵动岛**上（＝老板要的"弹窗"）。
             // ⚠️ 文案要把**代价**说清：挂机的时候灵动岛角落会一直有一个小标记。
-            //    另外：她正在聊天页里说话时不出声（人正看着，出声太吵），
+            //    另外：ta正在聊天页里说话时不出声（人正看着，出声太吵），
             //    只有你不在聊天页时才「展开 + 响一声」。
             toggleRow(
-                "她的消息上灵动岛",
+                "\(Pronoun.current)的消息上灵动岛",
                 subtitle: "\(Pronoun.current)说话时，灵动岛会展开、还会响一声（你不在聊天页时）。"
                     + "平时灵动岛角落会留一个不起眼的小标记，表示\(Pronoun.current)在 —— "
                     + "这是「一直挂着」的代价。关掉之后就完全不上岛。",
@@ -112,7 +112,7 @@ struct CompanionCard: View {
 
             // ——— 通话：多久算「你说完了」———
             //
-            // 用户报过：说完话只停一秒出头她就接了，像在抢话。
+            // 用户报过：说完话只停一秒出头ta就接了，像在抢话。
             // **这件事只有他本人体感最准，所以给三档让他自己定**，不替他选死。
             // 改的是 `ListenService` 的静音判句阈值。
             VStack(alignment: .leading, spacing: 8) {
@@ -133,7 +133,7 @@ struct CompanionCard: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("定太短她会抢话（你还没说完就接上了），太长你会觉得她不吭声。")
+                Text("定太短\(Pronoun.current)会抢话（你还没说完就接上了），太长你会觉得\(Pronoun.current)不吭声。")
                     .font(.aevis(11))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -7,7 +7,7 @@ import UIKit
 
 /// 「我的资料」—— 我的头像、我的名字。
 ///
-/// 和 TA 的设定**分开**：这是我的部分，改它不该动到她。
+/// 和 ta 的设定**分开**：这是我的部分，改它不该动到ta。
 /// 用户原话：「我的话也能改头像、改名称、改气泡。」
 struct MyProfileCard: View {
     @ObservedObject private var profile = ProfileStore.shared
@@ -82,7 +82,7 @@ struct MyProfileCard: View {
                 }
 
                 // 个性签名（用户 2026-09-28 要的）。
-                // 就是"我在 TA 朋友圈里"名字下面那句。
+                // 就是"我在 ta 朋友圈里"名字下面那句。
                 VStack(alignment: .leading, spacing: 7) {
                     Text("个性签名")
                         .font(.aevis(12.5))

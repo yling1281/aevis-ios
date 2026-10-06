@@ -20,18 +20,18 @@ import UIKit
 ///
 /// 能用的指令：
 /// ```
-/// ——— 让她做事 ———
-/// aevis://say?text=到点了该睡了          她主动发一条消息
-/// aevis://ask?text=我今天怎么样           把这句话发给她，她回
+/// ——— 让ta做事 ———
+/// aevis://say?text=到点了该睡了          ta主动发一条消息
+/// aevis://ask?text=我今天怎么样           把这句话发给ta，ta回
 /// aevis://note?text=今天量了体重62.5      直接记进长期记忆
-/// aevis://music?query=晴天                让她放这首歌
+/// aevis://music?query=晴天                让ta放这首歌
 /// aevis://call                           打开实时通话
 /// aevis://listen                         打开一起听
-/// aevis://daily                          让她看看今天过得怎么样
+/// aevis://daily                          让ta看看今天过得怎么样
 /// aevis://lock                           跑你设置好的那个「锁屏」快捷指令
 /// aevis://shortcut?name=回家开灯          跑任意一个快捷指令
 ///
-/// ——— 把外面的信息告诉她 ———
+/// ——— 把外面的信息告诉ta ———
 /// aevis://location?name=公司&lat=39.9&lon=116.4
 /// aevis://battery?level=57&charging=1
 /// aevis://focus?on=1
@@ -100,7 +100,7 @@ enum AevisBridge {
 
         switch command.host {
 
-        // ——— 让她说话 ———
+        // ——— 让ta说话 ———
 
         case "say":
             let text = command.first.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -124,7 +124,7 @@ enum AevisBridge {
             MemoryStore.shared.add(text, kind: .fact)
             return "记进长期记忆了。"
 
-        // ——— 让她做事 ———
+        // ——— 让ta做事 ———
 
         case "screentime":
             return ScreenTimeInsight.ingest(command.params)
@@ -268,7 +268,7 @@ enum AevisBridge {
 
     // MARK: - 放歌
 
-    /// 让她放一首歌。没登录就直接说清要先去登录，不装作在放。
+    /// 让ta放一首歌。没登录就直接说清要先去登录，不装作在放。
     @MainActor
     private static func playMusic(matching query: String) async {
         guard NeteaseClient.shared.isLoggedIn else {
@@ -292,21 +292,21 @@ enum AevisBridge {
 
     /// 界面上直接给用户抄的地址，省得他猜参数怎么写。
     static let examples: [(title: String, url: String, note: String)] = [
-        ("让她主动说句话", "aevis://say?text=到点了，该睡了",
+        ("让\(Pronoun.current)主动说句话", "aevis://say?text=到点了，该睡了",
          "快捷指令里最后一步加「打开 URL」，填这个"),
-        ("替我问问她", "aevis://ask?text=我今天怎么样",
-         "和上面不同：这句是「我说的」，她会回你"),
+        ("替我问问\(Pronoun.current)", "aevis://ask?text=我今天怎么样",
+         "和上面不同：这句是「我说的」，\(Pronoun.current)会回你"),
         ("记一件事", "aevis://note?text=今天量了体重 62.5",
-         "直接进长期记忆，她会一直记得"),
-        ("让她放首歌", "aevis://music?query=晴天",
+         "直接进长期记忆，\(Pronoun.current)会一直记得"),
+        ("让\(Pronoun.current)放首歌", "aevis://music?query=晴天",
          "需要先在「音乐」里登录网易云"),
-        ("让她看看今天", "aevis://daily",
-         "她会顺着你发过的信息说说今天"),
+        ("让\(Pronoun.current)看看今天", "aevis://daily",
+         "\(Pronoun.current)会顺着你发过的信息说说今天"),
         ("打开实时通话", "aevis://call", "直接进通话界面"),
         ("打开一起听", "aevis://listen", "直接进一起听"),
         ("锁屏", "aevis://lock", "需要先在下面填好「锁屏」快捷指令的名字"),
         ("跑任意快捷指令", "aevis://shortcut?name=回家开灯", "name 要和那个快捷指令完全一致"),
-        ("剪贴板里的东西也发给她", "aevis://paste?kind=health",
+        ("剪贴板里的东西也发给\(Pronoun.current)", "aevis://paste?kind=health",
          "快捷指令先「拷贝到剪贴板」，再打开这个；iOS 会问一次「允许粘贴」"),
         ("清掉外面来的信息", "aevis://clearcontext", "位置 / 电量 / 步数这些一并清空")
     ]

@@ -81,7 +81,7 @@ struct MomentsDecorSheet: View {
 
                     // ⚠️ 用户 2026-09-28：「装扮朋友圈是装扮对方的朋友圈，
                     //    就是对方的朋友圈里我是怎么样的」——
-                    //    所以除了 TA 的封面，还得能设置**我在 TA 朋友圈里的样子**。
+                    //    所以除了 ta 的封面，还得能设置**我在 ta 朋友圈里的样子**。
                     myLooks
 
                     if let note {
@@ -158,7 +158,7 @@ struct MomentsDecorSheet: View {
         }
     }
 
-    // MARK: - 我在 TA 朋友圈里的样子
+    // MARK: - 我在 ta 朋友圈里的样子
 
     private var myLooks: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -188,7 +188,7 @@ struct MomentsDecorSheet: View {
             Button("保存") {
                 profile.nickname = myName.trimmingCharacters(in: .whitespacesAndNewlines)
                 profile.signature = mySignature.trimmingCharacters(in: .whitespacesAndNewlines)
-                note = "我在 TA 朋友圈里的样子已经改好了。"
+                note = "我在 ta 朋友圈里的样子已经改好了。"
             }
             .font(.aevis(14))
             .foregroundStyle(settings.accentColor)
@@ -222,7 +222,7 @@ struct MomentsDecorSheet: View {
 
     private var personaName: String {
         let name = PersonaStore.shared.persona.name
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     // MARK: - 动作

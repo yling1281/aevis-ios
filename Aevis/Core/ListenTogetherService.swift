@@ -6,26 +6,26 @@ import SwiftUI
 ///
 /// ## 形态选择器已经删掉了（2026-10-02 用户拍板）
 ///
-/// 用户原话：「一点进去，不是有一个她控制，然后网易云一起听吗？那个就不要了」
-/// —— 说的是播放器里那个「同步听 / 她控制 / 一起听房间」的分段控件。
+/// 用户原话：「一点进去，不是有一个ta控制，然后网易云一起听吗？那个就不要了」
+/// —— 说的是播放器里那个「同步听 / ta控制 / 一起听房间」的分段控件。
 ///
 /// 删掉是对的：那三个形态本来就不是三种体验，而是**同一个体验的三个完成度**
-/// （「一起听房间」压根没接，界面上还写着"还没接"；「她控制」只是把她的歌词
+/// （「一起听房间」压根没接，界面上还写着"还没接"；「ta控制」只是把ta的歌词
 /// 碎碎念关掉）。真正该有的一直只有一种：
 ///
-/// > **歌在这儿放，她跟着听、跟着说，而且她想切歌就切。**
+/// > **歌在这儿放，ta跟着听、跟着说，而且ta想切歌就切。**
 ///
 /// 所以 `ListenTogetherMode` 这个枚举、`AppSettings.listenTogetherMode` 这个设置
 /// **全部删掉**。留着它们只会有一种下场：某天有人在某个角落里又把它读出来，
-/// 于是她莫名其妙不说话了（旧的 `herControl` 分支就是这么写的 ——
-/// `guard mode == .sync else { return }`，选中"她控制"就等于让她闭嘴）。
+/// 于是ta莫名其妙不说话了（旧的 `herControl` 分支就是这么写的 ——
+/// `guard mode == .sync else { return }`，选中"ta控制"就等于让ta闭嘴）。
 ///
 /// ## 为什么能真的"一起"
 /// 播放器里已经算出了**当前唱到哪一句**（`MusicPlayer.currentLyricLine`），
-/// 所以她知道你听到哪儿了 —— 她的话是接着这一句说的，不是随便说。
+/// 所以ta知道你听到哪儿了 —— ta的话是接着这一句说的，不是随便说。
 ///
-/// 刻意不自动念出来：音乐正在放，她再说话会把人声盖掉。
-/// 所以她的反应先落在面板上，想听就点旁边的小喇叭。
+/// 刻意不自动念出来：音乐正在放，ta再说话会把人声盖掉。
+/// 所以ta的反应先落在面板上，想听就点旁边的小喇叭。
 ///
 /// ⚠️ `@MainActor`（2026-09-26 补的）：它读 `MusicPlayer.shared` 的 `@Published`
 /// 和 `current` / `currentLyricLine`，而 `MusicPlayer` 现在是 `@MainActor` 的 ——
@@ -37,7 +37,7 @@ final class ListenTogetherService: ObservableObject {
     static let shared = ListenTogetherService()
 
     @Published private(set) var active = false
-    /// 她的实时反应（新的在前）
+    /// ta的实时反应（新的在前）
     @Published private(set) var herLines: [String] = []
     @Published private(set) var thinking = false
     @Published var statusLine: String?
@@ -72,7 +72,7 @@ final class ListenTogetherService: ObservableObject {
         lastSpokeAt = Date.distantPast
         active = true
         statusLine = nil
-        // 一起听默认打开外放语音？不 —— 音乐在放，让她念会盖住歌。
+        // 一起听默认打开外放语音？不 —— 音乐在放，让ta念会盖住歌。
         observeLyrics()
     }
 
@@ -87,7 +87,7 @@ final class ListenTogetherService: ObservableObject {
         chatLines = []
     }
 
-    /// 她说的话要不要顺带念出来。只有用户主动点才念。
+    /// ta说的话要不要顺带念出来。只有用户主动点才念。
     func speak(_ line: String) {
         SpeechService.shared.speak(
             line,
@@ -118,20 +118,20 @@ final class ListenTogetherService: ObservableObject {
         guard trimmed.count >= 2 else { return }
 
         lyricCount += 1
-        // 形态选择器删掉之后这里没有分支了 —— 她**永远**参与。
+        // 形态选择器删掉之后这里没有分支了 —— ta**永远**参与。
         // （旧代码这里是 `guard mode == .sync else { return }`，
-        //   选中「她控制」就等于让她整场闭嘴。那个坑跟着枚举一起删了。）
+        //   选中「ta控制」就等于让ta整场闭嘴。那个坑跟着枚举一起删了。）
         guard lyricCount % max(1, linesPerComment) == 0 else { return }
         guard Date().timeIntervalSince(lastSpokeAt) >= minimumGap else { return }
 
         Task { await react(to: trimmed) }
     }
 
-    /// 她接着这一句歌词说一句。
+    /// ta接着这一句歌词说一句。
     private func react(to lyric: String) async {
         guard !thinking else { return }
         guard !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            statusLine = "还没填 API Key，她没法跟着说。"
+            statusLine = "还没填 API Key，\(Pronoun.current)没法跟着说。"
             return
         }
 
@@ -163,16 +163,16 @@ final class ListenTogetherService: ObservableObject {
                 history: [ChatMessage(role: .user, text: instruction)],
                 memory: memory,
                 // ⚠️ **这句以前是没有的**，是一处"假装完成"的温床：
-                //    她对着一句歌词说「给你换首安静的」，听起来像做了，
+                //    ta对着一句歌词说「给你换首安静的」，听起来像做了，
                 //    其实手上一个工具都没有，什么都没发生。
-                //    用户点名要的就是"给她切歌的权限"，所以这里必须给全。
+                //    用户点名要的就是"给ta切歌的权限"，所以这里必须给全。
                 tools: DeviceTools.all(),
                 onToolActivity: { [weak self] title in
                     Task { @MainActor in self?.statusLine = title }
                 }
             ) {
-                // 她开始说话了，把「她翻了翻网易云…」那行收掉 ——
-                // 不然工具提示会压在她的话上面。
+                // ta开始说话了，把「ta翻了翻网易云…」那行收掉 ——
+                // 不然工具提示会压在ta的话上面。
                 if collected.isEmpty, statusLine != nil, piece.isEmpty == false {
                     statusLine = nil
                 }
@@ -180,11 +180,11 @@ final class ListenTogetherService: ObservableObject {
                 if collected.count > 200 { break }
             }
         } catch {
-            statusLine = "她这次没接上话：\(error.localizedDescription)"
+            statusLine = "\(Pronoun.current)这次没接上话：\(error.localizedDescription)"
             return
         }
 
-        // ⭐ 她跟着歌词说的这句要显示在面板上（还可能被点小喇叭念出来）——
+        // ⭐ ta跟着歌词说的这句要显示在面板上（还可能被点小喇叭念出来）——
         //    先剥掉末尾的心情标记，跟聊天页一个口径（顺便把心情落库）。
         let text = MoodStore.shared.consume(collected)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -194,7 +194,7 @@ final class ListenTogetherService: ObservableObject {
         statusLine = nil
     }
 
-    /// 手动让她说一句（不想等歌词的时候）。
+    /// 手动让ta说一句（不想等歌词的时候）。
     func pokeHer() async {
         let line = MusicPlayer.shared.currentLyricLine ?? "（还没到歌词）"
         await react(to: line)
@@ -206,7 +206,7 @@ final class ListenTogetherService: ObservableObject {
     ///
     /// 用户原话：「我们不能两个人互相打字聊天，要加一个输入框，能互相打字聊天的」。
     ///
-    /// 为什么单独一份、不直接读 `ChatStore`：她跟着歌词插的话（`herLines`）
+    /// 为什么单独一份、不直接读 `ChatStore`：ta跟着歌词插的话（`herLines`）
     /// 是**播放器里才看得到**的碎碎念，不该塞进正式聊天记录；而这里打出来的字
     /// 是正经对话，要两边都留（见 `send` 里那段镜像）。
     struct Line: Identifiable, Equatable {
@@ -218,20 +218,20 @@ final class ListenTogetherService: ObservableObject {
     @Published private(set) var chatLines: [Line] = []
     @Published private(set) var replying = false
 
-    /// 打一句话给她，等她回。
+    /// 打一句话给ta，等ta回。
     ///
     /// ## 三条口径
     /// 1. **两边都落进正式聊天记录**（`ChatStore`）—— 关掉播放器之后这段
-    ///    不该凭空消失。她下次在聊天页里也该记得刚才聊过什么。
+    ///    不该凭空消失。ta下次在聊天页里也该记得刚才聊过什么。
     ///    这跟 QQ 机器人那条是同一条规矩（见 `QQBotService.replyText`）。
-    /// 2. **工具照给**（`DeviceTools.all()`）—— 她说"给你放首安静的"、
+    /// 2. **工具照给**（`DeviceTools.all()`）—— ta说"给你放首安静的"、
     ///    "现在几点了"，在这儿也得能做。少给一份工具就是"假装完成"的温床。
-    /// 3. **带上"正在听什么"**。不然她不知道自己在什么场景里说话，
+    /// 3. **带上"正在听什么"**。不然ta不知道自己在什么场景里说话，
     ///    回出来的话跟歌完全没关系，那就不叫一起听了。
     func send(_ raw: String) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        // 上一条还在吐字 —— 不排队，直接说要等（排队会把她的话憋成两段）
+        // 上一条还在吐字 —— 不排队，直接说要等（排队会把ta的话憋成两段）
         guard !replying else { return }
 
         // 先把"之前聊过什么"抓下来，再把自己这句放进去 —— 顺序反了
@@ -243,14 +243,14 @@ final class ListenTogetherService: ObservableObject {
         trimChat()
 
         guard !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            statusLine = "还没填 API Key，她没法回你。"
+            statusLine = "还没填 API Key，\(Pronoun.current)没法回你。"
             return
         }
 
         replying = true
         defer { replying = false }
 
-        // 先占一条空位，她的字**流式**长在这条上 —— 不然要等整段生成完才出现
+        // 先占一条空位，ta的字**流式**长在这条上 —— 不然要等整段生成完才出现
         let placeholder = Line(mine: false, text: "")
         chatLines.append(placeholder)
         let slot = chatLines.count - 1
@@ -277,7 +277,7 @@ final class ListenTogetherService: ObservableObject {
                 history: history,
                 memory: memory,
                 tools: DeviceTools.all(),
-                // 她调工具的那几秒界面上不能是死的 —— 和聊天页同一条口径。
+                // ta调工具的那几秒界面上不能是死的 —— 和聊天页同一条口径。
                 onToolActivity: { [weak self] title in
                     Task { @MainActor in self?.statusLine = title }
                 }
@@ -290,11 +290,11 @@ final class ListenTogetherService: ObservableObject {
             }
         } catch {
             if chatLines.indices.contains(slot) { chatLines.remove(at: slot) }
-            statusLine = "她这次没接上话：\(error.localizedDescription)"
+            statusLine = "\(Pronoun.current)这次没接上话：\(error.localizedDescription)"
             return
         }
 
-        // ⭐ 收尾剥掉末尾的心情标记 —— 跟她打字的这条也要镜像进正式聊天记录，
+        // ⭐ 收尾剥掉末尾的心情标记 —— 跟ta打字的这条也要镜像进正式聊天记录，
         //    不能把标记带进去（顺带把心情落库，跟主链路一致）。
         let reply = MoodStore.shared.consume(collected)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -317,9 +317,9 @@ final class ListenTogetherService: ObservableObject {
     }
 
     #if DEBUG
-    /// 截图自检用：假装一起听开着，而且她已经说过两句。
+    /// 截图自检用：假装一起听开着，而且ta已经说过两句。
     ///
-    /// 真机上「两个人的头像」那一行要等她真的开口（得有 API Key）才出现，
+    /// 真机上「两个人的头像」那一行要等ta真的开口（得有 API Key）才出现，
     /// 模拟器里永远等不到 —— 那就截不到用户点名要看的那一块。
     /// **只在 Debug 生效。**
     func seedDemo() {

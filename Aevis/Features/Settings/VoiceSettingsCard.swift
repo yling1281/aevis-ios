@@ -15,7 +15,7 @@ struct VoiceSettingsCard: View {
             toggleRow("回复后直接念出来", isOn: $settings.speakerEnabled)
             rule
 
-            // ⭐ 语音消息（2026-09-30）：除了文字，她再发一条语音条（点一下播放）。
+            // ⭐ 语音消息（2026-09-30）：除了文字，ta再发一条语音条（点一下播放）。
             toggleRow("回复也发一条语音消息", isOn: $settings.voiceMessageEnabled)
             rule
 
@@ -56,7 +56,7 @@ struct VoiceSettingsCard: View {
             }
             Slider(value: $settings.speechRate, in: 0.3...0.7)
 
-            Text("免费、离线、不花钱。想更好听：设置 → 辅助功能 → 朗读内容 → 声音 → 中文，下载「增强」或「高级」音色，下完「TA 的设定」里的音色列表会多出来。")
+            Text("免费、离线、不花钱。想更好听：设置 → 辅助功能 → 朗读内容 → 声音 → 中文，下载「增强」或「高级」音色，下完「ta 的设定」里的音色列表会多出来。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -156,7 +156,7 @@ struct VoiceSettingsCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text("走的是 OpenAI 兼容的 /audio/speech。地址和 Key 留空时会自动沿用上面「模型接入」里那套，大多数中转站不用重复填。外接失败会自动退回系统音色，不会让 TA 突然哑掉。")
+                Text("走的是 OpenAI 兼容的 /audio/speech。地址和 Key 留空时会自动沿用上面「模型接入」里那套，大多数中转站不用重复填。外接失败会自动退回系统音色，不会让 ta 突然哑掉。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

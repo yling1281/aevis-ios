@@ -63,7 +63,7 @@ struct MeView: View {
                             route = SettingsRoute(focus: "qqbot")
                         }
                         // 「AI 权限」放这一组，而且**不藏在「更多设置」里** ——
-                        // 用户要的就是一句话能关掉她的手脚，藏起来等于没有。
+                        // 用户要的就是一句话能关掉ta的手脚，藏起来等于没有。
                         entry("AI 权限", "lock.shield", aiToolsLine) {
                             route = SettingsRoute(focus: "aitools")
                         }
@@ -225,11 +225,11 @@ struct MeView: View {
         return account.statusLine
     }
 
-    /// 「AI 权限」那一行 —— 一眼看出现在她能不能动手、关了几类。
+    /// 「AI 权限」那一行 —— 一眼看出现在ta能不能动手、关了几类。
     private var aiToolsLine: String {
-        guard settings.aiToolsEnabled else { return "已关掉，她只剩聊天" }
+        guard settings.aiToolsEnabled else { return "已关掉，\(Pronoun.current)只剩聊天" }
         let off = settings.disabledToolCategories.count
-        return off == 0 ? "全部开着，聊天以外她都能动手" : "关掉了 \(off) 类"
+        return off == 0 ? "全部开着，聊天以外\(Pronoun.current)都能动手" : "关掉了 \(off) 类"
     }
 
     // MARK: - 零件
@@ -309,7 +309,7 @@ struct MeView: View {
                         Text("更多设置")
                             .font(.aevis(15.5, weight: .medium))
                             .foregroundStyle(.primary)
-                        Text(showMore ? "点一下收起来" : "人设、音色、气泡、表情、音乐、抖音…")
+                        Text(showMore ? "点一下收起来" : "人设、音色、气泡、表情、音乐…")
                             .font(.aevis(12))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -329,7 +329,7 @@ struct MeView: View {
 
             if showMore {
                 divider
-                entry("TA 的人设", "person.text.rectangle", "名字、性别、性格、说话方式") {
+                entry("ta 的人设", "person.text.rectangle", "名字、性别、性格、说话方式") {
                     route = SettingsRoute(focus: "persona")
                 }
                 divider
@@ -337,7 +337,7 @@ struct MeView: View {
                     route = SettingsRoute(focus: "voice")
                 }
                 divider
-                entry("主动消息", "bell.badge", "她什么时候主动找你") {
+                entry("主动消息", "bell.badge", "\(Pronoun.current)什么时候主动找你") {
                     route = SettingsRoute(focus: "proactive")
                 }
                 divider
@@ -349,7 +349,7 @@ struct MeView: View {
                     route = SettingsRoute(focus: "bubbles")
                 }
                 divider
-                entry("表情", "face.smiling", "她发消息时带的表情") {
+                entry("表情", "face.smiling", "\(Pronoun.current)发消息时带的表情") {
                     route = SettingsRoute(focus: "emoji")
                 }
                 divider
@@ -357,7 +357,7 @@ struct MeView: View {
                     route = SettingsRoute(focus: "chat")
                 }
                 divider
-                entry("联网搜索", "magnifyingglass", "让她自己上网查") {
+                entry("联网搜索", "magnifyingglass", "让\(Pronoun.current)自己上网查") {
                     route = SettingsRoute(focus: "search")
                 }
                 if Experimental.enabled {
@@ -365,10 +365,6 @@ struct MeView: View {
                     entry("音乐", "music.note", "网易云登录、搜歌") {
                         route = SettingsRoute(focus: "music")
                     }
-                }
-                divider
-                entry("抖音", "play.rectangle", "刷视频、点赞") {
-                    route = SettingsRoute(focus: "douyin")
                 }
                 divider
                 entry("QQ 桥接", "message", "接上你自己的 QQ") {
@@ -379,11 +375,11 @@ struct MeView: View {
                     route = SettingsRoute(focus: "system")
                 }
                 divider
-                entry("MCP 外接工具", "puzzlepiece.extension", "接外面的工具给她用") {
+                entry("MCP 外接工具", "puzzlepiece.extension", "接外面的工具给\(Pronoun.current)用") {
                     route = SettingsRoute(focus: "mcp")
                 }
                 divider
-                entry("控制台", "terminal", "她刚才做了什么") {
+                entry("控制台", "terminal", "\(Pronoun.current)刚才做了什么") {
                     route = SettingsRoute(focus: "console")
                 }
                 divider

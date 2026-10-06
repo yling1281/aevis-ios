@@ -3,7 +3,7 @@ import SwiftUI
 /// 「气泡」设置卡片 —— **两侧各改各的**。
 ///
 /// 用户原话：「AI 的气泡也要改」「对方的气泡也能归我改」。
-/// 所以这里不是一个全局气泡风格，而是「我发的」和「TA 发的」两套，
+/// 所以这里不是一个全局气泡风格，而是「我发的」和「ta 发的」两套，
 /// 样式、颜色、圆角都能分开调，下面还有实时预览。
 struct BubbleSettingsCard: View {
     @ObservedObject private var settings = AppSettings.shared
@@ -15,12 +15,12 @@ struct BubbleSettingsCard: View {
             section(heading: "我发的", look: $settings.myBubble, isMine: true)
             rule
 
-            section(heading: "TA 发的", look: $settings.aiBubble, isMine: false)
+            section(heading: "ta 发的", look: $settings.aiBubble, isMine: false)
             rule
 
             VStack(alignment: .leading, spacing: 0) {
                 toggleRow("显示我的头像", subtitle: "关掉之后只有气泡，更干净", isOn: $settings.showMyAvatar)
-                toggleRow("显示 TA 的头像", subtitle: "关掉之后 TA 的话也不带头像", isOn: $settings.showAiAvatar)
+                toggleRow("显示 ta 的头像", subtitle: "关掉之后 ta 的话也不带头像", isOn: $settings.showAiAvatar)
             }
         }
         .aevisGlass(cornerRadius: 20)

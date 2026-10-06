@@ -13,8 +13,8 @@ struct LLMConfig {
     var model: String
     /// 推理预算。不支持的接口会自动降级重试。
     ///
-    /// ⚠️ 默认 **`.medium`**（2026-10-05 起）：让她「先想再答」是这次改版的
-    ///    核心 —— 关闭时她回得最快但最容易张口就来。不支持的接口会自动降级。
+    /// ⚠️ 默认 **`.medium`**（2026-10-05 起）：让ta「先想再答」是这次改版的
+    ///    核心 —— 关闭时ta回得最快但最容易张口就来。不支持的接口会自动降级。
     var reasoning: ReasoningBudget = .medium
     /// 每次带多少条历史。
     var contextLimit: Int = 40
@@ -101,7 +101,7 @@ enum EmojiFrequency: String, CaseIterable, Codable {
 enum ImessagePalette {
     /// iMessage「我」这一侧的气泡蓝。
     static let blue = Color(red: 10/255, green: 132/255, blue: 255/255)
-    /// iMessage「TA」那一侧的浅灰底。用 .primary 的半透明，深浅色都稳。
+    /// iMessage「ta」那一侧的浅灰底。用 .primary 的半透明，深浅色都稳。
     static let incoming = Color.primary.opacity(0.10)
 }
 
@@ -289,7 +289,7 @@ enum GlassStyle: String, CaseIterable, Identifiable {
 
     var explanation: String {
         switch self {
-        case .standard: return "系统默认的液态玻璃"
+        case .standard: return "iOS 26 是真液态玻璃，iOS 18 是加厚毛玻璃"
         case .clear: return "更透更亮，背景看得更清楚"
         case .frosted: return "更实的模糊，字最清楚"
         case .off: return "不要玻璃，用纯色卡片"
@@ -393,12 +393,12 @@ final class AppSettings: ObservableObject {
         static let randomEnabled = "aevis.randomEnabled"
         static let randomPerDay = "aevis.randomPerDay"
         static let proactiveLines = "aevis.proactiveLines"
-        /// 「她趁你不在时打给你」—— 一条带「接听」按钮的本地通知。默认关。
+        /// 「ta趁你不在时打给你」—— 一条带「接听」按钮的本地通知。默认关。
         static let callEnabled = "aevis.callEnabled"
         static let callProactive = "aevis.callProactive"
         /// 通话时用苹果那套系统界面（灵动岛 / 锁屏上那张通话卡）。默认开。
         static let systemCallUI = "aevis.systemCallUI"
-        /// 她的消息上**灵动岛**（Live Activity）。默认开。
+        /// ta的消息上**灵动岛**（Live Activity）。默认开。
         static let liveIsland = "aevis.liveIsland"
         static let barkEnabled = "aevis.barkEnabled"
         static let barkURL = "aevis.barkURL"
@@ -474,7 +474,7 @@ final class AppSettings: ObservableObject {
         /// 授权时绑的那个账号（服务器给的就是打码邮箱），只用来显示。
         static let deviceAuthorizedAccount = "aevis.device.authorizedAccount"
         /// 通话时「说完一句」要等多久（秒）。
-        /// **这个值直接决定她会不会抢话** —— 出厂 2.5 秒，设置里能调（1.5 / 2.5 / 3.5）。
+        /// **这个值直接决定ta会不会抢话** —— 出厂 2.5 秒，设置里能调（1.5 / 2.5 / 3.5）。
         static let callSilenceSeconds = "aevis.call.silenceSeconds"
         static let llmKeychain = "openai.apiKey"
         static let ttsKeychain = "tts.apiKey"
@@ -571,7 +571,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(reasoningBudget.rawValue, forKey: Key.reasoningBudget) }
     }
 
-    /// 每次带多少条历史给模型。带太多会又慢又贵，太少她会失忆。
+    /// 每次带多少条历史给模型。带太多会又慢又贵，太少ta会失忆。
     @Published var contextLimit: Int {
         didSet { UserDefaults.standard.set(contextLimit, forKey: Key.contextLimit) }
     }
@@ -736,7 +736,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(speakerEnabled, forKey: Key.speakerEnabled) }
     }
 
-    /// ⭐ 她除了文字，再发一条**语音消息**（微信那种语音条，点一下播放）。
+    /// ⭐ ta除了文字，再发一条**语音消息**（微信那种语音条，点一下播放）。
     /// 依赖外部 API 音色（系统音色导不出音频文件）。
     @Published var voiceMessageEnabled: Bool {
         didSet { UserDefaults.standard.set(voiceMessageEnabled, forKey: Key.voiceMessageEnabled) }
@@ -787,7 +787,7 @@ final class AppSettings: ObservableObject {
         didSet { Self.store(myBubble, forKey: Key.myBubble) }
     }
 
-    /// TA 那一侧的气泡长什么样。**和我的分开** —— 各改各的。
+    /// ta 那一侧的气泡长什么样。**和我的分开** —— 各改各的。
     @Published var aiBubble: BubbleLook {
         didSet { Self.store(aiBubble, forKey: Key.aiBubble) }
     }
@@ -797,7 +797,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(showMyAvatar, forKey: Key.showMyAvatar) }
     }
 
-    /// 聊天里显不显示 TA 的头像。
+    /// 聊天里显不显示 ta 的头像。
     @Published var showAiAvatar: Bool {
         didSet { UserDefaults.standard.set(showAiAvatar, forKey: Key.showAiAvatar) }
     }
@@ -837,7 +837,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(chatTheme.rawValue, forKey: Key.chatTheme) }
     }
 
-    /// 她发表情的频率。只进提示词，不改渲染。
+    /// ta发表情的频率。只进提示词，不改渲染。
     @Published var emojiFrequency: EmojiFrequency {
         didSet { UserDefaults.standard.set(emojiFrequency.rawValue, forKey: Key.emojiFrequency) }
     }
@@ -949,15 +949,15 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(randomPerDay, forKey: Key.randomPerDay) }
     }
 
-    /// 提前写好的一批「她会主动说的话」。
+    /// 提前写好的一批「ta会主动说的话」。
     @Published var proactiveLines: [String] {
         didSet { UserDefaults.standard.set(proactiveLines, forKey: Key.proactiveLines) }
     }
 
-    /// 「她趁你不在时打给你」—— 一条带「接听」按钮的通知（用户 2026-10-01 要的）。
+    /// 「ta趁你不在时打给你」—— 一条带「接听」按钮的通知（用户 2026-10-01 要的）。
     ///
     /// ⚠️ **和 `proactiveEnabled` 是两个开关，不是父子**。
-    ///    有人只想收她的文字消息、不想被"来电"打断；也有人反过来。
+    ///    有人只想收ta的文字消息、不想被"来电"打断；也有人反过来。
     ///    用户点名要这一个，就不该被藏在总开关后面。
     @Published var callEnabled: Bool {
         didSet { UserDefaults.standard.set(callEnabled, forKey: Key.callEnabled) }
@@ -984,23 +984,23 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(systemCallUI, forKey: Key.systemCallUI) }
     }
 
-    /// 她可以**主动打给你**（不经过你先点一下）。
+    /// ta可以**主动打给你**（不经过你先点一下）。
     ///
     /// ⚠️ 和 `callEnabled` 完全是两件事，别合并：
-    ///    · `callEnabled` = 「她趁你不在时打给你」的**通知**（你不在 App 里时收得到）；
-    ///    · 这个 = 你**正在聊天**时，她可以不问一句直接拨过来 —— 聊天页顶上会弹一条
-    ///      「她想打个电话 / 接 · 先不了」，你点了「接」才真的接通。
+    ///    · `callEnabled` = 「ta趁你不在时打给你」的**通知**（你不在 App 里时收得到）；
+    ///    · 这个 = 你**正在聊天**时，ta可以不问一句直接拨过来 —— 聊天页顶上会弹一条
+    ///      「ta想打个电话 / 接 · 先不了」，你点了「接」才真的接通。
     /// 用户 2026-10-01：「不要让他束手束脚的……你要让他真的能动起来」。
     /// 所以默认**开**：控制权还在你手上（永远要你点一下接听），
-    /// 但她终于有了主动找你的手，而不是只能等你说"打个电话吧"。
+    /// 但ta终于有了主动找你的手，而不是只能等你说"打个电话吧"。
     @Published var callProactive: Bool {
         didSet { UserDefaults.standard.set(callProactive, forKey: Key.callProactive) }
     }
 
-    /// 她回消息时，把这句话送上**灵动岛**（Live Activity）—— 老板要的「弹窗」。
+    /// ta回消息时，把这句话送上**灵动岛**（Live Activity）—— 老板要的「弹窗」。
     ///
     /// ⚠️ 说清代价：开着的时候，挂机态的活动会一直挂着，**灵动岛角落会一直有
-    ///    一个不起眼的小标记**（表示「她在」）。关掉之后就完全不上岛。
+    ///    一个不起眼的小标记**（表示「ta在」）。关掉之后就完全不上岛。
     ///
     /// 默认**开**（老板拍板："默认挂机"）。另外远端配置还能在它之上**再加一道
     /// kill switch**：本地开着、远端没关，才真的干活（见 `LiveIslandCenter.enabled`）。
@@ -1018,7 +1018,7 @@ final class AppSettings: ObservableObject {
 
     // MARK: - 长期记忆
 
-    /// 开着的话，聊够一段就自动让她提炼一次。
+    /// 开着的话，聊够一段就自动让ta提炼一次。
     @Published var memoryEnabled: Bool {
         didSet { UserDefaults.standard.set(memoryEnabled, forKey: Key.memoryEnabled) }
     }
@@ -1028,14 +1028,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(memoryExtractEvery, forKey: Key.memoryExtractEvery) }
     }
 
-    /// 要不要把记忆带进每次对话。关掉之后记忆还在，只是她这次不提。
+    /// 要不要把记忆带进每次对话。关掉之后记忆还在，只是ta这次不提。
     @Published var memoryInjectEnabled: Bool {
         didSet { UserDefaults.standard.set(memoryInjectEnabled, forKey: Key.memoryInjectEnabled) }
     }
 
     // MARK: - 朋友圈
 
-    /// 让她自己发朋友圈。
+    /// 让ta自己发朋友圈。
     @Published var momentsEnabled: Bool {
         didSet { UserDefaults.standard.set(momentsEnabled, forKey: Key.momentsEnabled) }
     }
@@ -1045,53 +1045,53 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(momentsPerDay, forKey: Key.momentsPerDay) }
     }
 
-    /// 我发完动态之后，她自动来互动（点赞 / 评论）。
+    /// 我发完动态之后，ta自动来互动（点赞 / 评论）。
     @Published var momentAutoReact: Bool {
         didSet { UserDefaults.standard.set(momentAutoReact, forKey: Key.momentAutoReact) }
     }
 
-    /// 她会给我点赞吗。
+    /// ta会给我点赞吗。
     @Published var momentLikeMine: Bool {
         didSet { UserDefaults.standard.set(momentLikeMine, forKey: Key.momentLikeMine) }
     }
 
-    /// 她最多在我一条动态下评论几条。
+    /// ta最多在我一条动态下评论几条。
     @Published var momentMaxComments: Int {
         didSet { UserDefaults.standard.set(momentMaxComments, forKey: Key.momentMaxComments) }
     }
 
-    /// 我在她动态下评论之后，她自动回一句。
+    /// 我在ta动态下评论之后，ta自动回一句。
     @Published var momentAutoReply: Bool {
         didSet { UserDefaults.standard.set(momentAutoReply, forKey: Key.momentAutoReply) }
     }
 
-    /// 她最多回复几条 —— 到上限就不再回了，免得没完没了。
+    /// ta最多回复几条 —— 到上限就不再回了，免得没完没了。
     @Published var momentMaxReplies: Int {
         didSet { UserDefaults.standard.set(momentMaxReplies, forKey: Key.momentMaxReplies) }
     }
 
-    /// 她刷到我动态之后，有时候会**直接私信**我，而不是只在评论区说。
+    /// ta刷到我动态之后，有时候会**直接私信**我，而不是只在评论区说。
     @Published var momentDMEnabled: Bool {
         didSet { UserDefaults.standard.set(momentDMEnabled, forKey: Key.momentDMEnabled) }
     }
 
-    /// 私信的概率。0.4 = 大概十次里有四次她会直接来找我。
+    /// 私信的概率。0.4 = 大概十次里有四次ta会直接来找我。
     @Published var momentDMChance: Double {
         didSet { UserDefaults.standard.set(momentDMChance, forKey: Key.momentDMChance) }
     }
 
     // MARK: - 朋友圈个性化（2026-09-25 用户要求「能自定义的都自定义」）
 
-    /// 她的朋友圈风格。用户写一段（例如「爱发吃的和猫，语气懒懒的，偶尔发牢骚」），
+    /// ta的朋友圈风格。用户写一段（例如「爱发吃的和猫，语气懒懒的，偶尔发牢骚」），
     /// 会拼进生成动态的指令里。**留空就不干预**，模型自由发挥。
     @Published var momentStylePrompt: String {
         didSet { UserDefaults.standard.set(momentStylePrompt, forKey: Key.momentStylePrompt) }
     }
 
-    /// 她发动态带不带图：
+    /// ta发动态带不带图：
     ///   `none`    —— 只发文字
-    ///   `library` —— 从「她的图库」里挑一张（图库是**用户自己往里放的**）
-    /// ⚠️ 我们没法凭空给她生成照片。与其假装能，不如让她从你给的图里挑。
+    ///   `library` —— 从「ta的图库」里挑一张（图库是**用户自己往里放的**）
+    /// ⚠️ 我们没法凭空给ta生成照片。与其假装能，不如让ta从你给的图里挑。
     @Published var momentImageMode: String {
         didSet { UserDefaults.standard.set(momentImageMode, forKey: Key.momentImageMode) }
     }
@@ -1149,8 +1149,8 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// 当前时段的相对权重。1.0 = 刚好平均；2.0 = 这个时段她勤快一倍；
-    /// 0 = 这个点她不发（调用方据此直接跳过）。
+    /// 当前时段的相对权重。1.0 = 刚好平均；2.0 = 这个时段ta勤快一倍；
+    /// 0 = 这个点ta不发（调用方据此直接跳过）。
     var momentCurrentWeight: Double {
         let weights = [momentMorningWeight, momentNoonWeight,
                        momentEveningWeight, momentNightWeight]
@@ -1163,22 +1163,15 @@ final class AppSettings: ObservableObject {
         return Double(weight) / (Double(total) / 4.0)
     }
 
-    // MARK: - 抖音（写操作还没接，但这个开关先备好）
-
-    /// 高危写操作（评论、发布、取关这类）要不要二次确认。默认开。
-    @Published var douyinConfirmRisky: Bool {
-        didSet { UserDefaults.standard.set(douyinConfirmRisky, forKey: Key.douyinConfirmRisky) }
-    }
-
     // MARK: - AI 权限（总开关 + 分类）
     //
     // 用户 2026-09-30：「AI 拥有操控这个手机的全部功能。当然，**你拥有最高权限**，
     // 可以控制它开或者不开。」→ 问他要哪种形态，他选了 **总开关 + 分类开关**。
     //
     // ⚠️ 这两个值只影响**发给模型的工具清单**（`DeviceTools.all()`）。
-    //    关掉不等于"她不会说话了" —— **聊天永远在**。
+    //    关掉不等于"ta不会说话了" —— **聊天永远在**。
 
-    /// 🔴 总开关。关掉之后她**只能聊天**，一个工具都拿不到。
+    /// 🔴 总开关。关掉之后ta**只能聊天**，一个工具都拿不到。
     ///
     /// 出厂是开的 —— 这些能力本来就是卖点，默认关掉等于没有。
     @Published var aiToolsEnabled: Bool {
@@ -1212,7 +1205,7 @@ final class AppSettings: ObservableObject {
 
     // MARK: - 录屏陪伴
 
-    /// 让她看你的屏幕（只在本机认文字，不传画面）。
+    /// 让ta看你的屏幕（只在本机认文字，不传画面）。
     @Published var companionEnabled: Bool {
         didSet { UserDefaults.standard.set(companionEnabled, forKey: Key.companionEnabled) }
     }
@@ -1248,7 +1241,7 @@ final class AppSettings: ObservableObject {
     /// 在 App 里放歌时，**自动开始一起听**。
     ///
     /// 用户的原话：「在 App 内放音乐的话，默认一起听。」
-    /// 出厂是开的 —— 但**这是个开关**，不想让她插嘴的人可以关掉。
+    /// 出厂是开的 —— 但**这是个开关**，不想让ta插嘴的人可以关掉。
     @Published var listenTogetherAutoStart: Bool {
         didSet { UserDefaults.standard.set(listenTogetherAutoStart, forKey: Key.listenTogetherAutoStart) }
     }
@@ -1294,7 +1287,7 @@ final class AppSettings: ObservableObject {
         didSet { Keychain.set(qqBridgeToken, for: Key.qqBridgeTokenKeychain) }
     }
 
-    /// 允不允许她**以用户本人的身份发 QQ 消息**。
+    /// 允不允许ta**以用户本人的身份发 QQ 消息**。
     ///
     /// 出厂开着（不然这个功能没意义），但它是个开关：
     /// 不想让人替自己说话的时候关掉，读消息不受影响。
@@ -1329,7 +1322,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(qqBotSandbox, forKey: Key.qqBotSandbox) }
     }
 
-    /// 后台静音保活。**出厂开** —— 不开的话他在 QQ 里聊、App 一进后台被挂起，她就不回了。
+    /// 后台静音保活。**出厂开** —— 不开的话他在 QQ 里聊、App 一进后台被挂起，ta就不回了。
     /// 但它费电，所以给开关（用户的原则：能自定义的都自定义）。
     @Published var qqBotKeepAlive: Bool {
         didSet { UserDefaults.standard.set(qqBotKeepAlive, forKey: Key.qqBotKeepAlive) }
@@ -1417,7 +1410,7 @@ final class AppSettings: ObservableObject {
 
     /// 通话时「你停顿多久才算这一句说完了」。
     ///
-    /// 用户报过：说完话只停一下下（1 秒出头）她就接了，像是在抢话。
+    /// 用户报过：说完话只停一下下（1 秒出头）ta就接了，像是在抢话。
     /// 现在默认 **2.5 秒**，并且设置里给三档 —— 这个只他本人体感最准，
     /// 不该由我们定死。
     @Published var callSilenceSeconds: Double {
@@ -1429,11 +1422,6 @@ final class AppSettings: ObservableObject {
     /// 网易云的 Cookie。**只进钥匙串**，和 API Key 一个待遇。
     @Published var neteaseCookie: String {
         didSet { Keychain.set(neteaseCookie, for: Key.neteaseCookieKeychain) }
-    }
-
-    /// 抖音的 Cookie。同理。
-    @Published var douyinCookie: String {
-        didSet { Keychain.set(douyinCookie, for: Key.douyinCookieKeychain) }
     }
 
     // MARK: - 百度网盘
@@ -1571,7 +1559,7 @@ final class AppSettings: ObservableObject {
         ttsAPIKey = Keychain.get(Key.ttsKeychain) ?? ""
         useGlass = defaults.object(forKey: Key.useGlass) as? Bool ?? true
         glassStyle = GlassStyle(rawValue: defaults.string(forKey: Key.glassStyle) ?? "") ?? .standard
-        // 出厂状态：我的气泡实心跟着主题色；她的气泡玻璃。都能改。
+        // 出厂状态：我的气泡实心跟着主题色；ta的气泡玻璃。都能改。
         myBubble = Self.loadLook(forKey: Key.myBubble) ?? BubbleLook(style: .solid, colorIndex: -1)
         aiBubble = Self.loadLook(forKey: Key.aiBubble) ?? BubbleLook(style: .glass, colorIndex: -1)
         showMyAvatar = defaults.object(forKey: Key.showMyAvatar) as? Bool ?? true
@@ -1624,14 +1612,14 @@ final class AppSettings: ObservableObject {
         randomEnabled = defaults.object(forKey: Key.randomEnabled) as? Bool ?? false
         randomPerDay = defaults.object(forKey: Key.randomPerDay) as? Int ?? 2
         proactiveLines = defaults.stringArray(forKey: Key.proactiveLines) ?? []
-        // 「她打给你」默认**关**：一条会响的来电通知，不该在用户没要求时就排上。
+        // 「ta打给你」默认**关**：一条会响的来电通知，不该在用户没要求时就排上。
         callEnabled = defaults.object(forKey: Key.callEnabled) as? Bool ?? false
         // 系统通话界面默认**关**（2026-10-01 探针真机实测：侧载签名不给通话资格，
         // 苹果那张卡弹不出来）。开了也只是每次多一行"调不出来"的提示 —— 见属性注释。
         systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? false
-        // 她可以主动拨过来：默认**开**（接不接永远是你点一下说了算）。
+        // ta可以主动拨过来：默认**开**（接不接永远是你点一下说了算）。
         callProactive = defaults.object(forKey: Key.callProactive) as? Bool ?? true
-        // 她的消息上灵动岛：默认**开**（挂机态在灵动岛角落留一个不起眼的小标记）。
+        // ta的消息上灵动岛：默认**开**（挂机态在灵动岛角落留一个不起眼的小标记）。
         liveIsland = defaults.object(forKey: Key.liveIsland) as? Bool ?? true
         barkEnabled = defaults.object(forKey: Key.barkEnabled) as? Bool ?? false
         barkURL = defaults.string(forKey: Key.barkURL) ?? ""
@@ -1660,7 +1648,6 @@ final class AppSettings: ObservableObject {
         momentDensityIndex = defaults.object(forKey: Key.momentDensityIndex) as? Int ?? 1
         momentTimeStyle = defaults.string(forKey: Key.momentTimeStyle) ?? "relative"
         momentCorner = defaults.object(forKey: Key.momentCorner) as? Double ?? 16
-        douyinConfirmRisky = defaults.object(forKey: Key.douyinConfirmRisky) as? Bool ?? true
         // AI 权限：出厂总开关**开**、分类全开（一个都没关）。
         aiToolsEnabled = defaults.object(forKey: Key.aiToolsEnabled) as? Bool ?? true
         disabledToolCategories = defaults.stringArray(forKey: Key.aiToolsDisabled) ?? []
@@ -1675,18 +1662,17 @@ final class AppSettings: ObservableObject {
         // 用错就把默认值反过来了。
         listenTogetherAutoStart = defaults.object(forKey: Key.listenTogetherAutoStart) as? Bool ?? true
         neteaseCookie = Keychain.get(Key.neteaseCookieKeychain) ?? ""
-        douyinCookie = Keychain.get(Key.douyinCookieKeychain) ?? ""
         qqBridgeToken = Keychain.get(Key.qqBridgeTokenKeychain) ?? ""
         qqBridgeEnabled = defaults.object(forKey: Key.qqBridgeEnabled) as? Bool ?? false
         qqBridgeURL = defaults.string(forKey: Key.qqBridgeURL) ?? ""
-        // 出厂允许她替你发 —— 这是这个功能的意义所在；不想让人替自己说话的可以关掉
+        // 出厂允许ta替你发 —— 这是这个功能的意义所在；不想让人替自己说话的可以关掉
         qqBridgeCanSend = defaults.object(forKey: Key.qqBridgeCanSend) as? Bool ?? true
         // QQ 官方机器人
         qqBotEnabled = defaults.object(forKey: Key.qqBotEnabled) as? Bool ?? false
         qqBotAppID = defaults.string(forKey: Key.qqBotAppID) ?? ""
         qqBotSecret = Keychain.get(Key.qqBotSecretKeychain) ?? ""
         qqBotSandbox = defaults.object(forKey: Key.qqBotSandbox) as? Bool ?? true
-        // 出厂开：不开的话他在 QQ 里聊、App 进后台被挂起，她就不回了
+        // 出厂开：不开的话他在 QQ 里聊、App 进后台被挂起，ta就不回了
         qqBotKeepAlive = defaults.object(forKey: Key.qqBotKeepAlive) as? Bool ?? true
         qqBotCodeEnabled = defaults.object(forKey: Key.qqBotCodeEnabled) as? Bool ?? false
         qqBotCodeKeyword = defaults.string(forKey: Key.qqBotCodeKeyword) ?? "注册"
@@ -1774,7 +1760,7 @@ final class AppSettings: ObservableObject {
     }
 
     var accentColor: Color {
-        // 用户勾了「主题色跟着 TA 的头像走」而且真取到了颜色，就用它；
+        // 用户勾了「主题色跟着 ta 的头像走」而且真取到了颜色，就用它；
         // 取不到（没设头像 / 取色失败）就老老实实回到他挑的那一个 —— 不能变透明。
         if dynamicAccent, let avatarTint { return avatarTint }
         let index = min(max(accentIndex, 0), Self.accentPalette.count - 1)

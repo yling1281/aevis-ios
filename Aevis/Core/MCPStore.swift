@@ -1,13 +1,13 @@
 import Foundation
 import SwiftUI
 
-/// MCP 服务器的管理，以及「把远程工具变成她的手」这件事。
+/// MCP 服务器的管理，以及「把远程工具变成ta的手」这件事。
 ///
 /// ## 为什么只要挂在 `DeviceTools.all()` 上就够了
 ///
-/// 她所有会用到工具的地方 —— 打字聊天、**语音通话**、一起听、主动消息、朋友圈 ——
+/// ta所有会用到工具的地方 —— 打字聊天、**语音通话**、一起听、主动消息、朋友圈 ——
 /// 走的都是同一个 `DeviceTools.all()`。所以外接的工具**接一次，处处可用**，
-/// 包括你直接跟她说话的时候。
+/// 包括你直接跟ta说话的时候。
 ///
 /// ## 为什么必须填一个地址
 ///
@@ -105,7 +105,7 @@ final class MCPStore: ObservableObject {
         } else {
             clients[server.id] = nil
             tools.removeAll { $0.serverID == server.id }
-            status[server.id] = "已关闭 —— 它的工具她暂时用不了。"
+            status[server.id] = "已关闭 —— 它的工具\(Pronoun.current)暂时用不了。"
         }
     }
 
@@ -164,12 +164,12 @@ final class MCPStore: ObservableObject {
         await connectEnabled()
     }
 
-    // MARK: - 变成她的手
+    // MARK: - 变成ta的手
     //
     // 下面这个属性**不能标 @MainActor** —— 因为 `DeviceTools.all()` 是同步的、
     // 而且会在后台线程被调用。工具早就在前面拉好放在 `tools` 里了，这里只是读一下。
 
-    /// 已经连上的服务器提供的工具，转成她能调用的一只手。
+    /// 已经连上的服务器提供的工具，转成ta能调用的一只手。
     var bridgedTools: [DeviceTool] {
         guard !tools.isEmpty else { return [] }
 

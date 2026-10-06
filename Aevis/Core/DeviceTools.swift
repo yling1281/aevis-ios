@@ -8,7 +8,7 @@ import EventKit
 import UIKit
 #endif
 
-/// 一个能被她调用的工具。
+/// 一个能被ta调用的工具。
 /// `parameters` 是给模型看的 JSON Schema，`run` 是真正干活的实现。
 struct DeviceTool {
     let name: String
@@ -34,6 +34,7 @@ enum ToolCategory: String, CaseIterable, Identifiable {
     case web
     case music
     case moment
+    case diary
     case pan
     case qq
     case system
@@ -52,12 +53,13 @@ enum ToolCategory: String, CaseIterable, Identifiable {
         case .web: return "上网搜索与看网页"
         case .music: return "音乐与一起听"
         case .moment: return "朋友圈"
+        case .diary: return "日记"
         case .pan: return "百度网盘"
         case .qq: return "QQ"
         case .system: return "系统动作"
         case .wallet: return "钱包"
         case .couple: return "情侣空间"
-        case .companion: return "她主动申请的事"
+        case .companion: return "\(Pronoun.current)主动申请的事"
         case .mcp: return "外接能力（MCP）"
         }
     }
@@ -70,6 +72,7 @@ enum ToolCategory: String, CaseIterable, Identifiable {
         case .web: return "搜索、把网页读出来"
         case .music: return "搜歌放歌、一起听、看歌词"
         case .moment: return "发朋友圈、翻朋友圈"
+        case .diary: return "写日记、翻日记（两个人在一个本子里）"
         case .pan: return "读你百度网盘里的文件"
         case .qq: return "在 QQ 上回消息"
         case .system: return "锁屏、跑快捷指令、看你的屏幕、回主屏、跑命令行"
@@ -89,29 +92,29 @@ enum ToolCategory: String, CaseIterable, Identifiable {
     }
 }
 
-/// TA 的手。
+/// ta 的手。
 ///
-/// 这些工具会被发给模型（function calling），由她自己决定什么时候用、用什么参数。
-/// 每个工具都只做一件小事，而且**只读她能读的东西**——
+/// 这些工具会被发给模型（function calling），由ta自己决定什么时候用、用什么参数。
+/// 每个工具都只做一件小事，而且**只读ta能读的东西**——
 /// 日历、提醒这类要用户授权的，授权被拒就老老实实返回「没授权」，绝不假装成功。
 ///
 /// ## 🔴 用户手里的两个闸（2026-09-30）
-/// - **总开关** `AppSettings.aiToolsEnabled`：关掉她只剩聊天。
+/// - **总开关** `AppSettings.aiToolsEnabled`：关掉ta只剩聊天。
 /// - **分类开关** `AppSettings.disabledToolCategories`：逐类关。
 /// 两者都只影响**发给模型的清单**，见 `all()`。
 enum DeviceTools {
 
     // MARK: - 登记
 
-    /// 她全部的手 = App 自带的（**已按「AI 权限」过滤**）+ 外接的。
+    /// ta全部的手 = App 自带的（**已按「AI 权限」过滤**）+ 外接的。
     ///
     /// **所有链路都走这里**（打字聊天、语音通话、一起听、主动消息、朋友圈），
-    /// 所以外接的 MCP 工具接一次就处处可用 —— 包括你直接对她说话的时候。
+    /// 所以外接的 MCP 工具接一次就处处可用 —— 包括你直接对ta说话的时候。
     static func all() -> [DeviceTool] {
         grantedBuiltinTools + (isOn(.mcp) ? MCPStore.shared.bridgedTools : [])
     }
 
-    /// 🔴 总开关。关掉之后她**只能聊天**。
+    /// 🔴 总开关。关掉之后ta**只能聊天**。
     static var masterEnabled: Bool { AppSettings.shared.aiToolsEnabled }
 
     /// 某一类现在是不是开着的。
@@ -150,6 +153,7 @@ enum DeviceTools {
             (.web, webTools),
             (.music, musicTools),
             (.moment, momentTools),
+            (.diary, DiaryTools.tools),
             (.pan, panTools),
             (.qq, qqTools + qqBotTools),
             // 系统动作 + `shellTool`（命令行）放一类 ——
@@ -157,7 +161,7 @@ enum DeviceTools {
             (.system, systemTools + [shellTool]),
             (.wallet, WalletTools.walletTools),
             (.couple, CoupleTools.coupleTools),
-            // 她**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
+            // ta**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
             // 跟别的不一样的地方：这几个只是"提出来"，真正开始还要用户点头。
             (.companion, CompanionTools.tools)
         ]
@@ -190,7 +194,7 @@ enum DeviceTools {
     static func run(name: String, arguments: [String: Any]) async -> String {
         // ⚠️ 「工具不存在」和「工具被关掉了」必须**分开说**：
         //    前一种模型会去猜别的工具，后一种它才会老实告诉用户"这个没开"。
-        //    混成一句话的后果，是用户看着她去用另一个工具绕过去。
+        //    混成一句话的后果，是用户看着ta去用另一个工具绕过去。
         if let blocked = blockedTool(named: name) {
             return "「\(blocked.title)」这个能力被用户关掉了（设置 → AI 权限）。"
                 + "照实跟他说这个没开，别自己想办法绕过。"
@@ -214,10 +218,10 @@ enum DeviceTools {
         return grantedBuiltinTools.contains(where: { $0.name == name }) ? nil : tool
     }
 
-    /// 被用户关掉的能力的中文名 —— **给她的提示词用**。
+    /// 被用户关掉的能力的中文名 —— **给ta的提示词用**。
     ///
-    /// ⚠️ 为什么非要有这个：关掉之后工具**根本不发给她**，于是她**不知道自己不能做**，
-    ///    用户一句「放首歌」她就顺口「好呀，正在放～」—— 那就是"假装完成"，
+    /// ⚠️ 为什么非要有这个：关掉之后工具**根本不发给ta**，于是ta**不知道自己不能做**，
+    ///    用户一句「放首歌」ta就顺口「好呀，正在放～」—— 那就是"假装完成"，
     ///    用户最不能接受的一种。所以关掉的能力必须**明写进系统提示**。
     ///
     /// 总开关关掉时返回空 —— 那种情况由提示词那边单独说一句更完整的（列 13 条太长）。

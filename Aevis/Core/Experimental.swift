@@ -6,8 +6,6 @@ import Foundation
 /// 不再藏在开关后面。代码留着这个枚举只是为了不改动那十几处 `Experimental.enabled`
 /// 的读法 —— `enabled` 恒为 true。
 ///
-/// ⚠️ 唯一的例外：**抖音**。它单独摘出来永远关（见 `DiscoverView`），
-///    因为那是用户 2026-09-28 明确要关掉的，跟这四块不是一个待遇。
 enum Experimental {
 
     /// 恒为 true：四块试验功能始终可见。

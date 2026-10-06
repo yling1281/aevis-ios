@@ -1,6 +1,6 @@
 import Foundation
 
-/// 一件「想和 TA 一起做的事」。
+/// 一件「想和 ta 一起做的事」。
 ///
 /// 用户 2026-10-04 看完电脑版之后要的：「手机端也同步这些」——
 /// 待办就是其中一块。**文案走温馨甜蜜那一挂**（老板原话：
@@ -13,7 +13,7 @@ struct TodoItem: Codable, Identifiable, Equatable {
     var done: Bool = false
     /// 附一句（可以不写）。比如「下周三之前」。
     var note: String = ""
-    /// true = 我提的；false = TA 提的。列表里据此标一下。
+    /// true = 我提的；false = ta 提的。列表里据此标一下。
     var byMe: Bool = true
     var createdAt: Date = Date()
     /// 哪一刻打上的勾。没做完就是 nil。

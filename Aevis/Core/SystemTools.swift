@@ -1,6 +1,6 @@
 import Foundation
 
-/// 她与系统之间的几只新手：打开链接、跑快捷指令、回主界面、看屏幕、解析抖音、锁屏。
+/// ta与系统之间的几只新手：打开链接、跑快捷指令、回主界面、看屏幕、锁屏。
 ///
 /// 这里每一只都**真会做事**；App 自己做不到的（比如锁屏），
 /// 就走「跑一个快捷指令」这条绕路，而不是假装失败。
@@ -8,7 +8,7 @@ extension DeviceTools {
 
     static var systemTools: [DeviceTool] {
         [openLinkTool, runShortcutTool, goHomeTool, lookAtScreenTool,
-         douyinLinkTool, lockScreenTool, screenTimeTool]
+         lockScreenTool, screenTimeTool]
     }
 
     // MARK: - 锁屏
@@ -64,7 +64,7 @@ extension DeviceTools {
             title: "打开了个链接",
             description: """
             在手机上打开一个链接或 App。可以传网页地址（https://...），
-            也可以传 App 的 scheme，比如抖音是 snssdk1128://、微信是 weixin://。
+            也可以传 App 的 scheme，比如微信是 weixin://。
             对方说「打开这个」「帮我点开」时用它。
             """,
             parameters: [
@@ -77,10 +77,6 @@ extension DeviceTools {
         ) { args in
             guard let text = args["url"] as? String, !text.isEmpty else {
                 return "没给要打开的链接。"
-            }
-            // 抖音单独走一下：装的是 App 就开 App，没装就退网页
-            if text.contains("douyin.com") || text.lowercased().hasPrefix("snssdk") {
-                return ShortcutBridge.openDouyin() ? "打开了抖音。" : "打不开抖音 —— 可能没装。"
             }
             return ShortcutBridge.open(text) ? "打开了：\(text)" : "打不开这个链接。"
         }
@@ -159,7 +155,7 @@ extension DeviceTools {
             let companion = ScreenCompanion.shared
 
             // 用 active 而不是逐个通道判断 —— 它把**环回备用通道**也算进去了。
-            // 早先这里只看容器那条通道，签名对不上时她会一直说「你没在录」，
+            // 早先这里只看容器那条通道，签名对不上时ta会一直说「你没在录」，
             // 哪怕红点正亮着、备用通道正源源不断往里送文字。
             guard companion.active else {
                 // 这里必须把两种情况分开说 —— 它们对用户来说长得一模一样：
@@ -188,43 +184,6 @@ extension DeviceTools {
                 .map { "\($0.offset + 1). \($0.element)" }
                 .joined(separator: "\n")
             return "他屏幕上最近的文字：\n\(listed)"
-        }
-    }
-
-    // MARK: - 抖音链接
-
-    private static var douyinLinkTool: DeviceTool {
-        DeviceTool(
-            name: "parse_douyin_link",
-            title: "解析了个抖音链接",
-            description: """
-            从一段抖音分享文案里把链接抠出来，并读出这条作品是什么
-            （标题、作者、作品 ID）。
-            对方粘过来一段「复制打开抖音…」的时候用它 ——
-            这样你能说出来那是什么内容，而不是复述一串乱码。
-            """,
-            parameters: [
-                "type": "object",
-                "properties": [
-                    "text": ["type": "string", "description": "用户粘过来的那段分享文案，含链接"]
-                ],
-                "required": ["text"]
-            ]
-        ) { args in
-            guard let text = args["text"] as? String, !text.isEmpty else {
-                return "没给要解析的内容。"
-            }
-            do {
-                let share = try await DouyinClient.shared.resolve(text)
-                var lines = ["解析出来了："]
-                if !share.author.isEmpty { lines.append("作者：\(share.author)") }
-                if !share.title.isEmpty { lines.append("标题：\(share.title)") }
-                if !share.videoID.isEmpty { lines.append("作品 ID：\(share.videoID)") }
-                lines.append("链接：\(share.link)")
-                return lines.joined(separator: "\n")
-            } catch {
-                return error.localizedDescription
-            }
         }
     }
 }

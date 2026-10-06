@@ -364,10 +364,10 @@ struct MusicSearchSheet: View {
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
 
-                                // 「她的歌单」要一眼认出来 —— 它在网易云里就是一个
+                                // 「ta的歌单」要一眼认出来 —— 它在网易云里就是一个
                                 // 普通歌单，不给个标记的话它跟别的没区别。
                                 if isHer(item) {
-                                    Text("她的")
+                                    Text("\(Pronoun.current)的")
                                         .font(.aevis(10, weight: .semibold))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 6)
@@ -435,16 +435,16 @@ struct MusicSearchSheet: View {
     private func subtitle(for item: NeteasePlaylist) -> String {
         var parts: [String] = []
         if item.trackCount > 0 { parts.append("\(item.trackCount) 首") }
-        if isHer(item) { parts.append("她自己收藏的") }
+        if isHer(item) { parts.append("\(Pronoun.current)自己收藏的") }
         else if item.isLiked { parts.append("我喜欢的音乐") }
         else if !item.isMine { parts.append("收藏的歌单") }
         return parts.isEmpty ? "歌单" : parts.joined(separator: " · ")
     }
 
-    /// 列表里的排序：**她的歌单最前**，然后是「我喜欢的音乐」，剩下的按原顺序。
+    /// 列表里的排序：**ta的歌单最前**，然后是「我喜欢的音乐」，剩下的按原顺序。
     ///
-    /// 不排序的话她的歌单会按网易返回的顺序埋在中间 —— 而这一页存在的
-    /// 一半理由就是"看看她藏了什么"。
+    /// 不排序的话ta的歌单会按网易返回的顺序埋在中间 —— 而这一页存在的
+    /// 一半理由就是"看看ta藏了什么"。
     private var orderedPlaylists: [NeteasePlaylist] {
         let hers = playlists.filter { isHer($0) }
         let liked = playlists.filter { !isHer($0) && $0.isLiked }
@@ -456,7 +456,7 @@ struct MusicSearchSheet: View {
         item.name == HerPlaylist.realName(for: personaStore.persona)
     }
 
-    /// 界面上的名字 —— 她的那张**不显示网易云里的真名**。
+    /// 界面上的名字 —— ta的那张**不显示网易云里的真名**。
     private func displayName(for item: NeteasePlaylist) -> String {
         isHer(item) ? HerPlaylist.displayName(for: personaStore.persona) : item.name
     }

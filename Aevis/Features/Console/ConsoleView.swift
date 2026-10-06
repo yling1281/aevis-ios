@@ -232,7 +232,7 @@ struct ConsoleView: View {
     欢迎。这里的命令会真的执行，不是演示。
 
     所有文件都在 App 自己的工作目录里，`..` 也出不去 ——
-    这样她帮你整理文件时，不可能误删手机上的东西。
+    这样\(Pronoun.current)帮你整理文件时，不可能误删手机上的东西。
 
     想接真 Alpine Linux（能 apk 装包、跑 python/node）的话，
     需要把它的 rootfs 编进 App，那是后面的事。输 help 看现在能做什么。

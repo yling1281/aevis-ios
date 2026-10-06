@@ -5,14 +5,18 @@ import WidgetKit
 /// Aevis 实时活动（灵动岛）扩展。
 ///
 /// 两种形态：
-///   · **挂机态**（`state.text` 为空）：只留一个不起眼的小圆点，表示「她在」。
-///   · **有消息态**：显示 她的名字 + 她这句话（截断）+ 时间。
+///   · **挂机态**（`state.text` 为空）：只留一个不起眼的小圆点，表示「ta在」。
+///   · **有消息态**：显示 ta的名字 + ta这句话（截断）+ 时间。
 ///
 /// ⚠️ 灵动岛那几种视图（展开区若干 + `compactLeading` + `compactTrailing` +
 ///    `minimal`）**一个都不能少** —— 少一个系统可能干脆不显示这张卡。
 ///
 /// ⚠️ 这里的 `Text` 一律**不解析 markdown**（单行字面量走 `Text(String)`），
 ///    所以文案里**不要**写 `**加粗**`，会原样显示星号（R17）。
+///
+/// ⚠️ 这是**扩展 target**，读不到主 App 的 `Pronoun`（人设性别）—— 所以这里指代 ta 的词
+///    一律**写死小写 `ta`**，**不会**跟着人设性别变（女 / 男都还是 ta）。这是跨 target 的已知限制；
+///    要让它跟着人设走，只能由主 App 在发 Activity 时把词算好、塞进 `ContentState` 再传进来。
 @main
 struct AevisLiveWidget: Widget {
     var body: some WidgetConfiguration {
@@ -56,7 +60,7 @@ struct AevisLiveWidget: Widget {
         }
     }
 
-    /// 「挂机态」= 她这句话是空的。
+    /// 「挂机态」= ta这句话是空的。
     static func isIdle(_ state: AevisMessageAttributes.ContentState) -> Bool {
         state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -64,7 +68,7 @@ struct AevisLiveWidget: Widget {
 
 // MARK: - 零件
 
-/// 那个「她在」的小标记。挂机时只是一个小灰点，有消息时是粉色、稍大一点。
+/// 那个「ta在」的小标记。挂机时只是一个小灰点，有消息时是粉色、稍大一点。
 private struct AevisMarker: View {
     let active: Bool
 
@@ -75,7 +79,7 @@ private struct AevisMarker: View {
     }
 }
 
-/// 她的名字（挂机态不显示）。
+/// ta的名字（挂机态不显示）。
 private struct AevisTitle: View {
     let state: AevisMessageAttributes.ContentState
 
@@ -84,7 +88,7 @@ private struct AevisTitle: View {
         if AevisLiveWidget.isIdle(state) {
             EmptyView()
         } else {
-            Text(name.isEmpty ? "她" : name)
+            Text(name.isEmpty ? "ta" : name)
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
@@ -93,7 +97,7 @@ private struct AevisTitle: View {
     }
 }
 
-/// 她的那句话（挂机态显示一句「她在」的说明，有消息时显示正文、截断到两行）。
+/// ta的那句话（挂机态显示一句「ta在」的说明，有消息时显示正文、截断到两行）。
 private struct AevisText: View {
     let state: AevisMessageAttributes.ContentState
 

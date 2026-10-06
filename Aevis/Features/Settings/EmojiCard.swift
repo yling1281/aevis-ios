@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// 「表情」设置卡片。
 ///
-/// 两件事：开关（她能不能发表情）+ 换成自己的表情图。
+/// 两件事：开关（ta能不能发表情）+ 换成自己的表情图。
 ///
 /// 关于版权：微信和 QQ 的表情图片是腾讯的资源，不该打包进一个要发给朋友的 App。
 /// 但表情的**名字**是通用的（两家都叫 `[微笑]`、`[呲牙]`），所以 Aevis 认名字，
@@ -27,7 +27,7 @@ struct EmojiCard: View {
             title("表情")
 
             toggleRow(
-                "让她发表情",
+                "让\(Pronoun.current)发表情",
                 subtitle: "\(Pronoun.current)写 [微笑] 这样的名字，聊天里会显示成真表情",
                 isOn: $emoji.enabled
             )
@@ -305,7 +305,7 @@ struct EmojiCard: View {
 
     private var explanation: String {
         """
-        图片的文件名就是表情名 —— 把 微笑.png 导进来，她写 [微笑] 时显示的就是这张图。
+        图片的文件名就是表情名 —— 把 微笑.png 导进来，\(Pronoun.current)写 [微笑] 时显示的就是这张图。
         长按某一格可以只删掉那一张。
         """
     }

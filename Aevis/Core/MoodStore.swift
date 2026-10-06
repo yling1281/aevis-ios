@@ -1,19 +1,19 @@
 import Foundation
 
-/// 她的「心情 + 心里话」。
+/// ta的「心情 + 心里话」。
 ///
-/// 她在回复的最后一行会自己写一个标记，例如：
+/// ta在回复的最后一行会自己写一个标记，例如：
 ///     〔心情：想你｜心里话：你今天回消息比平时慢，我数了下时间〕
 /// 这里把它剥离出来存下 —— 所以**用户永远看不到那个标记**，
 /// 看到的是剥干净之后的正常回复。
 ///
 /// ## 谁在用
-/// - 聊天页（`ChatView.send`）：拿到她整段回复后调 `consume(_:)` 剥标记 + 落库；
-/// - 她的资料页：读 `current` 展示最近一次的心情；
-/// - 系统提示词：把 `current` 喂回去，让她"记得自己上次在想什么"。
+/// - 聊天页（`ChatView.send`）：拿到ta整段回复后调 `consume(_:)` 剥标记 + 落库；
+/// - ta的资料页：读 `current` 展示最近一次的心情；
+/// - 系统提示词：把 `current` 喂回去，让ta"记得自己上次在想什么"。
 ///
 /// ## 为什么不放进 `AppSettings`
-/// 它是「她的状态」，不是「用户的设置」—— 混在一起会让设置页的存档越滚越大，
+/// 它是「ta的状态」，不是「用户的设置」—— 混在一起会让设置页的存档越滚越大，
 /// 也不利于按联系人区分（将来想做成"每个人一套心情"时改这里就行）。
 final class MoodStore: ObservableObject {
 
@@ -36,11 +36,11 @@ final class MoodStore: ObservableObject {
 
     // MARK: - 对外
 
-    /// 从她的回复里剥离末尾标记并写入；返回**剥干净后**的文本。
+    /// 从ta的回复里剥离末尾标记并写入；返回**剥干净后**的文本。
     /// 没找到标记 ⇒ 原样返回，且**不改动** `current`。
     ///
-    /// ⚠️ 只认**最后一行**：她可能在正文里正常写到「心情」两个字，
-    ///    那种情况不能被当成标记（否则会把她的正文吃出个洞）。
+    /// ⚠️ 只认**最后一行**：ta可能在正文里正常写到「心情」两个字，
+    ///    那种情况不能被当成标记（否则会把ta的正文吃出个洞）。
     @discardableResult
     func consume(_ reply: String) -> String {
         let normalized = Self.normalize(reply)
@@ -188,7 +188,7 @@ final class MoodStore: ObservableObject {
 // MARK: - 备份与搬家
 //
 // ⚠️ 这个 conformance **是 `BackupService.swift` 点名要的**（见那边 `stores()` 上面那段）：
-//    它把 `label("mood") = "她的心情"` 已经备好了，就等这里补上三件套。
+//    它把 `label("mood") = "ta的心情"` 已经备好了，就等这里补上三件套。
 //    少了它，`MoodStore.shared` 一旦被加进 `stores()` 数组，那边**直接编不过**。
 extension MoodStore: BackupableStore {
 

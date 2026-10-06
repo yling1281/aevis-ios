@@ -88,7 +88,7 @@ final class ListenService: ObservableObject {
         BlackBox.log("👂 开始听写（停顿阈值 \(AppSettings.shared.callSilenceSeconds) 秒）")
 
         let session = AVAudioSession.sharedInstance()
-        // 和音乐共存：一起听的时候她还要能听见你说话
+        // 和音乐共存：一起听的时候ta还要能听见你说话
         //
         // ⚠️ 选项**不能在这儿写死** —— 通话中「免提 / 听筒」那一档要换掉它。
         //    会话的唯一主人是 `AudioSession`，选项从它那儿取。
@@ -206,8 +206,8 @@ final class ListenService: ObservableObject {
         //
         // ⚠️⚠️ **通话中同样不能关**（2026-10-02 补的）。`AudioSession.inCall`
         //    为真时，这条会话是**通话**在用的 —— 关掉它等于把整通电话的音频拆了：
-        //    · 她正在念的那半句会被掐断（TTS 用的也是这条会话）；
-        //    · 麦克风再拿回来要重设类别，中间那一下就是"她听不见了"。
+        //    · ta正在念的那半句会被掐断（TTS 用的也是这条会话）；
+        //    · 麦克风再拿回来要重设类别，中间那一下就是"ta听不见了"。
         //    触发路径特别日常：**按静音** → `CallService.setMuted(true)` →
         //    `listen.stop()` → 走到这里。没有音乐在放就正好命中。
         //    用户报的「点静音的话用不了 App 原本的工具」就是这一条。
@@ -243,9 +243,9 @@ final class ListenService: ObservableObject {
             guard let self, self.isListening else { return }
             guard !self.transcript.isEmpty else { return }
 
-            // ⚠️ **这一处直接决定「她会不会抢话」。**
+            // ⚠️ **这一处直接决定「ta会不会抢话」。**
             // 初版拍的是 1.3 秒 —— 用户只是想了半拍就被当成"说完了"，
-            // 于是话没说完她就接上了（原话：「我说完话之后，如果一秒之内
+            // 于是话没说完ta就接上了（原话：「我说完话之后，如果一秒之内
             // 我没有说话，他就给我回复」）。现在默认放宽，并且设置里能调。
             //
             // 另外：**光看"识别结果有没有变"是不够的** —— 人在「嗯……」「那个……」
@@ -280,7 +280,7 @@ final class ListenService: ObservableObject {
     ///
     /// `level` 是 RMS × 11 再夹到 0…1：安静房间的底噪大概 0.01~0.06，正常说话 0.2 往上。
     /// 取 0.16 是为了**只挡真人声** —— 定得太低，空调声、马路噪音一来就永远不判句，
-    /// 那会变成"她再也不回话"，比抢话更糟。
+    /// 那会变成"ta再也不回话"，比抢话更糟。
     private static let speakingLevel: Double = 0.16
 
     // MARK: - 音量

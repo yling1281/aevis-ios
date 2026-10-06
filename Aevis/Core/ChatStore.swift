@@ -194,6 +194,33 @@ final class ChatStore: ObservableObject {
         return message.id
     }
 
+    // MARK: - 她的小手机
+
+    /// 她在**自己的小手机**上做了一件事（打开了某个 App）→ 落一条聊天记录。
+    ///
+    /// 谁在调：`HerPhoneStore.logEvent` —— 用户在「她的小手机」页面点某个图标时。
+    ///
+    /// 套路跟 `appendIncomingTransfer` 一模一样：**插到流式空占位前面**。
+    /// 理由也一样 —— 万一她此刻正在流式往外吐字，直接 append 会把那句半成品顶乱；
+    /// 插在空占位前面，是"她在手机上动了一下、再接着说"的自然顺序。
+    /// `replaceLast(with:)` 认的是列表**最后一条**，插在前面不影响它在改谁。
+    ///
+    /// - Returns: 新消息的 id。
+    @discardableResult
+    func appendIncomingHerPhone(appName: String, action: String) -> UUID {
+        let message = ChatMessage(role: .assistant,
+                                  text: ChatMessage.herPhoneLine(action: action),
+                                  kind: .herPhone,
+                                  herAppName: appName,
+                                  herAction: action)
+        let isStreamingPlaceholder = messages.last?.role == .assistant
+            && messages.last?.text.isEmpty == true
+        messages.insert(message, at: isStreamingPlaceholder ? messages.count - 1 : messages.count)
+        track(message)
+        save()
+        return message.id
+    }
+
     /// 把这条聊天记进黑匣子（用户 2026-09-26 要求：「聊天记录也要进日志」）。
     ///
     /// ⚠️ 两块内容**刻意只记类型、不记内容**：

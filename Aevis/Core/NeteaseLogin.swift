@@ -9,7 +9,7 @@ import WebKit
 /// 少一段、带上空格、从别的域名的页面复制。所以改成：**在 App 里正常登录一次**
 /// （扫码或者手机号都行），`MUSIC_U` 由我们从 cookie 存储里读出来，一步都不用手抄。
 ///
-/// 抖音那边是同一个思路 —— `DouyinWebDriver` 用的是同一份持久存储，
+/// 同一个思路也用在别的登录页上：App 内浏览器的持久存储是共享的，
 /// 登录一次就一直有效。
 final class NeteaseLogin: NSObject, ObservableObject {
 

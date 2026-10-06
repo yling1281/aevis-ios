@@ -61,23 +61,29 @@ struct NeteaseAccount {
     var avatarURL: URL?
 }
 
-/// 「她的歌单」在**你自己的网易云账号里**的真名。
+/// 网易云里那张「人设自己的歌单」的**真名**。
 ///
 /// ## 为什么要有这么一个名字（用户 2026-10-02 点名的做法）
 /// 用户原话：「原理是在你的网易云添加一个歌单是属于他的，但是在这个，
 /// 就是一整个我们的 App 里面，这个歌单显示的是 AI 的账号和他的歌单」。
 ///
 /// 翻成实现就是：**歌单真的建在你自己的网易云账号里**（所以你打开网易云
-/// 就能看到它、能自己往里加歌），但 App 界面上那一行显示成「她的歌单」——
+/// 就能看到它、能自己往里加歌），但 App 界面上那一行显示成「ta的歌单」（见 `displayName`）——
 /// 不显示这个真名。两边用的是同一份数据，只是叫法不同。
 ///
-/// ⚠️ 名字里带她的名字（「零砚的歌单」），所以**换人设之后就是另一个歌单** ——
-///    这是有意的：歌单是"她的"，不是"这台手机的"。
+/// ⚠️ 名字里带**人设的名字**（「零砚的歌单」），所以**换人设之后就是另一个歌单** ——
+///    这是有意的：歌单是"ta的"，不是"这台手机的"。
 enum HerPlaylist {
     /// 找不到人设名的时候用的兜底。
+    ///
+    /// ⚠️ 这是**匹配键**，不是文案。老用户账号里已经有一个叫「她的歌单」的歌单，
+    ///    改这里会导致找不到它。界面显示请走 `displayName`。
     static let fallback = "她的歌单"
 
     /// 在网易云里真实的歌单名。
+    ///
+    /// ⚠️ 这是**匹配键**，不是文案。老用户账号里已经有一个叫「她的歌单」的歌单，
+    ///    改这里会导致找不到它。界面显示请走 `displayName`。
     static func realName(for persona: Persona) -> String {
         let her = persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
         return (her.isEmpty ? "她" : her) + "的歌单"
@@ -85,10 +91,15 @@ enum HerPlaylist {
 
     /// App 界面上显示的名字。
     ///
-    /// 现在和真名一样 —— 但**特意分成两个函数**：以后想把界面上的叫法
-    /// 换成「她偷偷藏的歌」之类，只改这一个地方，不用去动网易云里那个真名。
+    /// ⭐ 这一层**跟随人设性别**（走 `Pronoun`）—— 而 `realName` 是匹配键、**不跟着变**。
+    /// 两者故意分开：改显示不会动到网易云里的真名。
+    /// （以前它直接返回 `realName`，所以「不设定 / 无性别」时会显示那个兜底名。）
     static func displayName(for persona: Persona) -> String {
-        realName(for: persona)
+        let her = persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if her.isEmpty {
+            return Pronoun.spaced(persona.pronoun) + "的歌单"
+        }
+        return her + "的歌单"
     }
 }
 
@@ -426,7 +437,7 @@ final class NeteaseClient {
     ///
     /// 🔴 这个函数存在的唯一原因是修一个真 bug：`play_music` 拿到 `song_id` 之后
     ///    原来是**把 id 当关键词丢进搜索**的（`search("33894312")`）——
-    ///    那当然搜不到东西。后果是"她放了我喜欢的某一首"永远是一句空话：
+    ///    那当然搜不到东西。后果是"ta放了我喜欢的某一首"永远是一句空话：
     ///    模型从 `my_music` 里明明拿到了正确的 id，却怎么也放不出来。
     ///
     /// `/api/v3/song/detail` 本来就是"一次问多首"，所以顺手支持批量。
@@ -478,7 +489,7 @@ final class NeteaseClient {
     //
     // 🔴 **这是整个网易云接入里最脆的一段。**
     //
-    // 读接口挂了最多是"看不到"，写接口挂了会让用户以为"她收藏了"、
+    // 读接口挂了最多是"看不到"，写接口挂了会让用户以为"ta收藏了"、
     // 其实什么都没写进去 —— 那是**假装完成**，是最不能忍的一类问题。
     // 所以这里每一个失败都原样把网易的 code/message 带出去，绝不吞。
     //
@@ -570,11 +581,11 @@ final class NeteaseClient {
         ])
     }
 
-    /// 她的歌单：**先在你账号里按名字找**，找不到才建。
+    /// ta的歌单：**先在你账号里按名字找**，找不到才建。
     ///
     /// ⚠️ 为什么不把 pid 存下来：歌单随时会被你自己删掉或改名，
     ///    存一个 id 就等于埋一个"以后必然失效"的值。每次现找一遍，
-    ///    删了她那边下次收藏时自然就重建 —— 比缓存稳。
+    ///    删了ta那边下次收藏时自然就重建 —— 比缓存稳。
     func ensureHerPlaylist(named name: String) async throws -> String {
         let mine = try await myPlaylists()
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -584,7 +595,7 @@ final class NeteaseClient {
         return try await createPlaylist(name: clean)
     }
 
-    /// 把一首歌收进她的歌单（没有就先建）。返回歌单 id。
+    /// 把一首歌收进ta的歌单（没有就先建）。返回歌单 id。
     @discardableResult
     func saveToHerPlaylist(songID: String, playlistName: String) async throws -> String {
         let pid = try await ensureHerPlaylist(named: playlistName)

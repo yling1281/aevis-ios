@@ -1,19 +1,19 @@
 import Foundation
 
-/// QQ 机器人服务：连上 QQ 开放平台的 WebSocket，收到消息就交给她回。
+/// QQ 机器人服务：连上 QQ 开放平台的 WebSocket，收到消息就交给ta回。
 ///
 /// ## 数据流
 /// ```
 /// 他在 QQ 里给机器人发一句
 ///   → 平台把事件推到我们的 WebSocket
 ///   → 取出发送者 openid + 内容 + 消息 id
-///   → 用她的人设跑一次模型（带她的工具）
+///   → 用ta的人设跑一次模型（带ta的工具）
 ///   → POST /v2/users/{openid}/messages 回过去（带 msg_id，算被动回复）
 /// ```
 ///
 /// ## 为什么必须做「后台保活」
-/// 他在 QQ 里跟她聊天时，**我们的 App 正好在后台** —— 而 iOS 会把后台 App 挂起，
-/// 连接一断她就哑了。所以这里配了 `SilentKeeper`（后台放一段静音音频），
+/// 他在 QQ 里跟ta聊天时，**我们的 App 正好在后台** —— 而 iOS 会把后台 App 挂起，
+/// 连接一断ta就哑了。所以这里配了 `SilentKeeper`（后台放一段静音音频），
 /// 这是 iOS 上唯一能让 App 长期待在后台的办法。可以在设置里关掉（省电）。
 ///
 /// ⚠️ 这个类**故意不标 `@MainActor`**：WebSocket 的回调、重连的定时任务都在别的线程上，
@@ -50,7 +50,7 @@ final class QQBotService: ObservableObject {
         var from: String
         var text: String
         var at: Date
-        /// true 表示这条是她发的
+        /// true 表示这条是ta发的
         var mine: Bool = false
     }
 
@@ -400,7 +400,7 @@ final class QQBotService: ObservableObject {
 
         if isPrivate {
             // ★ 注册码的分流必须**排在模型前面** ——
-            // 否则她会用"聊天"的方式答一句，用户拿不到码还以为功能坏了。
+            // 否则ta会用"聊天"的方式答一句，用户拿不到码还以为功能坏了。
             if let handled = await QQCodeGate.shared.handlePrivate(text: text,
                                                                    c2cOpenID: target) {
                 await deliver(handled, scope: scope, target: target, msgID: msgID)
@@ -423,7 +423,7 @@ final class QQBotService: ObservableObject {
     }
 
     /// 把一条回复发出去并记账。
-    /// 抽出来是因为现在有**两条**回复路径（注册码分流 / 让她回），
+    /// 抽出来是因为现在有**两条**回复路径（注册码分流 / 让ta回），
     /// 各写一份的话 `msg_seq` 的计数迟早会跑偏。
     private func deliver(_ reply: String, scope: String, target: String, msgID: String?) async {
         do {
@@ -435,7 +435,7 @@ final class QQBotService: ObservableObject {
                 msgSeq: nextSeq(for: msgID)
             )
             replied += 1
-            append(Line(from: botName.isEmpty ? "她" : botName, text: reply, at: Date(), mine: true))
+            append(Line(from: botName.isEmpty ? Pronoun.current : botName, text: reply, at: Date(), mine: true))
         } catch {
             setError(error.localizedDescription)
             append(Line(from: "系统", text: "回复没发出去：" + error.localizedDescription, at: Date()))
@@ -459,7 +459,7 @@ final class QQBotService: ObservableObject {
         return next
     }
 
-    // MARK: - 让她回
+    // MARK: - 让ta回
 
     private func replyText(to text: String, scope: String, target: String, from name: String) async -> String? {
         let settings = AppSettings.shared
@@ -469,11 +469,11 @@ final class QQBotService: ObservableObject {
             return nil
         }
 
-        // ⭐【记忆互通】QQ 和 App 是同一个 TA、同一本账（用户 2026-09-30 定的）。
+        // ⭐【记忆互通】QQ 和 App 是同一个 ta、同一本账（用户 2026-09-30 定的）。
         // 原来这里用一块临时内存 `histories[key]`（12 条、聊完就丢），
         // 两边各记各的 —— QQ 上聊的 App 看不到，App 里聊的 QQ 也不知道。
         // 现在改成直接读/写 App 的聊天记录（ChatStore），这样：
-        //   · 上下文 = 当前 TA 在 App 里的聊天记录（goesToModel 过滤掉占位/通话记录）
+        //   · 上下文 = 当前 ta 在 App 里的聊天记录（goesToModel 过滤掉占位/通话记录）
         //   · 收到的、回出去的都写回 ChatStore —— App 聊天界面能看到 QQ 的对话
         //   · 聊够一段顺手提炼长期记忆（MemoryStore），两边沉淀到同一本账
         // ⚠️ ChatStore 是主线程隔离的（后台读会在 iOS 26 上崩），读写都要过 MainActor。
@@ -483,7 +483,7 @@ final class QQBotService: ObservableObject {
         }
 
         // 用户这句记进 App 的聊天记录（role = .user 是「我」说的话）。
-        // 放在 guard 之后：只有确定是「跟她聊天」（不是「注册」那种指令）才记。
+        // 放在 guard 之后：只有确定是「跟ta聊天」（不是「注册」那种指令）才记。
         await MainActor.run {
             ChatStore.shared.append(ChatMessage(role: .user, text: text), for: ownerID)
         }
@@ -520,13 +520,13 @@ final class QQBotService: ObservableObject {
         let cleaned = Self.plain(stripped)
         guard !cleaned.isEmpty else { return nil }
 
-        // 她的回复也写回 App 的聊天记录（role = .assistant 是 TA 说的话）。
+        // ta的回复也写回 App 的聊天记录（role = .assistant 是 ta 说的话）。
         await MainActor.run {
             ChatStore.shared.append(ChatMessage(role: .assistant, text: cleaned), for: ownerID)
         }
 
         // 聊够一段就顺手提炼长期记忆（和 App 里聊天后那一步一样）。
-        // 传当前 TA 的全部消息，提炼时会跨 QQ 和 App 一起看。
+        // 传当前 ta 的全部消息，提炼时会跨 QQ 和 App 一起看。
         if settings.memoryEnabled {
             let all = await MainActor.run { ChatStore.shared.messages }
             await MemoryStore.shared.extractIfNeeded(

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 「外接能力」设置卡片 —— 给她接上一台电脑（和那台电脑上连着的手机）。
+/// 「外接能力」设置卡片 —— 给ta接上一台电脑（和那台电脑上连着的手机）。
 ///
 /// ## 为什么入口是「填一个 6 位码」而不是「填一个 URL」
 ///
@@ -87,7 +87,7 @@ struct MCPCard: View {
             //    他以为**电脑**是最终目标，其实电脑只是那个会说安卓协议的角色
             //    （iPhone 上没有 adb，这一步绕不过去，见 `PCAgent.scanLocalNetwork`
             //      上面那段注释）。所以这里明写"为了连手机"，别让他以为走错了。
-            Text("想让她操控安卓手机：让安卓手机和这台 iPhone 连同一个 WiFi，"
+            Text("想让\(Pronoun.current)操控安卓手机：让安卓手机和这台 iPhone 连同一个 WiFi，"
                  + "然后按下面「添加电脑」的步骤走一遍 —— "
                  + "连上之后，那台安卓手机就会出现在这台电脑下面，配对一次就行。")
                 .font(.aevis(11.5))
@@ -96,7 +96,7 @@ struct MCPCard: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
 
-            Text("想让她操控电脑：电脑上双击「Aevis 电脑助手」，"
+            Text("想让\(Pronoun.current)操控电脑：电脑上双击「Aevis 电脑助手」，"
                  + "屏幕上会出现一个二维码和一个 6 位配对码 —— 扫一下就行。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
@@ -163,11 +163,13 @@ struct MCPCard: View {
                         .font(.aevis(15, weight: .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                        .textSelection(.enabled)
                     Text(server.trimmedURL)
                         .font(.aevisMono(11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .textSelection(.enabled)
                 }
 
                 Spacer(minLength: 8)
@@ -188,6 +190,7 @@ struct MCPCard: View {
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
 
             if server.enabled, toolTotal(for: server.id) > 0 {
@@ -293,6 +296,7 @@ struct MCPCard: View {
                 .font(.aevis(11.5))
                 .foregroundStyle(status.connected ? .primary : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
 
         if !status.adbOK {
@@ -300,6 +304,7 @@ struct MCPCard: View {
                 .font(.aevis(11))
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
 
         if let pairing = status.pairing.first {
@@ -307,11 +312,13 @@ struct MCPCard: View {
                 .font(.aevis(11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         } else if !status.hint.isEmpty {
             Text(status.hint)
                 .font(.aevis(11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
 
         // 已经连着的时候，配对码那一行就没必要挤在那儿了 —— 想换手机再点开
@@ -362,6 +369,7 @@ struct MCPCard: View {
                 .font(.aevis(11.5))
                 .foregroundStyle(panel.messageOK ? Color.green : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
     }
 
@@ -427,12 +435,14 @@ struct MCPCard: View {
                     Text(tool.name)
                         .font(.aevisMono(11.5))
                         .foregroundStyle(.primary)
+                        .textSelection(.enabled)
                     Text(tool.description.isEmpty
                          ? "（那边没写说明）"
                          : String(tool.description.prefix(38)))
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                        .textSelection(.enabled)
                     Spacer(minLength: 0)
                 }
             }
@@ -576,6 +586,7 @@ struct MCPCard: View {
                     .font(.aevis(11))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
     }
@@ -700,6 +711,7 @@ struct MCPCard: View {
                             .font(.aevis(12))
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
                     }
 
                     if !addStep.isEmpty {
@@ -708,6 +720,7 @@ struct MCPCard: View {
                             Text(addStep)
                                 .font(.aevis(12))
                                 .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         }
                     }
 
@@ -768,7 +781,7 @@ struct MCPCard: View {
             addStep = "在核对配对码…"
             let token = try await PCAgent.exchange(address, code: code)
 
-            addStep = "在接上她的工具…"
+            addStep = "在接上\(Pronoun.current)的工具…"
             let name = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
             // ⚠️ 地址用**电脑报回来的那个**（machine.host/port），不是用户填的。
             //    用户可能填 127.0.0.1、也可能填主机名，电脑最清楚自己的局域网 IP。
@@ -903,6 +916,7 @@ struct MCPCard: View {
                         .font(.aevis(11.5))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
                 .padding(16)
             }

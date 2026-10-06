@@ -33,7 +33,7 @@ struct BubbleTheme {
 /// 用户 2026-09-26：「挂断电话的时候……像微信一样留下记录」。
 ///
 /// **故意不做成聊天气泡**：那不是谁说的话，做成气泡会让人误以为
-/// 她真的发过「通话时长 03:21」这么一条消息。
+/// ta真的发过「通话时长 03:21」这么一条消息。
 struct CallRecordBubble: View {
     let text: String
 
@@ -91,7 +91,7 @@ struct MessageBubble: View {
 
     /// 整条消息就是一个表情 —— 像微信那样**放大显示**，不套气泡。
     ///
-    /// 「一个表情」有两种写法：她自己写的 `[微笑]`，或者她直接发一个表情符号。
+    /// 「一个表情」有两种写法：ta自己写的 `[微笑]`，或者ta直接发一个表情符号。
     /// 判断交给 EmojiPack —— 表情在设置里被关掉时，这里自然就都不算表情了。
     private var sticker: EmojiPack.Item? {
         emoji.single(in: message.text)
@@ -130,7 +130,7 @@ struct MessageBubble: View {
             voiceBubble
         } else if let data = message.imageData, let image = UIImage(data: data) {
             // 图就是这条消息的全部内容 —— 那张图里 OCR 出来的文字在
-            // `message.text` 里，是**给她看的**，不该再显示一遍。
+            // `message.text` 里，是**给ta看的**，不该再显示一遍。
             pictureBubble(image)
         } else if let sticker {
             bigSticker(sticker)
@@ -250,12 +250,12 @@ struct MessageBubble: View {
     // ⚠️ 不走 `AevisBubble.solid`：它会按背景亮度算字色，半透明黑会被误判成
     // 深色、给白字。iMessage 分支在这里显式写字色。
 
-    /// iMessage「我」蓝底、「TA」半透明浅灰底。
+    /// iMessage「我」蓝底、「ta」半透明浅灰底。
     private var imessageBackground: Color {
         isUser ? ImessagePalette.blue : ImessagePalette.incoming
     }
 
-    /// 我的气泡白字；TA 的跟随系统（浅底上用 .primary 最稳）。
+    /// 我的气泡白字；ta 的跟随系统（浅底上用 .primary 最稳）。
     private var imessageTextColor: Color {
         isUser ? Color.white : Color.primary
     }
@@ -270,6 +270,7 @@ struct MessageBubble: View {
             .foregroundStyle(imessageTextColor)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
             .padding(.horizontal, horizontalPadding)
             .padding(.vertical, verticalPadding)
             .background(

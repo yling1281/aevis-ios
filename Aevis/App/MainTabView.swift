@@ -47,7 +47,7 @@ struct MainTabView: View {
     @EnvironmentObject private var chat: ChatStore
 
     @ObservedObject private var router = AppRouter.shared
-    /// 她主动提的申请（打电话 / 看屏幕 / 一起听）—— 你要点一下才会真的开始。
+    /// ta主动提的申请（打电话 / 看屏幕 / 一起听）—— 你要点一下才会真的开始。
     @ObservedObject private var companionRequest = CompanionRequest.shared
     /// 「这一通被系统那边挂断了」的信号。
     ///
@@ -70,7 +70,7 @@ struct MainTabView: View {
         }
         // 这几个面板提到根上，二级页面和根视图都能触发（截图自检也靠它）
         .sheet(isPresented: $router.showSettings, onDismiss: { router.settingsFocus = nil }) {
-            // `focus` 只为一件事存在：她申请看屏幕、你点了同意之后，
+            // `focus` 只为一件事存在：ta申请看屏幕、你点了同意之后，
             // 要直接落到「陪伴」那张卡（系统的录屏按钮只在那儿）。
             SettingsView(focus: router.settingsFocus)
                 .aevisScreen("设置")
@@ -121,11 +121,11 @@ struct MainTabView: View {
         .onChange(of: tab) { _, now in
             BlackBox.tap("底栏 · \(now.title)")
         }
-        // 她主动提的申请 —— 从顶上滑进来一条，但**不挡你手上的事**
+        // ta主动提的申请 —— 从顶上滑进来一条，但**不挡你手上的事**
         //（不点它照样能继续打字、翻朋友圈）。
         //
         // ⚠️ 打电话**单独走一张更大的「来电卡」**（见 `IncomingCallCard`）：
-        //    它在任何页面都会盖上来，因为"她打过来"这件事不该因为你正好不在
+        //    它在任何页面都会盖上来，因为"ta打过来"这件事不该因为你正好不在
         //    聊天页就消失。另外两种（看屏幕 / 一起听）还是用这条小条 ——
         //    它们本来就是"顺手提一下"，不需要那么大张旗鼓。
         .overlay(alignment: .top) {
@@ -157,7 +157,7 @@ struct MainTabView: View {
         .onAppear(perform: applyLaunchOptions)
         .onAppear {
             // 录屏的进度要**全程**刷新，不能只在设置页里刷。
-            // 早先只有 `CompanionCard` 在轮询：用户在聊天界面眼巴巴等着她
+            // 早先只有 `CompanionCard` 在轮询：用户在聊天界面眼巴巴等着ta
             // 「看到屏幕」，界面却永远停在进设置那一刻的样子，
             // 于是反馈就变成了「录屏还是不行」。
             ScreenCompanion.shared.startPolling()
@@ -262,7 +262,7 @@ struct MainTabView: View {
         }
     }
 
-    /// 她申请的事你点了同意 —— 到这里才真的去执行。
+    /// ta申请的事你点了同意 —— 到这里才真的去执行。
     ///
     /// ⚠️ 「看屏幕」只能把你**送到陪伴卡前面**，不能替你开始录屏 ——
     /// iOS 规定录屏必须用户本人点系统那个按钮（状态栏要亮红点，得让你知情）。

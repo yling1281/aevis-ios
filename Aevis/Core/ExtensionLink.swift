@@ -10,7 +10,7 @@ import Network
 /// 它照样收得到画面、认得出字，却一个字都送不回来。
 ///
 /// 症状就长这样：**系统弹出的列表里明明有「Aevis 录屏」、红点也亮了，
-/// 她却始终说看不到屏幕。** 用户就是这么报的，而且光看包和配置完全正常。
+/// ta却始终说看不到屏幕。** 用户就是这么报的，而且光看包和配置完全正常。
 ///
 /// ## 这条是什么
 /// 扩展往 `127.0.0.1` 的一个固定端口 POST 一小段 JSON，主 App 在那头听着。
@@ -32,7 +32,7 @@ enum ExtensionLink {
     }
 
     enum Kind: String, Codable {
-        /// 一条「她看到的」。
+        /// 一条「ta看到的」。
         case entry
         /// 「在录 / 停了」+ 统计。
         case state
@@ -82,7 +82,7 @@ final class ExtensionLinkListener {
 
     static let shared = ExtensionLinkListener()
 
-    /// 收到一条「她看到的」。
+    /// 收到一条「ta看到的」。
     var onEntry: ((String, Date) -> Void)?
     /// 收到一次状态上报（在录 / 停了 + 帧数 + 认出次数 + 时刻）。
     var onState: ((Bool, Int, Int, Date) -> Void)?
@@ -123,7 +123,7 @@ final class ExtensionLinkListener {
 
     private func accept(_ connection: NWConnection) {
         // ⚠️ 这个端口在「只听本机」这件事上没法靠参数保证，所以自己挡一道：
-        // 只收环回地址发来的。否则同一个 WiFi 上的人也能往她「看到的」里塞东西。
+        // 只收环回地址发来的。否则同一个 WiFi 上的人也能往ta「看到的」里塞东西。
         if case let .hostPort(host, _) = connection.endpoint {
             let name = "\(host)"
             guard name.hasPrefix("127.") || name == "::1" else {

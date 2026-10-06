@@ -108,7 +108,7 @@ struct SelfCheckView: View {
         let allTools = DeviceTools.builtinTools + MCPStore.shared.bridgedTools
         let tools = DeviceTools.all()
         rows.append(NeteaseCrypto.SelfCheck(
-            name: "她有多少只手",
+            name: "\(Pronoun.current)有多少只手",
             passed: allTools.count >= 10,
             detail: "内置 + 外接共 \(allTools.count) 个，当前允许 \(tools.count) 个："
                 + tools.map(\.name).joined(separator: ", ")

@@ -31,8 +31,8 @@ enum LLMError: LocalizedError {
 
 /// 只做一件事：把对话流式发给一个 OpenAI 兼容接口，逐字吐回来。
 ///
-/// 现在多了一层：**工具调用**。她会自己决定要不要用手 ——
-/// 比如用户问「今天几号」，她先调 get_current_time，拿到结果再用自己的话说出来。
+/// 现在多了一层：**工具调用**。ta会自己决定要不要用手 ——
+/// 比如用户问「今天几号」，ta先调 get_current_time，拿到结果再用自己的话说出来。
 enum LLMService {
 
     private struct ToolCall {
@@ -99,7 +99,7 @@ enum LLMService {
         return trimmed
     }
 
-    /// 让她知道"现在"是什么时候。
+    /// 让ta知道"现在"是什么时候。
     /// 单独一条 system 消息，不混进人设提示词 —— 人设是用户写的，不该被我改。
     private static func timeContext() -> String {
         let dateFormatter = DateFormatter()
@@ -126,13 +126,13 @@ enum LLMService {
             + "你知道今天几号、现在几点，直接用这个回答就行，不用去查。"
     }
 
-    // MARK: - 多轮：她可以用几次手再说
+    // MARK: - 多轮：ta可以用几次手再说
 
-    /// 一轮对话最多让她用几轮工具。
+    /// 一轮对话最多让ta用几轮工具。
     ///
     /// ⚠️ 2026-10-05：从 4 提到 **8** —— 用户要的是「能连着干」，
     ///    4 轮常常不够（搜一下、翻一页、再查一次就没了）。
-    ///    另有 `conversationBudget` 兜底，避免她陷在循环里出不来。
+    ///    另有 `conversationBudget` 兜底，避免ta陷在循环里出不来。
     private static let maxRounds = 8
 
     /// 一整轮对话（含所有工具往返）的总时限（秒）。
@@ -150,12 +150,22 @@ enum LLMService {
         onTool: (@Sendable (String) -> Void)?,
         onReasoning: ((String) -> Void)?
     ) async throws {
-        // 让她「感知现实时间」：把当前时间直接写进系统提示词，
-        // 不用她每次都去调 get_current_time。
+        // 让ta「感知现实时间」：把当前时间直接写进系统提示词，
+        // 不用ta每次都去调 get_current_time。
         var messages: [[String: Any]] = [
-            ["role": "system", "content": systemPrompt],
-            ["role": "system", "content": Self.timeContext()]
+            ["role": "system", "content": systemPrompt]
         ]
+        // ⭐ 「你能做的事」能力规格 —— 紧跟人设、排在时间之前。
+        //
+        // 🔴 为什么就在这里注入：这是所有模型调用的**唯一漏斗**
+        //    （打字聊天 / 通话 / 一起听 / QQ / 配对桥全都走 `runConversation`），
+        //    注入一次处处带上，不会漏；也正是用户说的「给 AI 供应商 API 时
+        //    顺便把规格包含进去」。⚠️ 因此 `Persona.swift` 里**不再写第二份**
+        //    （写两遍会重复注入）。总开关关掉时 `block()` 返回 nil，这里自然跳过。
+        if let capability = CapabilitySpec.block() {
+            messages.append(["role": "system", "content": capability])
+        }
+        messages.append(["role": "system", "content": Self.timeContext()])
         // 长期记忆、屏幕使用时间这类「背景资料」都走这一条 ——
         // 和人设、时间一样单独成段，不混写在一起，
         // 这样哪一段出问题都能单独关掉、单独查。
@@ -166,7 +176,7 @@ enum LLMService {
             """
             messages.append(["role": "system", "content": block])
         }
-        // 带多少条历史由用户决定：太多又慢又贵，太少她会失忆
+        // 带多少条历史由用户决定：太多又慢又贵，太少ta会失忆
         let limit = max(6, min(config.contextLimit, 200))
         for item in history.suffix(limit) {
             guard !item.text.isEmpty else { continue }
@@ -177,12 +187,12 @@ enum LLMService {
         }
 
         // ⚠️ 纯时间戳比较（`Date()` 差值），**不用 Task.sleep** —— 后者会阻塞，
-        //    而且她正流式吐字的时候，任何 await 停顿都会让界面看起来卡住。
+        //    而且ta正流式吐字的时候，任何 await 停顿都会让界面看起来卡住。
         let deadline = Date().addingTimeInterval(conversationBudget)
         var usedTools = false
 
         for round in 0..<maxRounds {
-            // 总时限到了就跳出去走「强制收尾」—— 不再让她调工具，直接用自己话回。
+            // 总时限到了就跳出去走「强制收尾」—— 不再让ta调工具，直接用自己话回。
             if Date() >= deadline {
                 onTool?("想得有点久了，先停下来")
                 break
@@ -200,8 +210,12 @@ enum LLMService {
             } catch LLMError.http(let status, _) where status == 400
                 && ((!tools.isEmpty) || config.reasoning != .off) && round == 0 {
                 // 有些接口既不认 tools、也不认 reasoning_effort。
-                // 那就退回最保守的请求再试一次 —— 报错总比"她突然不说话了"强。
+                // 那就退回最保守的请求再试一次 —— 报错总比"ta突然不说话了"强。
                 onTool?("这个接口不认工具或推理参数，这次用最保守的方式回答")
+                // ⚠️ 这次**没有工具可用**了（下面 tools 被清空成 []）——
+                //    记进黑匣子，让「ta这轮其实不能动手」这件事可见，
+                //    而不是用户事后发现「联网搜索有跟没有一样」却查无现场。
+                BlackBox.log("❗️接口不兼容 tools / reasoning，本次已降级为纯聊天")
                 var plain = config
                 plain.reasoning = .off
                 result = try await sendOnce(
@@ -238,9 +252,9 @@ enum LLMService {
             }
         }
 
-        // 走到这儿 = **轮数用完（或超时），而她还惦记着调工具**。
-        // 补那句话逼她收尾，并**真的再问一次**（这一次不带工具）——
-        // 少问这一次的话，她最后一轮只调了工具、没有正文，用户就干等一个空回复。
+        // 走到这儿 = **轮数用完（或超时），而ta还惦记着调工具**。
+        // 补那句话逼ta收尾，并**真的再问一次**（这一次不带工具）——
+        // 少问这一次的话，ta最后一轮只调了工具、没有正文，用户就干等一个空回复。
         if usedTools {
             messages.append([
                 "role": "user",
@@ -336,7 +350,7 @@ enum LLMService {
             // ⭐ 深度思考：把 `reasoning_content` 透出去。
             // ⚠️ 有的兼容实现字段名叫 `reasoning` —— **两个都试**：
             //    先看 `reasoning_content`，没有再退到 `reasoning`，且**只有它是 String 才算**。
-            // 🔴 这段**绝不混进 `content`**，也不混进最终回复 —— 否则用户会看到她的内心独白。
+            // 🔴 这段**绝不混进 `content`**，也不混进最终回复 —— 否则用户会看到ta的内心独白。
             //    这里传出去的是**增量**（一段一段），全量由调用方自己拼。
             if let piece = (delta["reasoning_content"] as? String)
                 ?? (delta["reasoning"] as? String), !piece.isEmpty {

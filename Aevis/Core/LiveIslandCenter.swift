@@ -5,7 +5,7 @@ import Foundation
 import UIKit
 #endif
 
-/// 她回消息时，把这句话送上**灵动岛**（Live Activity）。
+/// ta回消息时，把这句话送上**灵动岛**（Live Activity）。
 ///
 /// ## 设计前提（别改，这是这个功能能不能成立的全部依据）
 /// 侧载包**没有 APNs 密钥**，所以：
@@ -26,7 +26,7 @@ final class LiveIslandCenter {
     /// 留点余量，别卡在边界上。
     private static let maxAge: TimeInterval = 7 * 3600
 
-    /// 送进灵动岛的那句话最长留多少字。**在意层截断** —— 她整段话可能很长，
+    /// 送进灵动岛的那句话最长留多少字。**在意层截断** —— ta整段话可能很长，
     /// 别把整段塞进活动状态（状态要序列化、还走系统 IPC）。
     private static let maxChars = 80
 
@@ -95,7 +95,7 @@ final class LiveIslandCenter {
 
     // MARK: - 有消息
 
-    /// 她回消息时调。`name` 是她叫什么，`text` 是她这一整段话。
+    /// ta回消息时调。`name` 是ta叫什么，`text` 是ta这一整段话。
     func push(name: String, text: String) {
         guard enabled else { return }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
@@ -117,7 +117,7 @@ final class LiveIslandCenter {
         //    「前台不出声」的正确实现是**整条 alertConfiguration 传 nil**（见下面的 update）。
         let foreground = isForeground()
         let alert = AlertConfiguration(
-            title: LocalizedStringResource(stringLiteral: herName.isEmpty ? "她" : herName),
+            title: LocalizedStringResource(stringLiteral: herName.isEmpty ? Pronoun.current : herName),
             body: LocalizedStringResource(stringLiteral: said),
             sound: .default
         )

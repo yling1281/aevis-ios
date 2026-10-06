@@ -8,8 +8,8 @@ import SwiftUI
 ///
 /// 说不到"电话级"的地方我写明白：
 /// - **只能前台通话**。App 一到后台系统就收回麦克风，所以这是"开着屏幕的电话"。
-/// - **没有抢话**。她说完你才能说 —— 真要能打断得做回声消除，那是另一件事。
-/// - 她说的时候**主动把麦克风关掉**，否则她会把自己念的话当成你说的（回环）。
+/// - **没有抢话**。ta说完你才能说 —— 真要能打断得做回声消除，那是另一件事。
+/// - ta说的时候**主动把麦克风关掉**，否则ta会把自己念的话当成你说的（回环）。
 /// - 系统语音合成**没有「念完了」的回调**，所以只能轮询 `isSpeaking`。
 ///   连续两次都安静才算说完 —— 只判断一次会因为远程 TTS 还在加载而误判。
 ///
@@ -29,7 +29,7 @@ final class CallService: ObservableObject {
     @Published private(set) var startedAt: Date?
     /// 你正在说的话（实时）
     @Published private(set) var listeningText = ""
-    /// 她刚说的一句
+    /// ta刚说的一句
     @Published private(set) var lastSaid = ""
     @Published private(set) var thinking = false
     @Published private(set) var muted = false
@@ -60,7 +60,7 @@ final class CallService: ObservableObject {
     ///
     /// **必须记下来**：通话能从发现页、联系人列表、`aevis://call` 任何地方拉起来，
     /// 而 `ChatStore` 只认一个 `currentID`。不记的话就会串台 ——
-    /// 轻则她的回复落进别人的会话（用户在自己那边看不到，就成了「她不回我消息」），
+    /// 轻则ta的回复落进别人的会话（用户在自己那边看不到，就成了「ta不回我消息」），
     /// 重则 `currentID` 是 nil 时消息连盘都不落，重启就没了。
     private var contactID: UUID?
 
@@ -86,7 +86,7 @@ final class CallService: ObservableObject {
     @MainActor
     func start(persona: Persona, config: LLMConfig, memory: [String]) async {
         guard state == .idle else { return }
-        BlackBox.log("☎️ 拨号 → \(persona.name.isEmpty ? "TA" : persona.name)")
+        BlackBox.log("☎️ 拨号 → \(persona.name.isEmpty ? "ta" : persona.name)")
         self.persona = persona
         self.config = config
         self.memory = memory
@@ -99,7 +99,7 @@ final class CallService: ObservableObject {
 
         // 把对话切到这个人，这一通电话的上下文和落库都算在他头上。
         // 早先没这一步：从发现页或 `aevis://call` 打进来时，
-        // ChatStore 还停在上一个聊过的人身上，于是她的回复全写进了别人的会话。
+        // ChatStore 还停在上一个聊过的人身上，于是ta的回复全写进了别人的会话。
         contactID = PersonaStore.shared.activeID
         if let contactID {
             ChatStore.shared.switchTo(contactID)
@@ -123,7 +123,7 @@ final class CallService: ObservableObject {
             }
         }
 
-        // 把她正在听的内容显示在通话界面上
+        // 把ta正在听的内容显示在通话界面上
         transcriptWatch = listen.$transcript
             .receive(on: DispatchQueue.main)
             .sink { [weak self] text in
@@ -190,7 +190,7 @@ final class CallService: ObservableObject {
         AudioSession.applyCallOutputPort()
 
         // 先换掉通话编号：在途的那一轮立刻能认出「电话已经挂了」——
-        // 她的话照样进聊天记录（用户挂断后回到聊天能看到），
+        // ta的话照样进聊天记录（用户挂断后回到聊天能看到），
         // 但不会再念出声、也不会再把麦克风打开。
         session = UUID()
         speakingWatch?.cancel()
@@ -223,7 +223,7 @@ final class CallService: ObservableObject {
         )
     }
 
-    /// 静音（她说话的时候你自己不想被听到）。
+    /// 静音（ta说话的时候你自己不想被听到）。
     func toggleMute() {
         guard state == .active else { return }
         setMuted(!muted)
@@ -278,7 +278,7 @@ final class CallService: ObservableObject {
     ///
     /// 谁会动它：系统自己那套通话界面接通的那一下、来电、Siri、插拔耳机。
     /// 被改掉之后我们这边的麦克风就哑了，而用户看到的是
-    /// 「她突然听不见我说话了」——这种最难查，因为界面一切正常。
+    /// 「ta突然听不见我说话了」——这种最难查，因为界面一切正常。
     func reassertAudioIfActive() {
         guard state == .active, !muted else { return }
         // `ListenService.start()` 在"已经听着"的时候会直接返回（不重设类别），
@@ -299,7 +299,7 @@ final class CallService: ObservableObject {
     /// 用户 2026-10-01：「第三个的话呢，可以加点功能」。
     ///
     /// 为什么要有它：麦克风在吵的地方根本不好使（地铁、风大、旁边有人），
-    /// 而「电话里说不出话」会让她显得很笨。留一个能打字的入口，
+    /// 而「电话里说不出话」会让ta显得很笨。留一个能打字的入口，
     /// 这通电话就不会因为环境断掉 —— 而且**走的是和说话完全同一条路**。
     @MainActor
     func send(text raw: String) async {
@@ -316,14 +316,14 @@ final class CallService: ObservableObject {
         guard state == .active else { return }
         // 记下这一轮属于哪通电话。挂断会换掉 session，下面就能认出来。
         let token = session
-        // 她说的时候不能让麦克风收着，否则会把她的声音当成你的
+        // ta说的时候不能让麦克风收着，否则会把ta的声音当成你的
         listen.stop()
 
         ChatStore.shared.append(ChatMessage(role: .user, text: utterance), for: contactID)
         thinking = true
 
         // ⚠️ 用 `goesToModel` 而不是「文本非空」—— 它会把**通话记录**那种
-        // 只给人看的系统消息挡在外面（否则她会学着回「通话时长 03:21」）。
+        // 只给人看的系统消息挡在外面（否则ta会学着回「通话时长 03:21」）。
         let history = ChatStore.shared.messages.filter { $0.goesToModel }
         var collected = ""
         do {
@@ -336,9 +336,9 @@ final class CallService: ObservableObject {
             ) {
                 collected += piece
                 // 一边收一边往屏幕上放。
-                // 原来要等她整段写完才"啪"地蹦出来，那几秒在通话里就是死机 ——
-                // 屏幕上滚字，感觉就像她正在说（AI 权限那张卡那条产品原则：
-                // 「不要让她看起来像卡住了」）。
+                // 原来要等ta整段写完才"啪"地蹦出来，那几秒在通话里就是死机 ——
+                // 屏幕上滚字，感觉就像ta正在说（AI 权限那张卡那条产品原则：
+                // 「不要让ta看起来像卡住了」）。
                 lastSaid = collected
             }
         } catch {
@@ -350,8 +350,8 @@ final class CallService: ObservableObject {
 
         thinking = false
 
-        // ⭐ 剥掉她写在最后一行的那条心情标记（`〔心情：…｜心里话：…〕`）——
-        //    通话里她这句话既要说出口、又要落进聊天记录，标记一个字都不能露。
+        // ⭐ 剥掉ta写在最后一行的那条心情标记（`〔心情：…｜心里话：…〕`）——
+        //    通话里ta这句话既要说出口、又要落进聊天记录，标记一个字都不能露。
         //    用 `consume` 的返回值：剥标记 + 同步心情，语义跟聊天页那条主链路一致。
         let reply = MoodStore.shared.consume(collected)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -360,8 +360,8 @@ final class CallService: ObservableObject {
             return
         }
 
-        // **不管电话还在不在，她说的这句都要落进聊天记录。**
-        // 用户常常是在等她回答的时候挂断的 —— 恰恰这时候丢掉最气人：
+        // **不管电话还在不在，ta说的这句都要落进聊天记录。**
+        // 用户常常是在等ta回答的时候挂断的 —— 恰恰这时候丢掉最气人：
         // 电话里听到了半句，回到聊天却什么都没有。
         ChatStore.shared.append(ChatMessage(role: .assistant, text: reply), for: contactID)
         lastSaid = reply
@@ -382,7 +382,7 @@ final class CallService: ObservableObject {
         waitUntilSheStopsTalking()
     }
 
-    /// 等她把话说完，再把麦克风打开。
+    /// 等ta把话说完，再把麦克风打开。
     private func waitUntilSheStopsTalking() {
         speakingWatch?.cancel()
         speakingWatch = Task { @MainActor in

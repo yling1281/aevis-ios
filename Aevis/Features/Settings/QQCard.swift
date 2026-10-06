@@ -101,7 +101,7 @@ struct QQCard: View {
                 Text("启用")
                     .font(.aevis(15))
                 Text(settings.qqBridgeEnabled
-                     ? "开着。她可以看和发你的 QQ 消息了"
+                     ? "开着。\(Pronoun.current)可以看和发你的 QQ 消息了"
                      : "关着。整块 QQ 功能都不生效")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
@@ -164,8 +164,8 @@ struct QQCard: View {
                 Text("允许替你发消息")
                     .font(.aevis(15))
                 Text(settings.qqBridgeCanSend
-                     ? "开着。她说要发的时候，是以你本人的身份发出去的"
-                     : "关着。她只能看，不能替你说话")
+                     ? "开着。\(Pronoun.current)说要发的时候，是以你本人的身份发出去的"
+                     : "关着。\(Pronoun.current)只能看，不能替你说话")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

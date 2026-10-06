@@ -133,7 +133,7 @@ struct ShareToMomentsSheet: View {
                 }
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(isMine ? "我" : (persona.name.isEmpty ? "TA" : persona.name))
+                        Text(isMine ? "我" : (persona.name.isEmpty ? "ta" : persona.name))
                             .font(.aevis(11.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         Text(message.text)
@@ -173,7 +173,7 @@ struct ShareToMomentsSheet: View {
         #endif
 
         if posted != nil {
-            note = "转过去了。她在朋友圈里看得到。"
+            note = "转过去了。\(Pronoun.current)在朋友圈里看得到。"
             picked = nil
             extra = ""
         } else {

@@ -19,18 +19,48 @@ extension View {
                 in: RoundedRectangle(cornerRadius: radius, style: .continuous)
             )
         } else if AppSettings.shared.useGlass {
-            // iOS 26 以下：按材质档位近似
+            // iOS 26 以下：没有真液态玻璃，就用「加厚毛玻璃」近似 ——
+            // 材质底 + 顶部内高光 + 双色描边（顶亮底暗）＋ 柔光外阴影，
+            // 让它在纯色底上也看得出「玻璃的厚度」，而不是一块死板的色块。
+            // （老板反馈：iOS 18 上「像玻璃但底是纯色、透不出东西」。）
+            let material: AnyShapeStyle = AppSettings.shared.glassStyle == .clear
+                ? AnyShapeStyle(.ultraThinMaterial)
+                : AnyShapeStyle(.regularMaterial)
+
             self
                 .background(
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(AppSettings.shared.glassStyle == .clear
-                              ? AnyShapeStyle(.ultraThinMaterial)
-                              : AnyShapeStyle(.regularMaterial))
+                        .fill(material)
                 )
+                // 顶部内高光：光像从上面打进来，玻璃才「厚」
                 .overlay(
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.22), .clear],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
                 )
+                // 双色高光描边：顶部亮边 + 底部暗边 —— 这一笔最像真玻璃
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.60),
+                                    Color.white.opacity(0.10),
+                                    Color.black.opacity(0.12)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                // 柔光外阴影：玻璃微微浮起来
+                .shadow(color: Color.black.opacity(0.07), radius: 8, x: 0, y: 3)
         } else {
             self
                 .background(
@@ -212,7 +242,7 @@ struct AevisBackground: View {
     }
 }
 
-/// TA 的雏形：一团会呼吸的光。跟随主题色。
+/// ta 的雏形：一团会呼吸的光。跟随主题色。
 struct AevisOrb: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var breathing = false
@@ -307,6 +337,7 @@ struct AevisBubble: View {
             .foregroundStyle(textColor)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
             .padding(.horizontal, horizontalPadding)
             .padding(.vertical, verticalPadding)
     }
@@ -342,7 +373,7 @@ struct AevisBubble: View {
     }
 }
 
-/// TA 的头像，或者「我」的头像。
+/// ta 的头像，或者「我」的头像。
 /// 用户上传了图片就用图片；没有就退回「主题色 / seed 决定的一团光」。
 struct AevisAvatar: View {
     /// 这个头像是谁的。两侧都能自定义（用户要求）。
@@ -381,7 +412,7 @@ struct AevisAvatar: View {
         }
     }
 
-    /// 没上传照片时的兜底颜色。我的固定用一个青色，和 TA 区分开。
+    /// 没上传照片时的兜底颜色。我的固定用一个青色，和 ta 区分开。
     private var fallbackTop: Color {
         switch source {
         case .ai:

@@ -6,11 +6,11 @@ import SwiftUI
 /// 可以控制它开或者不开」→ 问他要哪种形态，他选的是 **总开关 + 分类开关**。
 ///
 /// 这张卡就是那两个闸的门面：
-/// - 顶上那个是**总闸**（`AppSettings.aiToolsEnabled`）—— 关掉她只剩聊天；
+/// - 顶上那个是**总闸**（`AppSettings.aiToolsEnabled`）—— 关掉ta只剩聊天；
 /// - 下面那一列是**分闸**（`AppSettings.disabledToolCategories`）—— 逐类关。
 ///
 /// ⚠️ 两个闸改的都只是「发给模型的工具清单」（`DeviceTools.all()`），
-///    不碰人设、记忆、聊天记录。关到最死，她也还在。
+///    不碰人设、记忆、聊天记录。关到最死，ta也还在。
 struct AIToolsCard: View {
     @ObservedObject private var settings = AppSettings.shared
 
@@ -18,7 +18,7 @@ struct AIToolsCard: View {
         VStack(alignment: .leading, spacing: 0) {
             title("AI 权限")
 
-            Text("最高权限在你手里：\(Pronoun.current)能碰什么由你说了算。关掉的只是她动手的能力，聊天一直都在。")
+            Text("最高权限在你手里：\(Pronoun.current)能碰什么由你说了算。关掉的只是\(Pronoun.current)动手的能力，聊天一直都在。")
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -28,10 +28,10 @@ struct AIToolsCard: View {
             rule
 
             toggleRow(
-                "让她能动手",
+                "让\(Pronoun.current)能动手",
                 subtitle: settings.aiToolsEnabled
-                    ? "现在她能调用 \(DeviceTools.all().count) 个工具"
-                    : "已关掉，她只剩聊天，什么也做不了",
+                    ? "现在\(Pronoun.current)能调用 \(DeviceTools.all().count) 个工具"
+                    : "已关掉，\(Pronoun.current)只剩聊天，什么也做不了",
                 isOn: $settings.aiToolsEnabled
             )
 
@@ -127,21 +127,21 @@ struct AIToolsCard: View {
     /// 说实话的那一段：哪些是真的做不到（不是没做）。
     private var boundary: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("她真正碰不到的")
+            Text("\(Pronoun.current)真正碰不到的")
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
 
-            Text("上面那列是她的全部本事。iOS 把每个 App 关在各自的沙盒里，所以下面这些谁都做不到，跟开不开权限无关：")
+            Text("上面那列是\(Pronoun.current)的全部本事。iOS 把每个 App 关在各自的沙盒里，所以下面这些谁都做不到，跟开不开权限无关：")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            limit("碰别的 App 里的东西", detail: "微信、支付宝里有什么，她看不到也改不了")
+            limit("碰别的 App 里的东西", detail: "微信、支付宝里有什么，\(Pronoun.current)看不到也改不了")
             limit("替你在别的 App 里点", detail: "跨 App 自动操作，系统不放行")
             limit("改系统设置", detail: "飞行模式、连 Wi-Fi、调音量这一类")
             limit("无人值守地在后台干活", detail: "App 一被挂起就停，不会替你一直盯着")
             limit("绕过权限弹窗", detail: "相册、定位、麦克风的授权只有你点得动")
-            limit("悄悄打开硬件", detail: "相机、麦克风不能被她静默启用")
+            limit("悄悄打开硬件", detail: "相机、麦克风不能被\(Pronoun.current)静默启用")
 
             Text("聊天永远不受影响：上面全关掉，你们该说的话一句不少。")
                 .font(.aevis(11.5))

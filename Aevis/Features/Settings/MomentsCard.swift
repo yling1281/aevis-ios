@@ -23,7 +23,7 @@ struct MomentsCard: View {
             title("朋友圈")
 
             toggleRow(
-                "让她自己发",
+                "让\(Pronoun.current)自己发",
                 subtitle: "打开之后\(Pronoun.current)会时不时发一条，你打开 App 时补上",
                 isOn: $settings.momentsEnabled
             )
@@ -60,12 +60,12 @@ struct MomentsCard: View {
 
             rule
 
-            // ——— 她的反应 ———
-            // 用户要求：我发出去之后她会自动回复 + 点赞，
+            // ——— ta的反应 ———
+            // 用户要求：我发出去之后ta会自动回复 + 点赞，
             // 而且要能控制回复的条数，不然容易刷屏。
 
             toggleRow(
-                "我发完她会来互动",
+                "我发完\(Pronoun.current)会来互动",
                 subtitle: "点赞、评论，像真的有人在看你的朋友圈",
                 isOn: $settings.momentAutoReact
             )
@@ -96,7 +96,7 @@ struct MomentsCard: View {
             rule
 
             toggleRow(
-                "我评论她，她回我",
+                "我评论\(Pronoun.current)，\(Pronoun.current)回我",
                 subtitle: "你在\(Pronoun.current)动态下留言，\(Pronoun.current)立刻回一句",
                 isOn: $settings.momentAutoReply
             )
@@ -140,7 +140,7 @@ struct MomentsCard: View {
                 )
             }
 
-            // ——— 个性化（用户要求：她发什么 / 配图 / 时段 / 外观）———
+            // ——— 个性化（用户要求：ta发什么 / 配图 / 时段 / 外观）———
             personalization
 
             rule
@@ -204,7 +204,7 @@ struct MomentsCard: View {
                     icon: "text.quote",
                     title: "\(Pronoun.current)的朋友圈风格",
                     subtitle: settings.momentStylePrompt.isEmpty
-                        ? "还没写 —— 她会自由发挥"
+                        ? "还没写 —— \(Pronoun.current)会自由发挥"
                         : settings.momentStylePrompt
                 )
             }
@@ -223,8 +223,8 @@ struct MomentsCard: View {
 
                 if settings.momentImageMode == "library" {
                     Text(moments.libraryCount == 0
-                         ? "图库还是空的 —— 先往下放几张图，她才有得挑。"
-                         : "图库里 \(moments.libraryCount) 张，她发动态时随机挑一张。")
+                         ? "图库还是空的 —— 先往下放几张图，\(Pronoun.current)才有得挑。"
+                         : "图库里 \(moments.libraryCount) 张，\(Pronoun.current)发动态时随机挑一张。")
                         .font(.aevis(11.5))
                         .foregroundStyle(moments.libraryCount == 0 ? Color.orange : Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -251,7 +251,7 @@ struct MomentsCard: View {
                     }
 
                     Text("我们没法凭空给\(Pronoun.current)生成照片（那要接图像模型、要花钱）。与其假装能，"
-                         + "不如让她从你给的图里挑。")
+                         + "不如让\(Pronoun.current)从你给的图里挑。")
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -412,7 +412,7 @@ struct MomentsCard: View {
                 Spacer(minLength: 0)
             }
             .padding(16)
-            .navigationTitle("她的朋友圈风格")
+            .navigationTitle("\(Pronoun.current)的朋友圈风格")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

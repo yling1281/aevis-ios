@@ -44,10 +44,10 @@ struct Moment: Codable, Identifiable, Equatable {
 /// 朋友圈。
 ///
 /// 设计取舍：
-/// - **只存两个作者**（我 / TA）。没有好友系统，也不需要。
+/// - **只存两个作者**（我 / ta）。没有好友系统，也不需要。
 /// - **图片走文件**，JSON 里只留文件名。
-/// - 她发动态**不做定时器**（后台跑不了模型），而是每次打开 App 时按「距上一条多久」补发。
-/// - 她也能**在聊天里被要求发**（工具 `post_moment`），说了就真发，不假装。
+/// - ta发动态**不做定时器**（后台跑不了模型），而是每次打开 App 时按「距上一条多久」补发。
+/// - ta也能**在聊天里被要求发**（工具 `post_moment`），说了就真发，不假装。
 final class MomentStore: ObservableObject {
     static let shared = MomentStore()
 
@@ -201,11 +201,11 @@ final class MomentStore: ObservableObject {
         return name
     }
 
-    // MARK: - 她的图库
+    // MARK: - ta的图库
     //
-    // 用户自己往这儿放图，她发动态时从里面挑一张带上。
-    // ⚠️ 我们**没法凭空给她生成照片**（那要接图像模型、要花钱）。
-    //    与其假装能，不如让她从你给的图里挑 —— 这也是「能自定义的都交给用户」。
+    // 用户自己往这儿放图，ta发动态时从里面挑一张带上。
+    // ⚠️ 我们**没法凭空给ta生成照片**（那要接图像模型、要花钱）。
+    //    与其假装能，不如让ta从你给的图里挑 —— 这也是「能自定义的都交给用户」。
 
     private var libraryDirectory: URL {
         imageDirectory.appendingPathComponent("library", isDirectory: true)
@@ -318,8 +318,8 @@ final class MomentStore: ObservableObject {
         return moments[index].comments.filter { $0.author == author }.count
     }
 
-    /// 「我上一次评论之后，她回了几条」——
-    /// 回她的条数上限按这个算，这样我每留一条言她就能回，但不会连着自言自语。
+    /// 「我上一次评论之后，ta回了几条」——
+    /// 回ta的条数上限按这个算，这样我每留一条言ta就能回，但不会连着自言自语。
     func taCommentsAfterMyLastComment(on moment: Moment) -> Int {
         guard let index = moments.firstIndex(where: { $0.id == moment.id }) else { return 0 }
         let comments = moments[index].comments
@@ -358,9 +358,9 @@ final class MomentStore: ObservableObject {
         statusLine = "朋友圈清空了。"
     }
 
-    // MARK: - 给她看
+    // MARK: - 给ta看
 
-    /// 最近几条动态的文字版，喂给她当上下文用。
+    /// 最近几条动态的文字版，喂给ta当上下文用。
     func digest(limit: Int = 6) -> String {
         guard !moments.isEmpty else { return "" }
         let formatter = DateFormatter()
@@ -379,15 +379,15 @@ final class MomentStore: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - 让她发
+    // MARK: - 让ta发
 
-    /// 让她写一条动态。返回没发出去就 nil。
+    /// 让ta写一条动态。返回没发出去就 nil。
     @discardableResult
     func generateAndPost(persona: Persona, config: LLMConfig, memory: [String], image: UIImage? = nil) async -> Moment? {
         let text = await compose(persona: persona, config: config, memory: memory)
         guard !text.isEmpty else { return nil }
-        // 调用方明确给了图就用它；否则看设置 —— 让她从「她的图库」里自己挑一张。
-        // 图库是空的就当她这次不想配图，照样发文字。
+        // 调用方明确给了图就用它；否则看设置 —— 让ta从「ta的图库」里自己挑一张。
+        // 图库是空的就当ta这次不想配图，照样发文字。
         var picture = image
         if picture == nil, AppSettings.shared.momentImageMode == "library" {
             picture = randomLibraryImage()
@@ -395,7 +395,7 @@ final class MomentStore: ObservableObject {
         return post(text: text, author: .ta, image: picture)
     }
 
-    /// 让她按人设写一条。写不出来返回空串（调用方决定要不要退回兜底句）。
+    /// 让ta按人设写一条。写不出来返回空串（调用方决定要不要退回兜底句）。
     func compose(persona: Persona, config: LLMConfig, memory: [String]) async -> String {
         guard !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return Self.fallbackLines.randomElement() ?? ""
@@ -412,7 +412,7 @@ final class MomentStore: ObservableObject {
             instruction += "\n\n你最近发过的（别重复）：\n\(recent)"
         }
 
-        // 用户写的「她的朋友圈风格」拼进去。
+        // 用户写的「ta的朋友圈风格」拼进去。
         // ⚠️ **留空就不加这一段** —— 空着还硬塞一句"按这个风格发"只会让模型困惑。
         let style = AppSettings.shared.momentStylePrompt
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -435,7 +435,7 @@ final class MomentStore: ObservableObject {
             return ""
         }
 
-        // ⭐ 先剥掉末尾的心情标记再清引号 —— 她发的动态也是用户看得到的，
+        // ⭐ 先剥掉末尾的心情标记再清引号 —— ta发的动态也是用户看得到的，
         //    标记不能跟着发出去。这句话本就在主 actor 之外，跳一次主线程再剥
         //    （`consume` 会写 `MoodStore` 的 @Published，必须在主线程上改）。
         let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
@@ -447,9 +447,9 @@ final class MomentStore: ObservableObject {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - 我发完之后：她自动来互动
+    // MARK: - 我发完之后：ta自动来互动
 
-    /// 我发了动态 → 她来点赞 + 评论。
+    /// 我发了动态 → ta来点赞 + 评论。
     ///
     /// 点赞和评论都受设置控制，而且**评论条数有上限** ——
     /// 一口气刷十条比没人理还烦。
@@ -487,7 +487,7 @@ final class MomentStore: ObservableObject {
             comment(line, on: moment, author: .ta)
         }
 
-        // 「有些还会私信主动联系你」—— 评完评论，有时候她还会直接发消息来。
+        // 「有些还会私信主动联系你」—— 评完评论，有时候ta还会直接发消息来。
         await maybeSendDirectMessage(
             reason: "对方刚发了一条动态：「\(moment.text)」，你在下面评论了",
             persona: persona,
@@ -496,7 +496,7 @@ final class MomentStore: ObservableObject {
         )
     }
 
-    /// 让她写几句，按行拆开、清理、按上限截断。
+    /// 让ta写几句，按行拆开、清理、按上限截断。
     private func composeLines(
         instruction: String,
         persona: Persona,
@@ -576,10 +576,10 @@ final class MomentStore: ObservableObject {
         return text.trimmingCharacters(in: .whitespaces)
     }
 
-    /// 她回复我的评论。
+    /// ta回复我的评论。
     ///
-    /// 条数上限用「我上一次留言之后她回了几条」来算 ——
-    /// 这样我每留一条言她都会回，但不会自己对着自己一直说。
+    /// 条数上限用「我上一次留言之后ta回了几条」来算 ——
+    /// 这样我每留一条言ta都会回，但不会自己对着自己一直说。
     func replyToMyComment(on moment: Moment, myComment: String, persona: Persona, config: LLMConfig, memory: [String]) async {
         let settings = AppSettings.shared
         guard settings.momentAutoReply else { return }
@@ -606,7 +606,7 @@ final class MomentStore: ObservableObject {
         guard let first = lines.first else { return }
         comment(first, on: moment, author: .ta)
 
-        // 回完评论，有时候她会直接私聊过来
+        // 回完评论，有时候ta会直接私聊过来
         await maybeSendDirectMessage(
             reason: "你自己发过：「\(moment.text)」。对方在下面评论：「\(myComment)」，你刚回了「\(first)」",
             persona: persona,
@@ -624,7 +624,7 @@ final class MomentStore: ObservableObject {
         return roll < min(chance, 1.0)
     }
 
-    /// 她刷到之后**直接私聊**我，而不是只在评论区说。
+    /// ta刷到之后**直接私聊**我，而不是只在评论区说。
     ///
     /// 用户原话：「有些还会私信主动联系你」—— 重点是「有些」，
     /// 所以按概率来，不是每次都发。真发出去的时候还会走一趟 Bark（如果开了）。
@@ -637,7 +637,7 @@ final class MomentStore: ObservableObject {
             roll: Double.random(in: 0..<1)
         ) else { return }
         guard !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        // 她正在打字的时候不插 —— 会把她半句话顶乱
+        // ta正在打字的时候不插 —— 会把ta半句话顶乱
         guard ChatStore.shared.canReceiveProactive else { return }
 
         let instruction = """
@@ -659,9 +659,9 @@ final class MomentStore: ObservableObject {
         guard let text = lines.first else { return }
         guard ChatStore.shared.appendProactive(text) else { return }
 
-        statusLine = "她私信你了。"
+        statusLine = "\(Pronoun.current)私信你了。"
 
-        // 她主动找你的时候，值得推一条 —— 不然 App 没开就错过了
+        // ta主动找你的时候，值得推一条 —— 不然 App 没开就错过了
         if settings.barkEnabled, !settings.barkURL.isEmpty {
             try? await ProactiveService.shared.sendBark(
                 text: text,
@@ -673,7 +673,7 @@ final class MomentStore: ObservableObject {
 
     // MARK: - 自动发
 
-    /// 她上一条动态距今多久。
+    /// ta上一条动态距今多久。
     func timeSinceLastPost() -> TimeInterval? {
         guard let last = moments.first(where: { $0.author == .ta }) else { return nil }
         return Date().timeIntervalSince(last.createdAt)
@@ -681,7 +681,7 @@ final class MomentStore: ObservableObject {
 
     /// 打开 App 时补发。
     /// 真实定时做不到（后台跑不了模型），所以用「距上一条够久了就补一条」的办法，
-    /// 效果上接近「她一直在发」。
+    /// 效果上接近「ta一直在发」。
     @MainActor
     func catchUpIfNeeded(persona: Persona, config: LLMConfig, memory: [String]) async {
         let settings = AppSettings.shared
@@ -691,12 +691,12 @@ final class MomentStore: ObservableObject {
         var interval = 24.0 * 3600.0 / Double(perDay)
 
         // 时段偏好（2026-09-25 加）：把「该等多久」按当前时段缩放。
-        // 权重高 → 等得短（这个钟点她勤快）；权重低 → 等得长；
+        // 权重高 → 等得短（这个钟点ta勤快）；权重低 → 等得长；
         // 用户把当前时段填成 0 → 就是"这个点别发"，直接跳过。
         // 四个时段全填 0 时 momentCurrentWeight 返回 1 —— 等于不干预，保持原行为。
         let weight = settings.momentCurrentWeight
         if weight <= 0 { return }
-        // 夹一下，免得某个时段权重特别高时她连着刷屏
+        // 夹一下，免得某个时段权重特别高时ta连着刷屏
         interval = interval / min(max(weight, 0.25), 4.0)
 
         if let elapsed = timeSinceLastPost(), elapsed < interval { return }
@@ -713,7 +713,7 @@ final class MomentStore: ObservableObject {
             }
             return
         }
-        statusLine = "她刚发了一条朋友圈。"
+        statusLine = "\(Pronoun.current)刚发了一条朋友圈。"
     }
 
     /// 没配模型、或生成失败时的兜底。

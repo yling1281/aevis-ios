@@ -25,7 +25,7 @@ struct TodoView: View {
 
     private var taName: String {
         let name = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     private var trimmedDraft: String {
@@ -274,7 +274,7 @@ private struct TodoEditor: View {
 
     private var taName: String {
         let name = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "TA" : name
+        return name.isEmpty ? "ta" : name
     }
 
     init(original: TodoItem,

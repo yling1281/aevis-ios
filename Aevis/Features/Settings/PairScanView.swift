@@ -236,7 +236,7 @@ struct PairScanView: View {
                 // ⚠️ **别在这个字符串里用 `**` 想加粗** —— 拼接出来的 `Text` 走的是
                 //    原文渲染，星号会原样显示在用户脸上（R17，项目里栽过）。
                 Text("点了「授权」之后，那台电脑会立刻登上你 Aevis 里的这个账号，"
-                     + "并且和你现在用的她绑在一起。"
+                     + "并且和你现在用的\(Pronoun.current)绑在一起。"
                      + "\n\n如果不是你刚在电脑上点开的，就别授权。")
                     .font(.aevis(13))
                     .foregroundStyle(.secondary)

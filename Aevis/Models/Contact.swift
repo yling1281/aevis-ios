@@ -3,7 +3,7 @@ import Foundation
 /// 通讯录里的一个联系人。
 ///
 /// 为什么要把人设**包一层**，而不是直接拿 `[Persona]` 当通讯录：
-/// 人设回答的是「TA 是谁」；而通讯录还得知道「什么时候加的、
+/// 人设回答的是「ta 是谁」；而通讯录还得知道「什么时候加的、
 /// 消息和记忆该算在谁头上」。分开之后，人设那部分仍然能整体导出成
 /// 角色卡（见 `CharacterCard`），不会被这些挂靠信息污染。
 struct Contact: Codable, Identifiable, Equatable {

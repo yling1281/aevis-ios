@@ -2,9 +2,9 @@ import Foundation
 
 /// 一个 MCP 服务器的配置。
 ///
-/// 「MCP」是让她的能力可以**外接**的一种方式：你电脑上跑一个 MCP 服务器
+/// 「MCP」是让ta的能力可以**外接**的一种方式：你电脑上跑一个 MCP 服务器
 /// （能读文件、能查数据库、能操作别的东西），Aevis 连上去，
-/// 那边提供什么工具，她就多几只手 —— 不用改一行 App 代码。
+/// 那边提供什么工具，ta就多几只手 —— 不用改一行 App 代码。
 struct MCPServerConfig: Codable, Identifiable, Equatable {
     var id: String = UUID().uuidString
     var name: String
@@ -194,7 +194,7 @@ final class MCPClient {
     }
 
     /// MCP 的返回是一组内容块，这里只取文字。
-    /// 图片、音频那些先跳过 —— 她要的是能读懂的信息。
+    /// 图片、音频那些先跳过 —— ta要的是能读懂的信息。
     static func text(from content: Any?) -> String {
         guard let blocks = content as? [[String: Any]] else { return "" }
         return blocks.compactMap { block -> String? in
