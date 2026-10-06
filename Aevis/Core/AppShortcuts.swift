@@ -17,7 +17,9 @@ import UIKit
 ///
 /// ## 三条硬规矩（错了就**静默失效**，界面上什么都看不出来）
 /// 1. 每个 phrase **必须含 `\(.applicationName)`**，否则那条动作不会出现在「快捷指令」里；
-/// 2. 一个 App 最多 **10** 条（Apple 建议 2–5 条），这里放 7 条；
+/// 2. 一个 App 最多 **10** 条（Apple 建议 2–5 条）—— **这是硬上限，本文件现在已经放满 10 条**。
+///    🔴 以后要再加动作，**必须先删一条旧的**，否则整组 `appShortcuts` 会**静默失效**
+///       （界面上什么都看不出来，只是「快捷指令」的动作列表里一个都不出现）；
 /// 3. 这些动作**不能被 `shortcuts://run-shortcut?name=` 按名字调** —— 那条 URL 只认
 ///    用户自己库里的快捷指令。所以 Aevis 要用它们，只能在自己的代码里直接读
 ///    （下面这些 intent 就是把"读"这一步做进了 App 自己）。
@@ -172,6 +174,94 @@ struct OpenAevisIntent: AppIntent {
     }
 }
 
+// MARK: - 打开界面（零配置）
+
+/// ⚠️ **为什么下面这三条是「零配置」**：它们要拉起的东西（通话页 / 一起听 / 让 ta 问一句）
+///    本来**只有一条路** —— 用户自己在系统「快捷指令」里建一条指令，最后加一步「打开 URL」，
+///    填 `aevis://call` / `aevis://listen` / `aevis://daily`。也就是说，**用户得自己拼 URL、
+///    自己建指令**才能用。现在把这三个动作声明成 App Shortcut：**代码里声明一次，
+///    随 App 安装就出现在「快捷指令」的 Aevis 分组里**，用户点一下就跑。
+///
+/// 🔴 **一个 App 最多 10 条 App Shortcut（Apple 硬上限）—— 加上这三条，本文件正好 10 条，满了。**
+///    以后要再加动作，**必须先删一条旧的**；否则整个 `appShortcuts` 会**静默失效**
+///    （界面上一点异常都看不出来，只是动作列表里一个都不出现）。
+///
+/// 这三条做的事**和 `AevisBridge.handle` 里对应的 `aevis://` 指令一模一样** ——
+/// 写的是**同一处 `BridgeInbox` 信号、走界面同一条消费路径**，只是入口从
+/// 「用户自建快捷指令」换成了「出厂自带」。⚠️ 它们**不读任何系统数据、不需要任何
+/// entitlement**（不像健康 / 屏幕使用时间），**别往里加权限相关的东西**。
+
+// MARK: 打开通话
+
+/// 直接拉起 App 的**通话页**。
+///
+/// 做的事和 `AevisBridge.handle` 的 `case "call"`（`BridgeInbox.shared.openCall = true`）
+/// **完全一样**；「零配置」的含义见本节顶部。
+struct OpenCallIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "打开通话"
+
+    // 这条要**弹界面**，所以照 `OpenAevisIntent` 一样打开 App。
+    static var openAppWhenRun: Bool { true }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        // `BridgeInbox` 本身**不是** `@MainActor`（它就是个 `ObservableObject`），
+        // 但 `openCall` 是 `@Published` —— `@Published` 必须在主线程上改
+        // （iOS 26 从后台线程写会硬崩），所以照本文件其它 intent 统一写法
+        // `await MainActor.run { … }`，不自己发明调用方式。
+        _ = await MainActor.run {
+            BridgeInbox.shared.openCall = true
+        }
+        return .result(dialog: "打开通话了。")
+    }
+}
+
+// MARK: 打开一起听
+
+/// 直接拉起 App 的**一起听**。
+///
+/// 做的事和 `AevisBridge.handle` 的 `case "listen"`（`BridgeInbox.shared.openListen = true`）
+/// **完全一样**；「零配置」的含义见本节顶部。
+struct OpenListenIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "打开一起听"
+
+    // 这条要**弹界面**，所以照 `OpenAevisIntent` 一样打开 App。
+    static var openAppWhenRun: Bool { true }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        // 同 `OpenCallIntent`：`openListen` 是 `@Published`，必须在主线程上写。
+        _ = await MainActor.run {
+            BridgeInbox.shared.openListen = true
+        }
+        return .result(dialog: "打开一起听了。")
+    }
+}
+
+// MARK: 问 ta 今天过得怎么样
+
+/// 让 ta **主动问一句「今天过得怎么样」**。
+///
+/// 做的事和 `AevisBridge.handle` 的 `case "daily"`（把 `BridgeInbox.shared.ask`
+/// 设成同一句话）**完全一样** —— 这里**照抄桥里那串字**，不自造新文案；
+/// 「零配置」的含义见本节顶部。
+struct AskDailyIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "问 ta 今天过得怎么样"
+
+    // 这条要**弹界面**（让 ta 那句话发出去、用户能看到），所以照 `OpenAevisIntent` 一样打开 App。
+    static var openAppWhenRun: Bool { true }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        // 同 `OpenCallIntent`：`ask` 是 `@Published`，必须在主线程上写。
+        // 这句话与 `AevisBridge` 的 `case "daily"` 保持一致（同一处消费路径）。
+        _ = await MainActor.run {
+            BridgeInbox.shared.ask = "帮我看看今天过得怎么样"
+        }
+        return .result(dialog: "让 ta 问问你今天过得怎么样。")
+    }
+}
+
 // MARK: - 上报健康
 
 /// 健康数据的**接收端**：让用户在系统「快捷指令」里把「查找健康样本 / 统计健康样本」
@@ -322,6 +412,35 @@ struct AevisAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "上报屏幕时间",
             systemImageName: "hourglass"
+        )
+        // ——— 下面三条是「打开界面」，零配置、不需要 entitlement（见上方「打开界面（零配置）」一节）———
+        // ⚠️ 到这三条为止，`appShortcuts` 已满 10 条（Apple 硬上限）。再加必须先删一条，否则整组静默失效。
+        AppShortcut(
+            intent: OpenCallIntent(),
+            phrases: [
+                "用\(.applicationName)打电话",
+                "用\(.applicationName)开个通话"
+            ],
+            shortTitle: "打开通话",
+            systemImageName: "phone.fill"
+        )
+        AppShortcut(
+            intent: OpenListenIntent(),
+            phrases: [
+                "用\(.applicationName)一起听",
+                "用\(.applicationName)打开一起听"
+            ],
+            shortTitle: "一起听",
+            systemImageName: "headphones"
+        )
+        AppShortcut(
+            intent: AskDailyIntent(),
+            phrases: [
+                "用\(.applicationName)问ta今天过得怎么样",
+                "让\(.applicationName)问问今天过得怎么样"
+            ],
+            shortTitle: "问今天",
+            systemImageName: "bubble.left.and.bubble.right.fill"
         )
     }
 }

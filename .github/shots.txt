@@ -138,3 +138,10 @@
 #       光带 -aevisOpenSettings -aevisSettingsFocus=console **只停在设置页、只高亮那张卡**，
 #       进不去 ⇒ 以前一个包都没有命令台的截图。这个参数把它自动推到那一页。
 51-console          -aevisDemo -aevisOpenSettings -aevisSettingsFocus=console -aevisOpenConsole
+
+# ⭐ 2026-10-06：「登录设备」那一张卡（老板要的「跟微信一样，能看出账号登了几台」）。
+#    ⚠️ `-aevisSettingsFocus=devicelist` 是**必须**的：带 `=account` 只会渲染 `AccountCard`，
+#       DeviceListCard 根本不在选中项里 —— 它虽然是「账号与数据」那一组的成员，
+#       但直达模式下**只显示 focus 指定的那一张**（SettingsView.swift:50-53）。
+#       所以在这条之前，`devicelist` 这张卡**从来没有被截过图**。
+52-devicelist       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=devicelist

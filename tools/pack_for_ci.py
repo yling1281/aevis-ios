@@ -20,6 +20,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import sys
 import zipfile
@@ -176,6 +177,19 @@ MUST_HAVE = [
     #    而且 `project.yml` 把这两个文件也写进了管理端 target 的 sources。
     "Aevis/Core/AevisHosts.swift",
     "Aevis/Core/AccountEndpoint.swift",
+    # ——— 灵动岛 / 实时活动扩件（**独立 target**，2026-10-01）———
+    # ⚠️ 理由同上面两批探针：`project.yml` 里已经有 target 了。
+    #    但**这批复件比探针更狠** —— 主 App **依赖**它（`dependencies: - target: AevisLive`），
+    #    源码没跟上不只是"扩件空着"，是主 App 依赖的 target 不存在、**整个构建失败**。
+    "AevisLive/AevisLiveWidget.swift",
+    "AevisLive/Info.plist",
+    # 数据契约——**主 App 和扩件两个 target 都要编**，只此一份
+    "Aevis/Core/MessageActivity.swift",
+    "Aevis/Core/LiveIslandCenter.swift",
+    "Aevis/Core/RemoteConfig.swift",
+    # ⚠️ 补充说明：下面这段「自动对账」会从 `project.yml` 反推所有 `- path:`，
+    #    所以**新增 target 时不必一定来改上面这份清单**。这里的条目是为了
+    #    "关键文件一眼可见"，不是唯一防线。
 ]
 
 
@@ -214,6 +228,8 @@ def main():
 
     with zipfile.ZipFile(bundle) as archive:
         names = set(archive.namelist())
+        yml = archive.read("aevis-ios/project.yml").decode("utf-8")
+
         print("关键文件在里面吗：")
         missing = 0
         for probe in MUST_HAVE:
@@ -222,8 +238,28 @@ def main():
                 missing += 1
             print("   %-46s %s" % (probe.split("/")[-1], "✓" if present else "✗ 缺了！"))
 
+        # ——— 自动对账：`project.yml` 里每个 `- path: X` 都得在包里 ———
+        #
+        # 为什么加这个：上面那份 `MUST_HAVE` 是**手工维护**的，而
+        # 「手工维护的清单迟早会漏」这件事在这个仓库里已经反复发生过 ——
+        # `AevisCallProbe2*` 和 `AevisLive*`（灵动岛扩件）**从来没被加进去过**。
+        # 漏了的后果**不是报错**：CI 会报「找不到 target」（看着像代码写错了），
+        # 或者更糟 —— 悄悄编出一个少功能的包，日志一路绿。
+        #
+        # 所以改成**从 project.yml 反推**：它写了 `- path:` 的每一处，
+        # 包里那个路径就必须存在。**新增 target 时不需要任何人记得来改这里。**
+        paths = sorted(set(re.findall(r"^\s*-\s*path:\s*(\S+)\s*$", yml, re.M)))
+        print("project.yml 里的源码路径（自动对账）：")
+        for entry in paths:
+            entry = entry.strip().strip('"')
+            # 目录走前缀匹配（zip 里不存目录条目），单文件走精确匹配。
+            present = ("aevis-ios/" + entry) in names or any(
+                name.startswith("aevis-ios/" + entry + "/") for name in names)
+            if not present:
+                missing += 1
+            print("   %-56s %s" % (entry, "✓" if present else "✗ 不在包里！"))
+
         # 顺手把版本号打出来，免得又忘了改
-        yml = archive.read("aevis-ios/project.yml").decode("utf-8")
         for line in yml.splitlines():
             if "MARKETING_VERSION" in line or "CURRENT_PROJECT_VERSION" in line:
                 print("   " + line.strip())

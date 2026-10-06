@@ -24,6 +24,11 @@ struct SystemBridgeCard: View {
     @State private var editingKey = ""
     @State private var note: String?
 
+    // 「自己拼」那两块高级区的展开状态。
+    // 🔴 **各用各的**，别共用一个 —— 共用的话展开一个另一个也跟着开。
+    @State private var showAdvancedShortcuts = false
+    @State private var showAdvancedAmbient = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             title("系统")
@@ -41,6 +46,7 @@ struct SystemBridgeCard: View {
                 title: "锁屏",
                 value: settings.lockShortcutName,
                 key: "lock",
+                defaultName: ShortcutBridge.defaultLockShortcutName,
                 action: {
                     note = ShortcutBridge.lockScreenViaShortcut()
                 }
@@ -65,6 +71,7 @@ struct SystemBridgeCard: View {
                 title: "屏幕使用时间",
                 value: settings.screenTimeShortcutName,
                 key: "screentime",
+                defaultName: ShortcutBridge.defaultScreenTimeShortcutName,
                 action: {
                     note = ShortcutBridge.requestScreenTimeViaShortcut()
                 }
@@ -86,42 +93,46 @@ struct SystemBridgeCard: View {
 
             // ——— 快捷指令怎么把数据发回来 ———
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("进阶：自己拼快捷指令")
+            // 默认收起：老板的要求是「别让用户自己拼」。这一整块是给想折腾的人的退路，
+            // 不展开就等于不存在，不影响绝大多数用户。
+            DisclosureGroup(isExpanded: $showAdvancedShortcuts) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("上面那些是现成的。如果你想要更自由的做法：在「快捷指令」里自己拼，最后加一步「打开 URL」，把下面任意一条填进去。点一下就能复制。")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(Array(AevisBridge.examples.enumerated()), id: \.offset) { _, item in
+                        Button {
+                            copy(item.url)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.title)
+                                    .font(.aevis(13.5, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                Text(item.url)
+                                    .font(.aevisMono(11.5))
+                                    .foregroundStyle(AppSettings.shared.accentColor)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(item.note)
+                                    .font(.aevis(11))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(11)
+                            .background(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } label: {
+                Text("高级：自己拼快捷指令（用不到就别展开）")
                     .font(.aevis(12.5, weight: .medium))
                     .foregroundStyle(.secondary)
-
-                Text("上面那些是现成的。如果你想要更自由的做法：在「快捷指令」里自己拼，最后加一步「打开 URL」，把下面任意一条填进去。点一下就能复制。")
-                    .font(.aevis(11.5))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(Array(AevisBridge.examples.enumerated()), id: \.offset) { _, item in
-                    Button {
-                        copy(item.url)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.title)
-                                .font(.aevis(13.5, weight: .medium))
-                                .foregroundStyle(.primary)
-                            Text(item.url)
-                                .font(.aevisMono(11.5))
-                                .foregroundStyle(AppSettings.shared.accentColor)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Text(item.note)
-                                .font(.aevis(11))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(11)
-                        .background(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
@@ -183,7 +194,7 @@ struct SystemBridgeCard: View {
             Button("保存") { save() }
             Button("取消", role: .cancel) { editingKey = "" }
         } message: {
-            Text("要和你在「快捷指令」App 里做的那个名字完全一致。")
+            Text(editHint)
         }
     }
 
@@ -204,6 +215,20 @@ struct SystemBridgeCard: View {
         }
         note = value.isEmpty ? "已清空。" : "保存了。"
         editingKey = ""
+    }
+
+    /// 编辑弹窗里那句提示。默认名**按 `editingKey` 现算**，不另加状态变量。
+    ///
+    /// 「不填也能跑」这件事必须在这里说清楚 —— 不填就用默认名（锁屏 / 屏幕使用时间），
+    /// 用户在自己「快捷指令」里按默认名做一条就成，不用回来填任何东西。
+    private var editHint: String {
+        let fallback: String
+        switch editingKey {
+        case "lock": fallback = ShortcutBridge.defaultLockShortcutName
+        case "screentime": fallback = ShortcutBridge.defaultScreenTimeShortcutName
+        default: fallback = ""
+        }
+        return "不填就用默认名「\(fallback)」；填了，就必须和你在「快捷指令」App 里做的那个名字完全一致。"
     }
 
     private func copy(_ text: String) {
@@ -235,7 +260,11 @@ struct SystemBridgeCard: View {
             // 一下跳到「快捷指令」App 里本 App 的 App Shortcuts 页面。
             ShortcutsLink()
 
-            Text("有：上报电量、上报位置、上报设备信息、上报健康、打开 Aevis、告诉\(Pronoun.current)我在干嘛。")
+            // 🔴 这份清单**必须**和 `Core/AppShortcuts.swift` 的 `appShortcuts` 一一对应
+            //    （那边是 Apple 的 10 条硬上限，现在正好放满）。改那边记得回来改这里 ——
+            //    这里漏一条，用户就**永远看不到**那个功能（功能是好的，只是没人告诉他）。
+            //    防回归：`tools/swift_check.py` 的 R35 会核对这两个文件对不对得上。
+            Text("有：上报电量、上报位置、告诉\(Pronoun.current)我在干嘛、上报设备信息、打开 Aevis、上报健康、上报屏幕时间、打开通话、一起听、问今天。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -285,28 +314,38 @@ struct SystemBridgeCard: View {
                 )
             }
 
-            ForEach(Array(AmbientContext.kinds.enumerated()), id: \.offset) { _, kind in
-                Button {
-                    copy(kind.example)
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(kind.label)
-                            .font(.aevis(13.5, weight: .medium))
-                            .foregroundStyle(.primary)
-                        Text(kind.example)
-                            .font(.aevisMono(11.5))
-                            .foregroundStyle(AppSettings.shared.accentColor)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+            // 默认收起：这几条是「想自己拼 URL 的人才用得到」的退路，平时不展开就等于不存在。
+            // （上面「现在拿到的」和下面「清空这些」照常显示，不进这个折叠区。）
+            DisclosureGroup(isExpanded: $showAdvancedAmbient) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(AmbientContext.kinds.enumerated()), id: \.offset) { _, kind in
+                        Button {
+                            copy(kind.example)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(kind.label)
+                                    .font(.aevis(13.5, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                Text(kind.example)
+                                    .font(.aevisMono(11.5))
+                                    .foregroundStyle(AppSettings.shared.accentColor)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(11)
+                            .background(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
                 }
-                .buttonStyle(.plain)
+            } label: {
+                Text("高级：自己拼 URL（用不到就别展开）")
+                    .font(.aevis(12.5, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
 
             if !ambient.entries.isEmpty {
@@ -341,12 +380,16 @@ struct SystemBridgeCard: View {
             .padding(.leading, 16)
     }
 
-    /// 一行：图标 + 名字 + 当前填的指令名 + 「填」/「试一次」两个按钮。
+    /// 一行：图标 + 名字 + 当前名字（空则显示默认名）+「自定义」/「改」+「试一次」。
+    ///
+    /// `defaultName` 是**不填时后端会用的那个名字**（`ShortcutBridge` 里的默认名）。
+    /// 空值时必须把它显示出来 —— 不填是真能跑的，界面不能再说"还没填"。
     private func shortcutRow(
         symbol: String,
         title text: String,
         value: String,
         key: String,
+        defaultName: String,
         action: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 10) {
@@ -359,7 +402,7 @@ struct SystemBridgeCard: View {
                 Text(text)
                     .font(.aevis(14.5))
                     .foregroundStyle(.primary)
-                Text(value.isEmpty ? "还没填快捷指令名" : value)
+                Text(value.isEmpty ? "不填就用默认名「\(defaultName)」" : value)
                     .font(.aevis(11.5))
                     .foregroundStyle(value.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
@@ -370,7 +413,7 @@ struct SystemBridgeCard: View {
             Button {
                 beginEdit(key, title: text, current: value)
             } label: {
-                Text(value.isEmpty ? "填" : "改")
+                Text(value.isEmpty ? "自定义" : "改")
                     .font(.aevis(13))
             }
 

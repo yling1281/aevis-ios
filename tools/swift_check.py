@@ -21,11 +21,16 @@
   R29 ObservableObject 的 async 方法里改 @Published 却没 @MainActor
                                               → 后台线程改 @Published，**iOS 26 硬崩**
                                                 （真机诊断 AE-155A-91FC；MusicPlayer 那次也是它）
+  R33 `.overlay` 里放了填充形状/颜色却没加 .allowsHitTesting(false)
+                                              → 这层盖在内容**上面**、又参与命中测试，
+                                                把整张卡片的点击/长按/滚动全吃掉
+                                                （0.0.110 整机所有按钮点不动、协议划不动）
 
 （R10–R19 的由来写在各自函数的 docstring 里，这里只列最先立起来的那批。）
 
 用法:
     python3 tools/swift_check.py            # 检查 Aevis/ 目录
+    python3 tools/swift_check.py --selftest # 只跑各条规则自带的自测（含 R33）
 """
 
 import os
@@ -53,6 +58,9 @@ SWIFT_ROOTS = [
     # 通话探针（2026-10-01）。**必须加进来** —— 它也是一份独立源码，
     # 不进这里就等于"没人检查"，而它要验的又是最要紧的通话权限。
     os.path.join(PROJECT, "AevisCallProbe", "App"),
+    # 实时活动扩件（2026-10-01）。同样是独立源码、一样要过 CI 编译 ——
+    # 它画的是灵动岛上那张卡，错了用户直接看不见，本地先扫一遍。
+    os.path.join(PROJECT, "AevisLive"),
 ]
 
 # 每个 target 的 Info.plist 都要验。
@@ -61,6 +69,9 @@ SWIFT_ROOTS = [
 INFO_PLISTS = {
     INFO_PLIST: "Aevis",
     os.path.join(PROJECT, "Broadcast", "Info.plist"): "AevisBroadcast",
+    # 实时活动扩件那份。注册点写错同样是**静默失效**（编译能过、装得上，
+    # 但灵动岛上永远不出现），所以一并解一遍，确保它是合法 plist。
+    os.path.join(PROJECT, "AevisLive", "Info.plist"): "AevisLive",
 }
 
 # 主 App 与扩展的权限声明文件。两份必须声明**同一个**应用组。
@@ -857,7 +868,9 @@ def check_markdown_in_strings(path, source, localized):
                 buffer.append(stripped)
                 in_multiline = False
                 body = "\n".join(buffer)
-                benign = header.startswith("description:") or "instruction = " in header
+                benign = (re.search(r'\bdescription\s*:\s*"""$', header) is not None
+                          or re.search(r'"(?:description|title)"\s*:', header) is not None
+                          or "instruction = " in header)
                 if _looks_like_prose(body) and not benign:
                     found = re.search(r"\b(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)", header)
                     name = found.group(1) if found else ""
@@ -899,9 +912,29 @@ def check_markdown_in_strings(path, source, localized):
             # ⚠️ `verbatim:` 是**明确要求不解析**的，放过它（报了也没法"修"）。
             wrapped_key = bool(re.search(r"\bText\(\s*LocalizedStringKey\(\s*$", before))
             verbatim = bool(re.search(r"\bverbatim\s*:\s*$", before))
+
+            # 工具参数的 JSON schema：`"description": "…"` 以及它的续行（`+ "…"`）。
+            #
+            # ⚠️ 这一处是 2026-10-02 补的：本规则自己的说明文档里早就写着
+            #    "喂给模型的工具描述要放过"，但实现只认**顶层**那种
+            #    （`description: """…"""`），不认 schema 里的 `"description": "…"`
+            #    —— 于是新加一个带 `**` 的参数说明就误报，而它根本不会经过 `Text`。
+            #    误报攒多了这条规则就没人看了，那正是最危险的状态。
+            benign_schema = bool(re.search(r'"(?:description|title)"\s*:', before))
+            if not benign_schema and before.rstrip().endswith("+"):
+                # 续行：往回找这一句的**开头**。只允许跨过同样是续行的行。
+                for back in range(number - 2, max(number - 5, -1), -1):
+                    prev = lines[back]
+                    if '"description":' in prev or '"title":' in prev:
+                        benign_schema = True
+                        break
+                    if prev.strip() and not prev.strip().rstrip().endswith("+"):
+                        break
+
             # 拼接（`+ "…"`）会让它变成 String 表达式 —— 星号同样原样显示。
             # `+` 常写在下一行，所以 next-line 也要看。
-            if _looks_like_prose(literal) and not wrapped_key and not verbatim:
+            if (_looks_like_prose(literal)
+                    and not wrapped_key and not verbatim and not benign_schema):
                 hint = ("拼接出来的要用 `Text(LocalizedStringKey(…))`，"
                         if after.startswith("+") else
                         "`Text(\"字面量\")` 走的是 `Text(String)`，不做 markdown 解析 —— "
@@ -1299,6 +1332,154 @@ def check_instance_member_on_type(sources, shared):
                         )
 
 
+# 「某个 store 的某个属性」是什么类型 —— 只列**项目自己的模型**。
+# 为什么只列这么几条：这条规则的判据是"该成员在类型里有没有声明过"，
+# 范围一旦放开到全项目，那些靠 protocol / 泛型 / 动态成员拿到的东西
+# 就会天天误报 —— 而误报一多，这个检查就没人看了。
+#
+# ⚠️ **集合属性（`[ChatMessage]` 这种）一个都别往这儿放。**
+#    2026-10-03 第一版就把 `ChatStore.messages` 写成了 `ChatMessage`，
+#    于是 `.filter` / `.suffix` 全被判成"ChatMessage 上没有" ——
+#    那是**数组**的方法，四条误报当场打脸。集合上能调的成员太多、
+#    跟元素类型没关系，判它有百害无一利。
+STORE_PROP_TYPES = [
+    ("PersonaStore", "active", "Contact"),
+    ("PersonaStore", "persona", "Persona"),
+]
+
+
+def extension_bodies(source):
+    """粗提每个 `extension TypeName { … }` 的体（和 `class_bodies` 同一套括号配平）。"""
+    out = []
+    for match in re.finditer(r"\bextension\s+([A-Z][A-Za-z0-9_]*)", source):
+        start = source.find("{", match.end())
+        if start < 0:
+            continue
+        depth = 0
+        for index in range(start, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    out.append((match.group(1), source[start:index + 1]))
+                    break
+    return out
+
+
+def collect_members(sources):
+    """类型名 → 它声明过的成员名。
+
+    ⚠️ **`extension` 里的必须一起算**：这个项目很爱用 extension 补计算属性，
+       只看类体的话，那些成员会被当成"不存在"⇒ 天天误报。
+    """
+    members = {}
+
+    def add(name, body):
+        slot = members.setdefault(name, set())
+        for line in body.splitlines():
+            for hit in re.finditer(
+                    r"\b(?:let|var|func|case)\s+([A-Za-z_][A-Za-z0-9_]*)", line):
+                slot.add(hit.group(1))
+
+    for _, source in sources.items():
+        for name, body in class_bodies(source):
+            add(name, body)
+        for name, body in extension_bodies(source):
+            add(name, body)
+    return members
+
+
+def _store_prop_type(text):
+    """这一行右边的表达式是不是「store.某属性」本尊？是就返回它的类型。
+
+    ⚠️ 必须**恰好是它自己**：`PersonaStore.shared.active?.id` 的类型是 `UUID?`，
+       不是 `Contact` —— 那种写法后面接的东西要按 UUID 判，不能按 Contact 判。
+       所以末尾用负向先行断言排掉 `?` / `.`。
+    """
+    for store, prop, type_name in STORE_PROP_TYPES:
+        if re.match(r"\s*%s\.shared\.%s\s*(?![\w?.])"
+                    % (re.escape(store), re.escape(prop)), text):
+            return type_name
+    return None
+
+
+def check_member_on_model(sources, members):
+    r"""**项目模型上不存在的成员** —— 最典型的就是把 `Contact` 当成有 `.name`。
+
+    真踩过（2026-10-03，白烧一轮 CI）：
+        "name": active?.name ?? "TA"          ← Contact 上根本没有 name
+    编译器原话（`build.log` 里唯一一条 error）：
+        PairChatBridge.swift:132:29: error: value of type 'Contact' has no member 'name'
+    名字其实在 `contact.persona.name`（或 `contact.displayName`）。
+
+    🔴 为什么这条**必须**自动挑出来：本机**没有 Xcode**，Swift 一行都编不了 ——
+       这类"成员名写错"的错**只有 CI 编到那一步才会炸**，人眼扫一遍是扫不出来的。
+
+    判据（保守，宁可漏报不误报）：
+      ① 只认 `STORE_PROP_TYPES` 里那几种写法（`PersonaStore.shared.active` 之类）；
+      ② 同一个文件里 `let NAME = <上面那种表达式>` 的绑定也认（只用 `let`；
+         `NAME` 在别处被 `var` / `for in` / 当参数用过，整条丢掉）；
+      ③ `NAME` 后面接 `?.` / `.` 再取**小写**成员名，而该成员在
+         类体 **和** extension 里都没声明过 ⇒ 报 R22。
+    """
+    for path, source in sources.items():
+        code = strip_code(source)
+        lines = code.splitlines()
+
+        # 名字被重新声明 / 当参数 / 当循环变量 ⇒ 这个文件里它不可信，整条丢
+        poisoned = set()
+        for line in lines:
+            for name in re.findall(r"\bvar\s+([A-Za-z_][A-Za-z0-9_]*)", line):
+                poisoned.add(name)
+            for name in re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", line):
+                poisoned.add(name)
+            if re.search(r"\bfunc\s+[A-Za-z_]", line) or "init(" in line:
+                for name in re.findall(r"(?:\(|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", line):
+                    poisoned.add(name)
+
+        binds = {}
+        for number, line in enumerate(lines, 1):
+            hit = re.search(
+                r"(?<![\w.])let\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,]+)", line)
+            if hit:
+                name, rhs = hit.group(1), hit.group(2)
+                type_name = _store_prop_type(rhs)
+                if type_name:
+                    if name in binds and binds[name] != type_name:
+                        binds.pop(name, None)
+                        poisoned.add(name)             # 同一名字绑过两种类型，别信
+                    else:
+                        binds[name] = type_name
+                else:
+                    binds.pop(name, None)              # 绑到别的东西上了，推断作废
+                    poisoned.add(name)
+
+            pairs = []
+            for name, type_name in binds.items():
+                if name in poisoned:
+                    continue
+                # ⚠️ 前面加 `(?<![\w.])`：不然后面 `screen.active?.x` 里的
+                #    `active` 也会被当成我们那个局部变量 —— 那是误报。
+                for member in re.findall(
+                        r"(?<![\w.])%s\??\.([a-z][A-Za-z0-9_]*)" % re.escape(name), line):
+                    pairs.append((name, type_name, member))
+            for store, prop, type_name in STORE_PROP_TYPES:
+                for member in re.findall(
+                        r"\b%s\.shared\.%s\??\.([a-z][A-Za-z0-9_]*)" % (store, prop), line):
+                    pairs.append(("%s.shared.%s" % (store, prop), type_name, member))
+
+            for where, type_name, member in pairs:
+                known = members.get(type_name)
+                if known is None:                      # 类型没扫到就闭嘴，别瞎报
+                    continue
+                if member in known:
+                    continue
+                report("R22", path, number,
+                       "%s 是 %s，而 %s 上没有 %s（编译器会报 no member）"
+                       % (where, type_name, type_name, member))
+
+
 def check_unicode_charset_in_url(path, code):
     r"""拼 URL 参数时用了 `CharacterSet.alphanumerics`。
 
@@ -1432,6 +1613,684 @@ def check_mainactor_state(sources):
                 )
 
 
+def check_line_endings():
+    """R31：Swift 源文件必须是 **LF**，不许整份 CRLF（也不许两者混着）。
+
+    🔴 为什么这值得单立一条（2026-10-03 真发生在这仓库里）：另一个会话用
+       Windows 的习惯重写了一个文件，**整份变成 CRLF**。后果不是"编译不过"，
+       而是更阴的那种：
+         · 推上去的 diff 是"整个文件都改了"—— 真正改了什么**完全看不出来**
+           （`git log -p` / review 是事后唯一能追的地方，等于废了）；
+         · 谁再把它改回来，又是一次全文件 diff。
+       判据取"整份 CRLF"：本仓库 179 个 Swift 文件里 178 个是 LF、
+       那一个 CRLF 就是事故 —— 所以这不是风格之争，是"谁动过这个文件"的信号。
+       （`read_swift_sources()` 是文本模式读的，换行早被吃掉了 ⇒ 这条必须**读字节**。）
+    """
+    for path in swift_files():
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+        except OSError:
+            continue
+        crlf = raw.count(b"\r\n")
+        if not crlf:
+            continue
+        lf = raw.count(b"\n")
+        report("R31", path, 1,
+               "整份 CRLF（%d/%d 行）—— 被 Windows 编辑器重写过。"
+               "推到仓库会让 diff 变成'整个文件都改了'，真实改动被埋掉。"
+               "改成 LF 再推" % (crlf, lf))
+
+
+def check_pairchannel_base(sources):
+    """R30：手机侧「和电脑聊天」的长连地址必须来自**配对记录**。
+
+    🔴 这条护的是一个**不会报错、只会永远转圈**的坑（2026-10-03 立的）。
+       那天电脑版改成了「局域网直连」——**电脑自己当服务器**：
+       配对码里的 `h` 是路由器给的 `192.168.x.x`，session 也只存在**那台电脑**上。
+
+       要是 `PairChannel` 还按老的 `PairClient.currentBase`（写死在包里的腾讯云）
+       去开长连，那台服务器上**根本没有这个 session** ⇒ 握手 401 ⇒
+       而这里的失败处理是"当网断了、等会儿重连" ⇒
+       **无限重连、一个错都不报**，界面上就是个小圆点一直转。
+
+       ⇒ 判据：`connect()` 里的地址只能来自 `Self.base(for:)`；
+         `PairClient.currentBase` 不许出现在 `connect()` 里
+         （它只允许出现在 `base(for:)` 的兜底分支里）。
+    """
+    target = None
+    for path in sources:
+        if path.replace("\\", "/").endswith("Aevis/Core/PairChannel.swift"):
+            target = path
+            break
+    if target is None:
+        report("R30", "Aevis/Core/PairChannel.swift", 0,
+               "找不到这个文件 —— 规则本身失效了，别默默跳过")
+        return
+
+    code = strip_code(sources[target])
+    if "func base(for" not in code:
+        report("R30", target, 0,
+               "少了 `base(for:)`：长连地址得跟着**配对时那台电脑**走，"
+               "否则局域网直连配对成功了聊天也连不上")
+        return
+
+    marker = "private func connect()"
+    at = code.find(marker)
+    if at < 0:
+        return                      # 函数改名了就别瞎猜，交给人工看
+    open_index = code.find("{", at)
+    close_index = balanced_end(code, open_index)
+    body = code[open_index:close_index if close_index > 0 else len(code)]
+    line = code[:open_index].count("\n") + 1
+
+    if "currentBase" in body:
+        report("R30", target, line,
+               "connect() 里用了 `PairClient.currentBase` —— 局域网配对会变成"
+               "无限重连（那台服务器上没有这个 session）。改用 `Self.base(for: session)`")
+    elif "base(for:" not in body:
+        report("R30", target, line,
+               "connect() 没走 `base(for:)` —— 长连地址必须来自配对时记下的那台电脑")
+
+
+def check_append_listener(sources):
+    """R32：`ChatStore` 的"又落了一条消息"必须是**可以挂多个**的。
+
+    🔴 2026-10-03 真踩的坑：原来它是 `var onAppended: ((ChatMessage, UUID?) -> Void)?`
+       ——一个**单赋值位**。`PairChatBridge` 用 `=` 占住了它，我又要挂一个
+       `AutoSync` 上去（每说一句话同步到网盘），第二个 `=` 会把第一个**悄悄顶掉**：
+       不报错、不抛异常，只是"电脑端聊天从此不再推送新消息"。
+
+    ⇒ 现在叫 `appendListeners` + `addAppendListener(_:)`。
+      这条规则钉死：`onAppended` 这个名字**不许再出现在任何地方**。
+      以后要加监听者，只能 `addAppendListener`。
+
+    ⚠️ 只看**代码**（注释里为了讲这段历史要提到它，不该被算成问题）。
+    """
+    bad = []
+    for rel, source in sources.items():
+        for number, line in enumerate(strip_code(source).splitlines(), 1):
+            if "onAppended" in line:
+                bad.append((rel, number, line.strip()[:60]))
+    for rel, number, text in bad:
+        report("R32", rel, number,
+               "`onAppended` 是单赋值位，挂第二个监听者会**静默顶掉**第一个；"
+               "改用 `ChatStore.shared.addAppendListener { ... }` —— %s" % text)
+
+
+# ——— R33 用的几个正则 ———
+
+# 填充：任何形状的 `.fill(...)` —— 这就是那次事故的根。
+_FILL_CALL = re.compile(r"\.fill\s*\(")
+# 显式尺寸约束。`.fill` 外面套了 `.frame(height: 0.5)` 这种的，是个细线/小块，
+# 盖不满整张卡片，放过（免责声明页那条 0.5pt 分隔线就是这么写的）。
+_FRAME_CALL = re.compile(r"\.frame\s*\(")
+# 描边：`.strokeBorder(...)` 或 `.stroke(...)`。两者都只是**一圈边**，
+# 命中区只有那一条线，**不会吃掉整张卡片** —— 所以带描边的算安全。
+_OUTLINE_CALL = re.compile(r"\.stroke(?:Border)?\s*\(")
+# 裸颜色：`Color(...)` / `Color.clear` / `Color.white.opacity(...)`。
+# 用负向先行断言挡掉 `.foregroundColor` 这类别的标识符尾巴。
+_BARE_COLOR = re.compile(r"(?<![\w.])Color\s*[.(]")
+# 材质：`.ultraThinMaterial` 之类，以及裸露的 `Material` 类型。
+_MATERIAL = re.compile(
+    r"\.(?:ultraThinMaterial|thinMaterial|regularMaterial|thickMaterial|"
+    r"ultraThickMaterial)\b|(?<![\w.])Material\b"
+)
+# 形状构造：`Rectangle()` / `RoundedRectangle(...)` / `Circle()` …（不带描边时才是问题）。
+_SHAPE_CTOR = re.compile(
+    r"(?<![\w.])(?:Rectangle|RoundedRectangle|Circle|Capsule|Ellipse|Path|"
+    r"UnevenRoundedRectangle|ContainerRelativeShape)\s*\("
+)
+# 「放过」标记。父层补的也算 —— 后面紧跟一行也认。
+_ALLOWS_HIT_FALSE = ".allowsHitTesting(false)"
+
+
+def _paired_close(text, index, opener, closer):
+    """从 `text[index]`（必须是 opener）开始数括号，返回配对 closer 的下标。
+
+    和 `balanced_end` 是同一套括号配对思路，只是这里通用一点（圆括号 / 花括号都能数）。
+    传进来的文本必须先过 `strip_code()`，否则字符串/注释里的括号会把深度带偏。
+    找不到闭合返回 -1。
+    """
+    if index < 0 or index >= len(text) or text[index] != opener:
+        return -1
+    depth = 0
+    for cursor in range(index, len(text)):
+        char = text[cursor]
+        if char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return cursor
+    return -1
+
+
+def _overlay_body(code, token_end):
+    """取出一次 `.overlay` 调用的**完整内容**，并把「调用结束」的位置一起给出来。
+
+    三种写法都要认（这个仓库里都有）：
+        .overlay(视图)                 → 圆括号里的内容
+        .overlay { … }                 → 尾随闭包
+        .overlay(alignment: .top) { … } → 圆括号 + 尾随闭包
+
+    返回 `(内容片段列表, 结束下标)`；结构不完整（括号没配平）时返回 `(None, -1)`，
+    交给上层**跳过** —— 宁可漏报也不误报。返回**片段列表**而不是拼好的字符串，
+    是因为后面要判断「这段 overlay 的**根视图**是什么」，得一片一片看。
+    """
+    length = len(code)
+    pos = token_end
+    while pos < length and code[pos] in " \t":
+        pos += 1
+
+    pieces = []
+    if pos < length and code[pos] == "(":
+        close = _paired_close(code, pos, "(", ")")
+        if close < 0:
+            return None, -1
+        pieces.append(code[pos + 1:close])
+        pos = close + 1
+        while pos < length and code[pos] in " \t":
+            pos += 1
+    if pos < length and code[pos] == "{":
+        close = _paired_close(code, pos, "{", "}")
+        if close < 0:
+            return None, -1
+        pieces.append(code[pos + 1:close])
+        pos = close + 1
+
+    if not pieces:
+        return None, -1        # `.overlay` 后面没跟调用（就是个名字），跳过
+    return pieces, pos
+
+
+def _overlay_roots(pieces):
+    """从各片段里挑出**根视图表达式**（用来判断 overlay 直接盖上去的是什么）。
+
+    `.overlay(alignment: .top)` 里的 `alignment: .top` 是**参数**不是视图 ——
+    形如 `名字:` 开头的片段一律跳过；剩下的（闭包体 / 位置参数）取洗白后的开头。
+    """
+    roots = []
+    for piece in pieces:
+        text = piece.strip()
+        if not text:
+            continue
+        if re.match(r"^[A-Za-z_]\w*\s*:", text):
+            continue                      # `alignment: .top` 这类参数标签
+        roots.append(text)
+    return roots
+
+
+def _overlay_following(code, call_end):
+    """取「调用结束的当前行剩余部分 + 紧跟的下一行」。
+
+    父层补的 `.allowsHitTesting(false)` 常写成：
+        .overlay { … }
+        .allowsHitTesting(false)
+    所以下一行必须一起看。
+    """
+    first_newline = code.find("\n", call_end)
+    if first_newline < 0:
+        return code[call_end:]
+    second_newline = code.find("\n", first_newline + 1)
+    end = second_newline if second_newline >= 0 else len(code)
+    return code[call_end:end]
+
+
+def _overlay_danger(body, pieces):
+    """这段 overlay 内容会不会「吃掉点击」？返回 `(是否危险, 原因)`。
+
+    判据（**只认 `.overlay`，`.background` 在内容下面、不吃点击，一律不看**）：
+
+      1. 有 `.fill(`：
+           · 外面套了 `.frame(` 尺寸约束的（细线/小块）→ 安全；
+           · 否则 → **危险**。这是那次事故的写法，**描边也救不回来**
+             （同一段里既有 `.fill(` 又有 `.strokeBorder(` 的，仍按 `.fill(` 算）。
+      2. 有 `.stroke(`/`.strokeBorder(` → **安全**。描边只有那一圈线有命中区，
+         老代码一直是这么写的，从没出过事；此时里面的 `Color` 是描边颜色，不算裸颜色。
+      3. 裸 `Color(...)` / 材质 / 裸形状，**且它是这段 overlay 的根视图** → 危险。
+         （嵌在 `.background(...)` 里、或当渐变色的 stop 的 `Color` **不算** ——
+           那种 `Color` 不是盖在整张卡片上的那一层。这是零误报的关键。）
+      都不满足 → 安全。
+    """
+    if _FILL_CALL.search(body):
+        if _FRAME_CALL.search(body):
+            return False, ""
+        return True, "填充形状"
+    if _OUTLINE_CALL.search(body):
+        return False, ""
+    for root in _overlay_roots(pieces):
+        if _BARE_COLOR.match(root) or _MATERIAL.match(root):
+            return True, "颜色/材质"
+        if _SHAPE_CTOR.match(root):
+            return True, "形状"
+    return False, ""
+
+
+def find_overlay_hit_test_issues(code):
+    """纯函数：扫一段**已过 `strip_code`** 的代码，返回 `[(行号, 原因)]`。
+
+    不碰全局状态，方便自测（`run_selftest`）直接喂字符串进来验。
+    行号指向 `.overlay(` 那一行。
+    """
+    issues = []
+    for match in re.finditer(r"\.overlay\b", code):
+        pieces, call_end = _overlay_body(code, match.end())
+        if pieces is None:
+            continue
+        body = "\n".join(pieces)
+        # 放过：内容里带了 `.allowsHitTesting(false)`，或它紧跟在本调用之后。
+        if (_ALLOWS_HIT_FALSE in body
+                or _ALLOWS_HIT_FALSE in _overlay_following(code, call_end)):
+            continue
+        dangerous, reason = _overlay_danger(body, pieces)
+        if dangerous:
+            line = code[:match.start()].count("\n") + 1
+            issues.append((line, reason))
+    return issues
+
+
+def check_overlay_hit_testing(sources):
+    """R33：`.overlay` 里放了**填充形状/颜色**，却没加 `.allowsHitTesting(false)`。
+
+    🔴 为什么值得单立一条（2026-10-06 事故，0.0.110 已经发到用户手上）：
+
+        `.overlay` 是**盖在内容上面**的。而 SwiftUI 里**填充形状（以及 `Color`，
+          包括 `Color.clear` / `.opacity(0)`）参与命中测试** —— 于是这一层把整张卡片的
+          **点击 / 长按 / 滚动全吃掉了**。
+
+        出事的那行（`GlassSurface.aevisGlass()` 里做顶部内高光）原来是：
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.white.opacity(0.22), .clear], …))
+            )
+        `aevisGlass()` 是全 App 唯一的卡片入口（203 处 / 58 个文件）⇒
+        症状是**整机所有按钮都点不动、列表也划不动**
+        （用户原话：「我一个按钮都点不动了」「用户协议划不动」）。
+
+        老代码那层用的是 `strokeBorder` —— 只有那 0.5pt 的**边框**有命中区，所以一直没事；
+        **改成 `fill` 就出事**。CI 的模拟器截图**抓不到**这种问题（截图只反映渲染，
+        命中测试坏了图还是好的），所以只能靠静态检查按在本地。
+
+    修法：装饰层加 `.allowsHitTesting(false)`（推荐），或改用 `.strokeBorder`，
+    或干脆把它移到 `.background` 里（background 在内容下面，不吃点击）。
+
+    为了**零误报**，刻意收窄：
+      · 只查 `.overlay`，**不查 `.background`**；
+      · 带 `.stroke(` / `.strokeBorder(` 的算安全（边框命中区只有那一圈）；
+      · 内容里（或紧跟其后一行）有 `.allowsHitTesting(false)` 的一律放过。
+    """
+    for path, source in sorted(sources.items()):
+        code = strip_code(source)
+        for line, reason in find_overlay_hit_test_issues(code):
+            report(
+                "R33", path, line,
+                "这层 .overlay 用了%s —— 填充形状/颜色**参与命中测试**，会盖在内容上把"
+                "整张卡片的点击/长按/滚动全吃掉。装饰请加 `.allowsHitTesting(false)`，"
+                "或改用 `.strokeBorder`，或把它放进 `.background` 里" % reason
+            )
+
+
+def find_device_name_non_ascii(source):
+    """在 `AevisDevice.names` 那张机型表里找出**值含非 ASCII** 的条目。
+
+    返回 `[(行号, 值)]`。抽成纯函数是为了自带自测（`run_selftest` 直接喂字符串进来）。
+
+    ⚠️ 取「声明行 `[` 之后的部分」必须用 **`rsplit`** —— 声明是
+       `let names: [String: String] = [`，里面**先出现一个 `]`**（类型标注那个）。
+       用 `split("[", 1)[1]` 会拿到 `String: String] = [`，于是
+       「本行含 `]` ⇒ 表到此结束」当场成立、整个表一行都没查
+       （自测一跑就红，2026-10-06 我自己栽的）。
+    """
+    hits = []
+    inside = False
+    for number, line in enumerate(source.splitlines(), 1):
+        if not inside:
+            if "private static let names: [String: String] = [" not in line:
+                continue
+            inside = True
+            body = line.rsplit("[", 1)[1]
+        else:
+            body = line
+        for match in re.finditer(r'"([^"]*)"\s*:\s*"([^"]*)"', body):
+            value = match.group(2)
+            if any(ord(ch) > 127 for ch in value):
+                hits.append((number, value))
+        if "]" in body:
+            inside = False
+    return hits
+
+
+def check_device_name_non_ascii(path, source):
+    """R34：会进 HTTP 头的设备名必须是纯 ASCII。
+
+    **真踩过（2026-10-06）**：机型表里有一行写着 `iPhone SE（第 2 代）`
+    （全角括号 + 中文）。这个值经 `DeviceIdentity.friendlyName` 塞进了请求头
+    `X-Aevis-Device-Name`（见 `AccountService.request()`），而**HTTP 头只认 latin-1** ——
+    值里有非 ASCII，请求就发不出去。
+    表现极其难查：**只有 iPhone SE 2/3 的用户**账号功能全废，
+    而代码里搜「中文」永远搜不到（因为那张表本来就叫"营销名"）。
+    当时是用真请求打到服务器、撞出 `UnicodeEncodeError: latin-1` 才发现的。
+
+    ⚠️ 反过来也成立：**HTTP 头里出现的任何字符串都必须纯 ASCII**。
+       以后往请求头里加东西（UA、机型、语言…）都要照这条。
+    """
+    for number, value in find_device_name_non_ascii(source):
+        report("R34", path, number,
+               "机型名「%s」含非 ASCII 字符 —— 它要进 HTTP 头 `X-Aevis-Device-Name`，"
+               "HTTP 头只认 latin-1，含中文会让该机型**所有账号请求**出错。"
+               "改成纯 ASCII（例：iPhone SE (2nd gen)）" % value)
+
+
+# ——— R35 用到的正则 ———
+#
+# `shortTitle: "上报电量"` —— App Shortcut 在系统「快捷指令」里显示的那个短名字。
+# 设置页里那句用户可见的「有：…」清单，就是照着它手抄的。
+_SHORT_TITLE = re.compile(r'\bshortTitle\s*:\s*"([^"]*)"')
+
+
+def find_missing_short_titles(shortcuts_source, card_source):
+    """把 `AppShortcuts.swift` 里声明的每个 `shortTitle` 拿去 `SystemBridgeCard.swift` 里找。
+
+    返回**在界面清单里找不到**的那些 shortTitle（list，保序、可重复）。抽成纯函数是为了自带自测。
+
+    ⚠️ 两个源都**不能 `strip_code()`** —— shortTitle 的值、以及界面那句清单，**都在字符串
+       字面量里**，一去字符串就全变成空格了（R34 的机型表也是栽在同一个坑上）。
+       只需要 `strip_comments()` 把注释去掉：某个名字只出现在注释里，不算"用户看得到"。
+    """
+    titles = _SHORT_TITLE.findall(strip_comments(shortcuts_source))
+    card = strip_comments(card_source)
+    missing = []
+    for title in titles:
+        if title and title not in card:
+            missing.append(title)
+    return missing
+
+
+def check_shortcut_titles_in_card(sources):
+    """R35：`Core/AppShortcuts.swift` 里每条 App Shortcut 的 `shortTitle`，都必须在
+    `Features/Settings/SystemBridgeCard.swift` 的**用户可见清单**里出现。
+
+    🔴 为什么值得单立一条（2026-10-06）：
+
+        App Shortcut 是**代码里声明一次、随 App 安装就进系统「快捷指令」**的
+        （免签名、免手搓，见 `AppShortcuts.swift` 顶部）。而设置页里那句
+        「有：上报电量、上报位置、…」是**用户唯一能一眼看到"Aevis 有哪些现成动作"的地方**。
+
+        这两处是**手抄**的 —— 加了一条动作、忘了往清单里补；或者清单在抄的时候就漏了
+        （这次的真 bug：清单漏了「上报屏幕时间」）。结果是：**动作是好的、真能跑，
+        但用户永远不知道它存在**（点 `ShortcutsLink` 也能翻到，但那要他主动去翻）。
+        这类"漏了等于没做"的错，静态检查最该按死在本地。
+
+    ⚠️ 判据是"shortTitle 作为**子串**出现在 SystemBridgeCard 里" —— 那句清单是中文散文
+       （「有：…」），不是逐字罗列短标题，所以按子串找、**不要求整句相等**。
+       文件找不到就**报出来**（规则本身失效别默默跳过，同 R30）。
+    """
+    shortcuts_path = card_path = None
+    for path in sources:
+        norm = path.replace("\\", "/")
+        if norm.endswith("Aevis/Core/AppShortcuts.swift"):
+            shortcuts_path = path
+        elif norm.endswith("Aevis/Features/Settings/SystemBridgeCard.swift"):
+            card_path = path
+
+    if shortcuts_path is None:
+        report("R35", "Aevis/Core/AppShortcuts.swift", 0,
+               "找不到这个文件 —— 规则本身失效了，别默默跳过")
+        return
+    if card_path is None:
+        report("R35", "Aevis/Features/Settings/SystemBridgeCard.swift", 0,
+               "找不到这个文件 —— 规则本身失效了，别默默跳过")
+        return
+
+    for title in find_missing_short_titles(sources[shortcuts_path], sources[card_path]):
+        report("R35", card_path, 0,
+               "App Shortcut 的 shortTitle「%s」没在设置页的清单里出现 —— "
+               "动作是好的、也真能跑，但**用户看不到它**。"
+               "去 `builtInActions` 那句「有：…」里补上" % title)
+
+
+# ——— R34 自带自测（同项目硬规矩）———
+
+R34_SELFTEST_POSITIVE = [
+    # 事故原样：全角括号 + 中文
+    '''
+    private static let names: [String: String] = [
+        "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE（第 2 代）",
+    ]
+    ''',
+    # 单个值就是中文
+    '''
+    private static let names: [String: String] = [
+        "iPhone14,6": "第二代 SE",
+    ]
+    ''',
+    # 中间夹杂的非 ASCII（不是全角括号也会中）
+    '''
+    private static let names: [String: String] = [
+        "iPhone99,9": "iPhone 20 Pro·Max",
+    ]
+    ''',
+]
+
+R34_SELFTEST_NEGATIVE = [
+    # 修好之后的写法
+    '''
+    private static let names: [String: String] = [
+        "iPhone12,5": "iPhone 11 Pro Max", "iPhone12,8": "iPhone SE (2nd gen)",
+        "iPhone14,6": "iPhone SE (3rd gen)",
+    ]
+    ''',
+    # 表外的中文注释 / 中文 key 说明都不能误报（只查值）
+    '''
+    /// 这张表里的值必须是纯 ASCII（中文注释随便写）
+    private static let names: [String: String] = [
+        "iPhone17,4": "iPhone 16 Plus"
+    ]
+    ''',
+    # 根本不是这张表
+    '''
+    private static let labels: [String: String] = [
+        "a": "中文字典"
+    ]
+    ''',
+]
+
+
+# ——— R35 自带自测（同项目硬规矩）———
+#
+# 正例 = 清单里漏了某条 shortTitle ⇒ **必须**报出来。
+# 反例 = 清单里都有 / 或压根没有 shortTitle ⇒ **绝不许**报。
+# 每个元素是 `(AppShortcuts 片段, SystemBridgeCard 片段)`，直接喂给
+# `find_missing_short_titles`，不依赖真实文件，跑到哪都是同一套判据。
+
+R35_SELFTEST_POSITIVE = [
+    # 这次修的那个**真 bug 的形状**：清单漏了「上报屏幕时间」
+    (
+        '''
+        AppShortcut(intent: ReportScreenTimeIntent(), phrases: [], shortTitle: "上报屏幕时间", systemImageName: "hourglass")
+        ''',
+        "有：上报电量、上报位置、上报设备信息、上报健康、打开 Aevis、告诉ta我在干嘛。",
+    ),
+    # 新加了一条动作，清单一个字没动
+    (
+        '''AppShortcut(intent: X(), phrases: [], shortTitle: "发个红包", systemImageName: "yensign")''',
+        "有：上报电量、上报位置。",
+    ),
+    # 多条里只漏了**中间**那一条
+    (
+        '''shortTitle: "打开通话"\nshortTitle: "一起听"\nshortTitle: "问今天"''',
+        "有：打开通话、一起听。",
+    ),
+]
+
+R35_SELFTEST_NEGATIVE = [
+    # 都在清单里（清单是散文，按子串命中即可）
+    (
+        '''shortTitle: "上报电量"\nshortTitle: "上报位置"\nshortTitle: "我在干嘛"''',
+        "有：上报电量、上报位置、告诉ta我在干嘛。",
+    ),
+    # 清单写的是「上报设备信息」、shortTitle 是「设备信息」—— 子串命中，**不许报**
+    (
+        '''shortTitle: "设备信息"''',
+        "有：上报设备信息。",
+    ),
+    # `title:`（LocalizedStringResource 的标题）**不是** shortTitle，别拿它当依据
+    (
+        '''static var title: LocalizedStringResource = "把电量发给 Aevis"''',
+        "有：上报电量。",
+    ),
+]
+
+
+# ——— R33 自带自测（本项目的硬规矩：防回归规则必须自带自测）———
+#
+# 触发：`python3 tools/swift_check.py --selftest`
+#
+# 正例 = 必须要报出来的写法（含 0.0.110 那次事故的原样代码）。
+# 反例 = 绝不能误报的写法（描边 / 有 allowsHitTesting / 在 background 里 / 纯视图）。
+# 直接喂给 `find_overlay_hit_test_issues`，不依赖真实文件，跑到哪都是同一套判据。
+
+R33_SELFTEST_POSITIVE = [
+    # 0.0.110 事故原样：填充形状 + LinearGradient
+    '''
+    .overlay(
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.22), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            )
+    )
+    ''',
+    # 整块纯色遮罩
+    ".overlay(Color.black.opacity(0.3))",
+    # 尾随闭包里的填充形状
+    ".overlay { Rectangle().fill(.blue) }",
+    # alignment + 尾随闭包里的裸形状
+    ".overlay(alignment: .top) { Capsule() }",
+    # alignment + 尾随闭包里的裸颜色（根视图就是 Color）
+    ".overlay(alignment: .top) { Color.black.opacity(0.4) }",
+    # fill 和 strokeBorder 同时出现 → 仍按 fill 算
+    ".overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white, lineWidth: 1).fill(.red))",
+    # 材质
+    ".overlay(.ultraThinMaterial)",
+]
+
+R33_SELFTEST_NEGATIVE = [
+    # 描边（老写法，一直没事）
+    ".overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.white.opacity(0.2), lineWidth: 1))",
+    # 只有 stroke（探针 App 里就是这么写的）
+    ".overlay(RoundedRectangle(cornerRadius: 16).stroke(tint.opacity(0.35), lineWidth: 1))",
+    # 内容里带了 allowsHitTesting(false)（修好之后的 GlassSurface）
+    '''
+    .overlay(
+        RoundedRectangle(cornerRadius: radius)
+            .fill(LinearGradient(colors: [Color.white.opacity(0.22), .clear], startPoint: .top, endPoint: .center))
+            .allowsHitTesting(false)
+    )
+    ''',
+    # 父层在**下一行**补的 allowsHitTesting(false)
+    '''
+    .overlay(
+        RoundedRectangle(cornerRadius: radius).fill(.red)
+    )
+    .allowsHitTesting(false)
+    ''',
+    # 父层在**同一行**补的
+    ".overlay { Rectangle().fill(.blue) }.allowsHitTesting(false)",
+    # 在 background 里 —— 内容下面，不吃点击，一律不看
+    ".background(RoundedRectangle(cornerRadius: 16).fill(material))",
+    ".background(Color.black.opacity(0.4))",
+    # 图片 / 纯视图，本来就没问题
+    ".overlay(Image(uiImage: image).resizable().scaledToFill())",
+    ".overlay(scrimBackground)",
+    ".overlay(alignment: .top) { island.padding(.top, 17) }",
+    ".overlay(Text(\"hi\").font(.aevis(11)))",
+    # 注释里提到 overlay 也不算（strip_code 会把注释变空）
+    "// .overlay(RoundedRectangle(cornerRadius: 8).fill(.red))",
+    # ——— 仓库里真实存在、但**不该**误报的三种写法（都被首轮打脸过，务必钉住）———
+    # ① AdminStyle 顶部提示条：Color 嵌在子视图的 .background 里，根视图是 if-let
+    '''
+    .overlay(alignment: .top) {
+        if let toast = store.toast {
+            Text(toast)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.88))
+                .clipShape(Capsule())
+        }
+    }
+    ''',
+    # ② MomentsView 封面渐隐：根视图是 LinearGradient，Color 只是渐变的色标
+    '''
+    .overlay(
+        LinearGradient(
+            colors: [Color.black.opacity(0.02), Color.black.opacity(0.55)],
+            startPoint: .top, endPoint: .bottom
+        )
+    )
+    ''',
+    # ③ DisclaimerView 的分隔线：虽然有 .fill(，但被 .frame(height: 0.5) 限成一条细线
+    '''
+    .overlay(alignment: .top) {
+        Rectangle()
+            .fill(Color.primary.opacity(0.07))
+            .frame(height: 0.5)
+    }
+    ''',
+]
+
+
+def run_selftest():
+    """跑 R33 / R34 / R35 的正例 / 反例自测。返回进程退出码（0 = 全过）。"""
+    failures = []
+    for index, snippet in enumerate(R33_SELFTEST_POSITIVE, 1):
+        if not find_overlay_hit_test_issues(strip_code(snippet)):
+            failures.append("R33 正例 %d 没被报出来：%s"
+                            % (index, snippet.strip().replace("\n", " ")[:70]))
+    for index, snippet in enumerate(R33_SELFTEST_NEGATIVE, 1):
+        hits = find_overlay_hit_test_issues(strip_code(snippet))
+        if hits:
+            failures.append("R33 反例 %d 被误报（行 %s）：%s"
+                            % (index, [h[0] for h in hits],
+                               snippet.strip().replace("\n", " ")[:70]))
+    for index, snippet in enumerate(R34_SELFTEST_POSITIVE, 1):
+        if not find_device_name_non_ascii(snippet):
+            failures.append("R34 正例 %d 没被报出来：%s"
+                            % (index, snippet.strip().replace("\n", " ")[:70]))
+    for index, snippet in enumerate(R34_SELFTEST_NEGATIVE, 1):
+        hits = find_device_name_non_ascii(snippet)
+        if hits:
+            failures.append("R34 反例 %d 被误报（行 %s）：%s"
+                            % (index, [h[0] for h in hits],
+                               snippet.strip().replace("\n", " ")[:70]))
+    for index, (app_src, card_src) in enumerate(R35_SELFTEST_POSITIVE, 1):
+        if not find_missing_short_titles(app_src, card_src):
+            failures.append("R35 正例 %d 没被报出来：%s"
+                            % (index, app_src.strip().replace("\n", " ")[:70]))
+    for index, (app_src, card_src) in enumerate(R35_SELFTEST_NEGATIVE, 1):
+        hits = find_missing_short_titles(app_src, card_src)
+        if hits:
+            failures.append("R35 反例 %d 被误报（%s）：%s"
+                            % (index, hits, card_src.strip().replace("\n", " ")[:70]))
+
+    print("R33 自测：正例 %d 个、反例 %d 个" % (
+        len(R33_SELFTEST_POSITIVE), len(R33_SELFTEST_NEGATIVE)))
+    print("R34 自测：正例 %d 个、反例 %d 个" % (
+        len(R34_SELFTEST_POSITIVE), len(R34_SELFTEST_NEGATIVE)))
+    print("R35 自测：正例 %d 个、反例 %d 个" % (
+        len(R35_SELFTEST_POSITIVE), len(R35_SELFTEST_NEGATIVE)))
+    if failures:
+        for item in failures:
+            print("  [FAIL] %s" % item)
+        print("自测未通过（规则有误报或漏报，必须先修规则）")
+        return 1
+    print("自测通过")
+    return 0
+
+
 def main():
     sources = {}
     for path in swift_files():
@@ -1441,6 +2300,7 @@ def main():
         code = strip_code(source)
         check_garbage(path, source)
         check_traditional_chinese(path, source)
+        check_device_name_non_ascii(path, source)
         check_balance(path, source, code)
         # 下面这些都只看「代码」——注释和字符串里提到关键字不算问题
         check_scaled_to_fill(path, code)
@@ -1465,6 +2325,7 @@ def main():
     declared = collect_declared_names(sources)
     check_shared_references(sources, types, shared)
     check_instance_member_on_type(sources, shared)
+    check_member_on_model(sources, collect_members(sources))
     check_card_usage(sources, types)
     check_member_references(sources, types, declared)
     check_property_scope(sources)
@@ -1472,6 +2333,11 @@ def main():
     check_keychain_labels(sources)
     check_uiimage_resizable(sources)
     check_mainactor_state(sources)
+    check_pairchannel_base(sources)
+    check_append_listener(sources)
+    check_overlay_hit_testing(sources)
+    check_shortcut_titles_in_card(sources)
+    check_line_endings()
 
     # 会让整条 CI 挂掉的配置类文件也一起验
     check_info_plist()
@@ -1501,4 +2367,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(run_selftest())
     sys.exit(main())
