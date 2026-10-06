@@ -30,10 +30,43 @@ final class MCPStore: ObservableObject {
 
     private static let key = "aevis.mcpServers"
 
+    /// ⭐ 内置的米家 MCP —— 老板 2026-10-06：「这个米家你也内置一下」。
+    ///
+    /// 用**固定 id** 而不是 UUID：这条是 App 自己塞进去的，要能一眼认出来是内置的
+    /// （界面上靠 `isBuiltin(_:)` 决定不给「删掉」按钮 —— 内置的只能开关，不能删）。
+    private static let mijaID = "builtin-mija"
+
+    /// 米家 MCP 的入口。
+    ///
+    /// ⚠️ 必须 https：老板 2026-10-06「我的 AI 这里显示只能 HTTPS」，
+    ///    而米家 MCP 上游（`120.55.181.161:8845/mcp`）只有明文 http ⇒
+    ///    走 `aevis.cn` 上那条 nginx 反代入口（`location ^~ /mija/`）。
+    /// ⚠️ 换域名时这一行要和 `server/nginx-aevis-cn.conf` 里那个 location **一起改**。
+    private static let mijaURL = "https://aevis.cn/mija/mcp"
+
     private init() {
         load()
+        ensureBuiltins()
         // 启动就把已启用的连上 —— 否则要等用户专门去设置页点一次才生效
         Task { await connectEnabled() }
+    }
+
+    /// 把内置的服务器补进列表 —— **只补缺的那一条**，用户改过的原样不动。
+    ///
+    /// 为什么不每次启动都重置：用户可能给米家改过名字、或者临时关掉它，
+    /// 每次启动覆盖一遍等于他的操作全白做。
+    private func ensureBuiltins() {
+        guard !servers.contains(where: { $0.id == Self.mijaID }) else { return }
+        servers.insert(
+            MCPServerConfig(id: Self.mijaID, name: "米家（智能家居）", url: Self.mijaURL),
+            at: 0
+        )
+        persist()
+    }
+
+    /// 这一条是不是 App 内置的（内置的不让删，只能开关）。
+    func isBuiltin(_ server: MCPServerConfig) -> Bool {
+        server.id == Self.mijaID
     }
 
     // MARK: - 增删改
@@ -112,6 +145,15 @@ final class MCPStore: ObservableObject {
     /// 某个服务器贡献了几个工具（列表上显示）。
     func toolCount(for id: String) -> Int {
         tools.filter { $0.serverID == id }.count
+    }
+
+    /// 某个服务器此刻是不是连着（成功握过手）。
+    ///
+    /// 界面上的「N 个工具」要说清两种「0 个」的区别 ——「连上了、但那边确实没提供工具」
+    /// 跟「压根没连上」对用户是两回事，可光看 `tools` 数组这两种长得一模一样，
+    /// 所以另外瞄一眼连接表（`clients` 里有的才算真连上）。只读，不碰落盘。
+    func isConnected(_ id: String) -> Bool {
+        clients[id] != nil
     }
 
     // MARK: - 连接

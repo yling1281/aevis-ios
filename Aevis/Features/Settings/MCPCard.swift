@@ -149,7 +149,7 @@ struct MCPCard: View {
     private func serverRow(_ server: MCPServerConfig) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 11) {
-                Image(systemName: server.looksLikePC ? "desktopcomputer" : "server.rack")
+                Image(systemName: server.kind == .computer ? "desktopcomputer" : "server.rack")
                     .font(.aevis(15, weight: .medium))
                     .foregroundStyle(settings.accentColor)
                     .frame(width: 34, height: 34)
@@ -183,6 +183,20 @@ struct MCPCard: View {
                     ))
                     .labelsHidden()
                 }
+            }
+
+            // 两个「常显」的小标签：① 这台是什么设备；② 它给了几个工具。
+            //
+            // 为什么要常显（都是用户 2026-10-02 要的）：
+            //   ① 「不是所有设备都是电脑」—— 类型得一眼看出来，别让手动加的米家
+            //      那种 MCP 也显示成一台电脑；所以这里把「电脑 / 服务器」直接写出来。
+            //   ② 「能显示这个 MCP 有多少工具吗」—— 以前只有连上、且工具数 > 0 时
+            //      才展开下面那个列表，「还有 N 个」又得 N > 3 才出现，所以数量平时
+            //      根本看不到。现在单独一行计数，**和下面的 `toolList` 并存**，不替代它。
+            HStack(spacing: 6) {
+                pill(deviceKindLabel(server), tint: deviceKindTint(server))
+                pill(toolCountText(for: server), tint: toolCountTint(for: server))
+                Spacer(minLength: 0)
             }
 
             if let line = store.status[server.id] {
@@ -223,12 +237,17 @@ struct MCPCard: View {
                 .font(.aevis(13))
                 .foregroundStyle(.secondary)
 
-                Button("删掉") {
-                    phones[server.id] = nil
-                    store.remove(server)
+                // ⚠️ 内置的那条（米家）**不给「删掉」** —— 删了下一次启动
+                //    `ensureBuiltins()` 又把它补回来，用户会觉得像流氓软件。
+                //    不想用就把左边那个开关关掉，那样它还在列表里、只是不连。
+                if !store.isBuiltin(server) {
+                    Button("删掉") {
+                        phones[server.id] = nil
+                        store.remove(server)
+                    }
+                    .font(.aevis(13))
+                    .foregroundStyle(.red)
                 }
-                .font(.aevis(13))
-                .foregroundStyle(.red)
 
                 Spacer(minLength: 0)
             }
@@ -413,6 +432,59 @@ struct MCPCard: View {
             .buttonStyle(.plain)
             .disabled(digitsOf(panel.code).count != 6 || panel.busy)
         }
+    }
+
+    // MARK: - 设备类型 / 工具数量（行上常显的两个标签）
+
+    /// 设备类型的文字：「电脑」还是「服务器」。
+    private func deviceKindLabel(_ server: MCPServerConfig) -> String {
+        switch server.kind {
+        case .computer: return "电脑"
+        case .server: return "服务器"
+        }
+    }
+
+    /// 设备类型的颜色：电脑用强调色（它是更特别的那一种），普通服务器用辅助色。
+    private func deviceKindTint(_ server: MCPServerConfig) -> Color {
+        switch server.kind {
+        case .computer: return settings.accentColor
+        case .server: return Color.secondary
+        }
+    }
+
+    /// 「N 个工具」这句话 —— 始终显示，并且按**连接状态**说话。
+    ///
+    /// 为什么不是简单地写「0 个工具」：`tools` 为空有几种完全不同的原因，
+    /// 对用户是几回事 ——
+    ///   · 正在连             →「正在数…」（别让他以为真的只有 0 个）
+    ///   · 连上了、那边没工具  →「没有工具」
+    ///   · 没连上             →「没连上」（是"没连上"，不是"没有工具"）
+    ///   · 用户手动关了        →「已关闭」
+    private func toolCountText(for server: MCPServerConfig) -> String {
+        if store.busy.contains(server.id) { return "正在数…" }
+        let total = toolTotal(for: server.id)
+        if total > 0 { return "\(total) 个工具" }
+        if !server.enabled { return "已关闭" }
+        if store.isConnected(server.id) { return "没有工具" }
+        return "没连上"
+    }
+
+    /// 计数标签的颜色：真拿到工具才算"好用"，给个好看的颜色；其余情况一律辅助色。
+    private func toolCountTint(for server: MCPServerConfig) -> Color {
+        toolTotal(for: server.id) > 0 ? settings.accentColor : Color.secondary
+    }
+
+    /// 一个共用的小圆角标签 —— 设备类型和工具数量两处共用，免得各写一份样式跑偏。
+    private func pill(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.aevis(10.5, weight: .medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(0.12))
+            )
     }
 
     // MARK: - 工具列表
@@ -947,8 +1019,12 @@ struct MCPCard: View {
             updated.name = name.isEmpty ? "MCP 服务器" : name
             updated.url = url
             updated.headerLines = draftHeaders
-            // 用户手改过地址的话，之前记下的电脑主机就不再作数了
-            if !draftAddress.isEmpty, let address = PCAgent.parse(draftAddress),
+            // ⚠️ 只有「本来就是电脑」的那条才跟着改主机地址（比如用户换了电脑的 IP）。
+            //    **手动添加的普通 MCP 绝不能被顺手变成电脑** —— 它的地址里也有一个 host，
+            //    这里要是不加 `server.looksLikePC` 这个条件，手工服务器被"改"一次就会被填上
+            //    pcHost / pcPort，界面上立刻变成 desktopcomputer 图标、还冒出「电脑上连着的
+            //    手机」那一段（用户 2026-10-02 明确要求把"电脑"和"普通服务器"分清）。
+            if server.looksLikePC, !draftAddress.isEmpty, let address = PCAgent.parse(draftAddress),
                "\(address.host):\(address.port)" != "\(server.pcHost):\(server.pcPort)" {
                 updated.pcHost = address.host
                 updated.pcPort = address.port

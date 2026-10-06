@@ -25,6 +25,28 @@ struct MCPServerConfig: Codable, Identifiable, Equatable {
     /// 这条是不是电脑助手带进来的（能不能显示「配对手机」）。
     var looksLikePC: Bool { !pcHost.isEmpty && pcPort > 0 }
 
+    /// 这台设备到底是**一台电脑**，还是一个**普通的 MCP 服务器**。
+    ///
+    /// 用户 2026-10-02 明确要求：「不是所有设备都是电脑，你要识别这个是不是电脑」。
+    /// 判定**只看它是不是由「Aevis 电脑助手」配对进来的** —— 那一步会在
+    /// `PCAgent.serverConfig` 里把 `pcHost` / `pcPort` 填上（见 `MCPStore.addComputer`）。
+    /// 手动添加的普通 MCP（米家那种智能家居服务、别的第三方服务）这两个字段一直是空的，
+    /// 所以一律是 `.server`，**绝不会**被当成一台电脑。
+    ///
+    /// 为什么不把 `kind` 存成一个字段：它的值完全由 `pcHost` / `pcPort` 推得，
+    /// 存下来就多一个要落盘的字段 —— 还得**同步改上面那个手写的 `init(from:)`**，
+    /// 漏一个字段老数据就整条解不出来（得不偿失）。做成计算属性，零成本、也不会不同步。
+    enum Kind {
+        /// 由「Aevis 电脑助手」配对进来的电脑。
+        case computer
+        /// 手动添加的普通 MCP 服务器（不是电脑）。
+        case server
+    }
+
+    /// `looksLikePC` 的「显式版」：把「是不是电脑」直接说成一个类型，
+    /// 界面按它选图标、选标签，而不是各自去拼一个 Bool。
+    var kind: Kind { looksLikePC ? .computer : .server }
+
     /// 拿去问电脑用。
     var pcAddress: PCAgent.Address { PCAgent.Address(host: pcHost, port: pcPort, code: "") }
 
