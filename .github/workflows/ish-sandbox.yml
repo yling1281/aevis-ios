@@ -10,6 +10,15 @@
 #    - fakefsify / ish                         macOS host 工具（打 rootfs / 跑沙箱用）
 #    - alpine-rootfs.zip                       Alpine aarch64 fakefs（data/ + meta.db）
 #
+#  ⚠️ **产物必须公开发布，不能只留在 Actions artifact 里**。
+#     原因：开发机是 Windows，`actions/upload-artifact` 的产物**下载需要 token**，
+#     而本机既没有 gh 也没有 token ⇒ 那五个文件在开发机上**永远拿不到**，
+#     等于白编。所以本 workflow 会把它们打进 `ish-vendor.tar.gz` 并**作为 Release
+#     附件**（未认证即可下载）挂出去，供 App 的构建链（build-ipa.yml）自行取用。
+#     `ish-vendor.tar.gz` 解包后是平铺的五个文件：
+#         libish.a  libish_emu.a  libfakefs.a  libvdso.so.elf  alpine-rootfs.zip
+#     ⚠️ 只有五个文件**齐全**时才生成（缺一个就整包不发），避免下游拿到残缺包。
+#
 #  ---------------------------------------------------------------------------
 #  上游来源与许可证（合规记录）
 #  ---------------------------------------------------------------------------
@@ -135,6 +144,17 @@ env:
   ALPINE_SERIES: "3.21"
   ALPINE_VERSION: "3.21.3"
   ALPINE_SHA256: "ead8a4b37867bd19e7417dd078748e2312c0aea364403d96758d63ea8ff261ea"
+  # 🔴 构建缓存的手动版本号 —— **改了下面任何一样就必须 +1**：
+  #      ① 三处构建期补丁（脚本内容）  ② ISH_SHA/pinned commit
+  #      ③ meson 配置参数（-Dguest_arch 之类）  ④ 编译步骤的 env/CFLAGS
+  # ⚠️ 为什么不用 `hashFiles('.github/workflows/ish-sandbox.yml')`（曾经是这么写的）：
+  #    本 workflow **没有 `actions/checkout`**（见文件末尾 Publish 步骤的注释——
+  #    就是为了避开"$GITHUB_WORKSPACE 不是 git 仓库、gh 推不出仓库名"那个坑）。
+  #    没有 checkout ⇒ `$GITHUB_WORKSPACE` 里**根本没有这个 yml 文件** ⇒
+  #    `hashFiles()` **永远返回空串** ⇒ key 实际只按 runner.os 区分，**永远不会失效**。
+  #    也就是说「改补丁 → 自动重编」从来没生效过，注释却在骗自己（run #5 实测确认）。
+  #    ⇒ 改成显式常量，改补丁的人**必须手动 +1**。宁可手动，也不要一个悄悄失效的自动。
+  SBX_CACHE_REV: "4"
 
 jobs:
   build:
@@ -179,8 +199,9 @@ jobs:
           echo "phase brew: ${SECONDS}s" | tee -a "$SBX/timings.txt"
 
       # —— 2. 恢复缓存 ——
-      #   key 里带本 workflow 文件的哈希 ⇒ 只要「脚本 / pinned SHA / 补丁」变了，
-      #   缓存自动失效并重编；否则命中缓存，增量 ninja 几乎瞬间完成。
+      #   ⚠️ key 是「runner.os + 手动常量 SBX_CACHE_REV」——**故意不用 hashFiles**，
+      #      原因见文件头 `env.SBX_CACHE_REV` 那段（本 workflow 没有 checkout，
+      #      hashFiles 恒为空串、永远不会失效）。改了补丁就手动把那个常量 +1。
       # 缓存内容：两个 meson 构建目录 + Alpine 包缓存（源码 clone 每次重来，很便宜）。
       - name: Restore build cache
         id: cache
@@ -190,7 +211,7 @@ jobs:
             ish-sandbox/build/ios-iphoneos
             ish-sandbox/build/native
             ish-sandbox/.cache
-          key: ish-sandbox-${{ runner.os }}-${{ hashFiles('.github/workflows/ish-sandbox.yml') }}
+          key: ish-sandbox-${{ runner.os }}-rev${{ env.SBX_CACHE_REV }}
 
       # —— 3. 取 iSH 源码（pin 到固定 commit）——
       #   iSH 的三个 submodule（deps/libapps、deps/libarchive、deps/linux）在
@@ -790,6 +811,37 @@ jobs:
           } > "$REPORT"
           cat "$REPORT"
 
+          # —— 11.5 打「App 侧 vendor 包」（这是给 App 用的，必须公开可下）——
+          # 为什么键在 Release 附件上、而不是只靠 artifact：见文件头那一段 ⚠️。
+          # 位置放在「Release 步骤之前」，是因为 Release 步骤要把这个 tgz 加进 ATTACH。
+          VENDOR_DIR="$SBX/out/ish-vendor"
+          rm -rf "$VENDOR_DIR"; mkdir -p "$VENDOR_DIR"
+          VENDOR_MISSING=""
+          for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf alpine-rootfs.zip; do
+            if [ -f "$SBX/out/$f" ]; then
+              cp "$SBX/out/$f" "$VENDOR_DIR/$f"
+            else
+              VENDOR_MISSING="$VENDOR_MISSING $f"
+            fi
+          done
+          rm -f "$SBX/out/ish-vendor.tar.gz" "$SBX/out/vendor.sha256"
+          if [ -z "$VENDOR_MISSING" ]; then
+            # ⚠️ 用 `-C "$VENDOR_DIR" .` 打成**平铺**包：下游 `tar xzf` 出来就是五个文件，
+            #    不带 `ish-vendor/` 这层目录 —— 免得 App 工程里多一层路径要维护。
+            ( cd "$VENDOR_DIR" && tar -czf "$SBX/out/ish-vendor.tar.gz" . )
+            {
+              echo "# ish-vendor.tar.gz 内容校验（App 侧可据此核对）"
+              for f in libish.a libish_emu.a libfakefs.a libvdso.so.elf alpine-rootfs.zip; do
+                printf '%s  %s\n' "$(shasum -a 256 "$VENDOR_DIR/$f" | cut -d' ' -f1)" "$f"
+              done
+              printf '%s  %s\n' "$(shasum -a 256 "$SBX/out/ish-vendor.tar.gz" | cut -d' ' -f1)" "ish-vendor.tar.gz"
+            } > "$SBX/out/vendor.sha256"
+            echo "VENDOR OK — $(du -h "$SBX/out/ish-vendor.tar.gz" | cut -f1)"
+            cat "$SBX/out/vendor.sha256"
+          else
+            echo "::error::VENDOR| vendor 包不完整，缺:$VENDOR_MISSING ⇒ 本轮**不发** ish-vendor.tar.gz（App 侧拿不到就不能接）"
+          fi
+
           # 只 attach 真实存在的文件：缺文件绝不能因此让这一步失败。
           # ⚠️ tag 固定为 ish-sandbox-macos-<run>：带上 run 号，同一轮重复触发（改本文件时
           #    会连着起两轮）不会互相覆盖，否则 `gh release create` 会因 tag 已存在而失败。
@@ -798,7 +850,10 @@ jobs:
           for f in "$SBX/out/logs.tgz" "$SBX/out/host-env.log" "$SBX/out/host-setup.log" \
                    "$SBX/out/host-offsets.log" "$SBX/out/host-ninja.log" "$SBX/out/meson-log.txt" \
                    "$SBX/out/ish-smoke.log" "$SBX/out/ish-mirror.log" \
-                   "$SBX/out/timings.txt" "$SBX/out/arch.txt" "$SBX/out/sizes.txt"; do
+                   "$SBX/out/timings.txt" "$SBX/out/arch.txt" "$SBX/out/sizes.txt" \
+                   "$SBX/out/ish-vendor.tar.gz" "$SBX/out/vendor.sha256" \
+                   "$SBX/out/libish.a" "$SBX/out/libish_emu.a" "$SBX/out/libfakefs.a" \
+                   "$SBX/out/libvdso.so.elf" "$SBX/out/alpine-rootfs.zip"; do
             [ -f "$f" ] && ATTACH+=("$f")
           done
 
@@ -837,7 +892,7 @@ jobs:
             ish-sandbox/build/ios-iphoneos
             ish-sandbox/build/native
             ish-sandbox/.cache
-          key: ish-sandbox-${{ runner.os }}-${{ hashFiles('.github/workflows/ish-sandbox.yml') }}
+          key: ish-sandbox-${{ runner.os }}-rev${{ env.SBX_CACHE_REV }}
 
 # ⚠️ 原本这里还有第二条线 `build-rootfs-linux-arm`（ubuntu-24.04-arm）。
 #    已于 2026-10-06 整段删除：原因见文件头「为什么不再保留 Linux/arm64 那条线」。
