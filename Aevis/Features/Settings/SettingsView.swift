@@ -37,6 +37,12 @@ struct SettingsView: View {
     @State private var renameNote = ""
     @State private var deleteTarget: APIProfile?
     @State private var showDeleteConfirm = false
+    /// 截图自检用：带 `-aevisOpenConsole` 启动时，**自动**把命令台那一页推出来。
+    ///
+    /// 为什么需要它：命令台藏在设置页那张卡的 `NavigationLink` 后面，
+    /// 光带 `-aevisOpenSettings -aevisSettingsFocus=console` **只停在设置页、
+    /// 只高亮那张卡**，进不去 ⇒ 以前一个包都没有命令台的截图。见下面 consoleCard。
+    @State private var autoConsole = false
 
     var body: some View {
         NavigationStack {
@@ -128,7 +134,7 @@ struct SettingsView: View {
                         keys: ["aitools", "companion", "baidupan", "music",
                                "qqbot", "qq", "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
-                        keys: ["account", "device", "pair", "share", "about"])
+                        keys: ["account", "device", "devicelist", "pair", "share", "about"])
         ]
     }
 
@@ -162,6 +168,7 @@ struct SettingsView: View {
         case "qqbot": QQBotCard()
         case "account": AccountCard()
         case "device": DeviceCard()
+        case "devicelist": DeviceListCard()
         case "pair": PairCard()
         case "share": ShareCard()
         case "baidupan": BaiduPanCard()
@@ -340,6 +347,21 @@ struct SettingsView: View {
             .buttonStyle(.plain)
         }
         .aevisGlass(cornerRadius: 20)
+        // 截图自检直达：带 `-aevisOpenConsole` 启动时，把命令台那一页自动推出来。
+        // ⚠️ 用 `navigationDestination(isPresented:)`，**不要**用 `NavigationLink(isActive:)`
+        //    —— 后者在 NavigationStack（iOS 16+）里已废弃、会静默不生效。
+        //    这个写法与同目录的 MemoryCard（`-aevisOpenMemoryList`）一致，
+        //    是这套代码里现成跑通的路子。
+        .navigationDestination(isPresented: $autoConsole) {
+            ConsoleView()
+        }
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-aevisOpenConsole") {
+                autoConsole = true
+            }
+            #endif
+        }
     }
 
     // MARK: - 模型接入

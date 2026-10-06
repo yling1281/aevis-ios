@@ -395,21 +395,52 @@ final class BuiltinShell: ShellProvider {
     """
 }
 
-/// 真 Alpine（iSH）的占位实现。
+/// 真 Alpine（iSH）的驱动层。
 ///
-/// 接上它需要把 iSH 的 C 代码与 Alpine rootfs 一起编进 App（周级工作量），
-/// 而且必须在真机上验证。在那之前它老老实实说自己不可用，
-/// **不假装能用** —— 界面上会显示成「未接入」。
+/// iSH 的 C 代码已经编进 `libaevisish.a`、Alpine 的 rootfs 也随包带上了
+/// （见 `project.yml`）。真正的驱动在 `Core/AlpineRuntime.swift` ——
+/// 这个类只是把它接到命令台协议上。
+///
+/// 🔴 **模拟器上必须「不存在」**：`libaevisish.a` 只有真机切片，模拟器那条线
+///    不链它。所以 `isAvailable` 在模拟器上恒为 `false` ⇒ `Shell.provider`
+///    自动回落到 `BuiltinShell`，截图照旧显示内置命令台。
+/// 🔴 `isAvailable` / `availability` **只读 `AlpineRuntime` 的纯 Swift 状态**，
+///    绝不在这里出现任何 C 调用（计算属性里调 C 是最容易漏的一处）。
 final class AlpineShell: ShellProvider {
     static let shared = AlpineShell()
 
     let displayName = "Alpine Linux"
-    var availability: String { "未接入。接上它需要把 Alpine 的 rootfs 编进 App，属于后续阶段。" }
-    var isAvailable: Bool { false }
+
+    /// 口径：**只要还没被永久判死（failed / dead）就算可用**。
+    ///
+    /// ⚠️ 为什么「还没启动」也算可用：`ConsoleView` 是在视图初始化那一刻把
+    ///    `Shell.provider` 取下来的（`private let provider = Shell.provider`），
+    ///    之后不再重取。要是这里写成「必须已经 boot 完才算可用」，那第一次进
+    ///    命令台时它还停在「没启动」⇒ `Shell.provider` 当场回落到 `BuiltinShell`
+    ///    ⇒ 内部 Linux 永远起不来（boot 也就永远不会被触发）。所以交给
+    ///    AlpineShell，由它在第一条命令时自己把内核拉起来。
+    var isAvailable: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return AlpineRuntime.shared.isUsable
+        #endif
+    }
+
+    var availability: String {
+        #if targetEnvironment(simulator)
+        return "模拟器里没有内置 Linux；装到真机上才有。"
+        #else
+        return AlpineRuntime.shared.statusText
+        #endif
+    }
+
+    /// ⚠️ 固定是 `/`：命令被包在子 shell 里跑，`cd` / `export` **不跨命令保持**，
+    ///    所以这里不假装能跟随当前目录。
     var workingDirectory: String { "/" }
 
     func run(_ command: String) async -> CommandResult {
-        .fail("Alpine 沙箱还没接上。现在用的是内置命令台，功能少一些但能用。")
+        await AlpineRuntime.shared.run(command)
     }
 }
 

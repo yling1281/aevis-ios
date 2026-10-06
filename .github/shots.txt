@@ -132,3 +132,9 @@
 #       启动参数也没人接（跟 47-herphone 一个道理）。
 49-herphone-wechat  -aevisDemo -aevisOpenTab=discover -aevisOpenHerPhone -aevisOpenHerApp=wechat
 50-herphone-netdisk -aevisDemo -aevisOpenTab=discover -aevisOpenHerPhone -aevisOpenHerApp=baidupan
+
+# ⭐ 2026-10-06：命令台那一页（内置命令台 / 以后的内置真 Linux）。
+#    ⚠️ 必须带 -aevisOpenConsole：命令台藏在设置页那张卡的 NavigationLink 后面，
+#       光带 -aevisOpenSettings -aevisSettingsFocus=console **只停在设置页、只高亮那张卡**，
+#       进不去 ⇒ 以前一个包都没有命令台的截图。这个参数把它自动推到那一页。
+51-console          -aevisDemo -aevisOpenSettings -aevisSettingsFocus=console -aevisOpenConsole

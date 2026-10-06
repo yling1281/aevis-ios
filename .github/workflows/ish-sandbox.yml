@@ -23,6 +23,11 @@
 #         libaevisish.a  ish_embed.h
 #     ⚠️ 只有七个文件**齐全**时才生成（缺一个就整包不发），避免下游拿到残缺包。
 #
+#     ⚠️ 另外：**同一批附件会再发一份到固定 tag `ish-vendor`**，当作「最新可用
+#        vendor」的指针。出包 CI（build-ipa.yml）就从这里取，不用去猜每轮的 run 号
+#        （`ish-sandbox-macos-<run>` 那个 tag 每轮都变，没法硬编码）。
+#        两处都发：run 号那份**保留不动**（可追溯），固定 tag 那份供下游消费。
+#
 #  ---------------------------------------------------------------------------
 #  上游来源与许可证（合规记录）
 #  ---------------------------------------------------------------------------
@@ -1232,6 +1237,29 @@ jobs:
             }
           fi
           [ -z "$ROUT" ] || echo "gh release 输出：$ROUT"
+
+          # —— 12.5 再发一份到固定 tag `ish-vendor`：出包 CI 从这里取，不用猜 run 号 ——
+          # 为什么需要：`build-ipa.yml` 不能硬编码 `ish-sandbox-macos-<run_number>`
+          #   （每轮都变）。固定 tag 就是「最新可用 vendor」的指针。
+          # ⚠️ 本步骤是 `if: always()` —— **失败的那一轮也会走到这里**。所以必须先
+          #    确认 vendor 包真的存在，否则会把一条**失败的构建**钉成下游要取的指针
+          #    （甚至拿空气去覆盖）. 只在 ish-vendor.tar.gz + vendor.sha256 都在时才发。
+          # ⚠️ 变量名 `$REPORT` / `$ATTACH` / `$SBX` 都是本步骤里现成的（见上）。
+          VENDOR_TAG="ish-vendor"
+          if [ -f "$SBX/out/ish-vendor.tar.gz" ] && [ -f "$SBX/out/vendor.sha256" ]; then
+            if gh release view "$VENDOR_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              gh release upload "$VENDOR_TAG" --repo "${{ github.repository }}" --clobber "${ATTACH[@]}" \
+                || { echo "::error::VENDOR-PIN| 更新固定 tag $VENDOR_TAG 失败"; exit 1; }
+            else
+              gh release create "$VENDOR_TAG" --repo "${{ github.repository }}" \
+                --title "ish-vendor（固定指针 —— 出包 CI 从这里取，别手改）" \
+                --notes-file "$REPORT" "${ATTACH[@]}" \
+                || { echo "::error::VENDOR-PIN| 创建固定 tag $VENDOR_TAG 失败"; exit 1; }
+            fi
+            echo "VENDOR-PIN OK — $VENDOR_TAG 已更新"
+          else
+            echo "::warning::VENDOR-PIN| 本轮没有 ish-vendor.tar.gz/vendor.sha256，跳过固定 tag 发布（不会污染已有的 $VENDOR_TAG）"
+          fi
 
       # —— 13. 保存缓存（只在成功时保存，避免把半截构建目录写进不可变缓存）——
       # ⚠️ `continue-on-error: true` 是必须的：本 workflow 的缓存 key 不含 run 维度，

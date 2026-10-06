@@ -42,6 +42,14 @@ enum DeviceIdentity {
         canonical.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
+    /// 给人看的设备名 —— 上报给服务器，做「登录设备」列表显示用。
+    ///
+    /// 机型表里有就用营销名（`iPhone 14 Pro Max` 这种）；表里没有
+    /// （iPad 标识又多又杂）就退回 `iPhone` / `iPad` 这种**通用名** ——
+    /// **绝不猜机型**（猜错比老实说"iPhone"更糟）。
+    /// 机型表和机器标识都**复用现成的**，不另写一套 sysctl。
+    static let friendlyName: String = makeFriendlyName()
+
     /// 网页上绑定的入口 —— 绑定**只在网页上做**，App 里不需要登录。
     /// 域名走 `AevisHosts`，别写死。
     /// ⚠️ 用 `accountWebURL`（**不带接口前缀**）—— `/me` 是给浏览器看的网页，
@@ -71,6 +79,16 @@ enum DeviceIdentity {
         // 理论上 UUID 一定够 12 位；不够就补，绝不让它生成出长度不对的码
         while hex.count < 12 { hex += "0" }
         return "AEVIS" + String(hex.prefix(12))
+    }
+
+    /// 取一个给人看的设备名（见 `friendlyName`）。
+    private static func makeFriendlyName() -> String {
+        if let name = AevisDevice.marketingName(for: Diagnostics.machine) { return name }
+        #if canImport(UIKit)
+        return UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        #else
+        return "iPhone"
+        #endif
     }
 
     /// `AEVIS9F2A4C317B3E` → `AEVIS-9F2A-4C31-7B3E`

@@ -125,6 +125,109 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # ——— 取「内置真 Linux」的 vendor 产物并铺好 ———
+      #
+      # 为什么需要这一步：主 App 现在**链接** iSH 合并静态库（`libaevisish.a`）
+      # 并带一个桥接头（`Aevis/Core/AevisIshBridge.h` → `ish_embed.h`）。
+      # 这两样**都不在仓库里**（静态库 / 头文件是生成物，推不上来）——
+      # 由 `ish-sandbox.yml` 编好后发成 Release，这里下载、校验、铺到本地，
+      # 供 `project.yml` 里的搜索路径取用。
+      #
+      # 取源两级回退（消除引导期的鸡生蛋）：
+      #   ① 优先固定 tag `ish-vendor`（ish-sandbox 每轮成功构建都会更新它）；
+      #   ② 它还不存在（引导期）或被人误删时 → 回退到「编号最大的
+      #      `ish-sandbox-macos-<run>`」。**固定 tag 永远优先**，回退只兜那两种情况。
+      #
+      # ⚠️ 顺序死线：**必须在 `xcodegen generate` 之前**（也在所有 build 之前）。
+      #    `project.yml` 给 Aevis target 配了
+      #    `HEADER_SEARCH_PATHS = $(SRCROOT)/vendor/ish`、
+      #    `LIBRARY_SEARCH_PATHS = $(SRCROOT)/vendor/ish` 和 `-laevisish`；
+      #    目录不在时 xcodegen 之后必然编不过。
+      # ⚠️ rootfs 在 `project.yml` 里是**文件夹引用**（`type: folder`），
+      #    布局必须是 `ish-rootfs/data/…` + `ish-rootfs/meta.db` ——
+      #    unzip 出来的就是这两项，**不要再套一层 `ish-rootfs/`**。
+      # ⚠️ 失败一律 `exit 1`，**不许静默继续**（否则会去编一个缺 vendor 的包）。
+      - name: Fetch iSH vendor (libaevisish.a + rootfs)
+        run: |
+          set -euo pipefail
+          DEST="/tmp/ishvendor"
+          rm -rf "$DEST"; mkdir -p "$DEST"
+
+          # —— 取源：固定 tag 优先；缺失时回退到「编号最大的 ish-sandbox-macos-*」——
+          # 为什么要有回退：本项目是**整树推送**，没法只推 ish-sandbox.yml 一个文件，
+          #   所以第一次推向 main 时 `ish-vendor` 必然还不存在 —— 没有回退就会死锁。
+          VENDOR_TAG="ish-vendor"
+          SRC="fixed"
+          if ! gh release view "$VENDOR_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            SRC="fallback"
+            # ⚠️ 不信任 `gh release list` 的默认排序：**自己按 run 号取最大**。
+            # ⚠️ limit 要给得够大：build-<n>/check-<n>/log-<n> 这类 release 每推一次
+            #    至少多一个、会把列表挤满；limit 太小会漏掉较老的 ish-sandbox release
+            #    （漏掉会走到下面的 `-z` 分支、明确报错，不会静默用错包）。
+            VENDOR_TAG=$(gh release list --repo "${{ github.repository }}" --limit 300 \
+              | awk '$1 ~ /^ish-sandbox-macos-/ { n=$1; sub(/^ish-sandbox-macos-/,"",n); if (n+0 > best) { best=n+0; tag=$1 } } END { print tag }')
+            if [ -z "$VENDOR_TAG" ]; then
+              echo "::error::VENDOR| 既没有固定 tag ish-vendor，也没有任何 ish-sandbox-macos-* release —— 先成功跑一轮 ish-sandbox.yml"
+              exit 1
+            fi
+            echo "::warning::VENDOR| 固定 tag ish-vendor 不存在，回退到 $VENDOR_TAG"
+          fi
+          echo "VENDOR-SOURCE| tag=$VENDOR_TAG source=$SRC"
+
+          # 1) 下载（gh 在 runner 上自带；失败直接红）
+          gh release download "$VENDOR_TAG" --repo "${{ github.repository }}" \
+            --pattern 'ish-vendor.tar.gz' --pattern 'vendor.sha256' \
+            --dir "$DEST" --clobber \
+            || { echo "::error::VENDOR| 从 $VENDOR_TAG 下载失败"; exit 1; }
+
+          # 2) 先校验 tarball 自身（vendor.sha256 里最后一行就是它）——
+          #    这是防「下载到半截」的唯一手段。
+          grep ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" > "$DEST/tar.sha256" \
+            || { echo "::error::VENDOR| vendor.sha256 里没有 ish-vendor.tar.gz 这一行"; exit 1; }
+          ( cd "$DEST" && shasum -a 256 -c tar.sha256 ) \
+            || { echo "::error::VENDOR| ish-vendor.tar.gz 的 sha256 校验失败"; exit 1; }
+
+          # 3) 解包到 aevis-ios/vendor/ish/（tar 里是平铺的七个文件）
+          rm -rf vendor/ish; mkdir -p vendor/ish
+          tar xzf "$DEST/ish-vendor.tar.gz" -C vendor/ish
+
+          # 3b) **内容体检**：libaevisish.a + ish_embed.h 是较新的 run 才有的产物。
+          #     回退到旧格式的包时在这里就报清楚，别一路编到链接期才炸。
+          for f in libaevisish.a ish_embed.h; do
+            [ -f "vendor/ish/$f" ] \
+              || { echo "::error::VENDOR| vendor 包里缺 $f（来源 $VENDOR_TAG / $SRC）—— 这个 release 的 vendor 是旧格式；请等一轮新的 ish-sandbox 构建，或先跑一轮 ish-sandbox.yml 把 ish-vendor 建出来"; exit 1; }
+          done
+
+          # 4) 再逐文件校验解出来的七个文件（vendor.sha256 里除末行外的那些）
+          grep -v ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" > "$DEST/files.sha256"
+          ( cd vendor/ish && shasum -a 256 -c "$DEST/files.sha256" ) \
+            || { echo "::error::VENDOR| vendor 包内文件的 sha256 校验失败"; exit 1; }
+
+          # 5) rootfs 解压到 aevis-ios/ish-rootfs/（要的是 data/ + meta.db 顶层）
+          rm -rf ish-rootfs; mkdir -p ish-rootfs
+          unzip -q vendor/ish/alpine-rootfs.zip -d ish-rootfs
+
+          # 6) 目录非空自查：解错了 / 没解出来都要当场红
+          { test -d vendor/ish && [ -n "$(ls -A vendor/ish 2>/dev/null)" ]; } \
+            || { echo "::error::VENDOR| vendor/ish 不存在或为空"; exit 1; }
+          { test -d ish-rootfs && [ -n "$(ls -A ish-rootfs 2>/dev/null)" ]; } \
+            || { echo "::error::VENDOR| ish-rootfs 不存在或为空"; exit 1; }
+
+          # 7) 可追溯信息写进 job summary（含「实际用了哪个 tag / 走的哪条路」）
+          NSHA=$(shasum -a 256 vendor/ish/libaevisish.a | cut -d' ' -f1 | cut -c1-16)
+          NFILES=$(find ish-rootfs -type f | wc -l | tr -d ' ')
+          PUB=$(gh release view "$VENDOR_TAG" --repo "${{ github.repository }}" \
+                  --json publishedAt --jq '.publishedAt' 2>/dev/null || echo "?")
+          {
+            echo "## iSH vendor"
+            echo ""
+            echo "- 取源: tag=\`$VENDOR_TAG\`  source=$SRC (fixed=固定 tag / fallback=回退)"
+            echo "- 发布时间: $PUB"
+            echo "- libaevisish.a sha256[:16]: \`$NSHA\`"
+            echo "- rootfs 解压后文件数: $NFILES"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "vendor 就绪：libaevisish.a=$NSHA  rootfs 文件数=$NFILES"
+
       - name: Generate app icon
         run: python3 scripts/make_icon.py Aevis/Resources
 

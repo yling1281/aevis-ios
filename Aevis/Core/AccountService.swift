@@ -409,6 +409,62 @@ final class AccountService: ObservableObject {
         _ = try? await post("/api/device/bind", ["device_id": code])
     }
 
+    // MARK: - 登录设备管理（跟微信一样：看几台、把别的踢下线）
+
+    /// 服务器给的「一台登录设备」。字段名跟 `GET /api/devices` 的返回一一对应。
+    ///
+    /// ⚠️ `deviceID` / `name` **可能是空串**（老 token 认不出是哪台设备）——
+    ///    界面碰到空串要显示「未知设备」，别把空字符串当名字摆出来。
+    struct DeviceSession: Identifiable, Hashable {
+        let deviceID: String
+        let name: String
+        let userAgent: String
+        let ip: String
+        /// Unix 秒。**0 = 从没记录过**（不是 1970 年，界面要显示「时间不详」）。
+        let lastSeen: Int
+        let firstSeen: Int
+        let tokenCount: Int
+        /// 是不是**本机**。
+        let isCurrent: Bool
+        /// 列表用的稳定 id：认不出的设备统一收成一个 `__unknown__`。
+        var id: String { deviceID.isEmpty ? "__unknown__" : deviceID }
+    }
+
+    /// 拉一份「当前账号登着哪些设备」的清单。
+    @MainActor
+    func listDevices() async throws -> [DeviceSession] {
+        let json = try await get("/api/devices")
+        let rows = (json["devices"] as? [[String: Any]]) ?? []
+        return rows.map { row in
+            DeviceSession(
+                deviceID: (row["device_id"] as? String) ?? "",
+                name: (row["name"] as? String) ?? "",
+                userAgent: (row["ua"] as? String) ?? "",
+                ip: (row["ip"] as? String) ?? "",
+                lastSeen: Self.int(row["last_seen"]),
+                firstSeen: Self.int(row["first_seen"]),
+                tokenCount: Self.int(row["tokens"]),
+                isCurrent: (row["current"] as? Bool) ?? false
+            )
+        }
+    }
+
+    /// 把某台设备踢下线。返回服务器说踢掉了几条登录（`revoked`）。
+    ///
+    /// 「踢自己」后端会回 400 + `cannot_revoke_current` —— 这里翻成
+    /// `AccountError.cannotRevokeCurrent`，界面就能说人话（提示他用「退出账号」）。
+    @MainActor
+    @discardableResult
+    func revokeDevice(_ deviceID: String) async throws -> Int {
+        do {
+            let json = try await post("/api/devices/revoke", ["device_id": deviceID])
+            return Self.int(json["revoked"])
+        } catch AccountError.http(let status, let body)
+                    where status == 400 && body.contains("cannot_revoke_current") {
+            throw AccountError.cannotRevokeCurrent
+        }
+    }
+
     // MARK: - 底层
 
     private func adopt(_ json: [String: Any]) throws {
@@ -452,6 +508,13 @@ final class AccountService: ObservableObject {
         if isSignedIn {
             request.setValue("Bearer \(settings.accountToken)", forHTTPHeaderField: "Authorization")
         }
+        // 设备身份**所有请求都带**（这是唯一的出口，加在这儿一处就全齐了）：
+        // 登录接口也会带上 ⇒ 后端在发 token 时顺手把这台设备落库，
+        // 「登录设备」列表里才认得出来。不用逐个改 signIn / adoptWebToken。
+        let code = DeviceIdentity.wireCode
+        if !code.isEmpty { request.setValue(code, forHTTPHeaderField: "X-Aevis-Device") }
+        let friendly = DeviceIdentity.friendlyName
+        if !friendly.isEmpty { request.setValue(friendly, forHTTPHeaderField: "X-Aevis-Device-Name") }
         return request
     }
 
@@ -522,6 +585,16 @@ final class AccountService: ObservableObject {
         return ""
     }
 
+    /// 服务器给的数字（`JSONSerialization` 可能解成 Int / Double / String）→ Int。
+    /// 解不出就当 0（`last_seen == 0` 的语义本来就是「没记录过」）。
+    private static func int(_ value: Any?) -> Int {
+        if let number = value as? Int { return number }
+        if let number = value as? Int64 { return Int(number) }
+        if let number = value as? Double { return Int(number) }
+        if let text = value as? String { return Int(text) ?? 0 }
+        return 0
+    }
+
     /// 设备标识：装到哪台机器上是稳定的，但**不含任何硬件唯一码** ——
     /// 只是给服务器做区分用的一个随机串，第一次生成后存在本机。
     static func deviceTag() -> String {
@@ -564,6 +637,8 @@ enum AccountError: LocalizedError {
     case unauthorized
     case http(status: Int, body: String)
     case badResponse(String)
+    /// 想踢的就是**本机** —— 后端拒（400 `cannot_revoke_current`）。
+    case cannotRevokeCurrent
 
     var errorDescription: String? {
         switch self {
@@ -581,6 +656,8 @@ enum AccountError: LocalizedError {
             return "服务器返回 \(status)：\(body.prefix(120))"
         case let .badResponse(text):
             return "服务器返回的内容看不懂：\(text.prefix(120))"
+        case .cannotRevokeCurrent:
+            return "这是本机，退出登录请用「退出账号」。"
         }
     }
 }
