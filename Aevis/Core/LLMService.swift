@@ -178,7 +178,35 @@ enum LLMService {
         }
         // 带多少条历史由用户决定：太多又慢又贵，太少ta会失忆
         let limit = max(6, min(config.contextLimit, 200))
-        for item in history.suffix(limit) {
+        // ⚠️⚠️ **别再只砍尾巴**（2026-10-06 改）。
+        //
+        // 原来是 `history.suffix(limit)`：超了就把**最老的那批整段扔掉**。
+        // 而「她是谁、你们怎么认识的、说好过什么」恰恰在最前面 ——
+        // 越聊越远，那些就最先被丢，表现就是用户说的「她容易失忆」。
+        //
+        // 新口径：**开头留一小段 + 最近留一大段**，只丢中间太远的。
+        // 开头留多少：`limit` 的 1/3、最多 6 条；`limit < 12` 时不留
+        // （小窗口被开头占掉一半反而更糟）。被丢掉的中间那段由
+        // 长期记忆 / 记忆网兜着。
+        let openingKeep = limit >= 12 ? min(6, limit / 3) : 0
+        var picked: [ChatMessage]
+        var skippedMiddle = false
+        if history.count <= limit {
+            picked = history
+        } else {
+            picked = Array(history.prefix(openingKeep))
+                + Array(history.suffix(limit - openingKeep))
+            skippedMiddle = openingKeep > 0
+        }
+        for (offset, item) in picked.enumerated() {
+            // 开头那几条发完、中间那段被跳过 —— 明说一句，
+            // 免得她以为"刚才那件事压根没发生过"。
+            if skippedMiddle, offset == openingKeep {
+                messages.append([
+                    "role": "system",
+                    "content": "（中间隔了一段比较早的闲聊，这里先略过了。）"
+                ])
+            }
             guard !item.text.isEmpty else { continue }
             messages.append([
                 "role": item.role == .user ? "user" : "assistant",

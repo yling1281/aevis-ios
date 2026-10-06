@@ -208,7 +208,7 @@ struct AevisBackground: View {
     @ViewBuilder
     private var customImage: some View {
         #if canImport(UIKit)
-        if let data = skin.data, let image = UIImage(data: data) {
+        if let data = skin.data, let image = ImageDecodeCache.image(for: data) {
             // 关键：用 Color.clear 定尺寸、图片放 overlay。
             // 直接把 scaledToFill 放进 ZStack 会把整棵布局撑大，
             // 底部的输入栏会被挤出屏幕 —— 之前就是这个 bug。

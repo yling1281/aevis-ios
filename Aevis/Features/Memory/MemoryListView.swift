@@ -24,6 +24,7 @@ struct MemoryListView: View {
     @State private var exportDocument = JSONBackupDocument(data: Data())
     @State private var showClearConfirm = false
     @State private var restoring: URL?
+    @State private var showingWeb = false
 
     var body: some View {
         List {
@@ -113,6 +114,14 @@ struct MemoryListView: View {
                     Image(systemName: "plus")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingWeb = true
+                } label: {
+                    Image(systemName: "circle.grid.3x3")
+                }
+                .disabled(memory.items.count < 2)
+            }
         }
         .alert("加一条记忆", isPresented: $adding) {
             TextField("比如：他住在杭州，晚上容易失眠", text: $newText, axis: .vertical)
@@ -190,6 +199,21 @@ struct MemoryListView: View {
             case .failure(let error):
                 memory.statusLine = "导入失败：\(error.localizedDescription)"
             }
+        }
+        .sheet(isPresented: $showingWeb) {
+            NavigationStack { MemoryWebView() }
+        }
+        .onAppear {
+            #if DEBUG
+            // 截图旁路：直接推记忆网（见 `.github/shots.txt` 的第 48 条）。
+            // ⚠️ 不能立刻弹 sheet —— 这时候下面的 push 动画还在跑，弹了会被吞掉。
+            //    隔一拍再弹，跟别处那几个延迟滚底一个路子。
+            guard ProcessInfo.processInfo.arguments.contains("-aevisOpenMemoryWeb") else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                showingWeb = true
+            }
+            #endif
         }
     }
 

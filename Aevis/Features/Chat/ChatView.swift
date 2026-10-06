@@ -21,6 +21,8 @@ struct ChatView: View {
     @ObservedObject private var emoji = EmojiPack.shared
 
     @State private var draft = ""
+    /// 滚动节流：见 `onChange(of: chat.messages.last?.text)`。
+    @State private var scrollPending = false
     @State private var isSending = false
     @State private var errorText: String?
     @State private var toolNote: String?
@@ -408,7 +410,15 @@ struct ChatView: View {
     }
 
     private var messageList: some View {
-        ScrollViewReader { proxy in
+        // ⭐ 只在列表外层算**一次**（原来 `workAnchorID` 写在 `ForEach` 里面，
+        //    对每条消息各算一遍 —— 它内部是 O(n) 的 `lastIndex`，整表 O(n²)，
+        //    而流式回复时 body 每个 token 都会重算一次，长会话下就是肉眼可见的卡）。
+        let workAnchor = workAnchorID
+        // 同理：气泡主题 + 当前人设也只在外面取一次，不再让每条气泡各算一遍
+        // （`bubbleTheme` 要读好几个 settings、`persona` 要 O(联系人数) 找一次）。
+        let theme = bubbleTheme
+        let face = persona
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: (settings.simpleMode ? 16 : 12) * CGFloat(settings.densityScale)) {
                     if chat.messages.isEmpty {
@@ -418,7 +428,7 @@ struct ChatView: View {
                     ForEach(chat.messages) { message in
                         // ⭐ 「她想了一下」+ 工具记录 —— 贴在她**这次回复的第一条**气泡前面。
                         //    这样看起来就是「先想了想 / 动了下手，再开口」，而不是飘在别处。
-                        if message.id == workAnchorID {
+                        if message.id == workAnchor {
                             workBlock
                         }
                         if message.kind == .call {
@@ -441,8 +451,8 @@ struct ChatView: View {
                         } else {
                             MessageBubble(
                                 message: message,
-                                persona: persona,
-                                theme: bubbleTheme,
+                                persona: face,
+                                theme: theme,
                                 simpleMode: settings.simpleMode
                             )
                             .id(message.id)
@@ -511,8 +521,17 @@ struct ChatView: View {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
+            // ⚠️ 流式回复时每吐一个 token 都会走到这里 —— 节流到「最多约 12 次/秒」。
+            //    注意是**跳过排队中的**、不是取消重排：取消重排的话，token
+            //    连续不停地来时永远等不到"最后一个 token"，就会一直不滚。
             .onChange(of: chat.messages.last?.text) { _, _ in
-                proxy.scrollTo("bottom", anchor: .bottom)
+                guard !scrollPending else { return }
+                scrollPending = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    scrollPending = false
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
             }
             .onChange(of: errorText) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {

@@ -628,7 +628,7 @@ struct SettingsView: View {
                         in: 6...200,
                         step: 2
                     )
-                    Text("带太多\(Pronoun.current)会又慢又贵，太少\(Pronoun.current)会失忆。40 左右是个平衡点。")
+                    Text("带太多\(Pronoun.current)会又慢又贵，太少\(Pronoun.current)会失忆。25 条左右是个平衡点。")
                         .font(.aevis(11))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

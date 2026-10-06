@@ -118,3 +118,9 @@
 45-agreement   -aevisShowAgreement
 46-reallife    -aevisDemo -aevisOpenTab=discover -aevisOpenRealLife
 47-herphone    -aevisDemo -aevisOpenTab=discover -aevisOpenHerPhone
+
+# ⭐ 2026-10-06：记忆网 —— 用户要的「一条连一条、跟蜘蛛网一样」。
+#    ⚠️ 必须带 -aevisOpenMemoryWeb：网是从**记忆库列表右上角**推进去的，
+#       少了它就只截到列表。演示数据里已经手工连了 3 条线（模拟器没 API Key、
+#       织不了网），所以这张图能看出线，不是四个孤零零的点。
+48-memoryweb  -aevisDemo -aevisOpenSettings -aevisSettingsFocus=memory -aevisOpenMemoryList -aevisOpenMemoryWeb

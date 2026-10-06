@@ -17,7 +17,7 @@ struct LLMConfig {
     ///    核心 —— 关闭时ta回得最快但最容易张口就来。不支持的接口会自动降级。
     var reasoning: ReasoningBudget = .medium
     /// 每次带多少条历史。
-    var contextLimit: Int = 40
+    var contextLimit: Int = 25
 }
 
 /// 语音从哪儿来。
@@ -1538,7 +1538,15 @@ final class AppSettings: ObservableObject {
         //    只改上面那个默认值是不够的：`settings.llm` 用的是这个 `@Published` 属性，
         //    而它从 UserDefaults 读，没存过时落到这里。两处要一起改。
         reasoningBudget = ReasoningBudget(rawValue: defaults.string(forKey: Key.reasoningBudget) ?? "") ?? .medium
-        contextLimit = defaults.object(forKey: Key.contextLimit) as? Int ?? 40
+        // ⚠️ 0.0.108：出厂默认从 40 降成 **25**（用户口径）。
+        //    光改默认值**覆盖不到老用户** —— 他们手机里已经存着 40。
+        //    判据：存的就是 40（= 旧出厂值）⇒ 视为"没自己拖过滑杆"，迁到 25；
+        //    存的是别的数（用户真调过）⇒ 一律不动。
+        if let stored = defaults.object(forKey: Key.contextLimit) as? Int, stored != 40 {
+            contextLimit = stored
+        } else {
+            contextLimit = 25
+        }
         autoTestOnLaunch = defaults.object(forKey: Key.autoTestOnLaunch) as? Bool ?? true
         if let data = defaults.data(forKey: Key.searchSources),
            let decoded = try? JSONDecoder().decode([SearchSource].self, from: data),

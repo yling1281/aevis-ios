@@ -88,6 +88,12 @@ struct AevisApp: App {
                         .environmentObject(chat)
                         .task { startServices() }
                         .onChange(of: scenePhase) { _, phase in
+                            // ⭐ 退到后台时把去抖中的聊天记录**立刻落盘** ——
+                            //    否则刚发出去的那条可能还卡在 0.5 秒的去抖窗口里，
+                            //    系统一回收进程就没了。
+                            if phase != .active {
+                                ChatStore.shared.flushToDisk()
+                            }
                             // 回到前台：把灵动岛的活动接上（挂了超过 8 小时就被系统收了，
                             // 得重开一个挂机态）。详见 `LiveIslandCenter.sync()`。
                             guard phase == .active else { return }

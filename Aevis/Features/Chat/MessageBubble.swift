@@ -128,7 +128,7 @@ struct MessageBubble: View {
         #if canImport(UIKit)
         if message.kind == .voice {
             voiceBubble
-        } else if let data = message.imageData, let image = UIImage(data: data) {
+        } else if let data = message.imageData, let image = ImageDecodeCache.image(for: data) {
             // 图就是这条消息的全部内容 —— 那张图里 OCR 出来的文字在
             // `message.text` 里，是**给ta看的**，不该再显示一遍。
             pictureBubble(image)
@@ -323,7 +323,7 @@ struct MessageBubble: View {
         #if canImport(UIKit)
         if message.kind == .voice {
             imessageVoiceBubble
-        } else if let data = message.imageData, let image = UIImage(data: data) {
+        } else if let data = message.imageData, let image = ImageDecodeCache.image(for: data) {
             pictureBubble(image)
         } else if let sticker {
             imessageSticker(sticker)

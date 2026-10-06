@@ -35,6 +35,19 @@ struct MemoryItem: Codable, Identifiable, Equatable {
     var createdAt: Date = Date()
     /// 钉住的记忆永远优先带上，也不会被自动整理掉。
     var pinned: Bool = false
+
+    /// ⭐ 记忆网：这条记忆**连着**哪几条（存对方的 `id`）。
+    ///
+    /// 为什么要它：原来记忆就是一列平铺的句子，条目之间毫无关系 ——
+    /// 模型看到的是"几条孤立的句子"，自然想不起旧事来。
+    /// 有了它，「搬家」这条能牵出「新房子」「那盆绿萝」「楼下那家面馆」。
+    ///
+    /// ⚠️ 用 Optional：老存档里**没有这个键**，`decodeIfPresent` 得 nil、不抛错
+    ///    （跟 `WalletStore.Entry` 同一个套路）。读写一律走 `linkIDs`。
+    var links: [String]? = nil
+
+    /// 只读口子：没连任何东西时给空数组，调用方不用到处 `?? []`。
+    var linkIDs: [String] { links ?? [] }
 }
 
 /// 长期记忆库。
@@ -65,6 +78,12 @@ final class MemoryStore: ObservableObject {
     @Published private(set) var working = false
     /// 最近一次操作的结果，界面上显示一行。外面也能写，方便直接从界面报错。
     @Published var statusLine: String?
+
+    /// 正在织网（供界面显示进度）。
+    @Published private(set) var weaving = false
+
+    /// 上次织网时条目有多少条 —— 没变就不必再花一次模型调用。
+    private var wovenCount = -1
 
     private static let extractedKey = "aevis.memoryExtractedUpTo"
     private let fileURL: URL
@@ -202,6 +221,7 @@ final class MemoryStore: ObservableObject {
 
     func remove(_ item: MemoryItem) {
         items.removeAll { $0.id == item.id }
+        pruneLinks(to: item.id)
         save()
     }
 
@@ -238,6 +258,132 @@ final class MemoryStore: ObservableObject {
             used += line.count
         }
         return lines
+    }
+
+    // MARK: - 记忆网（一条连一条）
+
+    /// ⭐ **织网**：让ta自己找出「哪几条记忆是有关系的」，写成一条条连线。
+    ///
+    /// 为什么不用关键词匹配：中文里「他住在杭州」和「他搬到杭州」**一个词都不重合**，
+    /// 按字面根本连不起来；「他们上个月吵过架」和「她说最近心里不踏实」更是完全不同的字。
+    /// 这种语义上的关系只有模型看得出来，所以把编号喂给它、让它自己认。
+    ///
+    /// 输出约定：只输出有关系的一对一对（`3-7`），别的什么都不说。
+    /// **解析不出来就原样保留已有连线，绝不清空** —— 宁可不织，也不能把网弄没。
+    ///
+    /// - Parameter force: 界面上的「重新织网」按钮传 true（跳过"条目数没变就不重织"的判断）。
+    @MainActor
+    func weaveLinks(config: LLMConfig, force: Bool = false) async {
+        guard !weaving else { return }
+        guard config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).count > 0 else { return }
+        let snapshot = items
+        guard snapshot.count >= 2 else { return }
+        // 条目太多就别织了 —— 提示词会太长、模型也会糊，画出来也是一团毛线。
+        guard snapshot.count <= 200 else { return }
+        if !force, wovenCount == snapshot.count { return }
+
+        weaving = true
+        defer { weaving = false }
+
+        let list = snapshot.enumerated().map { index, item in
+            "\(index + 1). [\(item.kind.label)] \(item.text)"
+        }.joined(separator: "\n")
+
+        let instruction = """
+        下面是一份记忆清单，每条前面有编号。
+        请找出**彼此有关系**的条目：同一个人、同一个地方、同一件事，或者后者是前者的起因/结果。
+
+        只输出编号对，一行一对，用短横线隔开，比如：
+        3-7
+        12-31
+
+        要求：
+        - 只输出编号对，**不要**任何解释、标题、标点或多余文字。
+        - 只连**真正相关**的，不要为了凑数硬连；每条最多连 4 条。
+        - 完全没有相关的就什么都不输出。
+
+        --- 记忆清单 ---
+        \(list)
+        """
+
+        var collected = ""
+        do {
+            for try await piece in LLMService.streamReply(
+                config: config,
+                systemPrompt: "你是一个把笔记连成网的助手。严格只输出要求的格式，不要解释。",
+                history: [ChatMessage(role: .user, text: instruction)],
+                memory: []
+            ) {
+                collected += piece
+                if collected.count > 4000 { break }
+            }
+        } catch {
+            return
+        }
+
+        let pairs = Self.parsePairs(collected)
+        guard !pairs.isEmpty else { return }
+
+        var linked: [String: [String]] = [:]
+        for pair in pairs {
+            guard pair.a >= 1, pair.a <= snapshot.count,
+                  pair.b >= 1, pair.b <= snapshot.count,
+                  pair.a != pair.b else { continue }
+            let left = snapshot[pair.a - 1].id
+            let right = snapshot[pair.b - 1].id
+            linked[left, default: []].append(right)
+            linked[right, default: []].append(left)
+        }
+        guard !linked.isEmpty else { return }
+
+        var changed = false
+        for index in items.indices {
+            let id = items[index].id
+            var picked = Array(Set(linked[id] ?? [])).sorted()
+            if picked.count > 4 { picked = Array(picked.prefix(4)) }
+            if (items[index].links ?? []) != picked {
+                items[index].links = picked.isEmpty ? nil : picked
+                changed = true
+            }
+        }
+        guard changed else { return }
+        save()
+        wovenCount = items.count
+        statusLine = "记忆网织好了。"
+    }
+
+    /// 解析 `3-7` 这种行。模型偶尔会写歪（`3 - 7`、`3,7`、`3、7`、`3—7`），尽量宽容。
+    private static func parsePairs(_ raw: String) -> [(a: Int, b: Int)] {
+        let separators = CharacterSet(charactersIn: "-—–~～,，、/|:：;；.。")
+            .union(.whitespaces)
+        // ⚠️ **整行只允许出现数字和分隔符** —— 一行里混进汉字，多半是模型没听话、
+        //    把清单原样抄回来了（"去年 5 月搬到杭州，住了 3 年"）。那种行里随便
+        //    两个数字都会被当成一对，**凭空连出一条错线**，比不连更糟。
+        let allowed = CharacterSet.decimalDigits.union(separators)
+        var result: [(Int, Int)] = []
+        for rawLine in raw.split(separator: "\n") {
+            guard rawLine.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { continue }
+            let numbers = rawLine
+                .components(separatedBy: separators)
+                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            guard numbers.count >= 2,
+                  let a = numbers.first,
+                  let b = numbers.dropFirst().first,
+                  a != b else { continue }
+            result.append((a, b))
+        }
+        return result
+    }
+
+    /// 删掉一条记忆之后，把别人指向它的连线清干净 ——
+    /// 不然网上会留着指向虚空的线。
+    private func pruneLinks(to removedID: String) {
+        for index in items.indices {
+            guard var list = items[index].links, list.contains(removedID) else { continue }
+            list.removeAll { $0 == removedID }
+            items[index].links = list.isEmpty ? nil : list
+        }
+        wovenCount = -1
     }
 
     // MARK: - 自动提炼
@@ -309,6 +455,11 @@ final class MemoryStore: ObservableObject {
         }
         if added > 0 { save() }
         statusLine = added == 0 ? "没有新东西要记。" : "记住了 \(added) 条。"
+
+        // ⭐ 新记忆进来之后顺手把网重织一遍 —— 新条目多半要跟老的挂上钩。
+        //    方法自身有 `weaving` 重入保护 + "条目数没变就不重织"的判断，
+        //    这里不用额外节流。
+        if added > 0 { await weaveLinks(config: config) }
     }
 
     /// 太像的就不再存一遍。先按去标点的正文比，再看是否互相包含。

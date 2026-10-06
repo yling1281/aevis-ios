@@ -56,6 +56,12 @@ final class ChatStore: ObservableObject {
     /// 修法：搬家的路上只允许**读**，绝不允许 `stash()` 往字典里**写**。
     private var loading = false
 
+    /// 落盘去抖的把手。见 `save()`。
+    private var writeDebounce: DispatchWorkItem?
+
+    /// 真正写文件的串行队列 —— 磁盘 IO 不该占着主线程。
+    private let ioQueue = DispatchQueue(label: "aevis.chats.io", qos: .utility)
+
     /// 切到某个联系人的对话。传 nil 就是「还没选定人」。
     func switchTo(_ id: UUID?) {
         stash()
@@ -386,7 +392,7 @@ final class ChatStore: ObservableObject {
 
     /// 流式结束后落盘。
     func commit() {
-        save()
+        flushToDisk()
     }
 
     /// 流式过程中「这一条说完了」：把它定稿，再开一条新的空占位接着收。
@@ -511,21 +517,57 @@ final class ChatStore: ObservableObject {
         // 只有 PersonaStore 知道，等它调 adoptLegacyMessages(for:) 再说。
     }
 
+    /// 落盘（**去抖**）。
+    ///
+    /// ⚠️ 原来这里是「立刻 stash + 立刻全量写盘」，而 `append` **每条消息**都调它 ——
+    ///    `ChatView.send` 里连着两次 `append`（用户条 + 她的空占位）⇒ 发一句话
+    ///    就在主线程把「所有联系人、全部历史」JSON 编码 + 原子写盘**两遍**。
+    ///    会话越长、联系人越多，按发送那一刻就越卡。
+    ///
+    /// 现在：`stash()` 照旧立刻做（只是把数组塞回字典，很便宜；而且后面所有读路径
+    /// 读的都是内存里的 `byContact`/`messages`，不依赖文件）；真正写文件**延后
+    /// 0.5 秒合并**，一次突发只写一次。
     private func save() {
-        // 搬家 / 读档的路上不落盘 —— 见 `loading` 的注释。
+        guard !loading else { return }
+        stash()
+        scheduleWrite()
+    }
+
+    /// 去抖写盘：0.5 秒内的多次 `save()` 合并成一次。
+    private func scheduleWrite() {
+        writeDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.writeArchive()
+        }
+        writeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    /// **立刻**落盘（把去抖中的那次取消掉）。
+    /// 用在「这一刻必须确保写下去了」的地方：一轮回复结束、以及退到后台。
+    func flushToDisk() {
+        writeDebounce?.cancel()
+        writeDebounce = nil
         guard !loading else { return }
         stash()
         writeArchive()
     }
 
     /// 把 `byContact` 原样写进文件，**不经过 `stash()`**。
-    /// 只在 `save()` 和导入里用 —— 这两处字典已经是最终状态了。
+    /// 只在 `save()` / `flushToDisk()` 和搬家导入里用 —— 这两处字典已经是最终状态。
+    ///
+    /// ⚠️ 编码留在主线程（`byContact` 是主线程状态），**只把磁盘写入丢到后台**：
+    ///    跨线程的只有 `Data` 和 `URL` 两个值类型，不碰任何主线程状态。
+    ///    `ioQueue` 是串行的 ⇒ 先后顺序不会乱，最后一个快照就是最终状态。
     private func writeArchive() {
         let flat = byContact.reduce(into: [String: [ChatMessage]]()) { result, item in
             result[item.key.uuidString] = item.value
         }
         guard let data = try? JSONEncoder().encode(Archive(byContact: flat)) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        let url = fileURL
+        ioQueue.async {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }
 

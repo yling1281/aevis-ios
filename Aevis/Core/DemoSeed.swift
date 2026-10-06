@@ -12,6 +12,7 @@ import Foundation
 ///     -aevisOpenSettings       直接打开设置面板
 ///     -aevisSettingsFocus=名字  设置页只显示那一张卡（内存太长，一屏截不全）
 ///     -aevisOpenMemoryList     直接推出记忆库列表
+///     -aevisOpenMemoryWeb      再往里推一层，直接打开**记忆网**（截图用）
 ///     -aevisOpenMoments        直接打开朋友圈
 ///     -aevisOpenTogether       直接打开一起听
 ///     -aevisSelfCheck          自检页
@@ -151,6 +152,27 @@ enum DemoSeed {
         memory.add("九月刚换了工作，还在适应新节奏", kind: .event, quiet: true)
         memory.add("答应过带 ta 去看一次海", kind: .promise, quiet: true)
         memory.statusLine = "记住了 4 条。"
+
+        // ⭐ 记忆网演示：真实环境里这些线是让 ta 自己织出来的
+        //    （`MemoryStore.weaveLinks` 会调一次模型），可模拟器里没有 API Key、
+        //    织不了 —— 所以这里手工连几条，好让那张截图真的看得出「一条连一条」，
+        //    而不是四个孤零零的点。
+        var seeded = memory.items
+        func link(_ a: Int, _ b: Int) {
+            guard a != b else { return }
+            seeded[a].links = Array(Set((seeded[a].links ?? []) + [seeded[b].id])).sorted()
+            seeded[b].links = Array(Set((seeded[b].links ?? []) + [seeded[a].id])).sorted()
+        }
+        let home = seeded.firstIndex { $0.text.hasPrefix("住在杭州") }
+        let job = seeded.firstIndex { $0.text.hasPrefix("九月刚换了工作") }
+        let sea = seeded.firstIndex { $0.text.hasPrefix("答应过带") }
+        let taste = seeded.firstIndex { $0.text.hasPrefix("不吃香菜") }
+        // 住哪 → 换了工作 → 说好一起去看海（同一条线上的三件事）
+        if let home, let job { link(home, job) }
+        if let job, let sea { link(job, sea) }
+        // 口味挂在「住哪」上 —— 同一个人的生活细节
+        if let home, let taste { link(home, taste) }
+        seeded.forEach { memory.update($0) }
     }
 
     /// 朋友圈截图要有内容可看，不然只能截到一个空状态。
