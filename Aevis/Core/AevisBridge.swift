@@ -30,6 +30,7 @@ import UIKit
 /// aevis://daily                          让ta看看今天过得怎么样
 /// aevis://lock                           跑你设置好的那个「锁屏」快捷指令
 /// aevis://shortcut?name=回家开灯          跑任意一个快捷指令
+/// aevis://read?url=https://example.com   把这网页发给ta，ta打开读完讲给你
 ///
 /// ——— 把外面的信息告诉ta ———
 /// aevis://location?name=公司&lat=39.9&lon=116.4
@@ -153,6 +154,18 @@ enum AevisBridge {
                 ? "跑了「\(name)」。"
                 : "没跑起来，检查快捷指令的名字。"
 
+        case "read":
+            // 网址优先取 `url` 参数，取不到再退到第一个参数（text / name / …）。
+            // `parse` 里的 URLComponents 已经把百分号编码解过了 —— 这里**不能再解一次**，
+            // 否则 `%2F` 会被吃掉、把网址拆坏。
+            let raw = (command.params["url"] ?? command.first)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { return "没带网址。" }
+            guard let target = URL(string: raw) else {
+                return "这个链接不是网页：\(raw)"
+            }
+            return askToRead(target)
+
         // ——— 外面的信息 ———
 
         case "location", "battery", "focus", "steps",
@@ -169,6 +182,29 @@ enum AevisBridge {
         default:
             return "不认识的指令：\(command.host)"
         }
+    }
+
+    // MARK: - 让ta读网页
+
+    /// 把一个网页交给 ta：注入一句话，让 ta 打开它、读完再讲给你听。
+    ///
+    /// 抽成一个函数，是因为它有**两个入口**，而两处必须是同一件事：
+    ///   1. URL scheme：`aevis://read?url=https://…`（快捷指令 / 别的 App 调我们）；
+    ///   2. 内置浏览器的「发给ta」按钮（见 `Core/InAppBrowser.swift`）。
+    /// 拼消息只此一处 —— 改文案不用改两遍，也不会两边不一致。
+    ///
+    /// 🔴 只认 `http` / `https`，其余**一律不注入**：这句话最终会进模型请求体
+    ///    （不是 HTTP 头），中文没问题，但没校验过的字符串绝不能混进去。
+    ///    不合格只回一句人话，不抛、不崩。
+    @discardableResult
+    static func askToRead(_ url: URL) -> String {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme == "http" || scheme == "https" else {
+            return "这个链接不是网页：\(url.absoluteString)"
+        }
+        let target = url.absoluteString
+        BridgeInbox.shared.ask = "我发给你一个网页，你打开读一下，然后跟我说说里面讲了什么：\(target)"
+        return "让\(Pronoun.current)读这个网页…"
     }
 
     // MARK: - 环境信息

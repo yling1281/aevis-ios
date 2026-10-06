@@ -308,6 +308,13 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      # ——— 微信机器人（ClawBot）在 guest 里跑的脚本 ———
+      # 和 rootfs 一样用「文件夹引用」(type: folder)：整目录原样拷进 App，
+      # 运行时按 Bundle/ish-scripts/wechat_bind.sh 取用（见 WeChatBotService）。
+      # 它**在仓库里**（不像 ish-rootfs 要 CI 下载），所以不用 optional。
+      - path: ish-scripts
+        type: folder
+        buildPhase: resources
     # ⚠️ 依赖清单**整体留在标记之外**（`dependencies:` 这个键 + AevisLive 那一项）。
     #
     # 为什么：`AevisLive`（实时活动扩件）**不能**被 strip_extension.py 摘掉 ——

@@ -93,6 +93,9 @@ struct RootView: View {
             if settings.qqBotEnabled {
                 QQBotService.shared.reconnectIfNeeded()
             }
+            if settings.weChatBotEnabled {
+                WeChatBotService.shared.reconnectIfNeeded()
+            }
             // 她"弹出来过但还没进聊天"的那几句话，补进聊天记录
             // （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的」）。
             Task { await ProactiveService.shared.deliverPendingToChat() }
@@ -165,6 +168,12 @@ struct RootView: View {
             // （它靠 SilentKeeper 的静音音频尽量活着，但系统真要掐也没辙。）
             if settings.qqBotEnabled {
                 QQBotService.shared.reconnectIfNeeded()
+            }
+
+            // 微信机器人（ClawBot）：那条常驻轮询跑在内置 Linux 里，回到前台要确认
+            // 轮询器还活着、并把断线期间攒下的消息补读一次。
+            if settings.weChatBotEnabled {
+                WeChatBotService.shared.reconnectIfNeeded()
             }
 
             // 顺手看看她该不该发朋友圈了（后台跑不了模型，只能回到前台补）

@@ -464,6 +464,15 @@ final class AppSettings: ObservableObject {
         static let qqBotCodeKeyword = "aevis.qqBotCode.keyword"
         static let qqBotCodeKeyKeychain = "aevis.qqBotCode.key"
         static let qqBotCodeGroups = "aevis.qqBotCode.groups"
+        /// 微信机器人（ClawBot / iLink）：扫码绑定 + 长轮询**整条都在内置真 Linux 里跑**。
+        static let weChatBotEnabled = "aevis.weChatBot.enabled"
+        static let weChatBotKeepAlive = "aevis.weChatBot.keepAlive"
+        /// 扫码绑定后拿到的 bot token —— **只进钥匙串**（是凭证，不落 UserDefaults）
+        static let weChatBotTokenKeychain = "aevis.weChatBot.token"
+        /// 绑的是哪个 bot（ilink_bot_id）—— 不是密钥，明文放这儿，界面用来显示
+        static let weChatBotILinkID = "aevis.weChatBot.ilinkID"
+        /// 绑定时间（unix 秒）—— 0 = 还没绑过
+        static let weChatBotBoundAt = "aevis.weChatBot.boundAt"
         static let accountServerURL = "aevis.account.serverURL"
         static let accountExpiresAt = "aevis.account.expiresAt"
         /// 这台设备通过了授权（设备码绑到某个账号上了）。
@@ -1322,6 +1331,39 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(qqBotKeepAlive, forKey: Key.qqBotKeepAlive) }
     }
 
+    // MARK: - 微信机器人（本地 Linux）
+    //
+    // ⭐ 这条和上面的 QQ 官方机器人**不是一回事**：微信这条（腾讯官方 ClawBot /
+    //    iLink 通道）的扫码绑定 + 长轮询**整个跑在 App 内置的真 Linux（iSH / Alpine）里**，
+    //    既不过我们的账号服务器、也不过电脑。理由与踩过的坑见
+    //    `WeChatBotService` 与 `ish-scripts/wechat_bind.sh`。
+
+    /// 总开关。**出厂关** —— 要先把内置 Linux 跑通、扫码绑上才有意义。
+    @Published var weChatBotEnabled: Bool {
+        didSet { UserDefaults.standard.set(weChatBotEnabled, forKey: Key.weChatBotEnabled) }
+    }
+
+    /// 后台静音保活。**出厂关** —— 这条常驻轮询跑在 guest 里，不开保活的话
+    /// App 一进后台被挂起，轮询也就停了。
+    @Published var weChatBotKeepAlive: Bool {
+        didSet { UserDefaults.standard.set(weChatBotKeepAlive, forKey: Key.weChatBotKeepAlive) }
+    }
+
+    /// 扫码绑定后拿到的 bot token。**只进钥匙串**（它是凭证，不能落 UserDefaults）。
+    @Published var weChatBotToken: String {
+        didSet { Keychain.set(weChatBotToken, for: Key.weChatBotTokenKeychain) }
+    }
+
+    /// ilink_bot_id。**不是密钥**，明文放这儿，界面用来显示「绑的是哪个 bot」。
+    @Published var weChatBotILinkID: String {
+        didSet { UserDefaults.standard.set(weChatBotILinkID, forKey: Key.weChatBotILinkID) }
+    }
+
+    /// 绑定时间（unix 秒）。0 = 还没绑过。
+    @Published var weChatBotBoundAt: Double {
+        didSet { UserDefaults.standard.set(weChatBotBoundAt, forKey: Key.weChatBotBoundAt) }
+    }
+
     // MARK: - QQ 机器人：发注册码
     //
     // 用户在 QQ 里发「注册」就能领一张注册码，**一个 QQ 一张**。
@@ -1675,6 +1717,13 @@ final class AppSettings: ObservableObject {
         qqBotSandbox = defaults.object(forKey: Key.qqBotSandbox) as? Bool ?? true
         // 出厂开：不开的话他在 QQ 里聊、App 进后台被挂起，ta就不回了
         qqBotKeepAlive = defaults.object(forKey: Key.qqBotKeepAlive) as? Bool ?? true
+        // 微信机器人（本地 Linux）—— 两个开关都出厂关（要先把内置 Linux 跑通才有意义）
+        weChatBotEnabled = defaults.object(forKey: Key.weChatBotEnabled) as? Bool ?? false
+        weChatBotKeepAlive = defaults.object(forKey: Key.weChatBotKeepAlive) as? Bool ?? false
+        // token 只进钥匙串；bot id / 时间只是展示用的，明文放 UserDefaults
+        weChatBotToken = Keychain.get(Key.weChatBotTokenKeychain) ?? ""
+        weChatBotILinkID = defaults.string(forKey: Key.weChatBotILinkID) ?? ""
+        weChatBotBoundAt = defaults.double(forKey: Key.weChatBotBoundAt)
         qqBotCodeEnabled = defaults.object(forKey: Key.qqBotCodeEnabled) as? Bool ?? false
         qqBotCodeKeyword = defaults.string(forKey: Key.qqBotCodeKeyword) ?? "注册"
         qqBotCodeKey = Keychain.get(Key.qqBotCodeKeyKeychain) ?? ""

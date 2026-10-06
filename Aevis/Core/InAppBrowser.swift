@@ -300,6 +300,8 @@ struct InAppBrowserView: View {
     @State private var started: Bool = false
     @State private var showShare: Bool = false
     @State private var showClearConfirm: Bool = false
+    /// 「发给ta」之后飘一句轻提示，几秒后自己消失（不弹二级面板）。
+    @State private var sendNote: String?
 
     init(start: URL?, title: String = "") {
         self.start = start
@@ -313,6 +315,7 @@ struct InAppBrowserView: View {
             toolbar
             progressBar
             Divider()
+            sendNotice
             content
         }
         .background(Color(UIColor.systemBackground))
@@ -322,6 +325,14 @@ struct InAppBrowserView: View {
         .onChange(of: engine.currentURL) { _, newValue in
             if let url = newValue {
                 addressText = url.absoluteString
+            }
+        }
+        .onChange(of: sendNote) { _, note in
+            guard note != nil else { return }
+            // 轻提示几秒后自己收掉，跟聊天页顶上那条飘字一个路子。
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                sendNote = nil
             }
         }
         .sheet(isPresented: $showShare) {
@@ -364,6 +375,11 @@ struct InAppBrowserView: View {
             addressField
             navButton(systemName: "square.and.arrow.up") {
                 showShare = true
+            }
+            // 「发给ta」：把当前网页交给 ta（走 AevisBridge 那条链路，和 aevis://read 同一处逻辑）。
+            // 页面还没打开时禁用 —— 没地址就没有可读的东西。
+            navButton(systemName: "paperplane", enabled: engine.currentURL != nil) {
+                sendToHer()
             }
             navButton(systemName: "trash") {
                 showClearConfirm = true
@@ -453,6 +469,29 @@ struct InAppBrowserView: View {
         return min(max(engine.progress, 0), 1)
     }
 
+    // MARK: 轻提示
+
+    /// 「发给ta」之后的提示条。没有提示时整块不占位。
+    @ViewBuilder
+    private var sendNotice: some View {
+        if let sendNote {
+            HStack(spacing: 6) {
+                Image(systemName: "paperplane.fill")
+                    .font(.aevis(11))
+                    .foregroundStyle(AppSettings.shared.accentColor)
+                Text(sendNote)
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .transition(.opacity)
+        }
+    }
+
     // MARK: 内容
 
     @ViewBuilder
@@ -537,5 +576,17 @@ struct InAppBrowserView: View {
             return [url]
         }
         return [pageTitle]
+    }
+
+    /// 把当前网页交给 ta。
+    ///
+    /// 走 `AevisBridge.askToRead` —— 和 `aevis://read` 是**同一条路、同一处文案**；
+    /// 这里不自己拼字符串。地址拿不到（比如还没打开）只给个提示，不当作成功。
+    private func sendToHer() {
+        guard let url = engine.currentURL else {
+            sendNote = "这一页还没打开，等它加载出来再发。"
+            return
+        }
+        sendNote = AevisBridge.askToRead(url)
     }
 }

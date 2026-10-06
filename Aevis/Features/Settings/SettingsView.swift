@@ -132,7 +132,7 @@ struct SettingsView: View {
                         // 「AI 权限」排在最前：它是这一组的总闸，
                         // 其余那些能力都归它管，放中间会让人以为只是并列的一项。
                         keys: ["aitools", "companion", "baidupan", "music",
-                               "qqbot", "qq", "system", "mcp", "console"]),
+                               "qqbot", "wechatbot", "qq", "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
                         keys: ["account", "device", "devicelist", "pair", "share", "about"])
         ]
@@ -166,6 +166,7 @@ struct SettingsView: View {
         case "search": searchCard
         case "qq": QQCard()
         case "qqbot": QQBotCard()
+        case "wechatbot": WeChatBotCard()
         case "account": AccountCard()
         case "device": DeviceCard()
         case "devicelist": DeviceListCard()
