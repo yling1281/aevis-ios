@@ -179,6 +179,13 @@ final class WalletStore: ObservableObject {
     /// 切人装载 / 搬家导入期间**只读不写**（漏了就是"搬家搬丢"，老 bug）。
     private var loading = false
 
+    /// 内存里那份「一个人一份」的缓存：`applyOwner` 先查它、查不到再读落盘的 blob。
+    ///
+    /// 🔴 2026-10-07：**这行之前被改没了** —— 下面 6 处 `byOwner[...]` 全变成
+    ///    `cannot find 'byOwner' in scope`，CI build-155 就是这么挂的。
+    ///    改这个文件时**别再把这行删掉**；删了本机不会报（没有编译器），只会在 CI 上炸。
+    private var byOwner: [UUID: OwnerData] = [:]
+
     /// 一个联系人的**整份钱包**。存 UserDefaults 的 blob、进备份，都走它。
     /// 老版本是 20 多枚扁平键（`aevis.wallet.mine` 那种），现在一个人一份。
     struct OwnerData: Codable {
