@@ -1601,24 +1601,12 @@ final class AppSettings: ObservableObject {
         apiKey = Keychain.get(Key.llmKeychain) ?? ""
         providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .deepseek
 
-        // 🔴 2026-10-07 迁移：**把老存档里那个已停用的模型名换掉**。
-        //
-        //    只改 `defaultModel` 是**救不到老用户的** —— 他们手机里 UserDefaults
-        //    已经存着 `deepseek-chat` 了（老板这台就是）。留着它 = 每次请求都 400
-        //    ⇒ 触发"卸工具"降级 ⇒ ta 变成只会聊天、张口就来。
-        //
-        //    ⚠️ 判据要**宽一点**：预设选的是 DeepSeek，**或者**地址就是 deepseek 域名
-        //       （有些人是从"自定义"进去手填的 `api.deepseek.com`，预设字段还停在 .custom）。
-        //       两种都算"这台在打 DeepSeek"，否则老板那台照样救不回来。
-        //    ⚠️ 但**只认那两个已停用的别名**才换；用户填的别的名字一律不动 ——
-        //       那可能是中转站的自定义名，动了会坏。
-        //    ⚠️ 换完**要写回 UserDefaults**，否则每次冷启动都白算一遍。
-        let looksLikeDeepSeek = providerPreset == .deepseek
-            || baseURL.lowercased().contains("deepseek")
-        if looksLikeDeepSeek, Self.retiredDeepSeekAliases.contains(model) {
-            model = "deepseek-v4-flash"
-            defaults.set(model, forKey: Key.model)
-        }
+        // ⚠️⚠️ 「把老存档里已停用的模型名换掉」那段迁移**挪到 init 的最末尾**了（见本函数结尾）。
+        //    它要读 `providerPreset` / `baseURL` / `model`，而这几个都是带 `didSet` 的
+        //    `@Published`：Swift 走保守路径，**在所有存储属性赋值完之前**碰 `self` 就报
+        //    `'self' used in property access 'X' before all stored properties are initialized`。
+        //    🔴 build-155 / build-156 连续挂在这一点上 —— **别再把它往前面挪**。
+
         // ⚠️ 出厂默认 **`.medium`** —— 必须跟 `LLMConfig.reasoning` 的默认值保持一致。
         //    只改上面那个默认值是不够的：`settings.llm` 用的是这个 `@Published` 属性，
         //    而它从 UserDefaults 读，没存过时落到这里。两处要一起改。
@@ -1849,6 +1837,31 @@ final class AppSettings: ObservableObject {
         // 当前那套被删掉了 → 退回到排序后的第一个
         if !activeProfileID.isEmpty, activeProfile == nil {
             activeProfileID = sortedProfiles.first?.id ?? ""
+        }
+
+        // 🔴 2026-10-07 迁移：**把老存档里那个已停用的模型名换掉**。
+        //
+        //    ⚠️⚠️ 这段**必须待在 init 最末尾**（上面那句「才能调方法」同样适用于它）：
+        //       它要读 `providerPreset` / `baseURL` / `model`，而这三个都是带 `didSet`
+        //       的 `@Published` —— 在所有存储属性赋值完之前碰 `self`，Swift 直接报
+        //       `'self' used in property access 'X' before all stored properties are initialized`。
+        //       🔴 build-155 / build-156 连续挂在这一条上，别再往前面挪。
+        //
+        //    只改 `defaultModel` 是**救不到老用户的** —— 他们手机里 UserDefaults
+        //    已经存着 `deepseek-chat` 了（老板这台就是）。留着它 = 每次请求都 400
+        //    ⇒ 触发"卸工具"降级 ⇒ ta 变成只会聊天、张口就来。
+        //
+        //    ⚠️ 判据要**宽一点**：预设选的是 DeepSeek，**或者**地址就是 deepseek 域名
+        //       （有些人是从"自定义"进去手填的 `api.deepseek.com`，预设字段还停在 .custom）。
+        //       两种都算"这台在打 DeepSeek"，否则老板那台照样救不回来。
+        //    ⚠️ 但**只认那两个已停用的别名**才换；用户填的别的名字一律不动 ——
+        //       那可能是中转站的自定义名，动了会坏。
+        //    ⚠️ 换完**要写回 UserDefaults**，否则每次冷启动都白算一遍。
+        let looksLikeDeepSeek = providerPreset == .deepseek
+            || baseURL.lowercased().contains("deepseek")
+        if looksLikeDeepSeek, Self.retiredDeepSeekAliases.contains(model) {
+            model = "deepseek-v4-flash"
+            defaults.set(model, forKey: Key.model)
         }
     }
 
