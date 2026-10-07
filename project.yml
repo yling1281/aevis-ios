@@ -289,8 +289,22 @@ settings:
     #      在读取时**见即删** ⇒ 老用户升级后**第一次对话就恢复**，不用等 6 小时。
     #   ② 微信机器人入口提到「能力」组第 2 位，并在「我」页加一条直达
     #      （老板反馈在设置页里找不到那张卡）。
-    MARKETING_VERSION: "0.0.116"
-    CURRENT_PROJECT_VERSION: "116"
+    # ⭐ 0.0.117（2026-10-07 晚）：修「内置 Linux 里 /dev 不见了」。
+    #   真机事故：老板那台机器上 guest 根 fs 缺 `data/dev` ⇒ 所有 `>/dev/null 2>&1`
+    #   在**第一句**就 ENOENT（`can't create /dev/null: No such file or directory`）
+    #   ⇒ 微信机器人自检 / 取二维码全废（"出网失败"是假象，压根没跑到联网那步）。
+    #   ⚠️ **包里那份 rootfs 是好的**（已解开 0.0.115 的 IPA 实测，`data/dev/` 和
+    #   `meta.db` 里的 `/dev` 都在）；坏的是**设备上那份早期构建留下的旧副本** ——
+    #   而 `prepareRootfs()` 原来只看 `.version` 决定要不要重拷，那个值从没变过
+    #   ⇒ 坏副本永远刷不掉（本次事故的真机制）。
+    #   修法（`Aevis/Core/AlpineRuntime.swift`）：① 加「形状校验」——缺 `data/dev`
+    #   就直接判定必须重拷；② App 自己管一个形状版本戳 `alpine-3.21.3-r2`，
+    #   对不上也重拷 ⇒ 老设备**第一次启动**就把坏副本顶掉。
+    #   ⚠️ 代价：这次会重拷一遍 rootfs，guest 里 `apk add` 装过的东西要重装。
+    #   ⏳ 待办：`ish-embed/ish_embed.c` 还该补一句 `mkdir /dev` + 检查返回值
+    #   （C 侧兜底，不依赖 rootfs）—— 那要重跑 ish-sandbox.yml（约 50 分钟）才生效，本轮没带。
+    MARKETING_VERSION: "0.0.117"
+    CURRENT_PROJECT_VERSION: "117"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

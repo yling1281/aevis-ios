@@ -308,6 +308,21 @@ final class AlpineRuntime {
 
     // MARK: - rootfs 准备（纯文件操作，不碰 C）
 
+    /// 这一版 App 期望的 rootfs「形状版本」——**由 App 自己说了算**，
+    /// 和 CI 打进包里的 `.version`（那只是 alpine 版本号）解耦。
+    ///
+    /// 🔴 为什么非要有它：设备上那份**可写副本**可能是更早的 App 构建留下的残次品
+    /// （例如缺 /dev），而它的 `.version` 却可能和包里那份**一模一样**——
+    /// 于是「只看 .version 决定要不要重拷」的逻辑永远会放行它。真机上
+    /// 「/dev 不存在 ⇒ 所有 `>/dev/null 2>&1` 第一句就报 No such file」的事故就是这么来的。
+    /// 把这一版期望的形状版本**戳**进副本目录后，老设备上的戳是旧的、或压根不存在
+    /// ⇒ 强制重拷一次，把坏副本顶掉。改这个字符串 = 让所有老设备重拷一次。
+    private static let requiredRootfsVersion = "alpine-3.21.3-r2"
+
+    /// 存放上面那个「形状版本戳」的文件名（放在可写副本根目录，和 data/、meta.db 同级；
+    /// 它不归 iSH 读，纯粹是 App 自己的记号）。
+    private static let shapeStampFileName = ".aevis-rootfs-shape"
+
     private func prepareRootfs() throws -> String {
         let fm = FileManager.default
 
@@ -321,15 +336,36 @@ final class AlpineRuntime {
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let target = support.appendingPathComponent("ish-rootfs", isDirectory: true)
 
-        // ⚠️ 只在「目标不存在」或「版本文件不同」时才重拷 ——
-        //    这样 guest 自己装的东西（apk add 装上的包）重启 App 后还在。
+        // ⚠️ 满足下面**任一**条件才重拷 —— 这样 guest 自己装的东西
+        //    （apk add 装上的包）重启 App 后还在。
         let targetExists = fm.fileExists(atPath: target.path)
         let bundledVersion = readTrimmed(bundled.appendingPathComponent(".version"))
         let targetVersion = readTrimmed(target.appendingPathComponent(".version"))
+        let targetStamp = readTrimmed(target.appendingPathComponent(Self.shapeStampFileName))
+
+        // 🔴 形状探针：rootfs 里必须有 `data/dev` 这个**目录**。
+        //    实际结构是 `<target>/data/… ` + `<target>/meta.db`（见下面那段收尾校验），
+        //    所以按 target 拼出来的探针就是 `<target>/data/dev`。
+        var isDevDir: ObjCBool = false
+        let devPath = target
+            .appendingPathComponent("data", isDirectory: true)
+            .appendingPathComponent("dev", isDirectory: true)
+        let hasDevNode = fm.fileExists(atPath: devPath.path, isDirectory: &isDevDir)
+            && isDevDir.boolValue
+
         var needCopy = false
         if !targetExists {
             needCopy = true
         } else if let bundledVersion, bundledVersion != targetVersion {
+            // CI 换了新 rootfs（包里那份 `.version` 变了）⇒ 跟着换。
+            needCopy = true
+        } else if !hasDevNode {
+            // 🔴 形状不全：缺 `<target>/data/dev`。**只看 `.version` 会放过设备上那份
+            //    早期构建留下的、缺 /dev 的陈旧副本** —— 这次真机事故就是这么来的。缺它 ⇒ 必须重拷。
+            needCopy = true
+        } else if targetStamp != Self.requiredRootfsVersion {
+            // 🔴 App 期望的形状版本对不上（老设备上这个戳是旧的、或根本没有）
+            //    ⇒ 再强制重拷一次，双保险，把已经坏掉的那份副本顶掉。
             needCopy = true
         }
 
@@ -343,6 +379,13 @@ final class AlpineRuntime {
             } catch {
                 throw RuntimeFailure(message: "拷贝 rootfs 失败：\(error.localizedDescription)")
             }
+            // 拷完把 App 期望的形状版本**戳**进副本目录根部（包里那份 `.version` 只是
+            // alpine 版本号，管不了这件事）——下次启动就能认出「这份副本是本版 App 建的」。
+            try? Self.requiredRootfsVersion.write(
+                to: target.appendingPathComponent(Self.shapeStampFileName),
+                atomically: true,
+                encoding: .utf8
+            )
         }
 
         // ⚠️ 拷完必须校验形状：<target>/data 是目录、<target>/meta.db 是文件。
