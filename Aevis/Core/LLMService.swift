@@ -35,6 +35,27 @@ enum LLMError: LocalizedError {
 /// 比如用户问「今天几号」，ta先调 get_current_time，拿到结果再用自己的话说出来。
 enum LLMService {
 
+    /// 「这一轮对话是说给**哪个会话**听的」—— 群聊成员调工具时要靠它把气泡落回**群**那份，
+    /// 而不是落进用户此刻正在看的那个会话。
+    ///
+    /// ## 为什么必须是 `@TaskLocal`
+    /// 工具的实际执行点是**本文件 `streamReply` 里的 `Task.detached`**（见下面 :60 附近，以及
+    /// `WalletTools` 里那句「工具是在 `Task.detached` 上跑的」注释）。`DeviceTool.run` 的闭包
+    /// 签名是 `([String: Any]) async -> String`，**没有地方**能塞一个 owner 进去 ——
+    /// 硬要在签名链上显式传，等于要改 `DeviceTools` + 十几个工具定义文件，这是大改。
+    ///
+    /// ⚠️ `@TaskLocal` **不会**从调用方**传播进**一个 `Task.detached`（detached 不继承调用方的
+    ///    task-local）。所以**绝对不能**指望「在调用方设好、detached 里自然读到」。
+    ///    正确用法是：owner 作为**形参**跨进 `streamReply`，在**detached 任务体内部**
+    ///    （`$conversationOwner.withValue(owner) { ... }`）绑定，再向下包住 `runConversation`
+    ///    整段（含工具执行）。这样绑定与读取在**同一个任务**里，工具闭包读到的就是它。
+    ///
+    /// ## 一对一零回归
+    /// 一对一路径不传 `owner`（默认 `nil`）⇒ 读出来是 `nil` ⇒ 三个写点全部退回
+    /// 「落当前会话」的老行为，与改动前**逐字一致**。只有群聊显式传群 id。
+    @TaskLocal
+    static var conversationOwner: UUID? = nil
+
     private struct ToolCall {
         var id: String
         var name: String
@@ -53,24 +74,31 @@ enum LLMService {
         history: [ChatMessage],
         memory: [String] = [],
         tools: [DeviceTool] = [],
+        owner: UUID? = nil,
         onToolActivity: (@Sendable (String) -> Void)? = nil,
         onReasoningDelta: (@Sendable (String) -> Void)? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 do {
-                    try await runConversation(
-                        config: config,
-                        systemPrompt: systemPrompt,
-                        history: history,
-                        memory: memory,
-                        tools: tools,
-                        onDelta: { piece in
-                            _ = continuation.yield(piece)
-                        },
-                        onTool: onToolActivity,
-                        onReasoning: onReasoningDelta
-                    )
+                    // ⭐ 在 **detached 任务体内部**绑定 owner —— 这样 `runConversation`
+                    //    整段（含工具执行）都在它的动态作用域里，工具闭包读
+                    //    `LLMService.conversationOwner` 就能拿到。**不能**在调用方设好后指望它传播进来
+                    //    （`Task.detached` 不继承调用方的 task-local，见 `conversationOwner` 的注释）。
+                    try await $conversationOwner.withValue(owner) {
+                        try await runConversation(
+                            config: config,
+                            systemPrompt: systemPrompt,
+                            history: history,
+                            memory: memory,
+                            tools: tools,
+                            onDelta: { piece in
+                                _ = continuation.yield(piece)
+                            },
+                            onTool: onToolActivity,
+                            onReasoning: onReasoningDelta
+                        )
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -152,9 +180,11 @@ enum LLMService {
     ) async throws {
         // 让ta「感知现实时间」：把当前时间直接写进系统提示词，
         // 不用ta每次都去调 get_current_time。
-        var messages: [[String: Any]] = [
-            ["role": "system", "content": systemPrompt]
-        ]
+        //
+        // 🔴 消息要能**重建** —— 降级之后得把那段「你能做的事」拿掉，
+        //    否则提示词还在说"你能发朋友圈"，而工具已经被清空了（= 教ta说谎）。
+        //    所以整段抽成这个局部函数，降级时用 `includeCapability: false` 重建。
+        //
         // ⭐ 「你能做的事」能力规格 —— 紧跟人设、排在时间之前。
         //
         // 🔴 为什么就在这里注入：这是所有模型调用的**唯一漏斗**
@@ -162,57 +192,95 @@ enum LLMService {
         //    注入一次处处带上，不会漏；也正是用户说的「给 AI 供应商 API 时
         //    顺便把规格包含进去」。⚠️ 因此 `Persona.swift` 里**不再写第二份**
         //    （写两遍会重复注入）。总开关关掉时 `block()` 返回 nil，这里自然跳过。
-        if let capability = CapabilitySpec.block() {
-            messages.append(["role": "system", "content": capability])
-        }
-        messages.append(["role": "system", "content": Self.timeContext()])
-        // 长期记忆、屏幕使用时间这类「背景资料」都走这一条 ——
-        // 和人设、时间一样单独成段，不混写在一起，
-        // 这样哪一段出问题都能单独关掉、单独查。
-        if !memory.isEmpty {
-            let block = """
-            这些是你知道的背景（自然地用，别像念资料一样背出来）：
-            \(memory.joined(separator: "\n"))
-            """
-            messages.append(["role": "system", "content": block])
-        }
-        // 带多少条历史由用户决定：太多又慢又贵，太少ta会失忆
-        let limit = max(6, min(config.contextLimit, 200))
-        // ⚠️⚠️ **别再只砍尾巴**（2026-10-06 改）。
-        //
-        // 原来是 `history.suffix(limit)`：超了就把**最老的那批整段扔掉**。
-        // 而「她是谁、你们怎么认识的、说好过什么」恰恰在最前面 ——
-        // 越聊越远，那些就最先被丢，表现就是用户说的「她容易失忆」。
-        //
-        // 新口径：**开头留一小段 + 最近留一大段**，只丢中间太远的。
-        // 开头留多少：`limit` 的 1/3、最多 6 条；`limit < 12` 时不留
-        // （小窗口被开头占掉一半反而更糟）。被丢掉的中间那段由
-        // 长期记忆 / 记忆网兜着。
-        let openingKeep = limit >= 12 ? min(6, limit / 3) : 0
-        var picked: [ChatMessage]
-        var skippedMiddle = false
-        if history.count <= limit {
-            picked = history
-        } else {
-            picked = Array(history.prefix(openingKeep))
-                + Array(history.suffix(limit - openingKeep))
-            skippedMiddle = openingKeep > 0
-        }
-        for (offset, item) in picked.enumerated() {
-            // 开头那几条发完、中间那段被跳过 —— 明说一句，
-            // 免得她以为"刚才那件事压根没发生过"。
-            if skippedMiddle, offset == openingKeep {
-                messages.append([
-                    "role": "system",
-                    "content": "（中间隔了一段比较早的闲聊，这里先略过了。）"
+        func buildMessages(includeCapability: Bool) -> [[String: Any]] {
+            // systemPrompt 永远第 0 条。
+            var built: [[String: Any]] = [
+                ["role": "system", "content": systemPrompt]
+            ]
+            // 能力规格只在允许时注入（工具被卸掉后就不该再告诉ta"你能做这些"）。
+            if includeCapability, let capability = CapabilitySpec.block() {
+                built.append(["role": "system", "content": capability])
+            }
+            built.append(["role": "system", "content": Self.timeContext()])
+            // 长期记忆、屏幕使用时间这类「背景资料」都走这一条 ——
+            // 和人设、时间一样单独成段，不混写在一起，
+            // 这样哪一段出问题都能单独关掉、单独查。
+            if !memory.isEmpty {
+                let block = """
+                这些是你知道的背景（自然地用，别像念资料一样背出来）：
+                \(memory.joined(separator: "\n"))
+                """
+                built.append(["role": "system", "content": block])
+            }
+            // 带多少条历史由用户决定：太多又慢又贵，太少ta会失忆
+            let limit = max(6, min(config.contextLimit, 200))
+            // ⚠️⚠️ **别再只砍尾巴**（2026-10-06 改）。
+            //
+            // 原来是 `history.suffix(limit)`：超了就把**最老的那批整段扔掉**。
+            // 而「她是谁、你们怎么认识的、说好过什么」恰恰在最前面 ——
+            // 越聊越远，那些就最先被丢，表现就是用户说的「她容易失忆」。
+            //
+            // 新口径：**开头留一小段 + 最近留一大段**，只丢中间太远的。
+            // 开头留多少：`limit` 的 1/3、最多 6 条；`limit < 12` 时不留
+            // （小窗口被开头占掉一半反而更糟）。被丢掉的中间那段由
+            // 长期记忆 / 记忆网兜着。
+            let openingKeep = limit >= 12 ? min(6, limit / 3) : 0
+            var picked: [ChatMessage]
+            var skippedMiddle = false
+            if history.count <= limit {
+                picked = history
+            } else {
+                picked = Array(history.prefix(openingKeep))
+                    + Array(history.suffix(limit - openingKeep))
+                skippedMiddle = openingKeep > 0
+            }
+            for (offset, item) in picked.enumerated() {
+                // 开头那几条发完、中间那段被跳过 —— 明说一句，
+                // 免得她以为"刚才那件事压根没发生过"。
+                if skippedMiddle, offset == openingKeep {
+                    built.append([
+                        "role": "system",
+                        "content": "（中间隔了一段比较早的闲聊，这里先略过了。）"
+                    ])
+                }
+                guard !item.text.isEmpty else { continue }
+                // ⭐ 群聊：给**别人的话**（非 user 的历史）加上「名字：」前缀。
+                //
+                // 🔴 为什么必须有这一段：这条漏斗把所有非 user 的历史都塞成
+                //    `assistant` 角色 —— 一对一没毛病，但**群里两个 AI 会因此把
+                //    对方说过的话认成「我自己刚说的」**，于是复读、串味、人格互染。
+                //    前缀就是那条唯一能告诉它「这句是谁说的」的线。
+                //
+                // 名字取 `speakerName`（落库时存的快照）—— **不在这里读 `PersonaStore`**：
+                //    这段跑在后台任务里，主线程隔离的 Store 在后台读会在 iOS 26 上崩。
+                // 一对一消息 `speakerName` 是 nil，不前缀，行为跟以前完全一样。
+                let speaker = (item.speakerName ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let content: String
+                if item.role != .user, !speaker.isEmpty {
+                    content = "\(speaker)：\(item.text)"
+                } else {
+                    content = item.text
+                }
+                built.append([
+                    "role": item.role == .user ? "user" : "assistant",
+                    "content": content
                 ])
             }
-            guard !item.text.isEmpty else { continue }
-            messages.append([
-                "role": item.role == .user ? "user" : "assistant",
-                "content": item.text
-            ])
+            return built
         }
+
+        // 循环里会往数组里 append（assistant / tool 消息），所以要 `var`；
+        // 而降级只发生在 round == 0、还没 append 过任何东西之前，重建是安全的。
+        //
+        // ⚠️ `includeCapability` 这里要多问一句 `remembersNoTools`（2026-10-07 补）：
+        //    这家接口**已经被证明不认 tools** 时，`sendOnce` 会直接不发工具 ——
+        //    而此时提示词里若还留着「你能做的事」清单，就是在**教 ta 承诺它做不到的事**
+        //    （项目红线之一：不许"假装完成"）。
+        //    第一次（还没记住）照常乐观地带上；真被卸掉后这一步会把它撤下来。
+        var messages = buildMessages(
+            includeCapability: !remembersNoTools(baseURL: config.baseURL, model: config.model)
+        )
 
         // ⚠️ 纯时间戳比较（`Date()` 差值），**不用 Task.sleep** —— 后者会阻塞，
         //    而且ta正流式吐字的时候，任何 await 停顿都会让界面看起来卡住。
@@ -235,31 +303,21 @@ enum LLMService {
                     onDelta: onDelta,
                     onReasoning: onReasoning
                 )
-            } catch LLMError.http(let status, _) where status == 400
+            } catch LLMError.http(let status, let body) where status == 400
                 && ((!tools.isEmpty) || config.reasoning != .off) && round == 0 {
-                // 有些接口既不认 tools、也不认 reasoning_effort。
-                // 那就退回最保守的请求再试一次 —— 报错总比"ta突然不说话了"强。
-                onTool?("这个接口不认工具或推理参数，这次用最保守的方式回答")
-                // ⚠️ 这次**没有工具可用**了（下面 tools 被清空成 []）——
-                //    记进黑匣子，让「ta这轮其实不能动手」这件事可见，
-                //    而不是用户事后发现「联网搜索有跟没有一样」却查无现场。
-                BlackBox.log("❗️接口不兼容 tools / reasoning，本次已降级为纯聊天")
-                var plain = config
-                plain.reasoning = .off
-                result = try await sendOnce(
-                    config: plain,
+                // 400 不一定是「既不认 tools 又不认 reasoning」—— 老代码一上来就把
+                // 两样**一起**卸掉，结果「接口不认一个推理参数」也把**全部工具能力连坐清空**，
+                // ta 这一轮手里一件工具都没有。改成逐级卸载、**每一级只卸一样**。
+                result = try await degrade(
+                    config: config,
                     messages: messages,
-                    tools: [],
+                    tools: tools,
                     onDelta: onDelta,
-                    onReasoning: onReasoning
+                    onReasoning: onReasoning,
+                    onTool: onTool,
+                    firstBody: body,
+                    rebuildMessages: buildMessages
                 )
-                // ⭐ 记住「这家 baseURL + model 不认 reasoning_effort」，
-                //    后续请求直接不带这个字段 —— 免得每次回答都白跑一次 400 往返。
-                //    ⚠️ 只在**确实因为推理参数**才降级时记（tools 一起被砍那不算）。
-                //    换模型 / 换地址时 hash 变了，会自然重新试 —— 见 `noReasoningKey`。
-                if config.reasoning != .off {
-                    rememberNoReasoning(baseURL: config.baseURL, model: config.model)
-                }
             }
 
             if result.toolCalls.isEmpty {
@@ -298,6 +356,121 @@ enum LLMService {
         }
     }
 
+    // MARK: - 400 降级：逐级卸载参数
+
+    /// 400 之后逐级卸载参数，**每一级只卸一样** ——
+    /// 🔴 顺序不能反：先卸 `reasoning_effort`（工具保住），
+    ///    只有连工具也不认时才卸工具。老代码一次卸两样，
+    ///    结果「接口不认一个推理参数」就把全部工具能力连坐清空了。
+    ///
+    /// - Parameters:
+    ///   - firstBody: 第一次 400 的响应体原文（会被摘成一行带进提示语和黑匣子）。
+    ///   - rebuildMessages: 重建消息。第 3 步（卸工具）时**必须**传 `includeCapability: false` ——
+    ///     工具都卸了，提示词里那段「你能做的事」就不能再留，否则等于教ta说谎。
+    /// - Returns: 某一级降级成功后真正拿到的结果。
+    /// - Throws: 三级都失败时抛**最后一次**的错误；**绝不吞错**（吞了上层会以为成功）。
+    private static func degrade(
+        config: LLMConfig,
+        messages: [[String: Any]],
+        tools: [DeviceTool],
+        onDelta: @escaping (String) -> Void,
+        onReasoning: ((String) -> Void)?,
+        onTool: (@Sendable (String) -> Void)?,
+        firstBody: String,
+        rebuildMessages: (Bool) -> [[String: Any]]
+    ) async throws -> RoundResult {
+        // 一个可卸的东西都没有（catch 的 where 已挡住这种情况，这里只是兜底）：
+        // 直接把第一次的错误抛上去，**别重试**。
+        if config.reasoning == .off && tools.isEmpty {
+            throw LLMError.http(status: 400, body: firstBody)
+        }
+
+        // ── 第 2 步：只卸推理参数，工具**原样保住** ──
+        // ⚠️ 这是本次修复的核心 —— 老代码在这一步就把 tools 一起清空成 [] 了。
+        var noThink = config
+        noThink.reasoning = .off
+        var lastBody = firstBody
+
+        if config.reasoning != .off {
+            do {
+                let result = try await sendOnce(
+                    config: noThink,
+                    messages: messages,
+                    tools: tools,
+                    onDelta: onDelta,
+                    onReasoning: onReasoning
+                )
+                // ⭐ 只有**确实因为推理参数**才降级成功时才记 —— 失败说明不是它的问题，
+                //    记了就冤枉了这家接口（老代码是无条件记的）。
+                rememberNoReasoning(baseURL: config.baseURL, model: config.model)
+                onTool?("接口不认推理参数（400）：\(brief(firstBody)) —— 已关掉它继续回答，工具照常可用")
+                BlackBox.log("❗️接口不认 reasoning_effort，已关掉它重试并成功；工具仍然可用。接口原话：\(brief(firstBody))")
+                return result
+            } catch LLMError.http(let status, let body) where status == 400 {
+                // 推理参数不是病根，记下第二个 body，继续往下卸工具。
+                lastBody = body
+            }
+            // ⚠️ 别的错误类型**不捕获**，自动往上抛 —— 绝不能吞。
+        }
+
+        // ── 第 3 步：连工具也不认，卸掉工具、纯聊天 ──
+        if !tools.isEmpty {
+            // 🔴 必须用 includeCapability: false 重建 —— 工具没了，就不能再告诉ta「你能做这些」。
+            let result = try await sendOnce(
+                config: noThink,
+                messages: rebuildMessages(false),
+                tools: [],
+                onDelta: onDelta,
+                onReasoning: onReasoning
+            )
+            rememberNoTools(baseURL: config.baseURL, model: config.model)
+            onTool?("接口连工具都不认（400）：\(brief(lastBody)) —— 这次只能纯聊天")
+            BlackBox.log("❗️接口不认 tools，已卸掉全部工具改为纯聊天并成功。接口原话：\(brief(lastBody))")
+            return result
+        }
+        // ⚠️ 第 3 步里的 `sendOnce` 抛错时**不捕获**，原样往上抛（含又是 400 的情况）——
+        //    绝不无限重试、绝不吞错。
+
+        // 走到这儿 = 没工具可卸、或卸推理参数后仍然 400。
+        // 抛出最后拿到的那个错误，让上层如实报给用户。
+        throw LLMError.http(status: 400, body: lastBody)
+    }
+
+    /// 把接口响应体压成**一行短摘要**，给用户提示语和黑匣子共用。
+    /// 去换行、把连续空白压成一个空格、截到 160 字符（超了加省略号）。
+    /// ⚠️ 只做截断、不做别的加工 —— 响应体是接口返回的，正常不含 API Key。
+    private static func brief(_ body: String) -> String {
+        let flattened = body
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !flattened.isEmpty else { return "（接口没给原因）" }
+        return flattened.count > 160 ? String(flattened.prefix(160)) + "…" : flattened
+    }
+
+    /// 把 App 的四档翻译成**这家接口真正认的** `reasoning_effort` 取值。
+    /// 返回 `nil` = 这一档干脆别发这个字段。
+    ///
+    /// 🔴 为什么必须有这一层（2026-10-07 真踩到）：
+    ///   DeepSeek V4 的 `reasoning_effort` **只认 `high` / `max`** ——
+    ///   官方公告原文（api-docs.deepseek.com/zh-cn/news/news260424）：
+    ///   「思考模式支持 reasoning_effort 参数设置思考强度(high/max)」。
+    ///   而 `ReasoningBudget` 的 rawValue 是 `low` / `medium` / `high`，
+    ///   于是 `.low` / `.medium` 会被接口 400 打回。虽然 `degrade` 兜得住，
+    ///   但那要白跑一次 400、还多一次往返，用户还会看到一次没必要的降级提示 ——
+    ///   **从源头翻译对更便宜**。
+    private static func effortValue(_ budget: ReasoningBudget, baseURL: String) -> String? {
+        guard budget != .off else { return nil }
+        // DeepSeek（官方域名，以及走它中转的地址）只认 high / max。
+        if baseURL.lowercased().contains("deepseek") {
+            // `.low` / `.medium` 在 DeepSeek 上没有对应档，取最接近的 `high`；
+            // `.high` 的语义是"想得最久、适合复杂问题"，对应它的最高档 `max`。
+            return budget == .high ? "max" : "high"
+        }
+        // 其余（OpenAI 系等）沿用原值 low / medium / high。
+        return budget.rawValue
+    }
+
     // MARK: - 单轮
 
     private static func sendOnce(
@@ -329,15 +502,21 @@ enum LLMService {
             "stream": true,
             "messages": messages
         ]
-        if !tools.isEmpty {
+        // 「这家接口已经证明不认 tools」时**直接不发**，省掉每次那一次必然 400 的往返。
+        // ⚠️ 此时调用方 `runConversation` 仍以为工具可用（会走 `result.toolCalls.isEmpty`
+        //    直接返回，行为没问题），只是这一轮 ta 没有手 —— 这是已知、可接受的降级
+        //    （总比每次多跑一次 400 强）。
+        if !tools.isEmpty && !remembersNoTools(baseURL: config.baseURL, model: config.model) {
             body["tools"] = DeviceTools.definitions()
             body["tool_choice"] = "auto"
         }
         // 推理预算：关闭时不传这个字段（有些模型不认，传了反而报错）。
+        // ⚠️ 取值要**按供应商翻译**（`effortValue`）—— DeepSeek V4 只认 `high`/`max`，
+        //    直接发 `low`/`medium` 会被 400 打回（虽然 `degrade` 兜得住，但白跑一次往返）。
         // ⚠️ 这家接口**已经证明不认** `reasoning_effort`（记在 UserDefaults，
         //    key 里带 baseURL+model 的稳定哈希）时就不传了 —— 直接省掉每次那一次 400 往返。
         //    换模型 / 换地址 → hash 变 → 自然重新试。
-        if let effort = config.reasoning.parameter,
+        if let effort = effortValue(config.reasoning, baseURL: config.baseURL),
            !remembersNoReasoning(baseURL: config.baseURL, model: config.model) {
             body["reasoning_effort"] = effort
         }
@@ -466,5 +645,29 @@ enum LLMService {
     /// 记下「这家接口不认 `reasoning_effort`」—— 后续请求直接不带。
     private static func rememberNoReasoning(baseURL: String, model: String) {
         UserDefaults.standard.set(true, forKey: noReasoningKey(baseURL: baseURL, model: model))
+    }
+
+    // MARK: - 「这家接口不认工具」的记忆
+
+    /// 和 `noReasoningKey` 同一套写法（FNV-1a 稳定哈希，绝不用 `String.hashValue`），
+    /// 只是前缀换成 `aevis.noTools.` —— 换模型 / 换地址会自然得到新 key，重新试一次。
+    private static func noToolsKey(baseURL: String, model: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325          // FNV-1a
+        for byte in (baseURL + "|" + model).utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        let hex = String(format: "%08X", UInt32(truncatingIfNeeded: hash))
+        return "aevis.noTools.\(hex)"
+    }
+
+    /// 这家接口是不是已经证明不认 `tools`。
+    private static func remembersNoTools(baseURL: String, model: String) -> Bool {
+        UserDefaults.standard.bool(forKey: noToolsKey(baseURL: baseURL, model: model))
+    }
+
+    /// 记下「这家接口不认 `tools`」—— 后续请求直接不带工具定义。
+    private static func rememberNoTools(baseURL: String, model: String) {
+        UserDefaults.standard.set(true, forKey: noToolsKey(baseURL: baseURL, model: model))
     }
 }

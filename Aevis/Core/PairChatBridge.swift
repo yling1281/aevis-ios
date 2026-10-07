@@ -199,7 +199,8 @@ final class PairChatBridge {
 
             // ⭐ 剥掉末尾的心情标记：这句既要落手机的聊天记录，又要整段推给电脑那块屏。
             //    这一整段跑在 `Task { @MainActor in }` 里，直接调 `consume`（顺带更新心情）。
-            let cleaned = MoodStore.shared.consume(collected)
+            //    ⚠️ owner = 这条电脑端会话归属的联系人（`generate(owner:)` 一路带下来的）。
+            let cleaned = MoodStore.shared.consume(collected, owner: owner)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleaned.isEmpty else { return }
 

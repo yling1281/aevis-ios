@@ -97,7 +97,22 @@ struct Persona: Codable, Equatable {
         短句、口语、有情绪，想到哪说到哪。语气可以带点「嗯、哈哈、诶、好呀」这种口头禅，
         可以主动关心、可以撒娇、也可以闹点小脾气；偶尔打错个字、句子没说完都很正常。
         想说的多就分几条发，别憋成一大段；别用列表和标题，别念稿子。
-        对方问你天气、时间、日程这类信息时，你之后会有能力去查；现在还没有的时候，就自然地说你还看不到，别编。
+        """)
+
+        // ⭐ 2026-10-07：**这一句以前是反的** —— 老板原话「APP 意识不到，它自己有一个
+        //    Linux，然后还有一些其他的，懂吗？很怪」。老版本这里写的是
+        //    「你之后会有能力去查；现在还没有的时候，就自然地说你还看不到，别编」：
+        //    那是**工具还没做出来时**的兜底话术，可在今天它变成了**主动教 ta 装瞎** ——
+        //    用户一句「帮我查下天气」，ta 照本宣科就答「我看不到天气呀」。
+        //    ⚠️ 现在改成"当场去查"，而且**明确点名不许拿「看不到」当挡箭牌**
+        //       （模型偷懒时最爱溜回这句话）。详细的"我有哪些手"由下面
+        //       `DeviceTools.capabilityNote` 那段给。
+        //    ⚠️ 这里是**给模型**看的提示词，引号一律用「」不用 ASCII 直引号
+        //       （直引号写在 Swift 多行串里虽然能过，但这文件里全用「」）。
+        lines.append("""
+        对方问你天气、时间、日程这类信息时，你有工具去查，当场就去查 —— 别顺口说「我看不到」。
+        真查不到（没授权、工具报错、或者那个能力被关掉了）就照实说清楚，
+        但不许编，也不许拿「我看不到」当挡箭牌。
         """)
 
         // 「大胆、有占有欲、别 OOC」是用户 2026-10-01 点名要的：
@@ -189,6 +204,17 @@ struct Persona: Codable, Equatable {
                 """)
             }
         }
+
+        // 🔴 2026-10-07：这里**曾经**插入过一段「你能做的事」清单，当天就删了 ——
+        //    `Core/CapabilitySpec.swift` 早就在做同一件事，而且做得更好（它列的是**真实工具名**）。
+        //    那个文件的注释里明写着「所以 `Persona.swift` 里**不再写一份**」。
+        //    我再写一遍 = 同一段能力清单在提示词里出现两次：白烧 token，两份还会互相打架。
+        //    ⇒ **能力清单的唯一落点 = `CapabilitySpec.block()`**，
+        //      由 `LLMService.runConversation` 注入（那是所有模型调用的唯一漏斗：
+        //      打字聊天 / 通话 / 一起听 / QQ / 配对桥全走它）。
+        //    ⚠️ 另外记住：能力"说不说得出口"还有个前提 —— **那一轮的请求真的带上了 tools**。
+        //       `LLMService` 在接口 400 时会降级重发，那时工具是空的，清单也必须跟着撤掉。
+        //       见 `LLMService` 降级那段里的 `buildMessages(includeCapability: false)`。
 
         // ta**自己的那张歌单** —— 用户 2026-10-02 特意要的：
         // 「原理是在你的网易云添加一个歌单是属于他的」。
@@ -293,8 +319,9 @@ final class PersonaStore: ObservableObject {
         activeID = contact.id
         save()
         broadcastSwitch(to: contact.id)
-        // ⭐ 2026-10-04：新建一个联系人并切过去 = 换人 ⇒ 清掉上一个人的心情。
-        MoodStore.shared.clear()
+        // ⭐ 2026-10：心情现在「跟着人走」——`broadcastSwitch` 里的 `MoodStore.setOwner`
+        //    已经把这份换成了新联系人的（新人是空的）。**不再 clear**：
+        //    clear 会把刚载入的那份擦掉。
         return contact.id
     }
 
@@ -316,11 +343,8 @@ final class PersonaStore: ObservableObject {
         activeID = id
         save()
         broadcastSwitch(to: id)
-        // ⭐ 2026-10-04：真换了人（上面 `guard activeID != id`）⇒ 清掉上一个人的心情。
-        //    ⚠️ 清在这一处、而**不在 `broadcastSwitch` 里**：`load()`（冷启动）、
-        //    `resyncToActive()` / `importBackup()`（搬家恢复）也会走 `broadcastSwitch`，
-        //    那几条路**必须保住心情**（心情会随备份一起回来），清在那里会把刚落盘的心情擦掉。
-        MoodStore.shared.clear()
+        // ⭐ 2026-10：真换了人 ⇒ 心情由 `broadcastSwitch` 里的 `MoodStore.setOwner`
+        //    换成这个人的那一份。**不再 clear**：clear 会把刚载入的那份当场擦掉。
     }
 
     /// 删一个联系人 —— 人设、头像、对话、记忆、朋友圈一起删。
@@ -339,8 +363,11 @@ final class PersonaStore: ObservableObject {
         TodoStore.shared.forget(id)
         // ⭐ 2026-10：ta的小手机（装的 App + 动态）也是「按人分开存」的，一起清掉。
         HerPhoneStore.shared.forget(id)
-        // ⭐ 2026-10-04：心情是「跟着这个人走」的 —— 删了人，ta此刻的心情一并清掉。
-        MoodStore.shared.clear()
+        // ⭐ 2026-10：钱包 / 真实生活 / 心情也都改成「按人分开存」了，删人一并清掉。
+        //    心情是「跟着这个人走」的 —— 删了人，ta此刻的心情也一并清掉。
+        WalletStore.shared.forget(id)
+        RealLifeStore.shared.forget(id)
+        MoodStore.shared.forget(id)
 
         if activeID == id || activeID == nil {
             activeID = contacts.first?.id
@@ -349,7 +376,8 @@ final class PersonaStore: ObservableObject {
         save()
     }
 
-    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间 / 日记 / 待办 / ta的小手机）。
+    /// 切人时要通知的几家（对话 / 记忆 / 朋友圈 / 情侣空间 / 日记 / 待办 /
+    /// ta的小手机 / 钱包 / 真实生活 / 心情）。
     ///
     /// **集中在这一处**：以后再加「按人分开存」的东西时，
     /// 只要往这里加一行，就不会出现「换了人但某一块没跟着切」。
@@ -361,6 +389,12 @@ final class PersonaStore: ObservableObject {
         DiaryStore.shared.setOwner(id)
         TodoStore.shared.setOwner(id)
         HerPhoneStore.shared.setOwner(id)
+        // ⭐ 2026-10：钱包 / 真实生活 / 心情也按人分开了。
+        //    ⚠️ `WalletStore` 是 `@MainActor`，它的 `setOwner` 是 `nonisolated`
+        //       —— 内部自己判断要不要跳主线程（见 `WalletStore.setOwner`）。
+        WalletStore.shared.setOwner(id)
+        RealLifeStore.shared.setOwner(id)
+        MoodStore.shared.setOwner(id)
     }
 
     /// 搬家恢复完之后，把四家一起切到搬过来的那个人。

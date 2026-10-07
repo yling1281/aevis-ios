@@ -33,6 +33,20 @@ enum ConfigShare {
         /// 「开始页背景」那套。可选 —— 老版本发来的配置里没有它，不该报错。
         var startBackgroundStyle: String?
         var personaName: String?
+        // ⭐ 2026-10：**人设本体也一起走** —— 以前只带 name / voice，
+        //    朋友套完还是空壳。下面几个都是 Optional，老配置缺键照样解得出、不报错。
+        //    ⚠️ 长人设塞不进二维码 ⇒ `image(for:)` 有长度闸门，超了改走文本（见那把注释）。
+        var personaCallUser: String?
+        var personaGender: String?
+        var personaPersonality: String?
+        var personaSpeakingStyle: String?
+        var personaRelationship: String?
+    }
+
+    /// 掐头去尾；空了给 nil（空串不进 payload，二维码能省一个字节是一个）。
+    private static func trimmedOrNil(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// 把当前配置打包成文本。
@@ -52,7 +66,12 @@ enum ConfigShare {
             useGlass: settings.useGlass,
             backgroundStyle: settings.backgroundStyle.rawValue,
             startBackgroundStyle: settings.startBackgroundStyle.rawValue,
-            personaName: persona.name
+            personaName: trimmedOrNil(persona.name),
+            personaCallUser: trimmedOrNil(persona.callUser),
+            personaGender: persona.gender == .unspecified ? nil : persona.gender.rawValue,
+            personaPersonality: trimmedOrNil(persona.personality),
+            personaSpeakingStyle: trimmedOrNil(persona.speakingStyle),
+            personaRelationship: trimmedOrNil(persona.relationship)
         )
 
         let encoder = JSONEncoder()
@@ -127,6 +146,34 @@ enum ConfigShare {
             personaTouched = true
             changed.append("名字")
         }
+        // ⭐ 2026-10：人设本体（称呼 / 性别 / 性格 / 说话方式 / 关系）也一起套用。
+        //    ⚠️ 一律是「对方真的带来且非空」才覆盖 —— 老配置里没有这些键，
+        //       `if let` 自然跳过，**不会把本机已写好的人设清空**。
+        if let call = payload.personaCallUser, !call.isEmpty {
+            persona.callUser = call
+            personaTouched = true
+            changed.append("称呼")
+        }
+        if let gender = payload.personaGender, let parsed = GenderIdentity(rawValue: gender) {
+            persona.gender = parsed
+            personaTouched = true
+            changed.append("性别")
+        }
+        if let personality = payload.personaPersonality, !personality.isEmpty {
+            persona.personality = personality
+            personaTouched = true
+            changed.append("性格")
+        }
+        if let style = payload.personaSpeakingStyle, !style.isEmpty {
+            persona.speakingStyle = style
+            personaTouched = true
+            changed.append("说话方式")
+        }
+        if let relation = payload.personaRelationship, !relation.isEmpty {
+            persona.relationship = relation
+            personaTouched = true
+            changed.append("关系")
+        }
         if personaTouched {
             PersonaStore.shared.update(persona)
         }
@@ -138,13 +185,29 @@ enum ConfigShare {
 
     // MARK: - 二维码
 
+    /// 二维码能装多少 **UTF-8 字节**。
+    ///
+    /// ⭐ 为什么要有这个闸门（2026-10）：配置里现在会带上**人设本体**（性格 / 说话方式 / 关系），
+    ///    动辄几百字。二维码（M 级容错）顶格也就两千多字节，而且越大越难扫、
+    ///    手机稍微歪一点就认不出。硬塞的下场是"码画出来了、但扫不动"，比明确用文本更糟。
+    ///    超了就让 `image(for:)` 返回 nil —— 界面本来就有
+    ///    「二维码画不出来。用下面那段文本吧。」的兜底（见 `ShareCard.qrSheet`），
+    ///    用户复制那段文本一样能套用。
+    private static let qrByteLimit = 1200
+
+    /// 这段文本够不够短、能画成能扫的二维码。
+    static func fitsQR(_ text: String) -> Bool {
+        !text.isEmpty && text.utf8.count <= Self.qrByteLimit
+    }
+
     /// 把一段文本画成二维码。
     ///
     /// 用 `CIFilter(name:)` 这种老写法而不是 `CIFilter.qrCodeGenerator()`：
     /// 后者要 `import CoreImage.CIFilterBuiltins`，多一个 import 就多一处可能编不过。
+    /// ⚠️ 文本太长（带了长人设）**直接返回 nil**，让界面走文本那条路 —— 见 `qrByteLimit`。
     static func image(for text: String, scale: CGFloat = 12) -> UIImage? {
         #if canImport(UIKit)
-        guard !text.isEmpty, let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        guard fitsQR(text), let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
         filter.setValue(Data(text.utf8), forKey: "inputMessage")
         // M 级容错：被挡住一角也还能认出来
         filter.setValue("M", forKey: "inputCorrectionLevel")

@@ -109,6 +109,12 @@ enum WalletTools {
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let isRedPacket = (args["is_red_packet"] as? Bool) ?? false
 
+            // ⭐ 「这轮是说给哪个会话听的」—— 工具跑在 `Task.detached` 上，owner 由
+            //    `LLMService.$conversationOwner` 在 detached 任务体内部绑好（见 `conversationOwner`）。
+            //    ⚠️ 必须在**跳主线程之前**取：一对一时它是 `nil`（退回落当前会话的老行为），
+            //       群里被调时是群 id —— 气泡就会落进群那份，而不是用户此刻正在看的会话。
+            let owner = LLMService.conversationOwner
+
             // 一步都不能省地在主线程做完：改余额 → 记流水 → 落一条气泡。
             // ⚠️ 三件事必须**成套**成功，否则就是"钱动了但聊天里没有"。
             return await MainActor.run { () -> String in
@@ -137,7 +143,7 @@ enum WalletTools {
                     accepted: true,
                     isRedPacket: isRedPacket
                 )
-                ChatStore.shared.appendIncomingTransfer(info)
+                ChatStore.shared.appendIncomingTransfer(info, for: owner)
 
                 return "已经转过去了：\(WalletStore.money(moved))"
                     + (note.isEmpty ? "" : "，附言「\(note)」")
@@ -248,6 +254,10 @@ enum WalletTools {
             let rawPeriod = ((args["period"] as? String) ?? "month").lowercased()
             let period = rawPeriod == "day" ? "day" : "month"
 
+            // ⭐ 同 `wallet_give_money`：跳主线程前把 owner 取好，让这条提示落进**正确的会话**
+            //    （群里被调就落群，不是用户此刻正在看的那个）。一对一为 `nil` → 老行为。
+            let owner = LLMService.conversationOwner
+
             return await MainActor.run { () -> String in
                 let wallet = WalletStore.shared
                 let fallback = (dir == .mine) ? wallet.closePayMineLimit : wallet.closePayTaLimit
@@ -264,7 +274,10 @@ enum WalletTools {
                 if userPays {
                     line = "亲密付给我开好啦：额度 \(amountText)，\(unit)。以后我花钱就从你那儿扣～"
                 }
-                ChatStore.shared.append(ChatMessage(role: .assistant, text: line))
+                // ⭐ 走「插到流式空占位前面」的口子（`appendIncomingAssistantLine`）——
+                //    不能普通 append：那样这条提示会变成列表最后一条，被下一个流式片段
+                //    经 `replaceLast` 原地覆盖掉（见该方法注释）。
+                ChatStore.shared.appendIncomingAssistantLine(line, for: owner)
 
                 let who = userPays ? "用户给你开的（你花、用户付）" : "你给用户开的（用户花、你付）"
                 return "已经开好亲密付：\(who)，额度 \(WalletStore.money(limit))（\(unit)）。"

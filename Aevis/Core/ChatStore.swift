@@ -186,18 +186,44 @@ final class ChatStore: ObservableObject {
     /// 所以改成：**插到那个空占位前面**。她的话接着往后流、气泡在上面 ——
     /// 正好就是微信里「先发个红包、再补一句话」的顺序。
     /// `replaceLast(with:)` 认的是列表**最后一条**，插在前面不影响它在改谁。
+    ///
+    /// ⭐ 群聊（2026-10）：加 `for owner` 版本，理由同 `replaceLast`。
+    ///    `owner` =「这轮是说给哪个会话听的」（由 `LLMService.conversationOwner` 带进来，
+    ///    `wallet_give_money` 在群里被调时就是群 id）。位置**只由 owner 决定**：
+    ///    · `owner == currentID` 或 `nil` → 落活的 `messages`（一对一 / 当前会话，要上屏）；
+    ///    · 别的会话 → 只落 `byContact[owner]`，**绝不碰 `messages`**；
+    ///      那份不存在 → **静默放弃**（宁可丢一条，也绝不写错人，同 `replaceLast` 第三分支）。
     @discardableResult
-    func appendIncomingTransfer(_ transfer: ChatMessage.Transfer) -> UUID? {
+    func appendIncomingTransfer(_ transfer: ChatMessage.Transfer, for owner: UUID?) -> UUID? {
         let message = ChatMessage(role: .assistant,
                                   text: ChatMessage.transferLine(transfer, mine: false),
                                   kind: .transfer,
                                   transfer: transfer)
-        let isStreamingPlaceholder = messages.last?.role == .assistant
-            && messages.last?.text.isEmpty == true
-        messages.insert(message, at: isStreamingPlaceholder ? messages.count - 1 : messages.count)
+        if let owner, owner != currentID {
+            guard var list = byContact[owner] else { return nil }
+            insertIncoming(message, into: &list)
+            byContact[owner] = list
+            track(message)
+            save()
+            // ⭐ 落进**别的会话**也要通知（PairChatBridge 推电脑屏 / AutoSync 推网盘）。
+            //    传 `owner`（这条真正落到的会话）。两个监听器都是**只读**（只转发/上传，
+            //    绝不回写 ChatStore），所以不会形成回声 —— 见各自回调。
+            notifyAppended(message, owner)
+            return message.id
+        }
+        insertIncoming(message, into: &messages)
         track(message)
         save()
+        // 落进**活的 `messages`** ⇒ 目标会话是 `currentID`（与 `append(_:)` 一致；
+        // `owner` 此刻要么 == currentID、要么是 nil，nil 时 `append(_:for:)` 也是回退到它）。
+        notifyAppended(message, currentID)
         return message.id
+    }
+
+    /// 老入口：落**当前会话**。一对一链路一个字都不用动。
+    @discardableResult
+    func appendIncomingTransfer(_ transfer: ChatMessage.Transfer) -> UUID? {
+        appendIncomingTransfer(transfer, for: currentID)
     }
 
     // MARK: - 她的小手机
@@ -212,19 +238,78 @@ final class ChatStore: ObservableObject {
     /// `replaceLast(with:)` 认的是列表**最后一条**，插在前面不影响它在改谁。
     ///
     /// - Returns: 新消息的 id。
+    ///
+    /// ⭐ 群聊（2026-10）：加 `for owner` 版本，规则与 `appendIncomingTransfer(_:for:)` 完全一致
+    ///    （`owner == currentID` / `nil` → 活的 `messages`；别的会话 → 只写 `byContact[owner]`；
+    ///    那份不存在 → 静默放弃）。
     @discardableResult
-    func appendIncomingHerPhone(appName: String, action: String) -> UUID {
+    func appendIncomingHerPhone(appName: String, action: String, for owner: UUID?) -> UUID {
         let message = ChatMessage(role: .assistant,
                                   text: ChatMessage.herPhoneLine(action: action),
                                   kind: .herPhone,
                                   herAppName: appName,
                                   herAction: action)
-        let isStreamingPlaceholder = messages.last?.role == .assistant
-            && messages.last?.text.isEmpty == true
-        messages.insert(message, at: isStreamingPlaceholder ? messages.count - 1 : messages.count)
+        if let owner, owner != currentID {
+            guard var list = byContact[owner] else { return message.id }
+            insertIncoming(message, into: &list)
+            byContact[owner] = list
+            track(message)
+            save()
+            // ⭐ 同 `appendIncomingTransfer`：别的会话也要通知；监听器只读、无回声。
+            notifyAppended(message, owner)
+            return message.id
+        }
+        insertIncoming(message, into: &messages)
         track(message)
         save()
+        notifyAppended(message, currentID)
         return message.id
+    }
+
+    /// 老入口：落**当前会话**。
+    @discardableResult
+    func appendIncomingHerPhone(appName: String, action: String) -> UUID {
+        appendIncomingHerPhone(appName: appName, action: action, for: currentID)
+    }
+
+    /// ta 在**流式回复过程中**往聊天里落一句正文（目前只有 `wallet_closepay_open`
+    /// 开通亲密付后那句提示）→ 落一条 assistant 文本消息。
+    ///
+    /// 套路与 `appendIncomingTransfer` / `appendIncomingHerPhone` **完全一致**：
+    /// **插到流式空占位前面**。这条不变量必须守 —— 否则这条提示会被下一个流式片段
+    /// 经 `replaceLast` **原地覆盖掉**（`replaceLast` 认的是列表**最后一条**，而这条提示
+    /// 自己也是 assistant，所以「补 role 守卫」那种做法**拦不住它**，唯一正解就是不让它
+    /// 变成最后一条）。
+    /// owner 规则也一致：`owner == currentID` / `nil` → 活的 `messages`（一对一 / 当前会话）；
+    /// 别的会话 → 只写 `byContact[owner]`，**绝不碰 `messages`**；那份不存在 → 静默放弃。
+    @discardableResult
+    func appendIncomingAssistantLine(_ text: String, for owner: UUID?) -> UUID? {
+        let message = ChatMessage(role: .assistant, text: text)
+        if let owner, owner != currentID {
+            guard var list = byContact[owner] else { return nil }
+            insertIncoming(message, into: &list)
+            byContact[owner] = list
+            track(message)
+            save()
+            // ⭐ 同 `appendIncomingTransfer`：别的会话也要通知；监听器只读、无回声。
+            notifyAppended(message, owner)
+            return message.id
+        }
+        insertIncoming(message, into: &messages)
+        track(message)
+        save()
+        notifyAppended(message, currentID)
+        return message.id
+    }
+
+    /// 落一条「她发来的」消息：**插到流式空占位前面**（她的话接着往下流、气泡在上面）。
+    ///
+    /// 一对一 / 群共用 —— `list` 是目标会话那一份，绝不直接读 `messages`
+    /// （群生成期间用户切走时，`messages` 已经是别人的了）。
+    private func insertIncoming(_ message: ChatMessage, into list: inout [ChatMessage]) {
+        let isStreamingPlaceholder = list.last?.role == .assistant
+            && list.last?.text.isEmpty == true
+        list.insert(message, at: isStreamingPlaceholder ? list.count - 1 : list.count)
     }
 
     /// 把这条聊天记进黑匣子（用户 2026-09-26 要求：「聊天记录也要进日志」）。
@@ -256,6 +341,10 @@ final class ChatStore: ObservableObject {
         guard message.imageData == nil else { return false }
         guard let last = messages.last(where: { !$0.text.isEmpty }) else { return false }
         guard last.imageData == nil, last.role == message.role else { return false }
+        // ⭐ 群聊：**发言人不同就不算同一句**。
+        //    不加这一句，两个 AI 在群里都说「你好」时，后一个会被当重复**静默吞掉**。
+        //    一对一聊天里两边 `speakerID` 都是 nil，这一句恒成立，行为不变。
+        guard last.speakerID == message.speakerID else { return false }
         guard Self.isSameLine(last.text, message.text) else { return false }
 
         if message.role == .assistant { return true }
@@ -385,9 +474,41 @@ final class ChatStore: ObservableObject {
     ///
     /// 治本就在这一行：这里显示的本来就只是"还没定稿的半句"，
     /// 首尾空白没有任何意义，trim 掉之后两条路径就完全一致了。
+    /// ⭐ 群聊（2026-10）：**按 owner 指定「这条半句写在哪个会话里」**。
+    ///
+    /// 为什么需要它：群聊一轮里好几个成员轮流说话、耗时长，用户等不及会切到别的
+    /// 联系人再切回来。`messages` 是「当前这份」，一切人它就变成别人的了 ——
+    /// 老的 `replaceLast(with:)` 只认 `messages`，于是群 A 的半句会被写进 B。
+    ///
+    /// 现在**位置只由 `owner` 决定**：`currentID` 只用来判断「owner 是不是当前正
+    /// 显示的那份」（是 → 写活的 `messages`，界面才看得到流式；否 → 只写
+    /// `byContact[owner]` 那份副本，**绝不碰 `messages`**）。
+    ///
+    /// ⚠️ 若 `byContact[owner]` 最后一条**不是** assistant 的流式占位（用户切过去
+    ///    又发了新消息等），**直接 return** —— 宁可丢半句，也不能把字写错人。
+    func replaceLast(with text: String, for owner: UUID?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let owner else {
+            // 没有 owner（还没选定会话）→ 只有当前这份可写。
+            guard let index = messages.indices.last else { return }
+            messages[index].text = trimmed
+            return
+        }
+        if owner == currentID {
+            // 正是当前显示的那份 → 写活的数组（界面靠它流式上屏）。
+            guard let index = messages.indices.last else { return }
+            messages[index].text = trimmed
+            return
+        }
+        guard var list = byContact[owner], let index = list.indices.last else { return }
+        guard list[index].role == .assistant else { return }
+        list[index].text = trimmed
+        byContact[owner] = list
+    }
+
+    /// 老入口：改**当前会话**的最后一条。一对一链路一个字都不用动。
     func replaceLast(with text: String) {
-        guard let index = messages.indices.last else { return }
-        messages[index].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        replaceLast(with: text, for: currentID)
     }
 
     /// 流式结束后落盘。
@@ -399,53 +520,99 @@ final class ChatStore: ObservableObject {
     ///
     /// 她在提示词里被要求「像真人发消息、短句」—— 所以**她换行就等于换一条消息**，
     /// 这样看起来才是一条一条发出来的，而不是一大段。
-    func finishStreamingLine(_ text: String) {
+    ///
+    /// ⭐ 群聊（2026-10）：加 `for owner` 版本，理由同 `replaceLast`。
+    ///    定稿逻辑抽到 `finishStreamingLineInPlace(_:_:)`，两种存储共用。
+    func finishStreamingLine(_ text: String, for owner: UUID?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard let owner else {
+            finishStreamingLineInPlace(&messages, trimmed)
+            return
+        }
+        if owner == currentID {
+            finishStreamingLineInPlace(&messages, trimmed)
+            return
+        }
+        // 别的会话：只改那一份副本，绝不碰 `messages`。
+        guard var list = byContact[owner] else { return }
+        finishStreamingLineInPlace(&list, trimmed)
+        byContact[owner] = list
+    }
 
-        // ⚠️ **这一行是「她每句话都说两遍」的真凶。**
-        //
-        // 她正在吐的那半句是靠 `replaceLast` **实时写在最后一条上**的
-        // （见 ChatView.flushLines）。所以当模型接着吐出一个换行、这一行被
-        // 正式定稿时，屏幕上那条**已经是同一句话了** —— 再追加一条，
-        // 就变成「B」显示两次。
-        //
-        // 触发条件很常见：模型先吐「B」，隔一会才吐「\n」。
-        // 前面那句"结束时不要再定稿一次"只挡住了整段结束的那一刻，
-        // 挡不住**每一行**的这一下。用户的原话是
-        // 「检查一下你发的和我发的是不是一样的，加了个符号之类的，一样的删掉一个」。
-        if let index = messages.indices.last,
-           messages[index].role == .assistant,
-           Self.isSameLine(messages[index].text, trimmed) {
+    /// 老入口：定稿**当前会话**的最后一条。
+    func finishStreamingLine(_ text: String) {
+        finishStreamingLine(text, for: currentID)
+    }
+
+    /// 定稿逻辑本体 —— 不关心 `list` 属于谁，只操作传进来的那份。
+    ///
+    /// ⚠️ **下面那个 `isSameLine` 分支是「她每句话都说两遍」的真凶。**
+    ///
+    /// 她正在吐的那半句是靠 `replaceLast` **实时写在最后一条上**的
+    /// （见 ChatView.flushLines）。所以当模型接着吐出一个换行、这一行被
+    /// 正式定稿时，屏幕上那条**已经是同一句话了** —— 再追加一条，
+    /// 就变成「B」显示两次。
+    ///
+    /// 触发条件很常见：模型先吐「B」，隔一会才吐「\n」。
+    /// 前面那句"结束时不要再定稿一次"只挡住了整段结束的那一刻，
+    /// 挡不住**每一行**的这一下。用户的原话是
+    /// 「检查一下你发的和我发的是不是一样的，加了个符号之类的，一样的删掉一个」。
+    private func finishStreamingLineInPlace(_ list: inout [ChatMessage], _ trimmed: String) {
+        if let index = list.indices.last,
+           list[index].role == .assistant,
+           Self.isSameLine(list[index].text, trimmed) {
             // ⚠️ **顺手把最后一条换成定稿版**（2026-10-01 加）。
             // 屏幕上那半句可能带着首尾空白（模型爱在行首留空格），
             // 而 `isSameLine` 洗掉空白之后照样判成"同一条"。
             // 只补空占位、不覆盖的话，带空格的那版就永久留在聊天气泡里了。
             // 覆盖成 `trimmed` 是安全的 —— 两边去空白后本来就相等。
-            messages[index].text = trimmed
+            list[index].text = trimmed
             // 定稿的动作跳过，但**空占位必须补上** —— 不补的话下一条
             // 半句会直接覆盖掉刚定稿的这一条。
-            messages.append(ChatMessage(role: .assistant, text: ""))
+            list.append(ChatMessage(role: .assistant, text: ""))
             return
         }
 
-        if let index = messages.indices.last,
-           messages[index].role == .assistant,
-           messages[index].text.isEmpty {
-            messages[index].text = trimmed
+        if let index = list.indices.last,
+           list[index].role == .assistant,
+           list[index].text.isEmpty {
+            list[index].text = trimmed
         } else {
-            messages.append(ChatMessage(role: .assistant, text: trimmed))
+            list.append(ChatMessage(role: .assistant, text: trimmed))
         }
         // 再开一条空占位，接着收下一行
-        messages.append(ChatMessage(role: .assistant, text: ""))
+        list.append(ChatMessage(role: .assistant, text: ""))
     }
 
     /// 出错或被打断时，把没内容的占位消息扔掉。
-    func removeLastIfEmpty() {
-        if let last = messages.last, last.text.isEmpty {
-            messages.removeLast()
-            save()
+    ///
+    /// ⭐ 群聊（2026-10）：加 `for owner` 版本 —— 群生成中途用户切走时，
+    ///    出错清理也必须清**群那份**，不能清到当前会话（别人的）头上。
+    func removeLastIfEmpty(for owner: UUID?) {
+        guard let owner else {
+            if let last = messages.last, last.text.isEmpty {
+                messages.removeLast()
+                save()
+            }
+            return
         }
+        if owner == currentID {
+            if let last = messages.last, last.text.isEmpty {
+                messages.removeLast()
+                save()
+            }
+            return
+        }
+        guard var list = byContact[owner], let last = list.last, last.text.isEmpty else { return }
+        list.removeLast()
+        byContact[owner] = list
+        scheduleWrite()
+    }
+
+    /// 老入口：清**当前会话**的空占位。
+    func removeLastIfEmpty() {
+        removeLastIfEmpty(for: currentID)
     }
 
     /// 清空**当前联系人**的对话。别的联系人不受影响。
@@ -464,6 +631,16 @@ final class ChatStore: ObservableObject {
     func lastMessage(for id: UUID) -> ChatMessage? {
         let list = currentID == id ? messages : (byContact[id] ?? [])
         return list.last { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// ⭐ 群聊（2026-10）：按 owner 取某个会话的**整份**消息。
+    ///
+    /// 群生成期间用户可能切到别的会话 —— 那时 `ChatStore.shared.messages` 已经
+    /// 是别人那份了。拼给模型的群历史必须**只取群自己这份**，否则这个 AI 会读着
+    /// 别人的聊天记录说话。`currentID` 只用来判「是不是当前这份」。
+    func history(for owner: UUID) -> [ChatMessage] {
+        if owner == currentID { return messages }
+        return byContact[owner] ?? []
     }
 
     // MARK: - 存档

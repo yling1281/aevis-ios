@@ -272,14 +272,14 @@ final class AdminStore: ObservableObject {
 
     /// 发码。返回发出来的那些（登录页要把它显示出来给用户复制）。
     @discardableResult
-    func issueCodes(count: Int, note: String) async -> [String] {
+    func issueCodes(count: Int, note: String, duration: Int = 0) async -> [String] {
         guard isSignedIn else { return [] }
         busy = true
         defer { busy = false }
         do {
             let reply: IssuedCodes = try await AdminAPI.call(
                 "/api/admin/issue_codes", method: "POST",
-                body: ["count": count, "note": note], token: token
+                body: ["count": count, "note": note, "duration": duration], token: token
             )
             await refreshAll()
             return reply.codes ?? []
@@ -308,14 +308,16 @@ final class AdminStore: ObservableObject {
 
     /// 生成解锁码（人工收款那条路：他手动发码）。
     @discardableResult
-    func issueUnlockCodes(count: Int, note: String, price: String) async -> [String] {
+    func issueUnlockCodes(count: Int, note: String, price: String,
+                          duration: Int = 0) async -> [String] {
         guard isSignedIn else { return [] }
         busy = true
         defer { busy = false }
         do {
             let reply: IssuedUnlockCodes = try await AdminAPI.call(
                 "/api/admin/unlock/new", method: "POST",
-                body: ["count": count, "note": note, "price": price], token: token
+                body: ["count": count, "note": note, "price": price, "duration": duration],
+                token: token
             )
             await refreshAll()
             return reply.codes ?? []

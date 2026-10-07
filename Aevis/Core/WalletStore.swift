@@ -31,6 +31,25 @@ import SwiftUI
 /// ⚠️ 用同一个 enum 收口，避免"两个方向各写一套函数"写歪。
 enum ClosePayDirection { case mine, ta }
 
+// MARK: - 「按联系人分存」要用的键（放**文件级**，不放类里）
+//
+// ⚠️ 为什么不放 `WalletStore` 里：这个类是 `@MainActor` 的，静态成员默认也吃
+//    主 actor 隔离；而 `BackupableStore.exportBackup()/importBackup()` 是
+//    **nonisolated** 的，要在任意线程上直接读写 UserDefaults —— 常量搬到文件级
+//    就不用到处打 `nonisolated` 补丁了（值都是 Sendable 的 String）。
+
+/// 某个联系人钱包 blob 的键前缀。用 `.v2.` 把新结构跟老扁平键**彻底隔开** ——
+/// 老键（`aevis.wallet.mine` 那种）一个不动，只在第一次认人时读一次做迁移。
+private let walletBlobPrefix = "aevis.wallet.v2."
+
+/// 某个联系人的钱包 blob 键。
+private func walletBlobKey(_ id: UUID) -> String {
+    walletBlobPrefix + id.uuidString
+}
+
+/// 老扁平键迁移过没有。认过一次就落盘置位，免得每切一次人搬一遍。
+private let walletLegacyMigratedKey = "aevis.wallet.v2.legacyMigrated"
+
 @MainActor
 final class WalletStore: ObservableObject {
 
@@ -60,12 +79,12 @@ final class WalletStore: ObservableObject {
 
     /// 我的余额。默认给个数，别让人一开始看到 0 觉得是坏的。
     @Published var myBalance: Double {
-        didSet { UserDefaults.standard.set(myBalance, forKey: Key.mine) }
+        didSet { persist() }
     }
 
     /// ta 的余额。ta也有钱包（用户明确要的）。
     @Published var taBalance: Double {
-        didSet { UserDefaults.standard.set(taBalance, forKey: Key.theirs) }
+        didSet { persist() }
     }
 
     /// 流水，**新的在前**。只由 `record()` 改。
@@ -82,32 +101,32 @@ final class WalletStore: ObservableObject {
 
     /// 每日发放总开关。
     @Published var bankEnabled: Bool {
-        didSet { UserDefaults.standard.set(bankEnabled, forKey: Key.bankEnabled) }
+        didSet { persist() }
     }
 
     /// 每天发多少钱。
     @Published var bankAmount: Double {
-        didSet { UserDefaults.standard.set(bankAmount, forKey: Key.bankAmount) }
+        didSet { persist() }
     }
 
     /// 发到哪一侧："her"（ta的卡）/ "me"（我的卡）/ "both"（两张卡都发）。
     @Published var bankTarget: String {
-        didSet { UserDefaults.standard.set(bankTarget, forKey: Key.bankTarget) }
+        didSet { persist() }
     }
 
     /// 最后一次发放是哪天（本地日期 `yyyy-MM-dd`）。空串 = 从来没发过。
     @Published private(set) var bankLastDay: String = "" {
-        didSet { UserDefaults.standard.set(bankLastDay, forKey: Key.bankLastDay) }
+        didSet { persist() }
     }
 
     /// 家庭共享：打开后每日发放进**共享金库**，不单独进谁的卡。
     @Published var bankShared: Bool {
-        didSet { UserDefaults.standard.set(bankShared, forKey: Key.bankShared) }
+        didSet { persist() }
     }
 
     /// 家庭共享金库的余额。
     @Published var sharedBalance: Double {
-        didSet { UserDefaults.standard.set(sharedBalance, forKey: Key.bankSharedBalance) }
+        didSet { persist() }
     }
 
     // MARK: - 亲密付的设置（两个方向各自独立）
@@ -118,40 +137,71 @@ final class WalletStore: ObservableObject {
 
     /// 我给ta开的亲密付。
     @Published var closePayMineEnabled: Bool {
-        didSet { UserDefaults.standard.set(closePayMineEnabled, forKey: Key.closePayMineEnabled) }
+        didSet { persist() }
     }
     @Published var closePayMineLimit: Double {
-        didSet { UserDefaults.standard.set(closePayMineLimit, forKey: Key.closePayMineLimit) }
+        didSet { persist() }
     }
     @Published var closePayMinePeriod: String {
-        didSet { UserDefaults.standard.set(closePayMinePeriod, forKey: Key.closePayMinePeriod) }
+        didSet { persist() }
     }
     @Published var closePayMineUsed: Double {
-        didSet { UserDefaults.standard.set(closePayMineUsed, forKey: Key.closePayMineUsed) }
+        didSet { persist() }
     }
     private var closePayMineSince: Double = 0 {
-        didSet { UserDefaults.standard.set(closePayMineSince, forKey: Key.closePayMineSince) }
+        didSet { persist() }
     }
 
     /// ta给我开的亲密付（ta主动给的；用户能关掉）。
     @Published var closePayTaEnabled: Bool {
-        didSet { UserDefaults.standard.set(closePayTaEnabled, forKey: Key.closePayTaEnabled) }
+        didSet { persist() }
     }
     @Published var closePayTaLimit: Double {
-        didSet { UserDefaults.standard.set(closePayTaLimit, forKey: Key.closePayTaLimit) }
+        didSet { persist() }
     }
     @Published var closePayTaPeriod: String {
-        didSet { UserDefaults.standard.set(closePayTaPeriod, forKey: Key.closePayTaPeriod) }
+        didSet { persist() }
     }
     @Published var closePayTaUsed: Double {
-        didSet { UserDefaults.standard.set(closePayTaUsed, forKey: Key.closePayTaUsed) }
+        didSet { persist() }
     }
     private var closePayTaSince: Double = 0 {
-        didSet { UserDefaults.standard.set(closePayTaSince, forKey: Key.closePayTaSince) }
+        didSet { persist() }
     }
 
     /// 每日发放的轮询定时器。**挂在 WalletStore 自己内部**（不碰 App/ 目录）。
     private var dailyTimer: Timer?
+
+    // MARK: - 按联系人分存（2026-10）
+
+    /// 现在这份钱包属于谁（联系人 id）。
+    private var owner: UUID?
+    /// 切人装载 / 搬家导入期间**只读不写**（漏了就是"搬家搬丢"，老 bug）。
+    private var loading = false
+
+    /// 一个联系人的**整份钱包**。存 UserDefaults 的 blob、进备份，都走它。
+    /// 老版本是 20 多枚扁平键（`aevis.wallet.mine` 那种），现在一个人一份。
+    struct OwnerData: Codable {
+        var mine: Double = 520.00
+        var theirs: Double = 1314.00
+        var entries: [Entry] = []
+        var bankEnabled: Bool = true
+        var bankAmount: Double = 88.00
+        var bankTarget: String = "her"
+        var bankLastDay: String = ""
+        var bankShared: Bool = false
+        var bankSharedBalance: Double = 0
+        var closePayMineEnabled: Bool = false
+        var closePayMineLimit: Double = 2000.00
+        var closePayMinePeriod: String = "month"
+        var closePayMineUsed: Double = 0
+        var closePayMineSince: Double = 0
+        var closePayTaEnabled: Bool = false
+        var closePayTaLimit: Double = 2000.00
+        var closePayTaPeriod: String = "month"
+        var closePayTaUsed: Double = 0
+        var closePayTaSince: Double = 0
+    }
 
     private enum Key {
         static let mine = "aevis.wallet.mine"
@@ -186,47 +236,242 @@ final class WalletStore: ObservableObject {
     static let quickAmounts: [Double] = [5.20, 13.14, 52.00, 88.88, 200.00]
 
     private init() {
-        let defaults = UserDefaults.standard
-        myBalance = defaults.object(forKey: Key.mine) as? Double ?? 520.00
-        taBalance = defaults.object(forKey: Key.theirs) as? Double ?? 1314.00
+        // 只铺默认值 —— 真正的钱在 `setOwner` 里按联系人装载（见 `applyOwner`）。
+        // 老版本那 20 多枚扁平键的迁移也在那一步**一次性**做掉。
+        //
+        // ⚠️ 这里**别**再读扁平键、也**别**调 `grantDailyIfNeeded()`：
+        //    此刻还没有 owner（`owner == nil`），`persist()` 会直接返回，
+        //    发了也存不下来（等于白发）。每日发放改到 `applyOwner` 里补。
+        myBalance = 520.00
+        taBalance = 1314.00
+        bankEnabled = true
+        bankAmount = 88.00
+        bankTarget = "her"
+        bankLastDay = ""
+        bankShared = false
+        sharedBalance = 0
+        closePayMineEnabled = false
+        closePayMineLimit = 2000.00
+        closePayMinePeriod = "month"
+        closePayMineUsed = 0
+        closePayMineSince = 0
+        closePayTaEnabled = false
+        closePayTaLimit = 2000.00
+        closePayTaPeriod = "month"
+        closePayTaUsed = 0
+        closePayTaSince = 0
 
-        if let data = defaults.data(forKey: Key.entries),
-           let list = try? JSONDecoder().decode([Entry].self, from: data) {
-            entries = list
-        }
+        BlackBox.log("钱包：初始化（等第一个联系人进来再装载）")
 
-        // 虚拟银行 / 亲密付的设置（全新键，老用户拿默认值）
-        bankEnabled = defaults.object(forKey: Key.bankEnabled) as? Bool ?? true
-        bankAmount = defaults.object(forKey: Key.bankAmount) as? Double ?? 88.00
-        let storedTarget = defaults.string(forKey: Key.bankTarget) ?? "her"
-        bankTarget = (storedTarget == "me" || storedTarget == "both") ? storedTarget : "her"
-        bankLastDay = defaults.string(forKey: Key.bankLastDay) ?? ""
-        bankShared = defaults.object(forKey: Key.bankShared) as? Bool ?? false
-        sharedBalance = defaults.object(forKey: Key.bankSharedBalance) as? Double ?? 0
-
-        closePayMineEnabled = defaults.object(forKey: Key.closePayMineEnabled) as? Bool ?? false
-        closePayMineLimit = defaults.object(forKey: Key.closePayMineLimit) as? Double ?? 2000.00
-        let minePeriod = defaults.string(forKey: Key.closePayMinePeriod) ?? "month"
-        closePayMinePeriod = (minePeriod == "day") ? "day" : "month"
-        closePayMineUsed = defaults.object(forKey: Key.closePayMineUsed) as? Double ?? 0
-        closePayMineSince = defaults.object(forKey: Key.closePayMineSince) as? Double ?? 0
-
-        closePayTaEnabled = defaults.object(forKey: Key.closePayTaEnabled) as? Bool ?? false
-        closePayTaLimit = defaults.object(forKey: Key.closePayTaLimit) as? Double ?? 2000.00
-        let taPeriod = defaults.string(forKey: Key.closePayTaPeriod) ?? "month"
-        closePayTaPeriod = (taPeriod == "day") ? "day" : "month"
-        closePayTaUsed = defaults.object(forKey: Key.closePayTaUsed) as? Double ?? 0
-        closePayTaSince = defaults.object(forKey: Key.closePayTaSince) as? Double ?? 0
-
-        BlackBox.log("钱包：我 \(Self.money(myBalance)) / ta \(Self.money(taBalance))"
-                     + " · 流水 \(entries.count) 笔")
-
-        // ⭐ 每日发放：启动先补一次（关机/后台过夜落下的那一笔补上），
-        //    之后每 60 秒查一次。定时器挂在 WalletStore 自己内部，
+        // ⭐ 每日发放：之后每 60 秒查一次。定时器挂在 WalletStore 自己内部，
         //    **绝不碰 App/ 目录**（那边别人在同时改）。
-        grantDailyIfNeeded()
+        //    启动时那一次补发由 `applyOwner` 负责（要有 owner 才发得出去）。
         dailyTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.grantDailyIfNeeded() }
+        }
+    }
+
+    // MARK: - 切人 / 存档（按联系人分存，2026-10）
+
+    /// 切到某个联系人。`PersonaStore.broadcastSwitch` 切人时来调它。
+    ///
+    /// ⚠️ `WalletStore` 整个类是 `@MainActor`，而调用点
+    ///    （`PersonaStore.broadcastSwitch` / `remove`）是**非隔离**的 ——
+    ///    直接声明成 `@MainActor` 会编译不过。所以这里标 `nonisolated`，
+    ///    内部自己判断要不要跳主线程：已经在主线程就 `assumeIsolated` **就地**
+    ///    跑（切人是同步语义，界面得立刻换过来），万一是别的线程就甩回主 actor。
+    nonisolated func setOwner(_ id: UUID?) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { self.applyOwner(id) }
+        } else {
+            Task { @MainActor in self.applyOwner(id) }
+        }
+    }
+
+    /// 删联系人时把某个人的整份钱包扔掉。
+    nonisolated func forget(_ id: UUID) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { self.applyForget(id) }
+        } else {
+            Task { @MainActor in self.applyForget(id) }
+        }
+    }
+
+    @MainActor
+    private func applyOwner(_ id: UUID?) {
+        // 切人前先把当前这份写回字典，免得丢改动。
+        stash()
+        owner = id
+
+        guard let id else {
+            // 一个联系人都没有 —— 给一份默认的，别让界面看着像坏的。
+            applyData(OwnerData())
+            return
+        }
+
+        // 先看内存缓存，再看落盘的 blob。
+        var data = byOwner[id] ?? Self.readBlob(id)
+
+        // 老版本（单人）那 20 多枚扁平键 → 认给**第一个进来的人**。
+        // 只认一次（`walletLegacyMigratedKey` 落盘记住），免得每切一次人搬一遍、
+        // 把别人后来改的数据又盖回老的。
+        if data == nil, !UserDefaults.standard.bool(forKey: walletLegacyMigratedKey) {
+            data = Self.legacyData()
+            UserDefaults.standard.set(true, forKey: walletLegacyMigratedKey)
+        }
+
+        let resolved = data ?? OwnerData()
+        byOwner[id] = resolved
+        applyData(resolved)
+
+        // ⭐ 启动 / 切人后补一次每日发放（原来在 `init` 里做，那时还没有 owner）。
+        //    `grantDailyIfNeeded` 内部有 `bankLastDay` 把关 —— 同一个联系人一天只发一次。
+        grantDailyIfNeeded()
+    }
+
+    @MainActor
+    private func applyForget(_ id: UUID) {
+        byOwner[id] = nil
+        UserDefaults.standard.removeObject(forKey: walletBlobKey(id))
+        if owner == id {
+            owner = nil
+            applyData(OwnerData())
+        }
+    }
+
+    /// 把当前 `@Published` 那份收进内存字典（**不落盘**）。
+    private func stash() {
+        guard !loading else { return }
+        guard let owner else { return }
+        byOwner[owner] = captureData()
+    }
+
+    /// 任何一处 `@Published` 改动都从这里落盘 —— 取代老版本"每枚扁平键各写各的"。
+    ///
+    /// 🔴 写的一定是**当前 owner**：`captureData()` 抓的就是界面上这份，
+    ///    而 `owner` 只可能被 `applyOwner`（同一个主 actor）改 —— 两者永远同步。
+    ///    `dailyTimer` 后台触发时跑的 `grantDailyIfNeeded()` 改的也是这几个
+    ///    `@Published`，于是它落盘的方向自然也是**当前联系人**，不会写到别人账上。
+    private func persist() {
+        guard !loading else { return }
+        guard let owner else { return }
+        let data = captureData()
+        byOwner[owner] = data
+        Self.writeBlob(owner, data)
+    }
+
+    /// 当前这份钱包（界面状态）打包成一份 `OwnerData`。
+    private func captureData() -> OwnerData {
+        var data = OwnerData()
+        data.mine = myBalance
+        data.theirs = taBalance
+        data.entries = entries
+        data.bankEnabled = bankEnabled
+        data.bankAmount = bankAmount
+        data.bankTarget = bankTarget
+        data.bankLastDay = bankLastDay
+        data.bankShared = bankShared
+        data.bankSharedBalance = sharedBalance
+        data.closePayMineEnabled = closePayMineEnabled
+        data.closePayMineLimit = closePayMineLimit
+        data.closePayMinePeriod = closePayMinePeriod
+        data.closePayMineUsed = closePayMineUsed
+        data.closePayMineSince = closePayMineSince
+        data.closePayTaEnabled = closePayTaEnabled
+        data.closePayTaLimit = closePayTaLimit
+        data.closePayTaPeriod = closePayTaPeriod
+        data.closePayTaUsed = closePayTaUsed
+        data.closePayTaSince = closePayTaSince
+        return data
+    }
+
+    /// 一份 `OwnerData` 铺到界面状态。**全程 `loading` 挡写** —— 否则下面每一次
+    /// 赋值都会触发 `didSet → persist()`，把刚载入的又写回磁盘（搬家场景会出事）。
+    private func applyData(_ data: OwnerData) {
+        loading = true
+        defer { loading = false }
+        myBalance = data.mine
+        taBalance = data.theirs
+        entries = data.entries
+        bankEnabled = data.bankEnabled
+        bankAmount = data.bankAmount
+        bankTarget = data.bankTarget
+        bankLastDay = data.bankLastDay
+        bankShared = data.bankShared
+        sharedBalance = data.bankSharedBalance
+        closePayMineEnabled = data.closePayMineEnabled
+        closePayMineLimit = data.closePayMineLimit
+        closePayMinePeriod = data.closePayMinePeriod
+        closePayMineUsed = data.closePayMineUsed
+        closePayMineSince = data.closePayMineSince
+        closePayTaEnabled = data.closePayTaEnabled
+        closePayTaLimit = data.closePayTaLimit
+        closePayTaPeriod = data.closePayTaPeriod
+        closePayTaUsed = data.closePayTaUsed
+        closePayTaSince = data.closePayTaSince
+    }
+
+    /// 老版本那 20 多枚扁平键 → 一份 `OwnerData`（**只读，不动老键**）。
+    /// 只用来做一次性迁移；读不出来的项一律退回 `OwnerData` 的默认值。
+    private static func legacyData() -> OwnerData {
+        let defaults = UserDefaults.standard
+        var data = OwnerData()
+        data.mine = defaults.object(forKey: Key.mine) as? Double ?? data.mine
+        data.theirs = defaults.object(forKey: Key.theirs) as? Double ?? data.theirs
+        if let raw = defaults.data(forKey: Key.entries),
+           let list = try? JSONDecoder().decode([Entry].self, from: raw) {
+            data.entries = list
+        }
+        data.bankEnabled = defaults.object(forKey: Key.bankEnabled) as? Bool ?? data.bankEnabled
+        data.bankAmount = defaults.object(forKey: Key.bankAmount) as? Double ?? data.bankAmount
+        let target = defaults.string(forKey: Key.bankTarget) ?? data.bankTarget
+        data.bankTarget = (target == "me" || target == "both") ? target : "her"
+        data.bankLastDay = defaults.string(forKey: Key.bankLastDay) ?? data.bankLastDay
+        data.bankShared = defaults.object(forKey: Key.bankShared) as? Bool ?? data.bankShared
+        data.bankSharedBalance =
+            defaults.object(forKey: Key.bankSharedBalance) as? Double ?? data.bankSharedBalance
+        data.closePayMineEnabled =
+            defaults.object(forKey: Key.closePayMineEnabled) as? Bool ?? data.closePayMineEnabled
+        data.closePayMineLimit =
+            defaults.object(forKey: Key.closePayMineLimit) as? Double ?? data.closePayMineLimit
+        let minePeriod = defaults.string(forKey: Key.closePayMinePeriod) ?? data.closePayMinePeriod
+        data.closePayMinePeriod = (minePeriod == "day") ? "day" : "month"
+        data.closePayMineUsed =
+            defaults.object(forKey: Key.closePayMineUsed) as? Double ?? data.closePayMineUsed
+        data.closePayMineSince =
+            defaults.object(forKey: Key.closePayMineSince) as? Double ?? data.closePayMineSince
+        data.closePayTaEnabled =
+            defaults.object(forKey: Key.closePayTaEnabled) as? Bool ?? data.closePayTaEnabled
+        data.closePayTaLimit =
+            defaults.object(forKey: Key.closePayTaLimit) as? Double ?? data.closePayTaLimit
+        let taPeriod = defaults.string(forKey: Key.closePayTaPeriod) ?? data.closePayTaPeriod
+        data.closePayTaPeriod = (taPeriod == "day") ? "day" : "month"
+        data.closePayTaUsed =
+            defaults.object(forKey: Key.closePayTaUsed) as? Double ?? data.closePayTaUsed
+        data.closePayTaSince =
+            defaults.object(forKey: Key.closePayTaSince) as? Double ?? data.closePayTaSince
+        return data
+    }
+
+    /// 读某个联系人落盘的 blob。
+    private nonisolated static func readBlob(_ id: UUID) -> OwnerData? {
+        guard let raw = UserDefaults.standard.data(forKey: walletBlobKey(id)) else { return nil }
+        return try? JSONDecoder().decode(OwnerData.self, from: raw)
+    }
+
+    /// 写某个联系人落盘的 blob。
+    private nonisolated static func writeBlob(_ id: UUID, _ data: OwnerData) {
+        guard let raw = try? JSONEncoder().encode(data) else { return }
+        UserDefaults.standard.set(raw, forKey: walletBlobKey(id))
+    }
+
+    /// 本机**现存的**所有联系人钱包 blob 键（按 `walletBlobPrefix` + 合法 uuid 认）。
+    /// ⚠️ `walletLegacyMigratedKey` 虽然也带前缀，但后缀不是 uuid ⇒ 认不出来、会被跳过。
+    private nonisolated static func existingBlobKeys() -> [String] {
+        UserDefaults.standard.dictionaryRepresentation().keys.filter { key in
+            guard key.hasPrefix(walletBlobPrefix) else { return false }
+            let suffix = String(key.dropFirst(walletBlobPrefix.count))
+            return UUID(uuidString: suffix) != nil
         }
     }
 
@@ -246,9 +491,7 @@ final class WalletStore: ObservableObject {
             list.removeLast(list.count - Self.maxEntries)
         }
         entries = list
-        if let data = try? JSONEncoder().encode(list) {
-            UserDefaults.standard.set(data, forKey: Key.entries)
-        }
+        persist()
         BlackBox.log("钱包流水：\(value > 0 ? "+" : "")\(String(format: "%.2f", value)) \(note)")
     }
 
@@ -583,10 +826,12 @@ final class WalletStore: ObservableObject {
     /// 重置成默认（设置里给个「恢复默认」用得上，也方便演示）。
     /// 流水也一起清掉 —— 余额都回到出厂了，留着旧账单只会对不上。
     func reset() {
+        // ⚠️ 只重置**当前联系人**这一份 —— 别人账上的钱一分不动。
+        //    `loading` 挡掉中途那些 `didSet` 触发的 `persist()`，最后统一落一次盘。
+        loading = true
         myBalance = 520.00
         taBalance = 1314.00
         entries = []
-        UserDefaults.standard.removeObject(forKey: Key.entries)
         // 余额都回出厂了，共享金库和"本期已用"也一起回零 ——
         // 免得出现"账单没了、但共享余额还挂着一笔对不上的钱"。
         sharedBalance = 0
@@ -594,6 +839,8 @@ final class WalletStore: ObservableObject {
         closePayTaUsed = 0
         // 清掉"今天已经发过"的记录，演示时能当场再看一次每日发放。
         bankLastDay = ""
+        loading = false
+        persist()
     }
 
     /// 从 `UserDefaults` 重新读一遍余额和流水。
@@ -601,39 +848,10 @@ final class WalletStore: ObservableObject {
     /// ⭐ 2026-10-04：搬家恢复时用。`importBackup` 是**非隔离**的（见文件末尾），
     ///    它只写 UserDefaults，写完跳回主线程调这个方法，把 `@Published` 刷新过来。
     func reloadFromDefaults() {
-        let defaults = UserDefaults.standard
-        myBalance = defaults.object(forKey: Key.mine) as? Double ?? 520.00
-        taBalance = defaults.object(forKey: Key.theirs) as? Double ?? 1314.00
-        if let data = defaults.data(forKey: Key.entries),
-           let list = try? JSONDecoder().decode([Entry].self, from: data) {
-            entries = list
-        } else {
-            entries = []
-        }
-
-        // ⭐ 2026-10-05：虚拟银行 / 亲密付的设置也一起刷回来 —— 不然 `importBackup`
-        //    把设置写进了 UserDefaults，界面上的开关 / 额度还是旧值（只有余额和流水被刷新）。
-        bankEnabled = defaults.object(forKey: Key.bankEnabled) as? Bool ?? true
-        bankAmount = defaults.object(forKey: Key.bankAmount) as? Double ?? 88.00
-        let storedTarget = defaults.string(forKey: Key.bankTarget) ?? "her"
-        bankTarget = (storedTarget == "me" || storedTarget == "both") ? storedTarget : "her"
-        bankLastDay = defaults.string(forKey: Key.bankLastDay) ?? ""
-        bankShared = defaults.object(forKey: Key.bankShared) as? Bool ?? false
-        sharedBalance = defaults.object(forKey: Key.bankSharedBalance) as? Double ?? 0
-
-        closePayMineEnabled = defaults.object(forKey: Key.closePayMineEnabled) as? Bool ?? false
-        closePayMineLimit = defaults.object(forKey: Key.closePayMineLimit) as? Double ?? 2000.00
-        let minePeriod = defaults.string(forKey: Key.closePayMinePeriod) ?? "month"
-        closePayMinePeriod = (minePeriod == "day") ? "day" : "month"
-        closePayMineUsed = defaults.object(forKey: Key.closePayMineUsed) as? Double ?? 0
-        closePayMineSince = defaults.object(forKey: Key.closePayMineSince) as? Double ?? 0
-
-        closePayTaEnabled = defaults.object(forKey: Key.closePayTaEnabled) as? Bool ?? false
-        closePayTaLimit = defaults.object(forKey: Key.closePayTaLimit) as? Double ?? 2000.00
-        let taPeriod = defaults.string(forKey: Key.closePayTaPeriod) ?? "month"
-        closePayTaPeriod = (taPeriod == "day") ? "day" : "month"
-        closePayTaUsed = defaults.object(forKey: Key.closePayTaUsed) as? Double ?? 0
-        closePayTaSince = defaults.object(forKey: Key.closePayTaSince) as? Double ?? 0
+        guard let owner else { return }
+        let data = Self.readBlob(owner) ?? OwnerData()
+        byOwner[owner] = data
+        applyData(data)
     }
 
     /// 钱怎么显示。**两位小数 + ¥**，全 App 一处说了算。
@@ -642,132 +860,132 @@ final class WalletStore: ObservableObject {
     }
 }
 
-// MARK: - 进网盘备份（2026-10-04）
+// MARK: - 进网盘备份 / 搬家（按联系人分存）
 
-/// 让虚拟银行跟**聊天记录一起进网盘** —— 老板明确的「所有的东西都存百度网盘」。
+/// 让钱包跟**聊天记录一起进网盘** —— 老板明确的「所有的东西都存百度网盘」。
 ///
 /// ⚠️ 这个钱包本身是 `@MainActor` 的，而 `BackupableStore` 的方法是**同步、
-///    非隔离**的（`BackupService` 会在非主线程的路径上调到）。所以这三个方法
+///    非隔离**的（`BackupService` 会在非主线程的路径上调到）。所以这里的方法
 ///    一律标 `nonisolated`，**只碰 `UserDefaults`**（它自带线程安全），
-///    绝不碰 `@Published` —— 导入之后跳回主线程再刷新。
+///    绝不碰 `@Published` —— 导入之后跳回主线程（`reloadFromDefaults`）再刷新。
 ///
-/// ⚠️ 键名一个都不能改（`aevis.wallet.mine` / `.theirs` / `.entries`）——
-///    那是已经落盘的数据，改了老用户的钱包当场清零。
+/// ## 包里的结构（2026-10 起）
+/// 老版本是**一枚扁平键一个人**那 20 多个 key；现在改成**一个人一份 blob**
+/// （`aevis.wallet.v2.<uuid>`）。导出 / 恢复都以「一份 `byOwner` 字典」为准：
+///   · 新备份：`Archive.byOwner` 装全部人；下面那些老段是 nil（`encodeIfPresent` 省略）。
+///   · 老备份：`byOwner` 缺键 ⇒ nil，`mine/theirs/entries` 有值 ⇒ 认到搬过来的 active 名下。
+///   ⚠️ 老扁平键（`aevis.wallet.mine` 那种）**一个没删**，只在本机第一次认人时
+///      读一次做迁移（见 `applyOwner` / `legacyData`）。
 extension WalletStore: BackupableStore {
 
     /// 包里这段的名字。**定了就别改** —— 改了的话老备份恢复不回来。
     nonisolated var backupName: String { "wallet" }
 
-    /// 钱包的存档结构。`Entry` 复用类里那个。
+    /// 钱包的备份结构。
+    ///
+    /// 🔴 **所有可能缺键的段一律 `Optional + 默认 nil`** —— Swift 合成的
+    ///    `Decodable` **不吃属性默认值**，非可选项缺键会直接抛 `keyNotFound`
+    ///    （老备份整条解不出）。只有可选项才走 `decodeIfPresent` → nil。
+    ///    ⚠️ `byOwner` 也必须可选项：老备份里根本没有这个键。
     private struct Archive: Codable {
-        var mine: Double = 520.00
-        var theirs: Double = 1314.00
-        var entries: [Entry] = []
+        /// 新结构，一个人一份。老备份没有这个键 ⇒ nil。
+        var byOwner: [String: OwnerData]? = nil
 
-        // ⭐ 2026-10-05 新增：虚拟银行 + 亲密付的设置也要跟着进网盘。
-        //    ⚠️ 一律 **Optional + 默认值 `nil`** —— 老备份里没有这些键，
-        //       这样才能「缺键 → nil」地解出来（不带默认值会让老备份整条解不出）。
-        //    导入时对 `nil` 一律**跳过**（保留现状），而不是写回成 0 / false。
-        // 虚拟银行（每日发放 + 家庭共享）
+        // —— 下面这些**只在读老备份（单人）时非空** ——
+        var mine: Double? = nil
+        var theirs: Double? = nil
+        var entries: [Entry]? = nil
+
         var bankEnabled: Bool? = nil
         var bankAmount: Double? = nil
         var bankTarget: String? = nil
         var bankLastDay: String? = nil
         var bankShared: Bool? = nil
         var bankSharedBalance: Double? = nil
-        // 亲密付 · 方向一（我给ta开 / 扣我的）
+
         var closePayMineEnabled: Bool? = nil
         var closePayMineLimit: Double? = nil
         var closePayMinePeriod: String? = nil
         var closePayMineUsed: Double? = nil
         var closePayMineSince: Double? = nil
-        // 亲密付 · 方向二（ta给我开 / 扣ta的）
+
         var closePayTaEnabled: Bool? = nil
         var closePayTaLimit: Double? = nil
         var closePayTaPeriod: String? = nil
         var closePayTaUsed: Double? = nil
         var closePayTaSince: Double? = nil
+
+        /// 老备份（单人）那几段 → 一份 `OwnerData`。缺的项退回默认值。
+        var legacyOwnerData: OwnerData {
+            var data = OwnerData()
+            if let mine { data.mine = mine }
+            if let theirs { data.theirs = theirs }
+            if let entries { data.entries = entries }
+            if let bankEnabled { data.bankEnabled = bankEnabled }
+            if let bankAmount { data.bankAmount = bankAmount }
+            if let bankTarget { data.bankTarget = bankTarget }
+            if let bankLastDay { data.bankLastDay = bankLastDay }
+            if let bankShared { data.bankShared = bankShared }
+            if let bankSharedBalance { data.bankSharedBalance = bankSharedBalance }
+            if let closePayMineEnabled { data.closePayMineEnabled = closePayMineEnabled }
+            if let closePayMineLimit { data.closePayMineLimit = closePayMineLimit }
+            if let closePayMinePeriod { data.closePayMinePeriod = closePayMinePeriod }
+            if let closePayMineUsed { data.closePayMineUsed = closePayMineUsed }
+            if let closePayMineSince { data.closePayMineSince = closePayMineSince }
+            if let closePayTaEnabled { data.closePayTaEnabled = closePayTaEnabled }
+            if let closePayTaLimit { data.closePayTaLimit = closePayTaLimit }
+            if let closePayTaPeriod { data.closePayTaPeriod = closePayTaPeriod }
+            if let closePayTaUsed { data.closePayTaUsed = closePayTaUsed }
+            if let closePayTaSince { data.closePayTaSince = closePayTaSince }
+            return data
+        }
     }
 
+    /// 导出**所有联系人**的钱包 —— 搬家要搬的是全部，不只当前这个。
+    /// 直接扫 UserDefaults 里现存的 blob 键（nonisolated，读不到内存缓存 `byOwner`）。
     nonisolated func exportBackup() throws -> Data {
-        let defaults = UserDefaults.standard
-        let archive = Archive(
-            mine: defaults.object(forKey: Key.mine) as? Double ?? 520.00,
-            theirs: defaults.object(forKey: Key.theirs) as? Double ?? 1314.00,
-            entries: defaults.data(forKey: Key.entries).flatMap {
-                try? JSONDecoder().decode([Entry].self, from: $0)
-            } ?? [],
-            bankEnabled: defaults.object(forKey: Key.bankEnabled) as? Bool,
-            bankAmount: defaults.object(forKey: Key.bankAmount) as? Double,
-            bankTarget: defaults.string(forKey: Key.bankTarget),
-            bankLastDay: defaults.string(forKey: Key.bankLastDay),
-            bankShared: defaults.object(forKey: Key.bankShared) as? Bool,
-            bankSharedBalance: defaults.object(forKey: Key.bankSharedBalance) as? Double,
-            closePayMineEnabled: defaults.object(forKey: Key.closePayMineEnabled) as? Bool,
-            closePayMineLimit: defaults.object(forKey: Key.closePayMineLimit) as? Double,
-            closePayMinePeriod: defaults.string(forKey: Key.closePayMinePeriod),
-            closePayMineUsed: defaults.object(forKey: Key.closePayMineUsed) as? Double,
-            closePayMineSince: defaults.object(forKey: Key.closePayMineSince) as? Double,
-            closePayTaEnabled: defaults.object(forKey: Key.closePayTaEnabled) as? Bool,
-            closePayTaLimit: defaults.object(forKey: Key.closePayTaLimit) as? Double,
-            closePayTaPeriod: defaults.string(forKey: Key.closePayTaPeriod),
-            closePayTaUsed: defaults.object(forKey: Key.closePayTaUsed) as? Double,
-            closePayTaSince: defaults.object(forKey: Key.closePayTaSince) as? Double
-        )
-        return try JSONEncoder().encode(archive)
+        var flat: [String: OwnerData] = [:]
+        for key in Self.existingBlobKeys() {
+            let suffix = String(key.dropFirst(walletBlobPrefix.count))
+            guard let id = UUID(uuidString: suffix),
+                  let data = Self.readBlob(id) else { continue }
+            flat[suffix] = data
+        }
+        return try JSONEncoder().encode(Archive(byOwner: flat))
     }
 
     nonisolated func importBackup(_ data: Data) throws {
         let archive = try JSONDecoder().decode(Archive.self, from: data)
         let defaults = UserDefaults.standard
-        defaults.set(archive.mine, forKey: Key.mine)
-        defaults.set(archive.theirs, forKey: Key.theirs)
-        if let list = try? JSONEncoder().encode(archive.entries) {
-            defaults.set(list, forKey: Key.entries)
+
+        // ⚠️ 先清掉本机**所有**现存的钱包 blob，再写导入的 —— 导入语义是「覆盖」。
+        //    不清的话，备份里没有的人会残留在本机，看着像"没导干净"。
+        for key in Self.existingBlobKeys() {
+            defaults.removeObject(forKey: key)
         }
-        // ⭐ 2026-10-05：虚拟银行 / 亲密付的设置（老备份是 nil → **不写**，保留现状）。
-        if let value = archive.bankEnabled { defaults.set(value, forKey: Key.bankEnabled) }
-        if let value = archive.bankAmount { defaults.set(value, forKey: Key.bankAmount) }
-        if let value = archive.bankTarget { defaults.set(value, forKey: Key.bankTarget) }
-        if let value = archive.bankLastDay { defaults.set(value, forKey: Key.bankLastDay) }
-        if let value = archive.bankShared { defaults.set(value, forKey: Key.bankShared) }
-        if let value = archive.bankSharedBalance {
-            defaults.set(value, forKey: Key.bankSharedBalance)
+
+        if let imported = archive.byOwner, !imported.isEmpty {
+            // 新备份：逐个人写回各自的 blob。
+            for (key, value) in imported {
+                guard let id = UUID(uuidString: key),
+                      let raw = try? JSONEncoder().encode(value) else { continue }
+                defaults.set(raw, forKey: walletBlobKey(id))
+            }
+        } else if archive.mine != nil || archive.theirs != nil || archive.entries != nil {
+            // 老备份（单人）→ 认到搬过来的那个 active。
+            // `PersonaStore` 先导完通讯录、`activeID` 已就位（见 `BackupService.restore`）。
+            let fallback = PersonaStore.shared.activeID ?? PersonaStore.shared.contacts.first?.id
+            if let fallback, let raw = try? JSONEncoder().encode(archive.legacyOwnerData) {
+                defaults.set(raw, forKey: walletBlobKey(fallback))
+            }
         }
-        if let value = archive.closePayMineEnabled {
-            defaults.set(value, forKey: Key.closePayMineEnabled)
-        }
-        if let value = archive.closePayMineLimit {
-            defaults.set(value, forKey: Key.closePayMineLimit)
-        }
-        if let value = archive.closePayMinePeriod {
-            defaults.set(value, forKey: Key.closePayMinePeriod)
-        }
-        if let value = archive.closePayMineUsed {
-            defaults.set(value, forKey: Key.closePayMineUsed)
-        }
-        if let value = archive.closePayMineSince {
-            defaults.set(value, forKey: Key.closePayMineSince)
-        }
-        if let value = archive.closePayTaEnabled {
-            defaults.set(value, forKey: Key.closePayTaEnabled)
-        }
-        if let value = archive.closePayTaLimit {
-            defaults.set(value, forKey: Key.closePayTaLimit)
-        }
-        if let value = archive.closePayTaPeriod {
-            defaults.set(value, forKey: Key.closePayTaPeriod)
-        }
-        if let value = archive.closePayTaUsed {
-            defaults.set(value, forKey: Key.closePayTaUsed)
-        }
-        if let value = archive.closePayTaSince {
-            defaults.set(value, forKey: Key.closePayTaSince)
-        }
+
+        // 老扁平键从此不再参与 —— 标记迁移过，别让它在切人时又搬一遍盖掉新数据。
+        defaults.set(true, forKey: walletLegacyMigratedKey)
+
         // ⚠️ 界面上的余额 / 流水 / 设置跳回主线程刷新 —— 直接改 @Published 会硬崩。
         Task { @MainActor in
             WalletStore.shared.reloadFromDefaults()
         }
     }
 }
-

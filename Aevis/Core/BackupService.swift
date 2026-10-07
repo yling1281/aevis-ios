@@ -238,7 +238,11 @@ final class BackupService {
          //    （`backupName = "reallife"`），与 `label()` 的 `case "reallife"` 对得上。
          //    ⚠️ 只备份**订单 + 假客服**，**不含**店 / 商品常量 —— 那些是内置的，
          //       由数据层自己重建（见 `RealLifeStore.Archive`）。
-         RealLifeStore.shared]
+         RealLifeStore.shared,
+         // ⭐ 2026-10：群聊也进包 —— 换设备后群还在。
+         //    `GroupStore.swift` 里已补 `extension GroupStore: BackupableStore`
+         //    （`backupName = "groups"`），与 `label()` 的 `case "groups"` 对得上。
+         GroupStore.shared]
     }
 
     /// 恢复收尾：把「现在看着谁」摆到搬过来的那个 activeID 上。
@@ -664,6 +668,8 @@ final class BackupService {
         case "herphone": return "ta 的小手机"
         // ⭐ 2026-10：真实生活（订单 + 假客服）。
         case "reallife": return "真实生活"
+        // ⭐ 2026-10：群聊。
+        case "groups": return "群聊"
         default: return name
         }
     }

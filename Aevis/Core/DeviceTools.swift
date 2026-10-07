@@ -32,6 +32,7 @@ enum ToolCategory: String, CaseIterable, Identifiable {
     case calendar
     case sense
     case web
+    case browser
     case music
     case moment
     case diary
@@ -51,6 +52,7 @@ enum ToolCategory: String, CaseIterable, Identifiable {
         case .calendar: return "日历与提醒"
         case .sense: return "定位 / 天气 / 健康"
         case .web: return "上网搜索与看网页"
+        case .browser: return "浏览器（真的在网页上操作）"
         case .music: return "音乐与一起听"
         case .moment: return "朋友圈"
         case .diary: return "日记"
@@ -70,6 +72,7 @@ enum ToolCategory: String, CaseIterable, Identifiable {
         case .calendar: return "翻日程、建日程、记提醒"
         case .sense: return "你在哪、什么天气、步数心率睡眠"
         case .web: return "搜索、把网页读出来"
+        case .browser: return "打开真网站、搜索、点、填、翻页；付款必须你本人点"
         case .music: return "搜歌放歌、一起听、看歌词"
         case .moment: return "发朋友圈、翻朋友圈"
         case .diary: return "写日记、翻日记（两个人在一个本子里）"
@@ -86,7 +89,7 @@ enum ToolCategory: String, CaseIterable, Identifiable {
     /// 敏感的那些 —— 界面上标一下，让用户在关之前知道它有多能干。
     var isSensitive: Bool {
         switch self {
-        case .system, .pan, .mcp, .qq: return true
+        case .system, .pan, .mcp, .qq, .browser: return true
         default: return false
         }
     }
@@ -151,6 +154,7 @@ enum DeviceTools {
             (.calendar, [calendarListTool, calendarCreateTool, reminderCreateTool]),
             (.sense, senseTools),
             (.web, webTools),
+            (.browser, browserTools),
             (.music, musicTools),
             (.moment, momentTools),
             (.diary, DiaryTools.tools),
@@ -224,12 +228,25 @@ enum DeviceTools {
     ///    用户一句「放首歌」ta就顺口「好呀，正在放～」—— 那就是"假装完成"，
     ///    用户最不能接受的一种。所以关掉的能力必须**明写进系统提示**。
     ///
-    /// 总开关关掉时返回空 —— 那种情况由提示词那边单独说一句更完整的（列 13 条太长）。
+    /// 总开关关掉时返回空 —— 那种情况由提示词那边单独说一句更完整的（列 15 条太长）。
     static var disabledCategoryLabels: [String] {
         guard masterEnabled else { return [] }
         let off = Set(AppSettings.shared.disabledToolCategories)
         return ToolCategory.allCases.filter { off.contains($0.rawValue) }.map(\.label)
     }
+
+    // 🔴 2026-10-07：这里**曾经**加过一个 `capabilityNote`（「你现在真的有下面这些手」），
+    //    当天就删掉了 —— 因为 `Core/CapabilitySpec.swift` 早就在做同一件事，
+    //    而且做得更好：它列的是**真实工具名**（`get_current_location`、`write_diary`…），
+    //    ta 不用照着一串泛称瞎猜。
+    //
+    //    `CapabilitySpec` 的注释里明写着「所以 `Persona.swift` 里**不再写一份**」。
+    //    我再写一遍 = 同一段能力清单在提示词里出现两次 —— 白烧 token，两份还会互相打架。
+    //    ⇒ **能力清单的唯一落点是 `CapabilitySpec.block()`**，由 `LLMService.runConversation`
+    //      注入（那里是所有模型调用的唯一漏斗）。
+    //
+    //    ⚠️ 教训就是工程红线 #15 那条：**动手前先查这段是不是已经有人做过**。
+    //       我当时只看了 `Persona.swift` 里"没有能力清单"，没往上游 `LLMService` 再看一层。
 
     /// 脱敏入参摘要：字符串只记 `key=长度`，标量记值，其它记 `key=?`。
     /// 按 key 排序，同一调用算出同一串 —— 日志里好比对，也绝不会泄原文。

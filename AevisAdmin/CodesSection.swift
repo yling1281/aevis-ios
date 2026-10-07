@@ -11,6 +11,8 @@ struct CodesSection: View {
 
     @State private var count = 1
     @State private var note = ""
+    /// ⭐ 2026-10-07：有效期。0 = 永久（老口径）；86400 = 一天体验（注册后 24h 自动失效）。
+    @State private var duration = 0
     @State private var fresh: [String] = []
 
     // ⚠️ 原来这儿有个 `usedCount`（算用了多少张）。标题交给 `AdminFold` 之后
@@ -54,11 +56,18 @@ struct CodesSection: View {
                     .padding(.vertical, 10)
                     .background(Color(uiColor: .tertiarySystemFill))
                     .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                // ⭐ 2026-10-07：可选"有效期"。永久 = 老口径；一天 = 体验（注册后 24h 自动失效）。
+                Picker("有效期", selection: $duration) {
+                    Text("永久").tag(0)
+                    Text("一天").tag(86400)
+                }
+                .pickerStyle(.segmented)
                 Button {
                     let wanted = count
                     let why = note
+                    let howLong = duration
                     Task {
-                        let made = await store.issueCodes(count: wanted, note: why)
+                        let made = await store.issueCodes(count: wanted, note: why, duration: howLong)
                         if !made.isEmpty {
                             fresh = made
                             note = ""
@@ -110,6 +119,7 @@ struct CodesSection: View {
                     ? "已用 · \(code.usedBy ?? "?")　\(AdminFormat.ago(code.usedAt))"
                     : "未用",
                 detail: (code.note?.isEmpty == false ? "备注：\(code.note!)　" : "")
+                    + (code.isTrial ? "一天体验　" : "永久　")
                     + "发于 \(AdminFormat.when(code.issuedAt))",
                 badge: code.isUsed ? ("已用", AdminSkin.warn) : nil
             )

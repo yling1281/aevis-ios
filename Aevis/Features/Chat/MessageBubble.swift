@@ -61,6 +61,15 @@ struct MessageBubble: View {
     var theme: BubbleTheme
     var simpleMode: Bool = false
 
+    /// ⭐ 群聊：这条消息的发言人（名字 / 头像 seed / 头像图）。
+    ///
+    /// 一对一聊天三项都是 `nil` —— 那条路跟以前一模一样（用 `persona`）。
+    /// 群聊时 `ChatView` 按 `message.speakerID` 查好这三项传进来，
+    /// 气泡上方就会多出一行名字、头像也换成那个成员自己的。
+    var speakerName: String? = nil
+    var speakerSeed: Int? = nil
+    var speakerImage: UIImage? = nil
+
     /// 订阅表情包 —— 判断这一条是不是"就是一个表情"要靠它。
     ///
     /// ⚠️ 必须声明在**这个** struct 里：`sticker` / `bigSticker` 都属于这里，
@@ -363,11 +372,46 @@ struct MessageBubble: View {
         } else {
             HStack(alignment: .bottom, spacing: 8) {
                 if theme.showAiAvatar {
-                    AevisAvatar(source: .ai, size: avatarSize, seed: persona.avatarSeed)
+                    AevisAvatar(source: .ai,
+                                size: avatarSize,
+                                seed: speakerSeed ?? persona.avatarSeed,
+                                image: speakerImage)
                 }
-                bubble
+                namedBubble
                 Spacer(minLength: Self.sideGap)
             }
+        }
+    }
+
+    /// ta 那条气泡；**群聊**时上面多一行发言人名字。
+    ///
+    /// 名字行**不跟头像开关联动** —— 群里「谁在说」比「显不显示头像」重要得多，
+    /// 用户把头像关掉也该看得见名字。
+    @ViewBuilder
+    private var namedBubble: some View {
+        if let name = speakerName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.aevis(simpleMode ? 13 : 12))
+                    .foregroundStyle(.secondary)
+                bubble
+            }
+        } else {
+            bubble
+        }
+    }
+
+    @ViewBuilder
+    private var imessageNamedBubble: some View {
+        if let name = speakerName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.aevis(simpleMode ? 13 : 12))
+                    .foregroundStyle(.secondary)
+                imessageBubble
+            }
+        } else {
+            imessageBubble
         }
     }
 
@@ -384,11 +428,49 @@ struct MessageBubble: View {
         } else {
             HStack(alignment: .bottom, spacing: 8) {
                 if theme.showAiAvatar {
-                    AevisAvatar(source: .ai, size: avatarSize, seed: persona.avatarSeed)
+                    AevisAvatar(source: .ai,
+                                size: avatarSize,
+                                seed: speakerSeed ?? persona.avatarSeed,
+                                image: speakerImage)
                 }
-                imessageBubble
+                imessageNamedBubble
                 Spacer(minLength: Self.sideGap)
             }
         }
+    }
+}
+
+// MARK: - 群聊的零件
+
+/// 群聊里「一个成员的脸」 —— 气泡按 `speakerID` 去查它。
+///
+/// 注意 `UIImage` 跟 `AevisAvatar` 一样是**不加 `#if canImport(UIKit)`** 的写法 ——
+/// 这个 target 只在 iOS 上编，UIKit 必然在（`AevisAvatar.image` 也是这么声明的）。
+struct ChatMemberFace {
+    var name: String
+    var seed: Int
+    var image: UIImage?
+}
+
+/// 群聊顶栏那个头像：两个小人的图标 + 成员数。
+///
+/// 为什么不复用 `AevisAvatar(source: .ai)`：那个在没有上传图时会**退回当前联系人
+/// 的头像**，用在群上就成了"顶着某一个人的脸当群头像"，不对。
+struct GroupAvatarBadge: View {
+    @ObservedObject private var settings = AppSettings.shared
+    var size: CGFloat = 36
+    var memberCount: Int = 0
+
+    var body: some View {
+        ZStack {
+            Circle().fill(settings.accentColor.opacity(0.18))
+            Image(systemName: "person.2.fill")
+                .font(.aevis(size * 0.42, weight: .semibold))
+                .foregroundStyle(settings.accentColor)
+        }
+        .frame(width: size, height: size)
+        .overlay(
+            Circle().strokeBorder(Color.white.opacity(0.28), lineWidth: 0.6)
+        )
     }
 }

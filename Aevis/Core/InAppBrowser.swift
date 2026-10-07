@@ -56,7 +56,13 @@ final class WebEngine: NSObject, ObservableObject {
         // 空数组：视频不需要用户先点一下才播。
         configuration.mediaTypesRequiringUserActionForPlayback = []
 
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        // ⚠️ 不能是 `.zero`：工具在面板还没弹出来的时候也会去查页面（`getBoundingClientRect`），
+        //    尺寸为 0 时**所有元素都会被判成「看不见」**，ta 拿到一张空页面。
+        //    给一个手机默认尺寸兜底（真正的显示尺寸由布局决定，这里只是给测量一个非零基准）。
+        webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 402, height: 874),
+            configuration: configuration
+        )
 
         super.init()
 
@@ -295,7 +301,15 @@ struct InAppBrowserView: View {
     /// 标题。非空就用它，否则用网页自己的标题。
     private let titleOverride: String
 
-    @StateObject private var engine = WebEngine()
+    /// 自己建的那个引擎（独立浏览器面板走这条）。
+    @StateObject private var ownEngine = WebEngine()
+    /// 外面注入进来的引擎。为 nil 表示用自己建的那个。
+    private let injectedEngine: WebEngine?
+    /// 视图体里用的那个引擎 —— 注入的优先，否则用自己的。
+    ///
+    /// 这样视图体里那几十处 `engine.xxx` 一个字都不用改。
+    private var engine: WebEngine { injectedEngine ?? ownEngine }
+
     @State private var addressText: String = ""
     @State private var started: Bool = false
     @State private var showShare: Bool = false
@@ -306,6 +320,16 @@ struct InAppBrowserView: View {
     init(start: URL?, title: String = "") {
         self.start = start
         self.titleOverride = title
+        self.injectedEngine = nil
+    }
+
+    /// 挂在**共享**引擎上 —— ta 驱动的页面和你看到的是同一份。
+    ///
+    /// ⚠️ `ownEngine` 那个 `@StateObject` 用的是 autoclosure，注入这条路上它不会被建出来。
+    init(engine: WebEngine, title: String = "") {
+        self.start = nil
+        self.titleOverride = title
+        self.injectedEngine = engine
     }
 
     // MARK: 视图
@@ -552,6 +576,14 @@ struct InAppBrowserView: View {
     /// 首次出现时决定去哪个地址。只做一次。
     private func prepareIfNeeded() {
         guard !started else { return }
+        // 注入路径（ta 操控的那台共享引擎）：页面由外面 `load`，
+        // 这里只要把界面切到网页本体 —— 否则 `start` 是 nil，永远停在「百度/必应」起始页，
+        // 用户根本看不到 ta 在点哪。
+        if injectedEngine != nil {
+            started = true
+            if let url = engine.currentURL { addressText = url.absoluteString }
+            return
+        }
         if let startURL = start {
             open(startURL)
         }

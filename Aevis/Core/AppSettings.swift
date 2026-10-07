@@ -146,7 +146,22 @@ enum ProviderPreset: String, CaseIterable, Identifiable {
 
     var defaultModel: String {
         switch self {
-        case .deepseek: return "deepseek-chat"
+        // 🔴 2026-10-07 修：原来这里是 `deepseek-chat` —— **那是个已经死掉的模型名**。
+        //
+        //    DeepSeek 官方「更新日志」原文（api-docs.deepseek.com/zh-cn/updates/）：
+        //      「旧有的 API 接口的两个模型名 deepseek-chat 与 deepseek-reasoner
+        //        将于三个月后（2026-07-24）停止使用。」
+        //    2026-04-24 起新模型名是 `deepseek-v4-pro` / `deepseek-v4-flash`
+        //    （**base_url 不变**，只换 model 参数）。
+        //
+        //    ⇒ 拿今天（2026-10-07）去调 `deepseek-chat`，**每次都是 400**。
+        //      而 400 在老代码里会触发"卸工具"降级 ⇒ ta 连手都没了，
+        //      表现就是用户说的「APP 意识不到自己有能力」。
+        //
+        //    ⚠️ 官方给的迁移目标是 **V4-Flash**，而且**价格完全一样**
+        //       （两个旧别名当年就是指到 V4-Flash 的）。千万别顺手迁到 `v4-pro`：
+        //       那是贵约 3 倍的另一个档，不是迁移目标。
+        case .deepseek: return "deepseek-v4-flash"
         case .openai: return "gpt-4o-mini"
         case .gemini: return "gemini-2.0-flash"
         case .doubao: return ""
@@ -188,11 +203,12 @@ enum ReasoningBudget: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 传给接口的值。关闭时**不传这个字段** ——
-    /// 有些模型不认它，传了反而报错。
-    var parameter: String? {
-        self == .off ? nil : rawValue
-    }
+    // ⚠️ 这里原来有个 `var parameter: String? { self == .off ? nil : rawValue }`，
+    //    2026-10-07 **删掉了** —— 它直接把 `low`/`medium`/`high` 原样发给接口，
+    //    而 DeepSeek V4 只认 `high`/`max`，于是 `.low`/`.medium` 每次都被 400 打回。
+    //    取值翻译现在统一在 `LLMService.effortValue(_:baseURL:)` 里按供应商做，
+    //    **别再在这个枚举上加"直接发 rawValue"的访问器** —— 那就是把同一个 bug 又种一遍。
+    //    （`rawValue` 本身仍在用：存档、`ReasoningBudget(rawValue:)` 回读、UI 选中态。）
 
     var explanation: String {
         switch self {
@@ -1563,13 +1579,46 @@ final class AppSettings: ObservableObject {
         return base.appendingPathComponent(name)
     }
 
+    /// DeepSeek 于 **2026-07-24** 停用的两个模型别名。
+    ///
+    /// 官方公告（api-docs.deepseek.com/zh-cn/updates/）：「旧有的 API 接口的两个模型名
+    /// deepseek-chat 与 deepseek-reasoner 将于三个月后(2026-07-24)停止使用。」
+    /// 新名字是 `deepseek-v4-flash` / `deepseek-v4-pro`，**base_url 不变**。
+    ///
+    /// 🔴 留这份清单是为了**迁移老存档**，不是为了继续用它们 ——
+    ///    光改 `defaultModel` 救不到老用户，他们手机里 UserDefaults 已经存着旧名了。
+    private static let retiredDeepSeekAliases: Set<String> = [
+        "deepseek-chat", "deepseek-reasoner"
+    ]
+
     private init() {
         let defaults = UserDefaults.standard
         baseURL = defaults.string(forKey: Key.baseURL) ?? "https://api.deepseek.com/v1"
-        model = defaults.string(forKey: Key.model) ?? "deepseek-chat"
+        // ⚠️ 这里必须和 `ProviderPreset.defaultModel` 的 DeepSeek 档保持一致 ——
+        //    `deepseek-chat` 已于 2026-07-24 停用（见上面那段注释）。
+        model = defaults.string(forKey: Key.model) ?? "deepseek-v4-flash"
         modelList = defaults.stringArray(forKey: Key.modelList) ?? []
         apiKey = Keychain.get(Key.llmKeychain) ?? ""
         providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .deepseek
+
+        // 🔴 2026-10-07 迁移：**把老存档里那个已停用的模型名换掉**。
+        //
+        //    只改 `defaultModel` 是**救不到老用户的** —— 他们手机里 UserDefaults
+        //    已经存着 `deepseek-chat` 了（老板这台就是）。留着它 = 每次请求都 400
+        //    ⇒ 触发"卸工具"降级 ⇒ ta 变成只会聊天、张口就来。
+        //
+        //    ⚠️ 判据要**宽一点**：预设选的是 DeepSeek，**或者**地址就是 deepseek 域名
+        //       （有些人是从"自定义"进去手填的 `api.deepseek.com`，预设字段还停在 .custom）。
+        //       两种都算"这台在打 DeepSeek"，否则老板那台照样救不回来。
+        //    ⚠️ 但**只认那两个已停用的别名**才换；用户填的别的名字一律不动 ——
+        //       那可能是中转站的自定义名，动了会坏。
+        //    ⚠️ 换完**要写回 UserDefaults**，否则每次冷启动都白算一遍。
+        let looksLikeDeepSeek = providerPreset == .deepseek
+            || baseURL.lowercased().contains("deepseek")
+        if looksLikeDeepSeek, Self.retiredDeepSeekAliases.contains(model) {
+            model = "deepseek-v4-flash"
+            defaults.set(model, forKey: Key.model)
+        }
         // ⚠️ 出厂默认 **`.medium`** —— 必须跟 `LLMConfig.reasoning` 的默认值保持一致。
         //    只改上面那个默认值是不够的：`settings.llm` 用的是这个 `@Published` 属性，
         //    而它从 UserDefaults 读，没存过时落到这里。两处要一起改。

@@ -619,25 +619,34 @@ final class ProactiveService {
     ///   ② 让模型回一句再弹一条通知（不然他发完就干等，像没人搭理）。
     @MainActor
     func handleQuickReply(_ text: String, from request: UNNotificationRequest) async {
+        // ⭐ owner 用**排程时定好**的那个（通知 `userInfo["persona"]` 里的），
+        //    不是"回来时再取一次当前联系人" —— 用户在通知上回字之前可能已经切过人，
+        //    那一刻的 `currentContactID` 未必是这条通知说给的人。
+        //    只有老通知确实没带 owner 时，才退回当前联系人兜底。
+        var owner = ChatStore.shared.currentContactID
         // ta刚才那句也得在聊天里 —— 它就是这条通知的内容。
         if let payload = Self.payload(fromRequest: request) {
             ChatStore.shared.appendProactive(payload.text, for: payload.owner)
+            if let payloadOwner = payload.owner { owner = payloadOwner }
         }
         center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
 
-        let owner = ChatStore.shared.currentContactID
         ChatStore.shared.append(ChatMessage(role: .user, text: text), for: owner)
 
         // 后台时间有限：回复尽力而为。拿不到也没关系 ——
         // 用户那句已经存进去了，打开 App 正常聊一样接得上。
-        guard let reply = await quickReply(to: text) else { return }
+        guard let reply = await quickReply(to: text, owner: owner) else { return }
         ChatStore.shared.appendProactive(reply, for: owner)
         await scheduleInstantNotification(reply, owner: owner)
     }
 
     /// 用一次短调用替ta回一句（通知上那条不需要长篇大论）。
+    ///
+    /// - Parameter owner: **这条回复是说给谁听的**（= 那条通知排程时的联系人，
+    ///   从通知 `userInfo["persona"]` 取出来、一路传进来）。**不许**在这里再取一次
+    ///   "当前联系人" —— 用户点通知回字之前可能已经切过人了，那会把心情写到别人头上。
     @MainActor
-    private func quickReply(to text: String) async -> String? {
+    private func quickReply(to text: String, owner: UUID?) async -> String? {
         let settings = AppSettings.shared
         guard settings.isConfigured else { return nil }
         let persona = PersonaStore.shared.persona
@@ -663,7 +672,8 @@ final class ProactiveService {
         }
         // ⭐ 剥掉末尾的心情标记 —— 这句要弹成通知、还要落进聊天记录，
         //    标记一个字都不能露（本函数是 @MainActor，直接调 consume）。
-        let trimmed = MoodStore.shared.consume(collected)
+        //    ⚠️ owner 传**排程时定好**的那个（不是当前联系人）。
+        let trimmed = MoodStore.shared.consume(collected, owner: owner)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
@@ -740,8 +750,13 @@ final class ProactiveService {
         }
 
         // ⭐ 先剥掉末尾的心情标记再拆句 —— 这批话会存进话术池、以后弹给用户看，
-        //    标记不能混在里面。本函数在主 actor 之外，跳一次主线程再剥。
-        let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
+        //    标记不能混在里面。
+        //    ⚠️ 这里是**给话术池代笔**，不是"ta此刻对某个人说的一句话"：话术池
+        //       (`settings.proactiveLines`) 是**全局共享**的，生成一次给所有联系人复用，
+        //       根本没有"这条属于谁"可言。所以**只剥、不写心情**（用纯剥
+        //       `strippingMarker`，跟 `callLine` 一个口径）—— 硬塞一个 owner
+        //       反而会把某个人的心情写脏。
+        let stripped = MoodStore.strippingMarker(from: collected)
         let lines = stripped
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }

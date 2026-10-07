@@ -36,6 +36,19 @@ struct DeviceGateView: View {
     private static let blockedHelp =
         "管理员停用了这台设备。\n解封之后这个页面会自己进去，不用重装。"
 
+    /// 体验到期那句话（2026-10-07）。
+    /// 三件事必须说全：**到期了**、**续费就能继续**、**数据没丢** ——
+    /// 少说一件，用户就会以为"你把我的东西清了"。
+    private static let trialHelp =
+        "这次的一天体验已经结束了。\n续费之后这一页会自己进去，聊天记录一条都不会丢。"
+
+    /// 连不上服务器那句话（2026-10-07）。
+    /// ⚠️ 必须说清"**不是欠费、也不是被封**" —— 否则用户会以为体验到期 / 账号被停，
+    ///    跑去问客服，白折腾一圈。同时给出恢复办法（连上就自动恢复），并强调数据没丢。
+    private static let offlineHelp =
+        "这台设备已经有一阵子连不上服务器了。\n"
+        + "不是体验到期，也不是账号被停 —— 检查一下网络，连上就会自动恢复，聊天记录都在。"
+
     /// 申诉要交什么。**用户 2026-09-28 定的口径**：
     /// 交录屏 + 翻到 3 天前的聊天记录 → 人工审。
     ///
@@ -56,13 +69,19 @@ struct DeviceGateView: View {
 
                 // ⚠️ 被封和"还没授权"要说的话**完全不同** ——
                 // 说错了会让人按着错的提示白折腾一轮。
-                Text(gate.blocked ? "这台设备已被停用" : "这台设备还没有授权")
+                Text(gate.blocked ? "这台设备已被停用"
+                     : (gate.trialOver ? "体验已到期"
+                        : (gate.unreachable ? "连不上服务器" : "这台设备还没有授权")))
                     .font(.aevis(21, weight: .semibold))
-                    .foregroundStyle(gate.blocked ? Color.red : Color.primary)
+                    .foregroundStyle(gate.blocked ? Color.red
+                                     : (gate.trialOver ? Color.orange
+                                        : (gate.unreachable ? Color.orange : Color.primary)))
                     .multilineTextAlignment(.center)
                     .padding(.top, 20)
 
-                Text(gate.blocked ? Self.blockedHelp : Self.normalHelp)
+                Text(gate.blocked ? Self.blockedHelp
+                     : (gate.trialOver ? Self.trialHelp
+                        : (gate.unreachable ? Self.offlineHelp : Self.normalHelp)))
                     .font(.aevis(13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -71,8 +90,12 @@ struct DeviceGateView: View {
                     .padding(.top, 10)
                     .padding(.horizontal, 6)
 
-                codeCard
-                    .padding(.top, 24)
+                // 体验到期时**不摆设备码** —— 那串码跟续费无关，摆出来只会让人
+                // 以为要重新绑定（其实账号、设备都还在，只是时间到了）。
+                if !gate.trialOver && !gate.unreachable {
+                    codeCard
+                        .padding(.top, 24)
+                }
 
                 // 被封时多摆一块「怎么申诉」——**只在被封时出现**。
                 // 没被封的人看到"你要申诉"会莫名其妙（同一屏上两套话术会打架）。
@@ -83,7 +106,9 @@ struct DeviceGateView: View {
 
                 // 被封时**不给「去绑定」按钮** —— 那会误导他以为再绑一次就行。
                 // 留着「再查一次」，解封之后点一下（或者等下一轮自动查）就恢复了。
-                if gate.blocked {
+                if gate.blocked || gate.trialOver || gate.unreachable {
+                    // 被封 / 体验到期 / 连不上服务器都**不给「去绑定」按钮** ——
+                    // 那会误导他以为再绑一次就行。
                     checkButton
                         .padding(.top, 18)
                 } else {
@@ -124,9 +149,13 @@ struct DeviceGateView: View {
                 .frame(width: 86, height: 86)
             // ⚠️ 图标用系统字号是**故意**的（R7 那条规则专门放过了 SF Symbol）：
             // 图标不该跟着用户选的字体变。
-            Image(systemName: gate.blocked ? "xmark.shield" : "lock.shield")
+            Image(systemName: gate.blocked ? "xmark.shield"
+                  : (gate.trialOver ? "hourglass"
+                     : (gate.unreachable ? "wifi.slash" : "lock.shield")))
                 .font(.system(size: 34, weight: .light))
-                .foregroundStyle(gate.blocked ? Color.red : settings.accentColor)
+                .foregroundStyle(gate.blocked ? Color.red
+                                 : (gate.trialOver ? Color.orange
+                                    : (gate.unreachable ? Color.orange : settings.accentColor)))
         }
     }
 
@@ -303,7 +332,10 @@ struct DeviceGateView: View {
     private func waitForGrant() async {
         while !Task.isCancelled {
             await gate.refresh()
-            if gate.authorized { return }
+            // ⚠️ 不能只看 `authorized` —— 体验到期时 `authorized` 仍是 true，
+            //    那样这个 5 秒循环会**立刻退出**，续费后这一页就不会自己进去了。
+            //    条件改成"授权了且没被挡"，到期/被封时都继续轮。
+            if gate.authorized && !gate.isBlocking { return }
             try? await Task.sleep(nanoseconds: 5_000_000_000)
         }
     }

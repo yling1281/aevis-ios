@@ -235,7 +235,12 @@ struct ShopChat: Codable, Identifiable, Equatable {
 ///
 /// 照 `TodoStore` 的路子写：`ObservableObject` + `static let shared` +
 /// `@Published` + 一个 `loading` 标志位（读档 / 搬家期间只读不写）+
-/// JSON 存 `UserDefaults`。**钱不归这里管** —— 扣款由结算页在 `placeOrder` 之前做完。
+/// **按联系人分开存**（JSON 落 `Application Support/aevis-reallife-by-contact.json`）。
+/// **钱不归这里管** —— 扣款由结算页在 `placeOrder` 之前做完。
+///
+/// ⚠️ 换人由 `PersonaStore.broadcastSwitch` 统一通知 ——「给 A 下的单、跟 A 的假客服」
+///    换到 B 就不该还看得见。老版本（单人）那两枚扁平键会在**第一次认人**时
+///    搬到那个人的名下，一条不丢（见 `setOwner`）。
 final class RealLifeStore: ObservableObject {
 
     static let shared = RealLifeStore()
@@ -249,26 +254,49 @@ final class RealLifeStore: ObservableObject {
 
     // MARK: 我的数据
 
-    /// 我下过的订单，**新的在最前**。只由 `placeOrder` 改。
+    /// 当前联系人的订单，**新的在最前**。只由 `placeOrder` 改。
     @Published private(set) var allOrders: [Order] = []
 
-    /// 每笔订单一段假客服对话。
+    /// 当前联系人的每笔订单对应的假客服对话。
     @Published private(set) var allChats: [ShopChat] = []
+
+    /// 每个人的订单 + 客服对话，**按联系人分开存**（老版本是一份，见 `setOwner` 的迁移）。
+    private var byOwner: [UUID: OwnerData] = [:]
+    /// 现在这份属于谁。
+    private var owner: UUID?
 
     /// 读档 / 搬家导入期间**只读不写**（同 `TodoStore.loading`）。
     private var loading = false
 
-    private enum Key {
+    /// 新格式存档读到没有 / 老存档认过没有 —— 老的那两枚扁平键只认一次。
+    private var loadedArchive = false
+    private var adoptedLegacy = false
+
+    private let fileURL: URL
+
+    /// 某个联系人的全部「真实生活」数据。存文件 / 进备份都走它。
+    struct OwnerData: Codable {
+        var orders: [Order] = []
+        var chats: [ShopChat] = []
+    }
+
+    /// 老版本（单人）用的两枚扁平键，**只用来做一次性迁移**。
+    private enum LegacyKey {
         static let orders = "aevis.reallife.orders"
         static let chats = "aevis.reallife.chats"
     }
 
-    /// 订单最多留多少条。再多也没人翻，而且这是 `UserDefaults`。
+    /// 订单最多留多少条。再多也没人翻。
     private static let maxOrders = 100
 
     private init() {
         allShops = Self.buildShops()
         allGoods = Self.buildGoods()
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        fileURL = base.appendingPathComponent("aevis-reallife-by-contact.json")
         load()
     }
 
@@ -401,7 +429,7 @@ final class RealLifeStore: ObservableObject {
         )
         allChats.append(ShopChat(orderID: order.id, lines: [opening]))
 
-        persist()
+        save()
         return order
     }
 
@@ -418,37 +446,119 @@ final class RealLifeStore: ObservableObject {
         } else {
             allChats.append(ShopChat(orderID: orderID, lines: [line]))
         }
-        persist()
+        save()
+    }
+
+    // MARK: - 切人
+
+    /// 切到某个联系人。`PersonaStore` 切人时来调它。
+    func setOwner(_ id: UUID?) {
+        stash()
+        owner = id
+
+        guard let id else {
+            allOrders = []
+            allChats = []
+            return
+        }
+
+        // 老版本只有一份、没分人 —— 认给**第一个进来的人**。
+        // 只在「没有新格式存档」并且「还没认过」的时候做一次。
+        if !loadedArchive, !adoptedLegacy {
+            adoptedLegacy = true
+            adoptLegacy(into: id)
+        }
+
+        let data = byOwner[id] ?? OwnerData()
+        allOrders = data.orders
+        allChats = data.chats
+    }
+
+    /// 把某个联系人的订单 / 客服对话整个删掉（删联系人时用）。
+    func forget(_ id: UUID) {
+        byOwner[id] = nil
+        if owner == id {
+            allOrders = []
+            allChats = []
+        }
+        save()
     }
 
     // MARK: - 存档
 
+    /// 存档 / 备份共用的结构。
+    ///
+    /// - `byOwner`：新结构，按联系人。
+    /// - `orders` / `chats`：**只在读老备份时非空**（老版本只有单人那一份）。
+    ///   ⚠️ 一律 Optional + 默认 nil，且写盘时是 nil ⇒ 序列化会用 `encodeIfPresent`
+    ///      把它们**省略**掉，新备份里不会多出这两段。
+    private struct Archive: Codable {
+        /// 新结构，按联系人。🔴 **必须可选项** —— Swift 合成的 `Decodable` 不吃
+        /// 属性默认值，非可选缺键会直接抛 `keyNotFound`（老单人备份整条解不出）。
+        /// 老备份没有这个键 ⇒ nil，`orders`/`chats` 才有值。
+        var byOwner: [String: OwnerData]? = nil
+        var orders: [Order]? = nil
+        var chats: [ShopChat]? = nil
+    }
+
     private func load() {
-        let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: Key.orders),
-           let list = try? JSONDecoder().decode([Order].self, from: data) {
-            allOrders = list
+        guard let data = try? Data(contentsOf: fileURL),
+              let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
+            return
         }
-        if let data = defaults.data(forKey: Key.chats),
-           let list = try? JSONDecoder().decode([ShopChat].self, from: data) {
-            allChats = list
+        // ⚠️ 读档期间禁写，理由同 `TodoStore.load()`：紧接着的 `setOwner` 会先
+        //    `stash()`，用旧机器的那份盖掉刚读进来的。
+        loading = true
+        defer { loading = false }
+        byOwner = (archived.byOwner ?? [:]).reduce(into: [:]) { result, pair in
+            guard let id = UUID(uuidString: pair.key) else { return }
+            result[id] = pair.value
         }
+        loadedArchive = true
     }
 
-    private func persist() {
+    /// 老版本那两枚扁平键 → 这个人名下。**只调一次**（调用点已保证）。
+    private func adoptLegacy(into id: UUID) {
+        let defaults = UserDefaults.standard
+        var data = byOwner[id] ?? OwnerData()
+        if let raw = defaults.data(forKey: LegacyKey.orders),
+           let list = try? JSONDecoder().decode([Order].self, from: raw),
+           !list.isEmpty {
+            data.orders = list
+        }
+        if let raw = defaults.data(forKey: LegacyKey.chats),
+           let list = try? JSONDecoder().decode([ShopChat].self, from: raw),
+           !list.isEmpty {
+            data.chats = list
+        }
+        byOwner[id] = data
+        // 认过就落盘。**老键不清** —— 删了就真没了，留着它零成本。
+        writeArchive()
+    }
+
+    /// 把当前这份写回字典。任何落盘之前都要先做一次。
+    private func stash() {
         guard !loading else { return }
-        writeRaw()
+        guard let owner else { return }
+        byOwner[owner] = OwnerData(orders: allOrders, chats: allChats)
     }
 
-    /// 真正落盘（**不看 `loading`**，搬家的 `importBackup` 要走到这里）。
-    private func writeRaw() {
-        let defaults = UserDefaults.standard
-        if let data = try? JSONEncoder().encode(allOrders) {
-            defaults.set(data, forKey: Key.orders)
+    private func save() {
+        guard !loading else { return }
+        stash()
+        writeArchive()
+    }
+
+    /// 把 `byOwner` 原样落盘，**不经过 `stash()`**。导入 / 迁移时用。
+    private func writeArchive() {
+        // 空字典不落盘 —— 否则第一次启动还没认人就会写一份空存档，
+        // 下次就再也认不到老的那份了。
+        guard !byOwner.isEmpty else { return }
+        let flat = byOwner.reduce(into: [String: OwnerData]()) { result, pair in
+            result[pair.key.uuidString] = pair.value
         }
-        if let data = try? JSONEncoder().encode(allChats) {
-            defaults.set(data, forKey: Key.chats)
-        }
+        guard let encoded = try? JSONEncoder().encode(Archive(byOwner: flat)) else { return }
+        try? encoded.write(to: fileURL, options: .atomic)
     }
 
     // MARK: - 内置店 / 货
@@ -649,22 +759,39 @@ extension RealLifeStore: BackupableStore {
     /// 包里这段的名字。**定了就别改** —— 改了老备份恢复不回来。
     var backupName: String { "reallife" }
 
-    /// 「真实生活」的存档结构。店铺 / 商品是内置的，不用备份。
-    private struct Archive: Codable {
-        var orders: [Order] = []
-        var chats: [ShopChat] = []
-    }
-
+    /// 导出**所有人的**订单 / 客服 —— 搬家要搬的是全部，不只当前这个。
     func exportBackup() throws -> Data {
-        try JSONEncoder().encode(Archive(orders: allOrders, chats: allChats))
+        stash()
+        let flat = byOwner.reduce(into: [String: OwnerData]()) { result, pair in
+            result[pair.key.uuidString] = pair.value
+        }
+        return try JSONEncoder().encode(Archive(byOwner: flat))
     }
 
     func importBackup(_ data: Data) throws {
         let archive = try JSONDecoder().decode(Archive.self, from: data)
+        // ⚠️ 导入全程禁写：中途 `PersonaStore.broadcastSwitch` 会调 `setOwner`，
+        //    那一下要是允许 `stash()`，刚搬进来的订单当场被旧机器的顶掉。
         loading = true
         defer { loading = false }
-        allOrders = archive.orders
-        allChats = archive.chats
-        writeRaw()
+
+        if let imported = archive.byOwner, !imported.isEmpty {
+            byOwner = imported.reduce(into: [:]) { result, pair in
+                guard let id = UUID(uuidString: pair.key) else { return }
+                result[id] = pair.value
+            }
+        } else if archive.orders != nil || archive.chats != nil {
+            // 老备份（单人）→ 认到现在的 active（`PersonaStore` 先导完通讯录，owner 已就位）。
+            let fallback = PersonaStore.shared.activeID ?? PersonaStore.shared.contacts.first?.id
+            if let fallback {
+                byOwner[fallback] = OwnerData(orders: archive.orders ?? [],
+                                              chats: archive.chats ?? [])
+            }
+        }
+
+        let current = owner.flatMap { byOwner[$0] } ?? OwnerData()
+        allOrders = current.orders
+        allChats = current.chats
+        writeArchive()
     }
 }

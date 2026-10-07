@@ -230,7 +230,11 @@ final class CoupleStore: ObservableObject {
 
     private struct Archive: Codable {
         var items: [String: [Anniversary]] = [:]
-        var since: [String: Date] = [:]
+        /// 🔴 **必须可选项** —— 理由同 `DiaryStore.Archive.pin`：Swift 合成的
+        ///    `Decodable` 不吃属性默认值，非可选缺键会直接 `keyNotFound`。
+        ///    老存档（还没有「绑定情侣」功能的版本导出的）没这个键 ⇒ nil，
+        ///    读的时候 `?? [:]` 兜底。
+        var since: [String: Date]? = nil
     }
 
     private func load() {
@@ -246,7 +250,7 @@ final class CoupleStore: ObservableObject {
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
-        sinceByOwner = archived.since.reduce(into: [:]) { result, pair in
+        sinceByOwner = (archived.since ?? [:]).reduce(into: [:]) { result, pair in
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
@@ -308,7 +312,7 @@ extension CoupleStore: BackupableStore {
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
-        sinceByOwner = archived.since.reduce(into: [:]) { result, pair in
+        sinceByOwner = (archived.since ?? [:]).reduce(into: [:]) { result, pair in
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }

@@ -295,7 +295,10 @@ final class HerPhoneStore: ObservableObject {
         save()
 
         // ⚠️ 落聊天走 **ChatStore** 的口子（它自己负责插到流式空占位前面）。
-        ChatStore.shared.appendIncomingHerPhone(appName: name, action: action)
+        // ⭐ 带上本店自己的 `owner` —— 「她的小手机」是**按联系人分开**的，
+        //    落库也必须落到**这个人**的会话里，绝不能落进"用户此刻正在看的那个"
+        //    （两者通常一致；万一不一致，按 owner 走也比写错人强）。
+        ChatStore.shared.appendIncomingHerPhone(appName: name, action: action, for: owner)
     }
 
     /// 最近 n 条动作，**新的在前**（界面直接拿去 forEach）。

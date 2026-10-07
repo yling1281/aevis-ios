@@ -519,7 +519,11 @@ final class QQBotService: ObservableObject {
 
         // ⭐ 先剥掉末尾的心情标记 —— 这句要发到 QQ、还要写回 App 聊天记录，
         //    标记不能跟着出去。本函数在主 actor 之外，跳一次主线程再剥。
-        let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
+        //    ⚠️ owner 传**这条 QQ 会话归属的那个联系人**（`ownerID`，上面已取好），
+        //       不是剥离那一刻的当前联系人。
+        let stripped = await MainActor.run {
+            MoodStore.shared.consume(collected, owner: ownerID)
+        }
         let cleaned = Self.plain(stripped)
         guard !cleaned.isEmpty else { return nil }
 

@@ -13,8 +13,16 @@ import Foundation
 /// - 系统提示词：把 `current` 喂回去，让ta"记得自己上次在想什么"。
 ///
 /// ## 为什么不放进 `AppSettings`
-/// 它是「ta的状态」，不是「用户的设置」—— 混在一起会让设置页的存档越滚越大，
-/// 也不利于按联系人区分（将来想做成"每个人一套心情"时改这里就行）。
+/// 它是「ta的状态」，不是「用户的设置」—— 混在一起会让设置页的存档越滚越大。
+///
+/// ## ⭐ 2026-10：**按联系人分开存**
+/// 老板拍板「每个人都是独立的」—— A 的「想你」不该出现在 B 的资料页。
+/// 每个人的心情按 `owner`（= 联系人 id）分开存，切人时 `setOwner` 换一份。
+/// 老版本那枚单人键 `aevis.mood` 会在**第一次认人**时认给那个人（见 `setOwner`）。
+///
+/// ⚠️ **异步通道要传 owner**：`ProactiveService` 的主动消息是**按 owner 排程**的，
+///    回来时用户可能已经切到别人 —— 那条 `consume(_:owner:)` 必须带上
+///    「这条是说给谁听的」，否则会把 B 的心情写到当前打开的 A 头上。
 final class MoodStore: ObservableObject {
 
     static let shared = MoodStore()
@@ -27,11 +35,67 @@ final class MoodStore: ObservableObject {
 
     @Published private(set) var current: Mood?
 
-    /// 持久化键。写法照 `AmbientContext`（UserDefaults + JSON 编码）。
-    private static let key = "aevis.mood"
+    /// 每个人的心情，**按联系人分开存**（不然换了人还看着上一个人的心情）。
+    private var byOwner: [UUID: Mood] = [:]
+    /// 现在这份属于谁。
+    private var owner: UUID?
+
+    /// 读档 / 搬家导入期间**只读不写**（同 `TodoStore.loading`）。
+    private var loading = false
+    /// 新格式存档读到没有 / 老存档认过没有 —— 老键只认一次。
+    private var loadedArchive = false
+    private var adoptedLegacy = false
+
+    /// 持久化键（按联系人那份）。写法照 `AmbientContext`（UserDefaults + JSON 编码）。
+    private static let byContactKey = "aevis.mood.by-contact"
+    /// 老版本（单人）那枚键，**只用来做一次性迁移**。
+    private static let legacyKey = "aevis.mood"
+
+    /// 存档 / 备份共用的结构。
+    /// - `byOwner`：新结构，按联系人。
+    /// - `current`：**只在读老备份时非空**（老版本只有单人那一份）。
+    ///   Optional + 默认 nil ⇒ 写盘时被 `encodeIfPresent` 省略，新备份里不会多出这一段。
+    private struct Archive: Codable {
+        /// 新结构，按联系人。🔴 **必须可选项** —— Swift 合成的 `Decodable` 不吃
+        /// 属性默认值，非可选缺键会直接抛 `keyNotFound`（老单人备份整条解不出）。
+        /// 老备份没有这个键 ⇒ nil，`current` 才有值。
+        var byOwner: [String: Mood]? = nil
+        var current: Mood? = nil
+    }
 
     private init() {
         load()
+    }
+
+    // MARK: - 切人
+
+    /// 切到某个联系人。`PersonaStore` 切人时来调它。
+    func setOwner(_ id: UUID?) {
+        stash()
+        owner = id
+
+        guard let id else {
+            current = nil
+            return
+        }
+
+        // 老版本只有一份、没分人 —— 认给**第一个进来的人**。只在还没读到新档时认一次。
+        if !loadedArchive, !adoptedLegacy {
+            adoptedLegacy = true
+            if byOwner[id] == nil, let legacy = Self.readLegacy() {
+                byOwner[id] = legacy
+                writeArchive()
+            }
+        }
+
+        current = byOwner[id]
+    }
+
+    /// 把某个联系人的心情整个删掉（删联系人时用）。
+    func forget(_ id: UUID) {
+        byOwner[id] = nil
+        if owner == id { current = nil }
+        writeArchive()
     }
 
     // MARK: - 对外
@@ -39,10 +103,15 @@ final class MoodStore: ObservableObject {
     /// 从ta的回复里剥离末尾标记并写入；返回**剥干净后**的文本。
     /// 没找到标记 ⇒ 原样返回，且**不改动** `current`。
     ///
+    /// - Parameter owner: 这条回复**是说给谁听的**。
+    ///   · 聊天页 / 通话这些「就在当前这个人身上」的路径可以不给（默认 = 当前联系人）；
+    ///   · 异步 / 按 owner 排程的通道（主动消息 `ProactiveService`、QQ、配对桥）
+    ///     **必须给**，否则会把那个人的心情写到当前打开的人头上。
+    ///
     /// ⚠️ 只认**最后一行**：ta可能在正文里正常写到「心情」两个字，
     ///    那种情况不能被当成标记（否则会把ta的正文吃出个洞）。
     @discardableResult
-    func consume(_ reply: String) -> String {
+    func consume(_ reply: String, owner: UUID? = nil) -> String {
         let normalized = Self.normalize(reply)
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return reply }
@@ -64,8 +133,16 @@ final class MoodStore: ObservableObject {
         guard !mood.isEmpty || !innerVoice.isEmpty else { return reply }
 
         let entry = Mood(mood: mood, innerVoice: innerVoice, updatedAt: Date())
-        current = entry
-        store(entry)
+        let resolved = owner ?? self.owner
+        if let resolved {
+            byOwner[resolved] = entry
+            if resolved == self.owner { current = entry }
+            writeArchive()
+        } else {
+            // 极端：还没认人。别丢，先落内存 + 老键兜底。
+            current = entry
+            Self.writeLegacy(entry)
+        }
 
         // 剥掉标记之后剩下的正文；如果被剥没了就返回原文（别把整条回复吃没了）
         let clean = Self.strippingMarker(from: normalized)
@@ -73,10 +150,15 @@ final class MoodStore: ObservableObject {
         return clean.isEmpty ? reply : clean
     }
 
-    /// 清掉当前心情（用户手动擦掉 / 换人）。
+    /// 清掉**当前联系人**的心情（ta的资料页里用户手动擦掉）。
+    ///
+    /// ⚠️ 切人**不走这里** —— 换人由 `setOwner` 换一份；旧写法在切人时调
+    ///    `clear()` 会把刚载入的新主人的心情当场擦掉（已改）。
     func clear() {
         current = nil
-        UserDefaults.standard.removeObject(forKey: Self.key)
+        if let owner { byOwner[owner] = nil }
+        writeArchive()
+        UserDefaults.standard.removeObject(forKey: Self.legacyKey)
     }
 
     // MARK: - 解析（纯函数，不碰状态 —— 聊天流收尾时也用它）
@@ -173,15 +255,47 @@ final class MoodStore: ObservableObject {
 
     // MARK: - 存
 
-    private func store(_ entry: Mood) {
-        guard let data = try? JSONEncoder().encode(entry) else { return }
-        UserDefaults.standard.set(data, forKey: Self.key)
+    /// 把当前这份写回字典。
+    private func stash() {
+        guard !loading else { return }
+        guard let owner else { return }
+        byOwner[owner] = current
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: Self.key),
-              let saved = try? JSONDecoder().decode(Mood.self, from: data) else { return }
-        current = saved
+        guard let data = UserDefaults.standard.data(forKey: Self.byContactKey),
+              let archived = try? JSONDecoder().decode(Archive.self, from: data) else {
+            return
+        }
+        // ⚠️ 读档期间禁写，理由同 `TodoStore.load()`：紧接着的 `setOwner` 会先
+        //    `stash()`，用旧机器的那份盖掉刚读进来的。
+        loading = true
+        defer { loading = false }
+        byOwner = (archived.byOwner ?? [:]).reduce(into: [:]) { result, pair in
+            guard let id = UUID(uuidString: pair.key) else { return }
+            result[id] = pair.value
+        }
+        loadedArchive = true
+    }
+
+    /// 把 `byOwner` 原样落盘，**不经过 `stash()`**。导入 / 迁移时用。
+    private func writeArchive() {
+        guard !byOwner.isEmpty else { return }
+        let flat = byOwner.reduce(into: [String: Mood]()) { result, pair in
+            result[pair.key.uuidString] = pair.value
+        }
+        guard let data = try? JSONEncoder().encode(Archive(byOwner: flat)) else { return }
+        UserDefaults.standard.set(data, forKey: Self.byContactKey)
+    }
+
+    private static func readLegacy() -> Mood? {
+        guard let data = UserDefaults.standard.data(forKey: legacyKey) else { return nil }
+        return try? JSONDecoder().decode(Mood.self, from: data)
+    }
+
+    private static func writeLegacy(_ entry: Mood) {
+        guard let data = try? JSONEncoder().encode(entry) else { return }
+        UserDefaults.standard.set(data, forKey: legacyKey)
     }
 }
 
@@ -194,22 +308,31 @@ extension MoodStore: BackupableStore {
 
     var backupName: String { "mood" }
 
-    /// 备份包里的形状 —— 单独包一层，免得直接编码 `Mood?` 时踩到「顶层 null」那点边角语义。
-    struct Archive: Codable {
-        var current: Mood?
-    }
-
+    /// 导出**所有人的**心情 —— 搬家要搬的是全部，不只当前这个。
     func exportBackup() throws -> Data {
-        try JSONEncoder().encode(Archive(current: current))
+        stash()
+        let flat = byOwner.reduce(into: [String: Mood]()) { result, pair in
+            result[pair.key.uuidString] = pair.value
+        }
+        return try JSONEncoder().encode(Archive(byOwner: flat))
     }
 
     func importBackup(_ data: Data) throws {
         let archived = try JSONDecoder().decode(Archive.self, from: data)
-        current = archived.current
-        if let saved = archived.current {
-            store(saved)
-        } else {
-            UserDefaults.standard.removeObject(forKey: Self.key)
+        // ⚠️ 导入全程禁写：中途 `PersonaStore.broadcastSwitch` 会调 `setOwner`。
+        loading = true
+        defer { loading = false }
+        if let imported = archived.byOwner, !imported.isEmpty {
+            byOwner = imported.reduce(into: [:]) { result, pair in
+                guard let id = UUID(uuidString: pair.key) else { return }
+                result[id] = pair.value
+            }
+        } else if let old = archived.current {
+            // 老备份（单人）→ 认到现在的 active（`PersonaStore` 已先导完通讯录）。
+            let fallback = PersonaStore.shared.activeID ?? PersonaStore.shared.contacts.first?.id
+            if let fallback { byOwner[fallback] = old }
         }
+        current = owner.flatMap { byOwner[$0] }
+        writeArchive()
     }
 }

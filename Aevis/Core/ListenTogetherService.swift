@@ -52,6 +52,8 @@ final class ListenTogetherService: ObservableObject {
     private var lastSpokeAt = Date.distantPast
 
     private var persona = Persona()
+    /// 这一场「一起听」属于谁 —— **开唱时**定好（不是每次开口再取当前联系人）。
+    private var owner: UUID?
     private var config = LLMConfig(baseURL: "", apiKey: "", model: "")
     private var memory: [String] = []
 
@@ -65,6 +67,9 @@ final class ListenTogetherService: ObservableObject {
 
     func start(persona: Persona, config: LLMConfig, memory: [String]) {
         self.persona = persona
+        // ⭐ 把「这一场属于谁」定在开唱这一刻：ta后面跟歌词说的话、打字聊的话
+        //    都算这个人的（免得中途切人时写错心情）。
+        self.owner = ChatStore.shared.currentContactID
         self.config = config
         self.memory = memory
         herLines = []
@@ -78,6 +83,7 @@ final class ListenTogetherService: ObservableObject {
 
     func stop() {
         active = false
+        owner = nil
         cancellable?.cancel()
         cancellable = nil
         lyricCount = 0
@@ -186,7 +192,8 @@ final class ListenTogetherService: ObservableObject {
 
         // ⭐ ta跟着歌词说的这句要显示在面板上（还可能被点小喇叭念出来）——
         //    先剥掉末尾的心情标记，跟聊天页一个口径（顺便把心情落库）。
-        let text = MoodStore.shared.consume(collected)
+        //    ⚠️ owner = 开唱时定好的那个人，不是此刻的当前联系人。
+        let text = MoodStore.shared.consume(collected, owner: owner)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         herLines.insert(text, at: 0)
@@ -296,7 +303,8 @@ final class ListenTogetherService: ObservableObject {
 
         // ⭐ 收尾剥掉末尾的心情标记 —— 跟ta打字的这条也要镜像进正式聊天记录，
         //    不能把标记带进去（顺带把心情落库，跟主链路一致）。
-        let reply = MoodStore.shared.consume(collected)
+        //    ⚠️ owner = 开唱时定好的那个人，不是此刻的当前联系人。
+        let reply = MoodStore.shared.consume(collected, owner: owner)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else {
             if chatLines.indices.contains(slot) { chatLines.remove(at: slot) }

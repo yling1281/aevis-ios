@@ -49,6 +49,9 @@ struct MainTabView: View {
     @ObservedObject private var router = AppRouter.shared
     /// ta主动提的申请（打电话 / 看屏幕 / 一起听）—— 你要点一下才会真的开始。
     @ObservedObject private var companionRequest = CompanionRequest.shared
+    /// ta 操作用的浏览器（真打开淘宝/京东这些站）。ta 一动它，这片浏览器就从底下推上来，
+    /// 你看着它在点哪；付款那一步要你自己点（见 `BrowserSession`）。
+    @ObservedObject private var browser = BrowserSession.shared
     /// 「这一通被系统那边挂断了」的信号。
     ///
     /// ⚠️ **别图省事直接观察 `CallService`** —— 通话中 `listeningText`
@@ -117,6 +120,31 @@ struct MainTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: router.showMoments)
+        // ta 操作用的那片浏览器：从底下推上来一整页，盖在底栏之上。
+        //
+        // ⚠️ 为什么**不用 `.sheet`**：这条修饰链上已经挂着设置面板的 `.sheet`，
+        //    而本项目实测「同一个视图叠两个 `.sheet` 只认最后一个」——
+        //    再叠一个的结果是浏览器面板可能根本弹不出来，而且不报错。
+        //    ⚠️ 把 sheet 挂到里层节点（`phoneTabs` / `splitLayout`）**也不可靠**：
+        //       `Group` 是透明的，它会把自己的修饰符转发给内容，
+        //       展开后链上仍然是两个 sheet 修饰符 —— 算不算"不同节点"没有文档保证。
+        //       `.overlay` 只走普通视图合成，完全不碰 SwiftUI 的呈现系统，
+        //       "谁认谁"这个问题根本不存在。朋友圈那条也是同样的理由。
+        .overlay {
+            if browser.isPresented {
+                NavigationStack {
+                    InAppBrowserView(engine: browser.engine, title: browser.titleHint)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("收起") { browser.close() }
+                            }
+                        }
+                }
+                .transition(.move(edge: .bottom))
+                .zIndex(40)
+            }
+        }
+        .animation(.easeInOut(duration: 0.28), value: browser.isPresented)
         // 底栏切换也记一笔（用户点名要的：「我切换了聊天、切换了发现、切换了我的」）。
         .onChange(of: tab) { _, now in
             BlackBox.tap("底栏 · \(now.title)")

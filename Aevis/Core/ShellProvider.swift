@@ -517,16 +517,34 @@ enum Shell {
 extension DeviceTools {
 
     /// 命令台对ta来说就是「一只手」：需要读写文件、批量处理文本、抓页面原文时用。
+    ///
+    /// ⚠️ 描述必须跟着真实后端走（2026-10-07）：真机上跑的是整套 Alpine Linux，
+    ///    而这一段以前**写死成 `BuiltinShell` 的阉割版口径**（"只能操作工作目录、
+    ///    碰不到手机上的其它东西"）⇒ ta 不知道自己有一整个 Linux，用户让它
+    ///    `apk add python3` 它会答"我做不到"。跟 `DeviceTools.capabilityNote`
+    ///    里那段讲的是同一件事，两处口径必须一致。
+    ///    （`AlpineShell.isAvailable` 只读纯 Swift 状态、无 C 调用，所以在这里问它是安全的。）
     static var shellTool: DeviceTool {
-        DeviceTool(
-            name: "run_command",
-            title: "在命令台里跑了一条命令",
-            description: """
+        let environment: String
+        if AlpineShell.shared.isAvailable {
+            environment = """
+            这是一整套真的 Alpine Linux，就跑在这台手机里：完整 shell、
+            apk 包管理器（apk add python3 / nodejs / git 都行，装完就留着）、
+            能联网 curl / wget。用户要你整理文件、批量处理文本、跑一段脚本、
+            抓网页原文、算复杂的东西时用它。
+            """
+        } else {
+            environment = """
             在手机内的工作目录里执行一条命令。支持：
             ls / cat / echo / grep / head / tail / wc / mkdir / rm / mv / cp / curl / date / pwd / cd。
             用户要你整理文件、批量处理文本、读写某个文件、抓网页原文时用它。
-            注意：只能操作工作目录里的文件，**碰不到手机上的其它东西**。
-            """,
+            注意：只能操作工作目录里的文件，碰不到手机上的其它东西。
+            """
+        }
+        return DeviceTool(
+            name: "run_command",
+            title: "在命令台里跑了一条命令",
+            description: environment,
             parameters: [
                 "type": "object",
                 "properties": [

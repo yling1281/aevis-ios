@@ -77,6 +77,20 @@ struct ChatView: View {
 
     private var persona: Persona { personaStore.persona }
 
+    /// ⭐ 当前这个会话是不是**群聊**；是的话返回那个群。
+    ///
+    /// 群和联系人**共用一套会话机制**（`ChatStore` 拿 id 当 key），所以这里靠
+    /// `GroupStore` 认一下：这个 id 在群表里 → 就是群。
+    private var activeGroup: ChatGroup? {
+        GroupStore.shared.group(for: chat.currentContactID)
+    }
+
+    /// 顶栏那行小字：群显示成员数，单人显示「正在输入…/在线」。
+    private var headerSubtitle: String {
+        if let group = activeGroup { return "\(group.memberCount) 个成员" }
+        return statusText
+    }
+
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -318,22 +332,31 @@ struct ChatView: View {
             //    用户习惯"点对方的头像看资料"，右上角那个人像按钮之外再补这一下。
             Button {
                 composerFocused = false
-                showPersona = true
+                // 群没有「人设资料」可看 —— 点群头像不开那个 sheet。
+                if activeGroup == nil { showPersona = true }
             } label: {
-                AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
+                if let group = activeGroup {
+                    GroupAvatarBadge(size: settings.simpleMode ? 40 : 36,
+                                     memberCount: group.memberCount)
+                } else {
+                    AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
+                }
             }
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(persona.name)
+                Text(activeGroup?.displayName ?? persona.name)
                     .font(.aevis(settings.simpleMode ? 18 : 16, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(statusText)
+                Text(headerSubtitle)
                     .font(.aevis(settings.simpleMode ? 13 : 11.5))
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 8)
+
+            // ⭐ 群聊没有「打电话给某个人」和「人设资料」—— 这两个按钮只在单人聊天里显示。
+            if activeGroup == nil {
 
             // 打电话 —— 用户 2026-10-01：
             // 「就是右上角，你要就是有一个让他打电话。如果点了让他打电话，
@@ -380,6 +403,7 @@ struct ChatView: View {
                     .contentShape(Rectangle())
             }
             .aevisGlass(cornerRadius: 20)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
@@ -418,6 +442,20 @@ struct ChatView: View {
         // （`bubbleTheme` 要读好几个 settings、`persona` 要 O(联系人数) 找一次）。
         let theme = bubbleTheme
         let face = persona
+        // ⭐ 群聊：预先取好每个成员的「脸」，气泡按 speakerID 去查。
+        let group = activeGroup
+        var memberFaces: [UUID: ChatMemberFace] = [:]
+        if let group {
+            for id in group.memberIDs {
+                if let contact = personaStore.contacts.first(where: { $0.id == id }) {
+                    memberFaces[id] = ChatMemberFace(
+                        name: contact.persona.name,
+                        seed: contact.persona.avatarSeed,
+                        image: personaStore.avatar(for: id)
+                    )
+                }
+            }
+        }
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: (settings.simpleMode ? 16 : 12) * CGFloat(settings.densityScale)) {
@@ -428,7 +466,10 @@ struct ChatView: View {
                     ForEach(chat.messages) { message in
                         // ⭐ 「她想了一下」+ 工具记录 —— 贴在她**这次回复的第一条**气泡前面。
                         //    这样看起来就是「先想了想 / 动了下手，再开口」，而不是飘在别处。
-                        if message.id == workAnchor {
+                        // 「她想了一下 / 工具记录」只在单人聊天贴 —— 群聊里没有
+                        // 「用户那句话之后的第一条」这个锚点（AI 之间会互相接话），
+                        // 贴上去会飘，所以群聊不显示过程块。
+                        if group == nil, message.id == workAnchor {
                             workBlock
                         }
                         if message.kind == .call {
@@ -449,11 +490,15 @@ struct ChatView: View {
                                            action: message.herAction ?? message.text)
                                 .id(message.id)
                         } else {
+                            let member = message.speakerID.flatMap { memberFaces[$0] }
                             MessageBubble(
                                 message: message,
                                 persona: face,
                                 theme: theme,
-                                simpleMode: settings.simpleMode
+                                simpleMode: settings.simpleMode,
+                                speakerName: member?.name,
+                                speakerSeed: member?.seed,
+                                speakerImage: member?.image
                             )
                             .id(message.id)
                         }
@@ -1032,6 +1077,19 @@ struct ChatView: View {
         bodyStarted = false
         toolTraces = []
         SpeechService.shared.stop()
+
+        // ⭐ 群聊：走另一条路 —— 不在这里自己流式，交给 `GroupChatService` 让成员轮流说。
+        //    包在 `sendTask` 里是为了让用户能按「停止」把它取消（`stopSending` 会 cancel）。
+        if let group = activeGroup {
+            isSending = true
+            let outgoing = text
+            sendTask = Task { @MainActor in
+                await GroupChatService.shared.run(userText: outgoing, group: group)
+                isSending = false
+                sendTask = nil
+            }
+            return
+        }
 
         chat.append(ChatMessage(role: .user, text: text, imageData: image))
         chat.append(ChatMessage(role: .assistant, text: ""))

@@ -272,8 +272,16 @@ settings:
     #    ⚠️ 后端是**同一批**改动（`server/account/app.py` 新表 `device_logins` + 三条路由
     #       + `web/scan.html`）；`_verify/deploy_app.py` 里加了 4 条探针盯它。
     #       后端没上而先装这个包，扫码登录会 404 —— 自动同步那半是纯客户端，不受影响。
-    MARKETING_VERSION: "0.0.113"
-    CURRENT_PROJECT_VERSION: "113"
+    #    🆕 0.0.115（本版）：**0.0.114 那一批（修「一发消息就弹提示」+ 内置浏览器操控）
+    #       和本批三条新需求（0.01 一天体验码 / 多联系人各自独立 / 群聊）一起出**。
+    #       ⚠️ 0.0.114 从未推过（连接器中断），所以没有单独出包，两批合并成这一版。
+    #       ⚠️ 「一天体验码」要生效，除了本包，还要两步**代码之外**的操作：
+    #          ① PayPro 后台建「Aevis 一天体验 / 0.01」商品
+    #          ② 服务器 `account.env` 加 `AEVIS_TRIAL_PRICE=0.01`（正式价 `AEVIS_ORDER_PRICE` 仍是 `12.00`）
+    #       另：本版后端 `app.py` / 网页后台 `admin.html` 是同一批改动，后端没上会缺
+    #          `/api/admin/device/expire` 与 `/api/device/lookup` 的 `trial_over` / `offline_grace` 字段。
+    MARKETING_VERSION: "0.0.115"
+    CURRENT_PROJECT_VERSION: "115"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

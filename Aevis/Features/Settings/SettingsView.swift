@@ -610,7 +610,9 @@ struct SettingsView: View {
             .padding(.vertical, 12)
             rule
 
-            labeledField("模型名", hint: "deepseek-chat", text: $settings.model)
+            // ⚠️ hint 别写死成 `deepseek-chat`（2026-10-07 改）——
+            //    那个模型名已于 2026-07-24 停用，写在那儿等于**教用户填一个已经死掉的**名字。
+            labeledField("模型名", hint: "deepseek-v4-flash", text: $settings.model)
             rule
 
             // 推理预算 + 上下文 + 启动自检

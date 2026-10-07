@@ -61,6 +61,11 @@ enum CapabilitySpec {
             return "- 定位/天气/健康：get_location、get_weather、get_health_summary。"
         case .web:
             return "- 上网：search_web、open_web_page。"
+        case .browser:
+            return "- 浏览器（真的在网页上操作，你看得见同一个页面）：browser_open 打开淘宝/天猫/京东/"
+                + "拼多多/美团/饿了么这些真网站，browser_read 看当前页有什么，browser_click 点，"
+                + "browser_type 填，browser_scroll 翻页，browser_back 后退。"
+                + "付款、提交订单那最后一下必须让他自己点，你只把页面停在待付款。"
         case .music:
             return "- 音乐：search_music、play_music、music_control、current_lyric、my_music、save_to_her_playlist。"
         case .moment:
@@ -70,8 +75,28 @@ enum CapabilitySpec {
         case .qq:
             return "- QQ：qq_contacts、qq_read_messages、qq_send_message、qq_bot_recent、qq_bot_send。"
         case .system:
-            return "- 系统动作：lock_screen、get_screen_time、open_link、run_shortcut、"
-                + "go_home、look_at_screen、run_command。"
+            // ⚠️ `run_command` 后面那句说明**不能省**（2026-10-07 加）。
+            //
+            // 老板原话：「APP 意识不到，它自己有一个 Linux，然后还有一些其他的，懂吗？很怪」。
+            // 真机上那台命令台是**一整套真的 Alpine Linux**（`AlpineShell`）——
+            // 只报一个工具名 `run_command`，ta 会以为它跟 `date`、`ls` 一个量级，
+            // 用户让它 `apk add python3` 它就答「我做不到」。
+            //
+            // ⚠️ 模拟器 / 没 rootfs 时回落到 `BuiltinShell`（几十个内建命令的阉割版）——
+            //    那时候**必须说实话**，否则等于教 ta 承诺它做不到的事。
+            // ⚠️ `AlpineShell.isAvailable` 只读 `AlpineRuntime` 的**纯 Swift 状态**，
+            //    里面没有任何 C 调用，所以从这儿问它是安全的。
+            var line = "- 系统动作：lock_screen、get_screen_time、open_link、run_shortcut、"
+                + "go_home、look_at_screen、run_command"
+            if AlpineShell.shared.isAvailable {
+                line += "（这个命令台是一整套真的 Alpine Linux，就在这台手机里跑着："
+                    + "完整 shell 能用，apk 包管理器也能用 —— apk add python3 / nodejs / git 都行，"
+                    + "装完就留着；还能联网 curl / wget。要写文件、批量处理文本、跑脚本、"
+                    + "抓网页原文、算复杂的东西，用它。）"
+            } else {
+                line += "（这台命令台是内置的精简版，只有几十个常用命令，不是真 Linux）"
+            }
+            return line + "。"
         case .couple:
             return "- 情侣空间：couple_anniversaries、couple_add_anniversary。"
         case .companion:

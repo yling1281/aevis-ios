@@ -438,7 +438,10 @@ final class MomentStore: ObservableObject {
         // ⭐ 先剥掉末尾的心情标记再清引号 —— ta发的动态也是用户看得到的，
         //    标记不能跟着发出去。这句话本就在主 actor 之外，跳一次主线程再剥
         //    （`consume` 会写 `MoodStore` 的 @Published，必须在主线程上改）。
-        let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
+        //    ⚠️ owner = 当前联系人（这条动态就是挂在ta名下的）。
+        let stripped = await MainActor.run {
+            MoodStore.shared.consume(collected, owner: ChatStore.shared.currentContactID)
+        }
         // 模型偶尔会带引号或「朋友圈：」这种前缀，清掉
         var text = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
         for token in ["朋友圈：", "朋友圈:", "「", "」", "\""] {
@@ -521,7 +524,10 @@ final class MomentStore: ObservableObject {
         }
         // ⭐ 先剥掉末尾的心情标记再拆行 —— 否则末行那条评论（或私信）会把标记露出来。
         //    本函数在主 actor 之外，剥的时候跳一次主线程（理由同 `compose`）。
-        let stripped = await MainActor.run { MoodStore.shared.consume(collected) }
+        //    ⚠️ owner = 当前联系人（评论 / 私信都挂在ta名下）。
+        let stripped = await MainActor.run {
+            MoodStore.shared.consume(collected, owner: ChatStore.shared.currentContactID)
+        }
         return Self.cleanLines(stripped, limit: limit)
     }
 

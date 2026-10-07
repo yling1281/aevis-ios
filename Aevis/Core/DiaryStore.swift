@@ -155,7 +155,12 @@ final class DiaryStore: ObservableObject {
 
     private struct Archive: Codable {
         var items: [String: [DiaryEntry]] = [:]
-        var pin: String = ""
+        /// 🔴 **必须可选项** —— Swift 合成的 `Decodable` 不吃属性默认值：
+        ///    写成 `var pin: String = ""` 时，**没有这个 key 的老存档**
+        ///    （还没有「日记隐私锁」的版本导出的）会直接抛 `keyNotFound`，
+        ///    整份日记解不出 ⇒ 本机静默清空 / 网盘恢复中断。
+        ///    老存档缺这个键 ⇒ nil，读的时候 `?? ""` 兜底。
+        var pin: String? = nil
     }
 
     private func load() {
@@ -170,7 +175,7 @@ final class DiaryStore: ObservableObject {
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
-        pin = archived.pin
+        pin = archived.pin ?? ""
     }
 
     /// 把当前这份写回字典。任何落盘之前都要先做一次。
@@ -221,7 +226,7 @@ extension DiaryStore: BackupableStore {
             guard let id = UUID(uuidString: pair.key) else { return }
             result[id] = pair.value
         }
-        pin = archived.pin
+        pin = archived.pin ?? ""
         entries = owner.flatMap { itemsByOwner[$0] } ?? []
         // 上面的 loading 还没解除，这里显式落盘
         writeArchive()

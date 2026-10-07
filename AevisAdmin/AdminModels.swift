@@ -61,9 +61,12 @@ struct AdminCode: Decodable, Identifiable {
     var issuedAt: Int?
     var usedAt: Int?
     var usedBy: String?
+    /// ⭐ 2026-10-07：有效期（秒）。0 / nil = 永久；86400 = 一天体验。
+    var durationSeconds: Int?
 
     var id: String { code ?? UUID().uuidString }
     var isUsed: Bool { (usedAt ?? 0) > 0 }
+    var isTrial: Bool { (durationSeconds ?? 0) > 0 }
 }
 
 struct AdminCodeStats: Decodable {
@@ -404,10 +407,13 @@ struct AdminUnlockCode: Decodable, Identifiable {
     var usedUa: String?
     var uses: Int?
     var disabled: Int?
+    /// ⭐ 2026-10-07：有效期（秒）。0 / nil = 永久；86400 = 一天体验。
+    var durationSeconds: Int?
 
     var id: String { code ?? UUID().uuidString }
     var isDisabled: Bool { (disabled ?? 0) > 0 }
     var isUsed: Bool { (uses ?? 0) > 0 }
+    var isTrial: Bool { (durationSeconds ?? 0) > 0 }
 }
 
 struct AdminUnlockStats: Decodable {

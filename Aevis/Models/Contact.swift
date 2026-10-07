@@ -23,7 +23,9 @@ extension Contact {
     /// （`Persona` 那边也是这么做的，保持一致。）
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        // ⚠️ `id` 必须 `decode`（缺了就抛），**不许给随机兜底** ——
+        //    凭空换一个 id 会让 `byContact` 里所有聊天 / 记忆 / 钱包变孤儿。
+        id = try container.decode(UUID.self, forKey: .id)
         persona = try container.decodeIfPresent(Persona.self, forKey: .persona) ?? Persona()
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }

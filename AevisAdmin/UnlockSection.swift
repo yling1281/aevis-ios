@@ -18,6 +18,8 @@ struct UnlockSection: View {
     @State private var count = 1
     @State private var note = ""
     @State private var price = "12"
+    /// ⭐ 2026-10-07：有效期。0 = 永久（老口径）；86400 = 一天体验（24h 后自动失效）。
+    @State private var duration = 0
     @State private var fresh: [String] = []
     /// 等确认作废的那张码（作废会连设备一起撤，是个不可逆动作）。
     @State private var disabling: String?
@@ -100,13 +102,20 @@ struct UnlockSection: View {
                     .padding(.vertical, 10)
                     .background(Color(uiColor: .tertiarySystemFill))
                     .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                // ⭐ 2026-10-07：可选"有效期"。永久 = 老口径；一天 = 体验码（24h 后自动失效）。
+                Picker("有效期", selection: $duration) {
+                    Text("永久").tag(0)
+                    Text("一天").tag(86400)
+                }
+                .pickerStyle(.segmented)
                 Button {
                     let wanted = count
                     let why = note
                     let howMuch = price
+                    let howLong = duration
                     Task {
                         let made = await store.issueUnlockCodes(
-                            count: wanted, note: why, price: howMuch)
+                            count: wanted, note: why, price: howMuch, duration: howLong)
                         if !made.isEmpty {
                             fresh = made
                             note = ""
@@ -187,8 +196,11 @@ struct UnlockSection: View {
 
     /// 「首次使用 … · IP …」或者「发出于 …」。
     private func usageText(_ item: AdminUnlockCode) -> String {
-        guard item.isUsed else { return "发出于 " + AdminFormat.when(item.issuedAt) }
-        var line = "首次使用 " + AdminFormat.when(item.firstUse)
+        let valid = item.isTrial ? "一天体验" : "永久"
+        guard item.isUsed else {
+            return "有效期：" + valid + "　·　发出于 " + AdminFormat.when(item.issuedAt)
+        }
+        var line = "有效期：" + valid + "　·　首次使用 " + AdminFormat.when(item.firstUse)
             + "　·　IP " + (item.usedIp?.isEmpty == false ? item.usedIp! : "?")
         if let ua = item.usedUa, !ua.isEmpty {
             line += "\n" + ua
