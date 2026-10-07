@@ -131,8 +131,11 @@ struct SettingsView: View {
             CardSection(id: "power", title: "能力",
                         // 「AI 权限」排在最前：它是这一组的总闸，
                         // 其余那些能力都归它管，放中间会让人以为只是并列的一项。
-                        keys: ["aitools", "companion", "baidupan", "music",
-                               "qqbot", "wechatbot", "qq", "system", "mcp", "console"]),
+                        // 🚀 「微信机器人」提到第 2 位（2026-10-07）：老板反馈在设置页里
+                        //    找不到它（原来夹在 qqbot 后面），所以挪到最显眼处，
+                        //    一眼就能看到。其余 key 的顺序、名字一个都没动。
+                        keys: ["aitools", "wechatbot", "companion", "baidupan", "music",
+                               "qqbot", "qq", "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
                         keys: ["account", "device", "devicelist", "pair", "share", "about"])
         ]

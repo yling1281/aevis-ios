@@ -278,6 +278,8 @@ enum LLMService {
         //    而此时提示词里若还留着「你能做的事」清单，就是在**教 ta 承诺它做不到的事**
         //    （项目红线之一：不许"假装完成"）。
         //    第一次（还没记住）照常乐观地带上；真被卸掉后这一步会把它撤下来。
+        //    ✅ 但这个记忆**现在有 6 小时 TTL**（`interfaceMemoryTTL`），不会再永久粘住 ——
+        //       过期后 `remembersNoTools` 自动翻回 false，ta 下一步就重新试（且老格式 key 见即删）。
         var messages = buildMessages(
             includeCapability: !remembersNoTools(baseURL: config.baseURL, model: config.model)
         )
@@ -620,6 +622,25 @@ enum LLMService {
 
     // MARK: - 「这家接口不认推理参数」的记忆
 
+    /// 这类「这家接口不认 X」的记忆**只留 6 小时**。
+    /// 为什么要有到期：以前是永久的 —— 一次偶发 400（某个工具的 schema 被中转商挑刺、
+    /// 或接口临时抽风）就把 ta 的工具**永久**废掉，用户还没法自救（界面上没有开关）。
+    /// 6 小时的含义：一次会话内不会反复白跑 400 往返，但第二天一定重新试。
+    private static let interfaceMemoryTTL: TimeInterval = 6 * 3600
+
+    /// 把 `baseURL|model` 算成 **8 位大写 hex**（FNV-1a 稳定哈希）。
+    /// ⚠️ 绝不能用 `String.hashValue` —— 后者每次进程启动都会变（Swift 的哈希是随机加盐的），
+    ///    存进去的 key 下次启动就对不上了，等于没记。
+    /// 两个 key 函数（tools / reasoning）**共用这一份**，别再各抄一遍（以前是重复的两段循环）。
+    private static func hashHex(baseURL: String, model: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325          // FNV-1a
+        for byte in (baseURL + "|" + model).utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(format: "%08X", UInt32(truncatingIfNeeded: hash))
+    }
+
     /// 记过的判定，落在 UserDefaults。key 里带 baseURL+model 的稳定哈希 ——
     /// 所以**换模型 / 换地址会自然得到一个新 key**，等于重新试一次，
     /// 不会被上一家接口的"坏印象"连累。
@@ -627,47 +648,59 @@ enum LLMService {
     /// ⚠️ 用**自己算的稳定哈希**（FNV-1a），**绝不能用 `String.hashValue`** ——
     ///    后者每次进程启动都会变（Swift 的哈希是随机加盐的），
     ///    存进去的 key 下次启动就对不上了，等于没记。
-    private static func noReasoningKey(baseURL: String, model: String) -> String {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325          // FNV-1a
-        for byte in (baseURL + "|" + model).utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        let hex = String(format: "%08X", UInt32(truncatingIfNeeded: hash))
-        return "aevis.noReasoning.\(hex)"
+    private static func noReasoningUntilKey(baseURL: String, model: String) -> String {
+        "aevis.noReasoningUntil.\(hashHex(baseURL: baseURL, model: model))"
     }
 
-    /// 这家接口是不是已经证明不认 `reasoning_effort`。
+    /// 这家接口是不是**还在**「不认 `reasoning_effort`」的记忆有效期内。
     private static func remembersNoReasoning(baseURL: String, model: String) -> Bool {
-        UserDefaults.standard.bool(forKey: noReasoningKey(baseURL: baseURL, model: model))
+        // 老格式（`aevis.noReasoning.<hex>` = Bool true，永不过期）一律作废：
+        // 见到就删 —— 老用户升级后**立刻**恢复手感，不用等 TTL 走完。
+        let legacyKey = "aevis.noReasoning." + hashHex(baseURL: baseURL, model: model)
+        if UserDefaults.standard.object(forKey: legacyKey) != nil {
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+        }
+        let until = UserDefaults.standard.double(
+            forKey: noReasoningUntilKey(baseURL: baseURL, model: model)
+        )
+        return until > Date().timeIntervalSince1970
     }
 
-    /// 记下「这家接口不认 `reasoning_effort`」—— 后续请求直接不带。
+    /// 记下「这家接口不认 `reasoning_effort`」—— 从此刻起 `interfaceMemoryTTL` 内不再带它。
     private static func rememberNoReasoning(baseURL: String, model: String) {
-        UserDefaults.standard.set(true, forKey: noReasoningKey(baseURL: baseURL, model: model))
+        UserDefaults.standard.set(
+            Date().timeIntervalSince1970 + interfaceMemoryTTL,
+            forKey: noReasoningUntilKey(baseURL: baseURL, model: model)
+        )
     }
 
     // MARK: - 「这家接口不认工具」的记忆
 
-    /// 和 `noReasoningKey` 同一套写法（FNV-1a 稳定哈希，绝不用 `String.hashValue`），
-    /// 只是前缀换成 `aevis.noTools.` —— 换模型 / 换地址会自然得到新 key，重新试一次。
-    private static func noToolsKey(baseURL: String, model: String) -> String {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325          // FNV-1a
-        for byte in (baseURL + "|" + model).utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        let hex = String(format: "%08X", UInt32(truncatingIfNeeded: hash))
-        return "aevis.noTools.\(hex)"
+    /// 和 `noReasoningUntilKey` 同一套写法（FNV-1a 稳定哈希，绝不用 `String.hashValue`），
+    /// 只是前缀换成 `aevis.noToolsUntil.` —— 换模型 / 换地址会自然得到新 key，重新试一次。
+    private static func noToolsUntilKey(baseURL: String, model: String) -> String {
+        "aevis.noToolsUntil.\(hashHex(baseURL: baseURL, model: model))"
     }
 
-    /// 这家接口是不是已经证明不认 `tools`。
+    /// 这家接口是不是**还在**「不认 `tools`」的记忆有效期内。
     private static func remembersNoTools(baseURL: String, model: String) -> Bool {
-        UserDefaults.standard.bool(forKey: noToolsKey(baseURL: baseURL, model: model))
+        // 老格式（`aevis.noTools.<hex>` = Bool true，永不过期）一律作废：
+        // 见到就删 —— 老用户升级后**立刻**恢复手感，不用等 TTL 走完。
+        let legacyKey = "aevis.noTools." + hashHex(baseURL: baseURL, model: model)
+        if UserDefaults.standard.object(forKey: legacyKey) != nil {
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+        }
+        let until = UserDefaults.standard.double(
+            forKey: noToolsUntilKey(baseURL: baseURL, model: model)
+        )
+        return until > Date().timeIntervalSince1970
     }
 
-    /// 记下「这家接口不认 `tools`」—— 后续请求直接不带工具定义。
+    /// 记下「这家接口不认 `tools`」—— 从此刻起 `interfaceMemoryTTL` 内不再带工具定义。
     private static func rememberNoTools(baseURL: String, model: String) {
-        UserDefaults.standard.set(true, forKey: noToolsKey(baseURL: baseURL, model: model))
+        UserDefaults.standard.set(
+            Date().timeIntervalSince1970 + interfaceMemoryTTL,
+            forKey: noToolsUntilKey(baseURL: baseURL, model: model)
+        )
     }
 }

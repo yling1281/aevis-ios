@@ -280,8 +280,17 @@ settings:
     #          ② 服务器 `account.env` 加 `AEVIS_TRIAL_PRICE=0.01`（正式价 `AEVIS_ORDER_PRICE` 仍是 `12.00`）
     #       另：本版后端 `app.py` / 网页后台 `admin.html` 是同一批改动，后端没上会缺
     #          `/api/admin/device/expire` 与 `/api/device/lookup` 的 `trial_over` / `offline_grace` 字段。
-    MARKETING_VERSION: "0.0.115"
-    CURRENT_PROJECT_VERSION: "115"
+    # ⭐ 0.0.116（2026-10-07 晚）：
+    #   ① 修「接口记忆」永久粘住 —— `LLMService` 里那个「这家接口不认 tools」的标记
+    #      原来是 `Bool true`，**永不过期、界面上也没有任何地方能清** ⇒ 一次偶发 400
+    #      就把 ta 的全部工具**永久**废掉，连「我会什么」的能力清单也一起撤
+    #      （老板反馈：ta 说调不了工具、也不知道自己有内置 Linux —— **同一个原因**）。
+    #      现在改存**到期时间戳 + 6 小时 TTL**；老 key（`aevis.noTools.*` = Bool true）
+    #      在读取时**见即删** ⇒ 老用户升级后**第一次对话就恢复**，不用等 6 小时。
+    #   ② 微信机器人入口提到「能力」组第 2 位，并在「我」页加一条直达
+    #      （老板反馈在设置页里找不到那张卡）。
+    MARKETING_VERSION: "0.0.116"
+    CURRENT_PROJECT_VERSION: "116"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

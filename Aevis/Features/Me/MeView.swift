@@ -62,6 +62,12 @@ struct MeView: View {
                         entry("QQ 机器人", "bubble.left.and.bubble.right", qqBotLine) {
                             route = SettingsRoute(focus: "qqbot")
                         }
+                        // 🚀 老板在设置页里找不到「微信机器人」，所以在「我」这一页也挂一条
+                        //    直达（跟 QQ 机器人并排 —— 都是「机器人」那条线），
+                        //    多一个入口，总好过让人找不到。
+                        entry("微信机器人", "message.badge", "在手机上跑，不用电脑（扫码绑定）") {
+                            route = SettingsRoute(focus: "wechatbot")
+                        }
                         // 「AI 权限」放这一组，而且**不藏在「更多设置」里** ——
                         // 用户要的就是一句话能关掉ta的手脚，藏起来等于没有。
                         entry("AI 权限", "lock.shield", aiToolsLine) {
