@@ -303,8 +303,26 @@ settings:
     #   ⚠️ 代价：这次会重拷一遍 rootfs，guest 里 `apk add` 装过的东西要重装。
     #   ⏳ 待办：`ish-embed/ish_embed.c` 还该补一句 `mkdir /dev` + 检查返回值
     #   （C 侧兜底，不依赖 rootfs）—— 那要重跑 ish-sandbox.yml（约 50 分钟）才生效，本轮没带。
-    MARKETING_VERSION: "0.0.117"
-    CURRENT_PROJECT_VERSION: "117"
+    # ⭐ 0.0.118（2026-10-07 晚）：微信机器人两个真机事故
+    #   ① **画错二维码字段** —— 把 `qrcode`（一串 32 位 hex 内部票据）画成了码，
+    #      微信扫出来是一串字符、弹不出绑定界面（老板原话「扫出来的是一串，不是绑定的那个界面」）。
+    #      真正该画的是 `qrcode_img_content`（`https://liteapp.weixin.qq.com/q/…`，腾讯 liteapp 绑定链接）。
+    #      主理人实调 `get_bot_qrcode` 确认返回：
+    #        {"qrcode":"ad3d…","qrcode_img_content":"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=ad3d…&bot_type=3","ret":0}
+    #   ② **「会话超时」处理全错** —— 腾讯真实失败响应是
+    #      `{"errcode":-14,"errmsg":"session timeout"}`：字段是 **errcode**，
+    #      而代码一直 grep `"ret":-14`（字段名错 ⇒ 认不出真超时）；更糟的是超时后那条路径
+    #      **不退避** ⇒ 变成「**每秒锤一次 getupdates**」（最招风控），而且宿主解不出消息、
+    #      界面毫无反馈 ⇒ 这就是老板说的「老是说被冻结 / 回不了消息」。
+    #      ⇒ 已改：顶层匹配 `errcode|ret` 的 -14（并锚 `[,}]` 防 `-140` 误判）、
+    #      带 `errmsg` 落盘、**退避 30 秒后继续重试（不再永久 break）**、抽不到新游标退避 8 秒；
+    #      宿主文案改成「会话超时（不是封号），需要重新扫码」；重绑时**连 cursor.txt 一起删**
+    #      （旧游标会让新 bot 收不到消息）；不再用 bot id 覆盖 uin.txt；重启轮询清旧报错。
+    #      ⚠️ 旧代码里「冻 1 小时、没有 refresh、只能扫码」是**没有任何出处的二手说法**（全仓无佐证），已作废，别再改回去。
+    #      ⚠️ `ish-scripts/wechat_bind.sh` 是 App 资源（每次启动由 `installScript()` 重写进 guest）
+    #        ⇒ 改它只需出新包，**不需要重编 `libaevisish.a`**。
+    MARKETING_VERSION: "0.0.118"
+    CURRENT_PROJECT_VERSION: "118"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

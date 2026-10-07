@@ -53,7 +53,8 @@ final class WeChatBotService: ObservableObject {
             case .waitingScan: return "出码了，等你扫"
             case .bound: return "已绑定"
             case .polling: return "已绑定，正在收消息"
-            case .frozen(let why): return "被冻结了：\(why)"
+            // ⚠️ iLink 顶层 -14 = **会话超时（session timeout）**，不是封号 ⇒ 别写「被冻结了」。
+            case .frozen(let why): return "会话超时了：\(why)"
             case .failed(let why): return "出错了：\(why)"
             }
         }
@@ -125,6 +126,10 @@ final class WeChatBotService: ObservableObject {
         static let qrcode = "/root/wechat/qrcode.json"
         static let status = "/root/wechat/status.json"
         static let updates = "/root/wechat/updates.jsonl"
+        /// guest 里 getupdates 的**增量游标**文件（`cursor.txt`）。
+        /// ⚠️ 换绑定（新 token）时宿主必须把它一起删掉 —— 否则新 bot 第一次
+        ///    getupdates 会带着**旧 bot 的游标**，必然收不到新消息。
+        static let cursor = "/root/wechat/cursor.txt"
         static let ticket = "/root/wechat/ticket.txt"
         static let token = "/root/wechat/token.txt"
         static let uin = "/root/wechat/uin.txt"
@@ -143,6 +148,20 @@ final class WeChatBotService: ObservableObject {
     private var lastPeer = ""
     /// 最近一次入站消息带的 `context_token`（`send` 有就原样带上）。**不是** `@Published`。
     private var lastContext = ""
+
+    /// 绑定成功后拿到的 `ilink_user_id` —— 它就是 `X-WECHAT-UIN` 头要的那个值。
+    ///
+    /// 🔴 为什么绝不能用 `weChatBotILinkID`：那是 **ilink_bot_id（bot 自己的 id）**，
+    ///    拿它当 uin 写进 guest 会让 `X-WECHAT-UIN` 头**一直在变**（bot id ≠ 用户 id）。
+    /// ⚠️ 为什么自成一份持久化、不放进 `AppSettings`：本次修复的硬约束是
+    ///    「只改 WeChatBotService.swift 与 ish-scripts/wechat_bind.sh 两个文件」，
+    ///    所以不去动 AppSettings.swift。语义上它和 AppSettings 里那几个 `weChatBot*`
+    ///    是同一类（都是扫码绑定态）。
+    private var ilinkUserID: String {
+        get { UserDefaults.standard.string(forKey: Self.ilinkUserIDKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: Self.ilinkUserIDKey) }
+    }
+    private static let ilinkUserIDKey = "aevis.weChatBot.ilinkUserID"
 
     private init() {}
 
@@ -303,11 +322,23 @@ final class WeChatBotService: ObservableObject {
             return
         }
 
+        // ⭐ 画进二维码的必须是 `qrcode_img_content`（腾讯给的 liteapp 绑定链接），
+        //    **不是** `qrcode` —— 那串 32 位 hex 只是「查扫码状态用的票」。
+        //    🔴 2026-10-07 真机实测：原来画的是 `qrcode` ⇒ 微信扫出来是一串字符、
+        //       弹不出绑定界面（老板原话「扫出来的是一串，不是绑定的那个界面」）。
+        //    腾讯真实返回（本机实调 get_bot_qrcode）：
+        //      {"qrcode":"ad3d…","qrcode_img_content":"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=ad3d…&bot_type=3","ret":0}
+        //    ⚠️ 万一哪天不返回 `qrcode_img_content`，退回用 `qrcode` —— 至少不崩，也不会比现在更差。
+        let qrContent = (obj["qrcode_img_content"] as? String) ?? ""
+        // ⚠️ 这里显式写 `: String` —— 本地变量名和 `@Published var qrPayload` 撞名，
+        //    不写类型会让 swift_check 的 R29 误报「在 async 里改 @Published」。
+        let qrPayload: String = qrContent.isEmpty ? ticket : qrContent
+
         // 票交给 guest 落地（base64 走，免得出特殊字符）—— status 用它查。
         let ticketB64 = Data(ticket.utf8).base64EncodedString()
         _ = await linux("printf '%s' '\(ticketB64)' | base64 -d > \(Guest.ticket)")
 
-        setQR(ticket)
+        setQR(qrPayload)
         setState(.waitingScan)
 
         // 轮询扫码状态：最多等 5 分钟，每 2 秒一次（**不刷屏**）。
@@ -336,10 +367,15 @@ final class WeChatBotService: ObservableObject {
         settings.weChatBotBoundAt = Date().timeIntervalSince1970
 
         let uin = (status["ilink_user_id"] as? String) ?? ""
+        // 记下**真正的用户 id**（`X-WECHAT-UIN` 用它）—— `startPolling` 重写 uin.txt 时要用。
+        ilinkUserID = uin
         _ = await writeGuest(settings.weChatBotToken, to: Guest.token)
         _ = await writeGuest(uin, to: Guest.uin)
         // 新绑定 ⇒ 旧的增量游标作废（换了个 bot，游标对不上）。
-        _ = await linux("rm -f \(Guest.updates) \(Guest.frozen) \(Guest.stop)")
+        //  ⚠️ 连 `cursor.txt` 一起删：`wechat_bind.sh` 顶部注释明说「换绑定（新 token）
+        //     时由宿主负责把旧游标清掉」，而宿主以前**没做** ⇒ 新 bot 第一次
+        //     getupdates 会带着**旧 bot 的游标**，必然收不到新消息。
+        _ = await linux("rm -f \(Guest.updates) \(Guest.frozen) \(Guest.stop) \(Guest.cursor)")
 
         setQR(nil)
         setState(.bound)
@@ -371,15 +407,23 @@ final class WeChatBotService: ObservableObject {
             return
         }
 
+        // 重新起轮询 ⇒ 先把上一回残留的报错清掉，别让界面一直挂着旧错。
+        setError(nil)
+
         let install = await installScript()
         guard install.output.contains("AEVIS_SCRIPT_OK") else {
             setError("脚本没能放进内置 Linux：" + install.output)
             return
         }
 
-        // token / uin 再写一遍（App 重启、或换了绑定之后要保证对得上）。
+        // token 再写一遍（App 重启、或换了绑定之后要保证对得上）。
         _ = await writeGuest(settings.weChatBotToken, to: Guest.token)
-        _ = await writeGuest(settings.weChatBotILinkID, to: Guest.uin)
+        // 🔴 uin 只写**真正的 `ilink_user_id`**，绝不再拿 `weChatBotILinkID`
+        //    （= ilink_**bot**_id）去覆盖 —— 那会让 `X-WECHAT-UIN` 头一直变。
+        //    ⚠️ 拿不到就**不动** uin.txt（`saveBinding` 写进去的那份本来就是对的）。
+        if !ilinkUserID.isEmpty {
+            _ = await writeGuest(ilinkUserID, to: Guest.uin)
+        }
         _ = await linux("rm -f \(Guest.frozen) \(Guest.stop)")
 
         // 从「当前文件末尾」开始读 —— 免得把上一个会话的消息又刷一遍。
@@ -438,16 +482,23 @@ final class WeChatBotService: ObservableObject {
         }
     }
 
-    /// 读一次：先看有没有「冻结」标记，再增量读 `updates.jsonl`。
+    /// 读一次：先看有没有「会话超时」标记（frozen），再增量读 `updates.jsonl`。
     @MainActor
     private func readOnce() async {
-        // 冻结：guest 探测到 ret=-14 会写这个文件并退出循环。
+        // frozen 标记：guest 探测到**顶层** errcode/ret = -14 时会写这个文件。
+        // 🔴 本机 curl 真打腾讯接口的实测真相：`-14` = **会话超时（session timeout）**，
+        //    **不是**「账号被封 / 冻结」。证据：
+        //      · `getupdates` 不带 token / 带假 token → 都返回
+        //          {"errcode":-14,"errmsg":"session timeout"}（HTTP 200，42 字节）
+        //      · `sendmessage` 不带 token → 同样返回这一条
+        //    ⚠️ 旧文案「冻 1 小时、没有 refresh、只能重新扫码」是**没有任何出处的二手说法**
+        //       （本机全仓无佐证），已作废 —— 别再改回去。
         let frozenText = (await linux("cat \(Guest.frozen) 2>/dev/null")).output
         if !frozenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await stopPolling()
-            setError("账号被冻结了（ret=-14）。iLink 的说法是冻 1 小时、没有 refresh，"
-                     + "只能重新扫码。原文：\n" + frozenText)
-            setState(.frozen("ret=-14，要重新扫码"))
+            setError("微信机器人会话超时了（iLink 顶层 errcode/ret = -14，含义是 session timeout，"
+                     + "不是封号）。需要重新点「微信扫码绑定」扫一次码。原文：\n" + frozenText)
+            setState(.frozen("会话超时，要重新扫码"))
             return
         }
 

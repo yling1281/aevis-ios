@@ -34,7 +34,7 @@
 #   token.txt / uin.txt   宿主写进来的凭证
 #   send_body.json   宿主拼好的 sendmessage 请求体（本脚本**不解析**，原样 -d @ 发出去）
 #   send_result.json sendmessage 的原始响应
-#   frozen         打上就是「账号被冻结（ret=-14）」，宿主看到就停轮询
+#   frozen         -14 会话超时（session timeout，**不是封号**）的留痕（含 errmsg），宿主读到就提示重新扫码
 #   stop           poll 循环看到它就退出
 # =============================================================================
 
@@ -131,7 +131,7 @@ case "$1" in
     rm -f "$FROZEN" "$STOP"
     log "poll 起来（token 文件存在=$([ -f "$TOKENFILE" ] && echo yes || echo no)）"
     # ⚠️ 故意**不删 cursor.txt**：fakefs 是持久的，断了要能接着拉（断了能续）。
-    #    换绑定（新 token）时由宿主负责把旧游标清掉。
+    #    换绑定（新 token）时由宿主负责把旧游标清掉（见 WeChatBotService.saveBinding）。
     while [ ! -f "$STOP" ]; do
       buf=""
       if [ -f "$CURSOR" ]; then buf=$(cat "$CURSOR"); fi
@@ -156,18 +156,54 @@ case "$1" in
       tr -d '\n' < "$RESP" >> "$UPDATES"
       printf '\n' >> "$UPDATES"
       echo "$(stamp) getupdates ok http=$code"
-      # ret=-14 ⇒ 该账号冻结 1 小时、没有 refresh、只能重新扫码。
-      #   ⚠️ **探测到就停**，绝不死刷（死刷只会一直撞墙，还可能延长冻结）。
-      if grep -q '"ret"[[:space:]]*:[[:space:]]*-14' "$RESP"; then
-        echo "ret=-14 检测于 $(stamp)" >> "$FROZEN"
-        cat "$RESP" >> "$FROZEN"
-        log "账号被冻结（ret=-14），停止轮询"
-        break
+      #
+      # 🔴 失败判据（本机 curl 真打腾讯接口实测）：iLink **成功用顶层 `ret`、
+      #    失败用顶层 `errcode`**：
+      #      无 token / token 失效 → getupdates 返回
+      #        {"errcode":-14,"errmsg":"session timeout"}   （HTTP 200，约 42 字节）
+      #      sendmessage 无 token 同样是这一条。
+      #    🔴 `-14` 的真实含义是**会话超时（session timeout）**，**不是**「账号被封」！
+      #       这里原来那句「ret=-14 ⇒ 冻结 1 小时、只能重新扫码」是**没有任何出处的
+      #       二手说法**（本机全仓无佐证），已作废 —— 别再改回去。
+      #    ⚠️ 只在**响应开头**匹配**顶层**字段名（`[^{]*` 保证不跨进嵌套对象），
+      #       绝不 `grep` 整个响应体去找 `-14` —— 否则嵌套结构里的 ret=-14 会误判。
+      #    ⚠️ `-14` 后面必须紧跟 `,` 或 `}`（JSON 里数字后面只可能是这两个之一），
+      #       否则 `-140` 会被当成 `-14` —— 所以尾部锚一个 `[[:space:]]*[,}]`。
+      #    ⚠️ 用两条 BRE（不用 `|` 扩展正则），busybox grep 也稳。
+      if grep -q \
+           -e '^[[:space:]]*{[^{]*"errcode"[[:space:]]*:[[:space:]]*-14[[:space:]]*[,}]' \
+           -e '^[[:space:]]*{[^{]*"ret"[[:space:]]*:[[:space:]]*-14[[:space:]]*[,}]' \
+           "$RESP"; then
+        # 把 errmsg 一起落进 frozen，宿主好如实把原因显示出来。
+        errmsg=$(sed -n 's/.*"errmsg"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RESP" | head -n 1)
+        {
+          echo "time=$(stamp)"
+          echo "errmsg=$errmsg"
+          echo "note=顶层 -14 = 会话超时（session timeout），不是封号；需要重新扫码"
+          printf 'raw=%s\n' "$(cat "$RESP")"
+        } > "$FROZEN"
+        log "getupdates 返回 -14（会话超时，非封号）errmsg=[$errmsg]，退避 30 秒后继续"
+        echo "$(stamp) getupdates -14 会话超时 http=$code"
+        # 🔴 退避，绝不死刷（每秒锤一次 getupdates 最容易被风控盯上）；
+        #    也**不永久 break** —— 保留「不快刷」的原则，但不「一停到底」。
+        sleep 30
+        continue
       fi
+      # 正常响应 ⇒ 清掉可能残留的 frozen（上一轮 -14 过、这一轮已经好了）。
+      if [ -f "$FROZEN" ]; then rm -f "$FROZEN"; fi
       # 抽新的游标并落盘（下次请求接着用）。
       newbuf=$(sed -n 's/.*"get_updates_buf"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$RESP" | tail -n 1)
-      if [ -n "$newbuf" ]; then printf '%s' "$newbuf" > "$CURSOR"; fi
-      sleep 1
+      if [ -n "$newbuf" ] && [ "$newbuf" != "$buf" ]; then
+        printf '%s' "$newbuf" > "$CURSOR"
+        sleep 1
+      else
+        # 🔴 P0-1：响应非空、却**抽不到新游标**（空、或游标没前进）—— 这条路径以前
+        #    只 `sleep 1`，会变成「约每秒锤一次 getupdates」（最容易被风控盯上）。
+        #    这里退避 8 秒，并写进日志留痕。
+        log "getupdates 响应里没有新游标（http=$code，空或未前进）⇒ 退避 8 秒，避免每秒锤一次"
+        echo "$(stamp) getupdates 无新游标 http=$code，退避 8 秒"
+        sleep 8
+      fi
     done
     log "poll 结束"
     ;;
