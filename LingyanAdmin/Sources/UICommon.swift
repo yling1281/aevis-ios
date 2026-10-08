@@ -30,6 +30,64 @@ enum Fmt {
         if s.count >= 10 { s = String(s.prefix(10)) }
         return s
     }
+
+    /// 金额：¥128 / ¥0（不带小数；有零头时保留两位）
+    static func money(_ n: Double) -> String {
+        if n <= 0 { return "¥0" }
+        if abs(n - n.rounded()) < 0.005 {
+            return "¥" + String(format: "%.0f", n)
+        }
+        return "¥" + String(format: "%.2f", n)
+    }
+
+    /// 大额（收入汇总）：¥12,345
+    static func moneyGrouped(_ n: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        let s = f.string(from: NSNumber(value: n)) ?? "0"
+        return "¥" + s
+    }
+}
+
+/// 状态配色：按「好 / 待处理 / 已停用」三档给色。
+/// 0=中性 1=好（绿）2=待处理（橙）3=已停用（红）
+enum Tone {
+    static func color(_ n: Int) -> Color {
+        switch n {
+        case 1: return .green
+        case 2: return .orange
+        case 3: return .red
+        default: return .secondary
+        }
+    }
+
+    static func forDevice(_ status: String) -> Int {
+        switch status {
+        case "active": return 1
+        case "pending": return 2
+        case "blocked": return 3
+        default: return 0
+        }
+    }
+
+    static func forCard(_ status: String) -> Int {
+        switch status {
+        case "unused": return 1
+        case "bound": return 2
+        case "disabled": return 3
+        default: return 0
+        }
+    }
+
+    static func forOrder(_ status: String) -> Int {
+        switch status {
+        case "done": return 1
+        case "pending", "paid": return 2
+        case "canceled": return 3
+        default: return 0
+        }
+    }
 }
 
 /// 加载状态（每个页签自己一份）

@@ -1,7 +1,7 @@
 import Foundation
 
 /// 接口层错误。`status < 0` 表示**根本没连上**（网络问题），
-/// `401/403` 表示**服务器不认这个 Key**——这两种要分开告诉用户，
+/// `401` 表示**登录已过期**，`403` 表示**权限不够** —— 这三种要分开告诉用户，
 /// 不然用户会一直去检查网络。
 struct APIError: LocalizedError {
     let status: Int
@@ -9,8 +9,11 @@ struct APIError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-/// 只读接口客户端（对应服务端 app_server/routers/openapi.py 的 /api/v1/*）。
-/// 所有请求都带 `X-API-Key` 头；服务端只认 sha256 摘要，明文只存在手机本地。
+/// 后台接口客户端（对应服务端 app_server 那一套 /api/* 管理端点）。
+///
+/// 鉴权：登录拿 JWT → 之后每个请求带 `Authorization: Bearer <token>`。
+/// 令牌一旦被服务器判成无效（账号删了 / 权限撤了 / 过期），这里会**自动退出登录**，
+/// 界面自己回到登录页 —— 免得用户对着一个永远 401 的界面反复点重试。
 final class API {
     static let shared = API()
 
@@ -26,9 +29,9 @@ final class API {
 
     // MARK: - 拼地址
 
-    func makeURL(_ path: String, query: [String: String] = [:]) -> URL? {
-        let base = AppConfig.shared.baseURL
-        guard var comps = URLComponents(string: base + path) else { return nil }
+    func makeURL(_ path: String, query: [String: String] = [:], base: String? = nil) -> URL? {
+        let b = base ?? AppConfig.shared.baseURL
+        guard var comps = URLComponents(string: b + path) else { return nil }
         if !query.isEmpty {
             var items: [URLQueryItem] = comps.queryItems ?? []
             for (k, v) in query where !v.isEmpty {
@@ -39,14 +42,26 @@ final class API {
         return comps.url
     }
 
-    /// 给别人复制用的完整链接（把 Key 拼在 ?k= 上，浏览器点开就能下）
-    func shareURL(_ path: String) -> String {
-        let base = AppConfig.shared.baseURL
-        let key = AppConfig.shared.apiKey
-        return base + path + "?k=" + key
+    // MARK: - 登录
+
+    /// 账号密码登录。还没令牌，所以这一步不能带 Authorization。
+    func login(server: String, username: String, password: String) async throws -> [String: Any] {
+        let base = AppConfig.normalize(server)
+        guard let u = makeURL("/api/auth/login", base: base) else {
+            throw APIError(status: 0, message: "服务器地址不合法：\(server)")
+        }
+        var req = URLRequest(url: u)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "username": username.trimmingCharacters(in: .whitespacesAndNewlines),
+            "password": password,
+        ]
+        req.httpBody = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
+        return try await send(req, base: base, auth: false)
     }
 
-    // MARK: - 请求
+    // MARK: - 通用请求
 
     func get(_ path: String, query: [String: String] = [:]) async throws -> [String: Any] {
         guard let u = makeURL(path, query: query) else {
@@ -57,20 +72,40 @@ final class API {
         return try await send(req)
     }
 
-    func post(_ path: String, body: [String: Any]) async throws -> [String: Any] {
+    func post(_ path: String, body: [String: Any] = [:]) async throws -> [String: Any] {
+        try await body(path, method: "POST", body: body)
+    }
+
+    func put(_ path: String, body: [String: Any] = [:]) async throws -> [String: Any] {
+        try await body(path, method: "PUT", body: body)
+    }
+
+    func delete(_ path: String, query: [String: String] = [:]) async throws -> [String: Any] {
+        guard let u = makeURL(path, query: query) else {
+            throw APIError(status: 0, message: "服务器地址不合法：\(AppConfig.shared.server)")
+        }
+        var req = URLRequest(url: u)
+        req.httpMethod = "DELETE"
+        return try await send(req)
+    }
+
+    private func body(_ path: String, method: String, body: [String: Any]) async throws -> [String: Any] {
         guard let u = makeURL(path) else {
             throw APIError(status: 0, message: "服务器地址不合法：\(AppConfig.shared.server)")
         }
         var req = URLRequest(url: u)
-        req.httpMethod = "POST"
+        req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
         return try await send(req)
     }
 
-    private func send(_ req: URLRequest) async throws -> [String: Any] {
+    private func send(_ req: URLRequest, base: String? = nil, auth: Bool = true) async throws -> [String: Any] {
         var r = req
-        r.setValue(AppConfig.shared.apiKey, forHTTPHeaderField: "X-API-Key")
+        if auth {
+            let t = AppConfig.shared.token
+            if !t.isEmpty { r.setValue("Bearer " + t, forHTTPHeaderField: "Authorization") }
+        }
         r.setValue("LingyanAdmin-iOS", forHTTPHeaderField: "User-Agent")
 
         let data: Data
@@ -78,7 +113,8 @@ final class API {
         do {
             (data, resp) = try await session.data(for: r)
         } catch {
-            throw APIError(status: -1, message: "连不上服务器：\(error.localizedDescription)")
+            let b = base ?? AppConfig.shared.baseURL
+            throw APIError(status: -1, message: "连不上服务器（\(b)）：\(error.localizedDescription)")
         }
 
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -90,14 +126,24 @@ final class API {
         if code >= 200 && code < 300 { return json }
 
         var msg = (json["detail"] as? String) ?? ""
-        if json["detail"] != nil, msg.isEmpty {
+        if msg.isEmpty, json["detail"] != nil {
             msg = String(describing: json["detail"] ?? "")
         }
         if msg.isEmpty {
             msg = String(data: data.prefix(300), encoding: .utf8) ?? "HTTP \(code)"
         }
-        if code == 401 { msg = "API Key 无效：\(msg)" }
-        if code == 403 { msg = "这个 Key 没有权限：\(msg)" }
+
+        if code == 401 {
+            // 令牌废了：立刻清掉，界面自己回登录页（别再让用户对着 401 点重试）
+            if auth {
+                DispatchQueue.main.async { AppConfig.shared.signOut() }
+                msg = msg.isEmpty ? "登录已过期，请重新登录" : msg
+            } else {
+                msg = msg.isEmpty ? "账号或密码不对" : msg
+            }
+        }
+        if code == 403 { msg = "权限不够：\(msg)" }
+        if code == 429 { msg = msg.isEmpty ? "尝试次数过多，请过一会儿再试" : msg }
         throw APIError(status: code, message: msg.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
@@ -128,6 +174,7 @@ extension Dictionary where Key == String, Value == Any {
     func b(_ k: String) -> Bool {
         if let v = self[k] as? Bool { return v }
         if let v = self[k] as? NSNumber { return v.intValue != 0 }
+        if let v = self[k] as? String { return v == "1" || v.lowercased() == "true" }
         return false
     }
 
@@ -138,5 +185,11 @@ extension Dictionary where Key == String, Value == Any {
         if let v = self[k] as? [String] { return v }
         if let v = self[k] as? [Any] { return v.map { "\($0)" } }
         return []
+    }
+
+    /// 有些字段服务端会给 null，这里统一成 ""
+    func nz(_ k: String) -> String {
+        if self[k] == nil || self[k] is NSNull { return "" }
+        return s(k)
     }
 }

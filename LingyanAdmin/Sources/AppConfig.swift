@@ -1,10 +1,11 @@
 import Foundation
 
-/// 服务器地址 + API Key 的本地存储。
+/// 服务器地址 + 登录态的本地存储。
 ///
-/// 为什么不把 Key 编译进包里：这个包是要发给别人装的，
-/// 二进制里写死的 Key 谁都能扒出来。所以改成**首次打开自己填**，
-/// 存在本机 UserDefaults 里；后台随时能停用某个 Key。
+/// 2026-10-08 改版：原来靠一条 API Key（`X-API-Key`）看只读数据；
+/// 现在「零砚后台」是**完整版后台**，改成和电脑网页后台一样的 **账号密码登录** ——
+/// 登录后拿到 JWT 令牌（`Authorization: Bearer`），能看也能改。
+/// API Key 那套留给**第三方**用（拿码 / 验证 / 上传文件），App 这边不再碰它。
 ///
 /// ⚠️ 这个类**故意不加 `@MainActor`**：View 的属性初始化里会取 `.shared`，
 ///    加了隔离在 Swift 5 语言模式下会报「非隔离上下文访问主线程属性」。
@@ -16,18 +17,23 @@ final class AppConfig: ObservableObject {
     static let defaultServer = "https://lingyan.cyou:8642"
     /// 备用入口（香港**同一台机器、同一个库**的 443 入口）。
     ///
-    /// ⚠️ 备地址绝不能指向别的机器：早先配的是「123.57.33.160 裸 IP」——那是另一台
+    /// ⚠ 备地址绝不能指向别的机器：早先配的是「123.57.33.160 裸 IP」——那是另一台
     ///    机器上的旧快照（少一个用户、卡密/设备都是旧数据），回退过去会出现
-    ///    「刚买的卡密验不过」。而且那个端口一直被安全组挡着，本来就连不上。
-    ///    现在这条走 443（基本不会被 ISP 拦），回的是同一台机器。
+    ///    「刚买的卡密验不过」。现在这条走 443，回的是同一台机器。
     static let backupServer = "https://sucai.lingyan.cyou"
 
     @Published var server: String
-    @Published var apiKey: String
+    @Published var username: String
+    /// 「站长」/「管理员」/「普通账号」—— 只用来显示徽标，真实权限永远以服务器为准
+    @Published var roleText: String
+    /// 登录令牌（JWT）。空 = 没登录，界面会回到登录页。
+    @Published private(set) var token: String
 
     private let store = UserDefaults.standard
-    private static let keyServer = "ly_server"
-    private static let keyApiKey = "ly_apikey"
+    private static let kServer = "ly_server"
+    private static let kUser = "ly_user"
+    private static let kToken = "ly_token"
+    private static let kRole = "ly_role"
 
     private init() {
         let args = ProcessInfo.processInfo.arguments
@@ -35,21 +41,24 @@ final class AppConfig: ObservableObject {
         if let i = args.firstIndex(of: "-server"), i + 1 < args.count {
             server = args[i + 1]                       // 截图自检用
         } else {
-            server = store.string(forKey: Self.keyServer) ?? Self.defaultServer
+            server = store.string(forKey: Self.kServer) ?? Self.defaultServer
         }
-        if let i = args.firstIndex(of: "-apiKey"), i + 1 < args.count {
-            apiKey = args[i + 1]
-        } else {
-            apiKey = store.string(forKey: Self.keyApiKey) ?? ""
-        }
+        username = store.string(forKey: Self.kUser) ?? ""
+        token = store.string(forKey: Self.kToken) ?? ""
+        roleText = store.string(forKey: Self.kRole) ?? ""
+
         if AppConfig.isDemo {
             server = "demo"
-            apiKey = "DEMO"
+            username = "零砚（演示）"
+            roleText = "站长"
+            token = "DEMO"
         }
         if args.contains("-showSetup") {
-            // 截图自检要单独拍「首次打开」那一屏（跟 -demo 是一对开关）
+            // 截图自检要单独拍「登录」那一屏（跟 -demo 是一对开关）
             server = Self.defaultServer
-            apiKey = ""
+            username = ""
+            roleText = ""
+            token = ""
         }
     }
 
@@ -58,7 +67,7 @@ final class AppConfig: ObservableObject {
         ProcessInfo.processInfo.arguments.contains("-demo")
     }
 
-    /// 强制显示「首次打开」的设置页（截图用）
+    /// 强制显示登录页（截图用）
     static var forceSetup: Bool {
         ProcessInfo.processInfo.arguments.contains("-showSetup")
     }
@@ -88,8 +97,10 @@ final class AppConfig: ObservableObject {
 
     var configured: Bool {
         if AppConfig.forceSetup { return false }
-        return !apiKey.trimmingCharacters(in: .whitespaces).isEmpty
+        return !token.trimmingCharacters(in: .whitespaces).isEmpty
     }
+
+    var isOwner: Bool { roleText.contains("站长") }
 
     /// 给界面看的短地址（去掉协议）
     var shortServer: String {
@@ -100,23 +111,31 @@ final class AppConfig: ObservableObject {
         return s
     }
 
-    var keyHint: String {
-        let k = apiKey
-        if k.count <= 14 { return k }
-        return String(k.prefix(10)) + "…" + String(k.suffix(4))
-    }
-
-    func save(server: String, key: String) {
+    /// 登录成功后保存
+    func save(server: String, user: String, token: String, role: String) {
         let s = AppConfig.normalize(server)
-        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let u = user.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
         self.server = s
-        self.apiKey = k
-        store.set(s, forKey: Self.keyServer)
-        store.set(k, forKey: Self.keyApiKey)
+        self.username = u
+        self.token = t
+        self.roleText = role
+        store.set(s, forKey: Self.kServer)
+        store.set(u, forKey: Self.kUser)
+        store.set(t, forKey: Self.kToken)
+        store.set(role, forKey: Self.kRole)
     }
 
+    /// 只换服务器地址（保留登录态）
+    func saveServer(_ raw: String) {
+        let s = AppConfig.normalize(raw)
+        server = s
+        store.set(s, forKey: Self.kServer)
+    }
+
+    /// 退出登录：清掉令牌（**账号名留着**，下次登录不用重新打）
     func signOut() {
-        apiKey = ""
-        store.removeObject(forKey: Self.keyApiKey)
+        token = ""
+        store.removeObject(forKey: Self.kToken)
     }
 }
