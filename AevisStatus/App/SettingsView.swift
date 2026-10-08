@@ -49,7 +49,9 @@ struct SettingsView: View {
                 row("设备", deviceText(snapshot))
                 row("网络", networkText(snapshot))
                 row("WiFi", snapshot.wifiName.isEmpty ? "没拿到" : snapshot.wifiName)
-                row("步数", snapshot.hasSteps ? "\(snapshot.steps) 步" : "没拿到")
+                // 步数这一行**故意不显示**：本版不采步数（理由见 StatusCollector 文件头），
+                // 留着就永远显示"没拿到"，那是块假信息。模型里的 hasSteps / steps 两个
+                // 字段保留着，将来若改由「快捷指令喂步数」再把它加回来。
             } else {
                 Text("还没采集过").foregroundStyle(.secondary).font(.subheadline)
             }

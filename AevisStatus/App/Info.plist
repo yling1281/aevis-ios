@@ -44,15 +44,13 @@
 	<string>用来把你的位置告诉你的 AI，好让它知道你在哪。</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>就算 App 在后台，也要能偶尔更新一下你的位置，好让 TA 随时知道你在哪。</string>
-	<!-- 步数要读运动与健身数据 -->
-	<key>NSMotionUsageDescription</key>
-	<string>用来读取你的步数。</string>
 	<!--
-	  功能侧会**尝试**用 HealthKit 读步数，读不到就静默跳过 ——
-	  所以这条说明是"尝试读取"，不是"一定会读"。
+	  ⚠️ 这里**故意没有** NSMotionUsageDescription / NSHealthShareUsageDescription。
+	     步数本版**不采**（2026-10-09 定案：读步数只能走 HealthKit，而侧载重签的
+	     描述文件拿不到 `com.apple.developer.healthkit`）。既然一行都不读，就**不留**
+	     那两条权限说明 —— 留着等于对外宣称一个它根本不做的能力，而 Info.plist 是
+	     会随包发到用户手机上的。别再往回加。
 	-->
-	<key>NSHealthShareUsageDescription</key>
-	<string>用来读取你的步数，好让 TA 知道你今天动了多少。</string>
 	<!--
 	  audio = 那套静音音频保活；location = 让后台还能收到位置回调。
 	-->
