@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 总览：后台首页。数据来自 4 个管理端点，挨个拉齐。
+/// 总览：后台首页。数据来自 4 个管理端点，一次并发拉齐。
 struct OverviewView: View {
     @ObservedObject private var cfg = AppConfig.shared
 

@@ -206,8 +206,8 @@ struct AuditView: View {
                 overview = try await API.shared.get("/api/audit/overview")
             case 1:
                 let r = try await API.shared.get("/api/audit/logins",
-                                                 query: ["limit": "100",
-                                                         "ok": onlyFail ? "0" : "-1"])
+                                                  query: ["limit": "100",
+                                                          "ok": onlyFail ? "0" : "-1"])
                 logins = r.list("rows").map { LoginRow(raw: $0) }
             case 2:
                 let r = try await API.shared.get("/api/audit/activity", query: ["limit": "200"])
@@ -260,7 +260,7 @@ struct BlockIPView: View {
                     TextField("封多少小时（留空 = 永久）", text: $hours)
                         .keyboardType(.numberPad)
                 } footer: {
-                    Text("被封的 IP 访问任何接口都会被拒。封错了就在这里把它解封。")
+                    Text("被封的 IP 访问任何接口都会被拒。解错了就在这里把它解封。")
                         .font(.caption2)
                 }
 

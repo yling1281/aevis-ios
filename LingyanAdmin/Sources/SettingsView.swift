@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 设置：服务器地址 / 账号 / 下载去向（百度网盘）/ 改密码 / 退出。
+/// 设置：服务器地址 / 账号 / 下载去向（百度网盘）/ 下载项 / 改密码 / 退出。
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var cfg = AppConfig.shared
@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var oldPw = ""
     @State private var newPw = ""
     @State private var pwMsg = ""
+    @State private var pwOK = false
     @State private var confirmOut = false
 
     private var version: String {
