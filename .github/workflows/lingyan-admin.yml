@@ -211,12 +211,12 @@ jobs:
             fi
           }
 
-          shot 00-设置页     -showSetup
-          shot 01-概览       -demo -tab 0
-          shot 02-素材       -demo -tab 1
+          shot 00-登录页     -showSetup
+          shot 01-总览       -demo -tab 0
+          shot 02-订单       -demo -tab 1
           shot 03-设备       -demo -tab 2
           shot 04-卡密       -demo -tab 3
-          shot 05-下载       -demo -tab 4
+          shot 05-账号       -demo -tab 4
 
           say "--- 4) 结果 ---"
           ls -la shots/ 2>&1 | tee -a "$SHOTLOG"
@@ -271,13 +271,14 @@ jobs:
           name: 零砚后台 iOS ${{ github.run_number }}
           prerelease: true
           body: |
-            零砚素材管理器 · **后台看板**（iOS，只读）。
+            零砚素材管理器 · **管理后台**（iOS，完整版：能看也能改）。
 
             - 提交：`${{ github.sha }}`
             - 安装：下载 `LingyanAdmin-unsigned.ipa`，用「全能签 / AltStore / Sideloadly」签名后安装
-            - 首次打开要填 **服务器地址**（默认 `https://lingyan.cyou:8642`）+ **API Key**
-              （在电脑后台 `/admin` → 对外 API 里创建，`LYAPI-…`）
-            - `shots.zip` 是模拟器截图自检（演示数据，不含任何 Key）
+            - 首次打开填 **服务器地址**（默认 `https://lingyan.cyou:8642`）+ **管理员账号密码**
+              —— 跟电脑上登 `/admin` 用的是同一个账号，不用再单独生成什么密钥
+            - 五个页签：总览 / 订单 / 设备 / 卡密 / 账号；审计日志、对外 API、设置在「总览」右上角菜单里
+            - `shots.zip` 是模拟器截图自检（演示数据，不含任何账号密码）
           files: |
             LingyanAdmin-unsigned.ipa
             LingyanAdmin-adhoc.ipa
