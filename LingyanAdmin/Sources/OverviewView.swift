@@ -1,26 +1,30 @@
 import SwiftUI
 
-/// 概览：服务端统计 + 当前 Key 信息。
+/// 总览：后台首页。数据来自 4 个管理端点，挨个拉齐。
 struct OverviewView: View {
     @ObservedObject private var cfg = AppConfig.shared
 
     @State private var state: LoadState = .idle
-    @State private var stats: [String: Any] = [:]
-    @State private var cards: [String: Any] = [:]
-    @State private var me: [String: Any] = [:]
-    /// `/api/v1/stats` 的**原始响应**。`server_time` 在这一层，
-    /// 不在 `stats` 子对象里 —— 直接去 stats 里取会永远是空的。
-    @State private var rawStats: [String: Any] = [:]
+    @State private var audit: [String: Any] = [:]
+    @State private var devStats: [String: Any] = [:]
+    @State private var cardStats: [String: Any] = [:]
+    @State private var orderStats: [String: Any] = [:]
     @State private var showSettings = false
+    @State private var showAudit = false
+    @State private var showApi = false
 
-    private var labels: [(String, String, String, Color)] {
+    private var today: [String: Any] { audit.dict("today") }
+
+    private var cards: [(String, String, String, Color)] {
         [
-            ("用户", "\(stats.i("users"))", "person.2.fill", .blue),
-            ("素材", "\(stats.i("materials"))", "photo.on.rectangle.angled", .indigo),
-            ("设备", "\(stats.i("devices"))", "desktopcomputer", .teal),
-            ("未用卡密", "\(cards.i("unused"))", "creditcard", .orange),
-            ("已绑卡密", "\(cards.i("bound"))", "checkmark.seal.fill", .green),
-            ("今日新卡", "\(cards.i("today"))", "calendar", .pink),
+            ("在线设备", "\(devStats.i("online"))", "bolt.fill", .teal),
+            ("用户", "\(audit.i("users_total"))", "person.2.fill", .blue),
+            ("待授权", "\(devStats.i("pending"))", "hourglass", .orange),
+            ("已授权", "\(devStats.i("active"))", "checkmark.seal.fill", .green),
+            ("未用卡密", "\(cardStats.i("unused"))", "creditcard", .indigo),
+            ("待处理单", "\(orderStats.i("pending"))", "tray.full", .pink),
+            ("今日收入", Fmt.moneyGrouped(orderStats.d("income_today")), "yensign.circle", .red),
+            ("今日登录", "\(today.i("logins_ok"))", "arrow.right.to.line", .purple),
         ]
     }
 
@@ -30,70 +34,130 @@ struct OverviewView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if AppConfig.isDemo {
                         Text("演示数据（-demo 启动，不连服务器）")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
 
                     StateBanner(state: state) { Task { await load() } }
 
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                        GridItem(.flexible(), spacing: 10),
                                         GridItem(.flexible(), spacing: 10)],
                               spacing: 10) {
-                        ForEach(labels, id: \.0) { item in
+                        ForEach(cards, id: \.0) { item in
                             BigStat(label: item.0, value: item.1, icon: item.2, tint: item.3)
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("当前 Key").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                        KVRow(k: "名称", v: me.s("name"))
-                        KVRow(k: "权限", v: me.strings("scopes").joined(separator: " / "))
-                        KVRow(k: "备注", v: me.s("note"))
-                        KVRow(k: "创建于", v: Fmt.time(me.s("created_at")))
-                        KVRow(k: "服务器", v: cfg.baseURL, mono: true)
-                        KVRow(k: "服务端时间", v: Fmt.time(rawStats.s("server_time")))
+                    // ---- 登录概况 ----
+                    card("今日登录") {
+                        KVRow(k: "成功", v: "\(today.i("logins_ok"))")
+                        KVRow(k: "失败", v: "\(today.i("logins_fail"))")
+                        KVRow(k: "活跃账号", v: "\(today.i("users"))")
+                        KVRow(k: "独立 IP", v: "\(today.i("ips"))")
+                        KVRow(k: "已封 IP", v: "\(audit.list("blocked").count)")
                     }
-                    .padding(12)
-                    .background(Color(UIColor.secondarySystemGroupedBackground),
-                                in: RoundedRectangle(cornerRadius: 12))
 
-                    Text("提示：这页所有数据都是只读的，改数据要去电脑上的管理后台。")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    // ---- 收入 ----
+                    card("收款") {
+                        KVRow(k: "累计", v: Fmt.moneyGrouped(orderStats.d("income")))
+                        KVRow(k: "今日", v: Fmt.moneyGrouped(orderStats.d("income_today")))
+                        KVRow(k: "今日订单", v: "\(orderStats.i("today"))")
+                        KVRow(k: "待处理", v: "\(orderStats.i("pending"))")
+                        KVRow(k: "已发码", v: "\(orderStats.i("done"))")
+                    }
+
+                    // ---- 今日活跃 TOP ----
+                    let top = audit.list("top_today")
+                    if !top.isEmpty {
+                        card("今日活跃 TOP") {
+                            ForEach(Array(top.prefix(8).enumerated()), id: \.offset) { _, r in
+                                HStack {
+                                    Text(r.s("username"))
+                                        .font(.footnote)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("\(r.i("hits")) 次")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                    Text(Fmt.time(r.s("last_seen")))
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+
+                    card("当前登录") {
+                        KVRow(k: "账号", v: cfg.username)
+                        KVRow(k: "身份", v: cfg.roleText)
+                        KVRow(k: "服务器", v: cfg.baseURL, mono: true)
+                    }
+
+                    Text(audit.s("rate_limit_note"))
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 .padding(16)
             }
             .background(Color(UIColor.systemGroupedBackground))
-            .navigationTitle("概览")
+            .navigationTitle("总览")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                    Menu {
+                        Button { showAudit = true } label: {
+                            Label("审计日志", systemImage: "list.bullet.rectangle")
+                        }
+                        Button { showApi = true } label: {
+                            Label("对外 API", systemImage: "link")
+                        }
+                        Button { showSettings = true } label: {
+                            Label("设置", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
             }
             .refreshable { await load() }
             .task { await load() }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showAudit) { AuditView() }
+            .sheet(isPresented: $showApi) { ApiKeysView() }
         }
+    }
+
+    /// 统一的小卡片容器
+    @ViewBuilder
+    private func card<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+            content()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(UIColor.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func load() async {
         if state.isLoading { return }
         state = .loading
         if AppConfig.isDemo {
-            me = DemoData.me
-            rawStats = DemoData.stats
-            stats = rawStats.dict("stats")
-            cards = stats.dict("cards")
+            audit = DemoData.audit
+            devStats = DemoData.deviceStats
+            cardStats = DemoData.cardStats
+            orderStats = DemoData.orderStats
             state = .done
             return
         }
         do {
-            me = try await API.shared.get("/api/v1/me")
-            let rStats = try await API.shared.get("/api/v1/stats")
-            rawStats = rStats
-            stats = rStats.dict("stats")
-            cards = stats.dict("cards")
+            // 串行拉四个端点。故意不用 async let —— 少写一种并发语法，就少一种云端白跑一轮的可能。
+            let ra = try await API.shared.get("/api/audit/overview")
+            let rd = try await API.shared.get("/api/device/list")
+            let rc = try await API.shared.get("/api/card/list")
+            let ro = try await API.shared.get("/api/order/list/all")
+            audit = ra
+            devStats = rd.dict("stats")
+            cardStats = rc.dict("stats")
+            orderStats = ro.dict("stats")
             state = .done
         } catch {
             let e = error as? APIError
