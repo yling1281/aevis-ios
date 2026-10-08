@@ -1,0 +1,56 @@
+# 零砚后台（iOS）—— 单独一个 XcodeGen 工程，故意**不碰仓库根目录的 project.yml**。
+#
+# 为什么不合并进根工程：
+#   根 project.yml 是 Aevis 那套（主 App + 管理端 + 一堆探针），那条流水线要
+#   `xcodegen generate` + `-target Aevis` 才能出包。往它里面加 target，一旦我这个
+#   target 写错，**xcodegen 生成失败会连带把 Aevis 的构建一起弄挂**。
+#   所以这里自成一套：不同的 .xcodeproj、不同的目录、不同的流水线，互不牵连。
+#
+# 用法（CI 里）：
+#   cd LingyanAdmin && xcodegen generate
+#   xcodebuild -project LingyanAdmin.xcodeproj -target LingyanAdmin ...
+
+name: LingyanAdmin
+options:
+  bundleIdPrefix: cn.lingyan
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "16.0"
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    ALWAYS_SEARCH_USER_PATHS: "NO"
+    CLANG_ENABLE_OBJC_ARC: "YES"
+    # 关掉签名相关的一切（云端只出**未签名** IPA，签名交给手机上的工具）
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGN_ENTITLEMENTS: ""
+
+targets:
+  LingyanAdmin:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Resources
+        excludes:
+          - "Info.plist"          # 不排除的话会被当资源重复拷进 bundle
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cn.lingyan.admin
+        PRODUCT_NAME: LingyanAdmin
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"      # 不设会被 XcodeGen 自己造一个，跟我们的 plist 打架
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.0"
+        TARGETED_DEVICE_FAMILY: "1,2"      # iPhone + iPad
+        SWIFT_EMIT_LOC_STRINGS: "NO"
+        DEVELOPMENT_TEAM: ""
+        # 关掉 Swift 6 的严格并发（Swift 5 语言模式，代码按 5 写的最省心）
+        SWIFT_STRICT_CONCURRENCY: minimal

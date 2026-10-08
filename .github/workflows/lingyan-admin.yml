@@ -1,0 +1,221 @@
+# 零砚后台（iOS）—— 单独一条流水线，单独的工程、单独的目录，**不碰 Aevis 那几条**。
+#
+# 出什么：
+#   LingyanAdmin-unsigned.ipa   ← 手机上用「全能签」之类再签一次就能装
+#   LingyanAdmin-adhoc.ipa      ← 备用（adhoc 签）
+#   shots.zip                   ← 模拟器截图自检（每页一张）
+#
+# 为什么用 paths 过滤：这个仓库里 Aevis 那几条流水线都没有过滤，
+# 推任何东西都会一起跑。加上过滤之后，只有动到 LingyanAdmin 的东西才跑这一条。
+#
+# ⚠️ 本流水线**不 push 仓库**。仓库里负责“把源码落回”的是 Aevis 主流水线那一条，
+#    两条都推必然撞车（见 admin.yml 里的血泪注释）。这里只读、只构建、只发 Release。
+
+name: LingyanAdmin
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'LingyanAdmin/**'
+      - '.github/workflows/lingyan-admin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  app:
+    name: Build 零砚后台
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # 图标 PNG 不进仓库（二进制），每次在 CI 现生成
+      - name: Generate app icon
+        run: python3 LingyanAdmin/scripts/make_icon.py LingyanAdmin/Resources
+
+      - name: Generate Xcode project
+        run: cd LingyanAdmin && xcodegen generate
+
+      # ---------- 真机编译（未签名） ----------
+      - name: Compile (device, unsigned)
+        env:
+          LY_COMMIT: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          LOG="$GITHUB_WORKSPACE/lingyan-build.log"
+          cd LingyanAdmin
+          xcodebuild \
+            -project LingyanAdmin.xcodeproj \
+            -target LingyanAdmin \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            LY_COMMIT="$LY_COMMIT" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > "$LOG" 2>&1 || { echo "===== BUILD FAILED ====="; tail -n 200 "$LOG"; exit 1; }
+          echo "===== BUILD OK ====="
+          tail -n 6 "$LOG"
+
+      # 编译错误同时以 workflow 命令发到 Annotations 区（那块免鉴权可读）
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          grep -E "error:" "$GITHUB_WORKSPACE/lingyan-build.log" 2>/dev/null | head -15 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+
+      # ---------- 打包 IPA ----------
+      - name: Package IPA
+        if: success()
+        run: |
+          set -e
+          APP="LingyanAdmin/build/Release-iphoneos/LingyanAdmin.app"
+          test -d "$APP" || { echo "找不到 LingyanAdmin.app"; ls -la LingyanAdmin/build/Release-iphoneos || true; exit 1; }
+
+          rm -rf Payload LingyanAdmin-unsigned.ipa LingyanAdmin-adhoc.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/LingyanAdmin.app
+          rm -rf Payload/LingyanAdmin.app/_CodeSignature
+          rm -f  Payload/LingyanAdmin.app/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X LingyanAdmin-unsigned.ipa Payload
+
+          codesign -f -s - --deep Payload/LingyanAdmin.app || true
+          /usr/bin/zip -qry -X LingyanAdmin-adhoc.ipa Payload
+
+          echo "包里信息："
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" Payload/LingyanAdmin.app/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Payload/LingyanAdmin.app/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Print :LingyanCommit" Payload/LingyanAdmin.app/Info.plist || true
+          ls -lh LingyanAdmin-unsigned.ipa LingyanAdmin-adhoc.ipa
+
+      # ---------- 模拟器截图自检 ----------
+      # 自绘/新写的界面必须靠截图验收（"编译通过" ≠ "能用"）。
+      # -demo 走本地假数据：截图时不带真 Key，也就不会把 Key 泄进公开仓库。
+      - name: Screenshots (simulator)
+        if: success()
+        run: |
+          set +e
+          mkdir -p shots
+          LOG="$GITHUB_WORKSPACE/lingyan-sim.log"
+          cd LingyanAdmin
+          xcodebuild \
+            -project LingyanAdmin.xcodeproj \
+            -target LingyanAdmin \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -arch arm64 \
+            SYMROOT="$PWD/simbuild" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            > "$LOG" 2>&1
+          if [ $? -ne 0 ]; then
+            echo "::warning::模拟器版编译失败，跳过截图"
+            tail -n 60 "$LOG"
+            exit 0
+          fi
+          cd "$GITHUB_WORKSPACE"
+
+          DEVTYPE=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devicetypes'];print([x['identifier'] for x in d if 'iPhone' in x['name']][-1])")
+          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c "import json,sys;d=json.load(sys.stdin)['runtimes'];print([x['identifier'] for x in d if x.get('isAvailable') and 'iOS' in x['name']][-1])")
+          echo "设备类型 $DEVTYPE / 运行时 $RUNTIME"
+          UDID=$(xcrun simctl create lyshot "$DEVTYPE" "$RUNTIME")
+          echo "UDID=$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+          xcrun simctl install "$UDID" LingyanAdmin/simbuild/Release-iphonesimulator/LingyanAdmin.app
+          xcrun simctl status_bar "$UDID" override --time "18:40" --batteryState charged --batteryLevel 100 2>/dev/null
+
+          shot () {
+            name="$1"; shift
+            xcrun simctl terminate "$UDID" cn.lingyan.admin >/dev/null 2>&1
+            sleep 1
+            xcrun simctl launch "$UDID" cn.lingyan.admin "$@" || echo "::warning::启动失败 $name"
+            sleep 6
+            xcrun simctl io "$UDID" screenshot "shots/$name.png" || echo "::warning::截图失败 $name"
+          }
+
+          shot 00-设置页     -showSetup
+          shot 01-概览       -demo -tab 0
+          shot 02-素材       -demo -tab 1
+          shot 03-设备       -demo -tab 2
+          shot 04-卡密       -demo -tab 3
+          shot 05-下载       -demo -tab 4
+
+          ls -la shots/ || true
+          cd shots && /usr/bin/zip -qry ../shots.zip . || true
+          cd "$GITHUB_WORKSPACE"
+          ls -lh shots.zip || true
+
+      - name: Ensure log files exist
+        if: always()
+        run: |
+          # ⚠️ GitHub 不接受 0 字节的发布资产 —— 有一个空的，整个发布就失败。
+          for f in lingyan-build.log lingyan-sim.log; do
+            [ -s "$f" ] || echo "（这一步没有产生内容）" > "$f"
+          done
+          if [ ! -s shots.zip ]; then
+            mkdir -p shots
+            ( cd shots && /usr/bin/zip -qry ../shots.zip . )
+          fi
+          ls -lh lingyan-build.log lingyan-sim.log shots.zip
+
+      - name: Collect failure info
+        if: failure()
+        run: |
+          {
+            echo "零砚后台 iOS 构建失败。"
+            echo '```'
+            grep -E "error:" lingyan-build.log 2>/dev/null | head -60 || true
+            echo '```'
+            echo "（如果上面是空的，说明挂在编译之前的步骤 —— 去看 Run 页面的 step 列表）"
+          } > errors.txt
+          cat errors.txt
+
+      - name: Publish release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lyadmin-${{ github.run_number }}
+          name: 零砚后台 iOS ${{ github.run_number }}
+          prerelease: true
+          body: |
+            零砚素材管理器 · **后台看板**（iOS，只读）。
+
+            - 提交：`${{ github.sha }}`
+            - 安装：下载 `LingyanAdmin-unsigned.ipa`，用「全能签 / AltStore / Sideloadly」签名后安装
+            - 首次打开要填 **服务器地址**（默认 `https://lingyan.cyou:8642`）+ **API Key**
+              （在电脑后台 `/admin` → 对外 API 里创建，`LYAPI-…`）
+            - `shots.zip` 是模拟器截图自检（演示数据，不含任何 Key）
+          files: |
+            LingyanAdmin-unsigned.ipa
+            LingyanAdmin-adhoc.ipa
+            lingyan-build.log
+            shots.zip
+
+      - name: Publish failure log
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lyadmin-log-${{ github.run_number }}
+          name: 零砚后台构建失败日志 ${{ github.run_number }}
+          prerelease: true
+          body_path: errors.txt
+          files: |
+            errors.txt
+            lingyan-build.log
+            lingyan-sim.log
