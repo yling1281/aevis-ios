@@ -2,7 +2,7 @@
 LingyanAdmin.xcodeproj/
 
 # 图标 PNG 由 scripts/make_icon.py 在 CI 里现生成（二进制，推不上来，
-# 也不该让“本地有一份、仓库没有”这种差异去干扰别处的同步逻辑）
+# 也不该让"本地有一份、仓库没有"这种差异去干扰别处的同步逻辑）
 Resources/Assets.xcassets/
 
 # 构建产物

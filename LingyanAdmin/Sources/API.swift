@@ -73,11 +73,11 @@ final class API {
     }
 
     func post(_ path: String, body: [String: Any] = [:]) async throws -> [String: Any] {
-        try await body(path, method: "POST", body: body)
+        try await sendBody(path, method: "POST", body: body)
     }
 
     func put(_ path: String, body: [String: Any] = [:]) async throws -> [String: Any] {
-        try await body(path, method: "PUT", body: body)
+        try await sendBody(path, method: "PUT", body: body)
     }
 
     func delete(_ path: String, query: [String: String] = [:]) async throws -> [String: Any] {
@@ -89,7 +89,10 @@ final class API {
         return try await send(req)
     }
 
-    private func body(_ path: String, method: String, body: [String: Any]) async throws -> [String: Any] {
+    /// ⚠️ 这个方法**不能**叫 `body` —— 上面 post/put 的形参也叫 `body`，
+    ///    同名会把方法遮住，编译报「cannot call value of non-function type '[String : Any]'」。
+    ///    （2026-10-08 run #5 就是这么挂的，`_ios/check_swift.py` 现在会查这类同名遮蔽。）
+    private func sendBody(_ path: String, method: String, body: [String: Any]) async throws -> [String: Any] {
         guard let u = makeURL(path) else {
             throw APIError(status: 0, message: "服务器地址不合法：\(AppConfig.shared.server)")
         }

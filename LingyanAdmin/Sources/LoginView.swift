@@ -35,7 +35,10 @@ struct LoginView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                Section("服务器地址") {
+                // ⚠️ 不能写成 Section("服务器地址") { … } footer: { … } ——
+                //    SwiftUI **没有** init(_:content:footer:)，带了 footer 就必须用
+                //    Section { } header: { Text(…) } footer: { … }（编译错误极具迷惑性）。
+                Section {
                     TextField(AppConfig.defaultServer, text: $server)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
@@ -49,18 +52,22 @@ struct LoginView: View {
                         server = AppConfig.backupServer
                     }
                     .font(.footnote)
+                } header: {
+                    Text("服务器地址")
                 } footer: {
                     Text("一般情况下不用改。主地址连不上时，点一下「备用地址」再登录。")
                         .font(.caption2)
                 }
 
-                Section("账号") {
+                Section {
                     TextField("管理员账号", text: $user)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
                         .font(.callout)
                     SecureField("密码", text: $pass)
                         .font(.callout)
+                } header: {
+                    Text("账号")
                 } footer: {
                     Text("跟电脑上登 \(AppConfig.defaultServer)/admin 用的是同一个账号密码。")
                         .font(.caption2)
