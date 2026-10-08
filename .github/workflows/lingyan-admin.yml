@@ -8,7 +8,7 @@
 # 为什么用 paths 过滤：这个仓库里 Aevis 那几条流水线都没有过滤，
 # 推任何东西都会一起跑。加上过滤之后，只有动到 LingyanAdmin 的东西才跑这一条。
 #
-# ⚠️ 本流水线**不 push 仓库**。仓库里负责“把源码落回”的是 Aevis 主流水线那一条，
+# ⚠️ 本流水线**不 push 仓库**。仓库里负责"把源码落回"的是 Aevis 主流水线那一条，
 #    两条都推必然撞车（见 admin.yml 里的血泪注释）。这里只读、只构建、只发 Release。
 
 name: LingyanAdmin
@@ -80,8 +80,14 @@ jobs:
           done
 
       # ---------- 打包 IPA ----------
+      #
+      # ⚠️ 给这个步骤一个 id：后面「发 Release」只认它，不认"整轮是不是全绿"。
+      #    教训（2026-10-08 run #1）：编译和打包都成功了，挂在最后面的收尾步骤上
+      #    （截图一张没截到 → zip 空目录报错），结果 `if: success()` 的发布步骤
+      #    被跳过 —— **IPA 明明打好了却没上传**，看着就像"编译失败"。
+      #    出包的优先级最高，任何非编译类的小毛病都不许把包吞掉。
       - name: Package IPA
-        if: success()
+        id: pkg
         run: |
           set -e
           APP="LingyanAdmin/build/Release-iphoneos/LingyanAdmin.app"
@@ -104,49 +110,105 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :LingyanCommit" Payload/LingyanAdmin.app/Info.plist || true
           ls -lh LingyanAdmin-unsigned.ipa LingyanAdmin-adhoc.ipa
 
+          echo "ok=1" >> "$GITHUB_OUTPUT"
+
       # ---------- 模拟器截图自检 ----------
       # 自绘/新写的界面必须靠截图验收（"编译通过" ≠ "能用"）。
       # -demo 走本地假数据：截图时不带真 Key，也就不会把 Key 泄进公开仓库。
+      #
+      # ⚠️ 两条铁律（都是 run #1 踩出来的）：
+      #   ① `continue-on-error: true` —— **截图失败绝不能拖挂出包**；
+      #   ② 不许再用 `|| echo warning` 把错误吞掉 —— 那样步骤"成功"、图却一张没有，
+      #      排查时完全没有线索。现在每一句 simctl 都进 `lingyan-shot.log`，
+      #      失败带上原因，日志跟包一起发出来。
       - name: Screenshots (simulator)
-        if: success()
+        id: shots
+        if: steps.pkg.outputs.ok == '1'
+        continue-on-error: true
         run: |
           set +e
+          SHOTLOG="$GITHUB_WORKSPACE/lingyan-shot.log"
+          : > "$SHOTLOG"
+
+          say () { echo "$@" | tee -a "$SHOTLOG"; }
+          # 跑一句命令：既进控制台也进日志，返回它自己的退出码
+          runlog () { say "\$ $*"; "$@" 2>&1 | tee -a "$SHOTLOG"; return "${PIPESTATUS[0]}"; }
+
+          say "===== 截图自检 $(date -u +%FT%TZ) ====="
           mkdir -p shots
+          : > shots/.keep
+
           LOG="$GITHUB_WORKSPACE/lingyan-sim.log"
+          say "--- 1) 编模拟器版 ---"
           cd LingyanAdmin
-          xcodebuild \
-            -project LingyanAdmin.xcodeproj \
-            -target LingyanAdmin \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -arch arm64 \
+          runlog xcodebuild -project LingyanAdmin.xcodeproj -target LingyanAdmin \
+            -configuration Release -sdk iphonesimulator -arch arm64 \
             SYMROOT="$PWD/simbuild" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            > "$LOG" 2>&1
-          if [ $? -ne 0 ]; then
-            echo "::warning::模拟器版编译失败，跳过截图"
-            tail -n 60 "$LOG"
-            exit 0
-          fi
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
           cd "$GITHUB_WORKSPACE"
 
-          DEVTYPE=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devicetypes'];print([x['identifier'] for x in d if 'iPhone' in x['name']][-1])")
-          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c "import json,sys;d=json.load(sys.stdin)['runtimes'];print([x['identifier'] for x in d if x.get('isAvailable') and 'iOS' in x['name']][-1])")
-          echo "设备类型 $DEVTYPE / 运行时 $RUNTIME"
-          UDID=$(xcrun simctl create lyshot "$DEVTYPE" "$RUNTIME")
-          echo "UDID=$UDID"
-          xcrun simctl bootstatus "$UDID" -b
+          APP="LingyanAdmin/simbuild/Release-iphonesimulator/LingyanAdmin.app"
+          if [ ! -d "$APP" ]; then
+            say "!! 找不到模拟器版 App：$APP（这一步到此为止，见上面的编译输出）"
+            exit 0
+          fi
+          say "App 就位：$APP"
 
-          xcrun simctl install "$UDID" LingyanAdmin/simbuild/Release-iphonesimulator/LingyanAdmin.app
-          xcrun simctl status_bar "$UDID" override --time "18:40" --batteryState charged --batteryLevel 100 2>/dev/null
+          # --- 2) 找一台模拟器 ---
+          # 优先自己 create 一台干净的；create 失败/返回的不是 UUID 就退回
+          # 「从已有设备里挑一台 iPhone」（这条回退是 build-ipa.yml 里验证过的做法）。
+          say "--- 2) 准备模拟器 ---"
+          say "可用运行时："
+          xcrun simctl list runtimes 2>&1 | tee -a "$SHOTLOG"
 
+          DEVTYPE=$(xcrun simctl list devicetypes -j 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin)['devicetypes'];print([x['identifier'] for x in d if 'iPhone' in x['name']][-1])")
+          RUNTIME=$(xcrun simctl list runtimes -j 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin)['runtimes'];print([x['identifier'] for x in d if x.get('isAvailable') and 'iOS' in x['name']][-1])")
+          say "DEVTYPE=$DEVTYPE"
+          say "RUNTIME=$RUNTIME"
+
+          UDID=""
+          if [ -n "$DEVTYPE" ] && [ -n "$RUNTIME" ]; then
+            UDID=$(xcrun simctl create lyshot "$DEVTYPE" "$RUNTIME" 2>&1 | tail -1)
+          fi
+          case "$UDID" in
+            *[!0-9A-Fa-f-]*|"") say "!! create 返回的不是 UUID（原样返回：$UDID）→ 改用已有设备"
+                                UDID=$(xcrun simctl list devices available 2>/dev/null | grep -m1 "iPhone" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/') ;;
+          esac
+          say "UDID=$UDID"
+          if [ -z "$UDID" ]; then
+            say "!! 没有任何可用模拟器，跳过截图"
+            xcrun simctl list devices available 2>&1 | tee -a "$SHOTLOG"
+            exit 0
+          fi
+
+          runlog xcrun simctl boot "$UDID"
+          runlog xcrun simctl bootstatus "$UDID" -b
+          runlog xcrun simctl install "$UDID" "$APP"
+          xcrun simctl status_bar "$UDID" override --time "18:40" --batteryState charged --batteryLevel 100 >/dev/null 2>&1
+
+          # --- 3) 逐页截图 ---
+          say "--- 3) 截图 ---"
           shot () {
             name="$1"; shift
             xcrun simctl terminate "$UDID" cn.lingyan.admin >/dev/null 2>&1
             sleep 1
-            xcrun simctl launch "$UDID" cn.lingyan.admin "$@" || echo "::warning::启动失败 $name"
-            sleep 6
-            xcrun simctl io "$UDID" screenshot "shots/$name.png" || echo "::warning::截图失败 $name"
+            # ⚠️ 别写成 `if ! cmd | tee log`：管道的状态取的是 **tee** 的，
+            #    tee 永远成功 → 启动失败会被静默吞掉（run #1 就是这么瞒过去的）。
+            #    先把输出和退出码接下来，再分头判断。
+            say "\$ simctl launch cn.lingyan.admin $*"
+            OUT=$(xcrun simctl launch "$UDID" cn.lingyan.admin "$@" 2>&1); RC=$?
+            echo "$OUT" | tee -a "$SHOTLOG"
+            [ "$RC" -eq 0 ] || say "!! 启动失败（rc=$RC）"
+            sleep 7
+            OUT=$(xcrun simctl io "$UDID" screenshot "shots/$name.png" 2>&1); RC=$?
+            echo "$OUT" | tee -a "$SHOTLOG"
+            if [ "$RC" -eq 0 ] && [ -s "shots/$name.png" ]; then
+              say "   -> shots/$name.png $(wc -c < "shots/$name.png") 字节"
+            else
+              say "!! 截图失败（rc=$RC）"
+              # 失败也抓一张，至少能看到当时停在哪一屏
+              xcrun simctl io "$UDID" screenshot "shots/$name-FAILED.png" >/dev/null 2>&1
+            fi
           }
 
           shot 00-设置页     -showSetup
@@ -156,23 +218,36 @@ jobs:
           shot 04-卡密       -demo -tab 3
           shot 05-下载       -demo -tab 4
 
-          ls -la shots/ || true
-          cd shots && /usr/bin/zip -qry ../shots.zip . || true
-          cd "$GITHUB_WORKSPACE"
-          ls -lh shots.zip || true
+          say "--- 4) 结果 ---"
+          ls -la shots/ 2>&1 | tee -a "$SHOTLOG"
+          PNG=$(ls shots/*.png 2>/dev/null | wc -l | tr -d ' ')
+          say "截到 $PNG 张 png"
+          say "===== 截图自检结束 ====="
 
-      - name: Ensure log files exist
+      # 收尾：保证每个要发布的文件都**非空**存在。
+      # ⚠️ GitHub 不接受 0 字节的发布资产，files 里有一个空的，整个发布就失败。
+      # ⚠️ 这一步**绝不能**把整轮判红（continue-on-error + set +e）：
+      #    它只是个保洁步骤，没有任何理由让它挡住已经打好的包。
+      - name: Normalize artifacts
         if: always()
+        continue-on-error: true
         run: |
-          # ⚠️ GitHub 不接受 0 字节的发布资产 —— 有一个空的，整个发布就失败。
-          for f in lingyan-build.log lingyan-sim.log; do
+          set +e
+          for f in lingyan-build.log lingyan-sim.log lingyan-shot.log; do
             [ -s "$f" ] || echo "（这一步没有产生内容）" > "$f"
           done
-          if [ ! -s shots.zip ]; then
-            mkdir -p shots
-            ( cd shots && /usr/bin/zip -qry ../shots.zip . )
+          mkdir -p shots
+          if [ -z "$(ls -A shots 2>/dev/null)" ]; then
+            # ⚠️ 空目录 `zip .` 会报 "Nothing to do" 并以非 0 退出 —— 必须垫一个文件
+            echo "这次没有截到图，原因见 lingyan-shot.log" > shots/README.txt
           fi
-          ls -lh lingyan-build.log lingyan-sim.log shots.zip
+          if [ ! -s shots.zip ]; then
+            ( cd shots && /usr/bin/zip -qry ../shots.zip . ) || true
+          fi
+          [ -s shots.zip ] || echo "shots.zip 没做出来" > shots.zip
+          ls -lh lingyan-build.log lingyan-sim.log lingyan-shot.log shots.zip || true
+          echo "=== 产物清单 ==="
+          ls -lh LingyanAdmin-unsigned.ipa LingyanAdmin-adhoc.ipa 2>/dev/null || true
 
       - name: Collect failure info
         if: failure()
@@ -186,8 +261,10 @@ jobs:
           } > errors.txt
           cat errors.txt
 
+      # ⚠️ 发布条件看的是「IPA 有没有打出来」，不是「这一轮是不是全绿」。
+      #    只要包在就发出去 —— 这样任何后续小毛病都不会把用户的包吞掉。
       - name: Publish release
-        if: success()
+        if: steps.pkg.outputs.ok == '1'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: lyadmin-${{ github.run_number }}
@@ -205,6 +282,8 @@ jobs:
             LingyanAdmin-unsigned.ipa
             LingyanAdmin-adhoc.ipa
             lingyan-build.log
+            lingyan-sim.log
+            lingyan-shot.log
             shots.zip
 
       - name: Publish failure log
@@ -219,3 +298,4 @@ jobs:
             errors.txt
             lingyan-build.log
             lingyan-sim.log
+            lingyan-shot.log
