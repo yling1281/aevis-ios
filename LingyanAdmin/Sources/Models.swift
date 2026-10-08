@@ -222,7 +222,7 @@ struct DownloadItem: Identifiable, Hashable {
     var size: Int { raw.i("size") }
     /// 实际下载地址（配了网盘就是网盘链接，否则是服务器直链）
     var url: String { raw.s("dl") }
-    /// 下载去向：netdisk（网盘）/ direct（服务器直链）
+    /// 下载去向：netdisk（网盘）/ file（本机文件）/ legacy（老路径）
     var target: String { raw.s("target") }
 
     var targetLabel: String {
