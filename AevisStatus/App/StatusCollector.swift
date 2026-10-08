@@ -146,9 +146,14 @@ enum StatusCollector {
 
     private static func networkInfo() async -> (has: Bool, online: Bool, kind: String) {
         let monitor = NWPathMonitor()
-        let path: NWPath? = await withCheckedContinuation {
-            (continuation: CheckedContinuation<NWPath?, Never>) in
-            let once = OnceBox<NWPath?>(continuation)
+        // ⚠️ 这里必须写**全限定名 `Network.NWPath`**：本文件为了 WiFi 名字
+        //    （`NEHotspotNetwork`）同时 `import NetworkExtension`，而那个模块里
+        //    也有一个同名的 `NWPath`（ObjC class，来自 `NWPath.h`）。
+        //    只写 `NWPath` 会报 "'NWPath' is ambiguous for type lookup"，
+        //    连带下面 `usesInterfaceType(.wifi)` 也推不出类型。
+        let path: Network.NWPath? = await withCheckedContinuation {
+            (continuation: CheckedContinuation<Network.NWPath?, Never>) in
+            let once = OnceBox<Network.NWPath?>(continuation)
             monitor.pathUpdateHandler = { current in
                 once.finish(current)
             }
