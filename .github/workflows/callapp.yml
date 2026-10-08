@@ -1,0 +1,226 @@
+name: CallApp
+
+# 隐形通话包（AevisCall）的流水线 —— **独立的包**，
+# 跟买家那个包、跟管理端、跟三颗探针都无关。
+#
+# 它要做的：用 Apple 的 `LiveCommunicationKit`（iOS 17.4+，微信"语音通话用弹窗
+# 快捷接听"用的那个）在锁屏 / 灵动岛上弹出**苹果自己那种**来电界面。
+#
+# ⚠️ 为什么独立成一个包：探针（`AevisCallProbe`）真机验过 —— "**只有一个 bundle、
+#    一份签名**"这个形状**能**弹系统通话界面；而主 App（嵌了扩展、要签两个 bundle）
+#    一直弹不出来。所以这个包照探针的成功形状做：单可执行文件、**不嵌扩展**。
+#
+# ⚠️ 它**自己做 bootstrap（源码引导）**，理由和通话探针那条一模一样 ——
+#    是个**竞态**：源码进来要靠"落回仓库"那一步，而那是**主流水线**负责的；
+#    两条流水线同时被同一次 push 触发，谁先谁后没保证。
+#    不自己取一次，就可能"通话包先跑 → 仓库里还没有源码 → 整轮跳过（而且是绿的）"。
+#
+#    ⚠️ 但 bootstrap 会 **rsync 覆盖**：`.bootstrap-url` 指向的包里要是没有这个包
+#    （比如那是个买家版的源码包），它会把 `project.yml` 盖回旧版、target 就没了。
+#    所以下面的门禁**两样都查**（源文件 + project.yml 里有没有这个 target），
+#    缺任何一样就整轮跳过 —— 而不是编到一半报"找不到 target"（那报错会误导人）。
+#
+# ⚠️ 它**不 push 仓库**（跟 admin.yml 一个教训：两条流水线都写仓库必然撞车）。
+#    `contents: write` 留着是给 action-gh-release 建 release 用的。
+#
+# 要出这个包：把 `.release/callapp` 改成 1 再推。出完**人工**改回 0。
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  callapp:
+    name: Build call app
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap source (temporary)
+        if: hashFiles('.bootstrap-url') != ''
+        run: |
+          set -e
+          SRC_URL=$(tr -d ' \n\r' < .bootstrap-url)
+          echo "从 $SRC_URL 取源码"
+          curl -fsSL --retry 4 --retry-all-errors --retry-delay 3 \
+            --max-time 300 -o "$RUNNER_TEMP/src.zip" "$SRC_URL"
+          SIZE=$(wc -c < "$RUNNER_TEMP/src.zip")
+          echo "拿到 $SIZE 字节"
+          test "$SIZE" -gt 200000 || { echo "源码包不完整"; exit 1; }
+          rm -rf "$RUNNER_TEMP/src"
+          mkdir -p "$RUNNER_TEMP/src"
+          unzip -q "$RUNNER_TEMP/src.zip" -d "$RUNNER_TEMP/src"
+          rsync -a "$RUNNER_TEMP/src/aevis-ios/" ./
+          echo "通话包 Swift 文件: $(find AevisCall -name '*.swift' 2>/dev/null | wc -l)"
+
+      # ⚠️ 门禁要**两样都查**，缺一不可：
+      #    源文件 + **project.yml 里那个 target**。
+      #    只查源文件是不够的 —— 实测过的坑：`.bootstrap-url` 指向的包里要是没有这个包
+      #    （比如那是个买家版的源码包），rsync 会把 project.yml **盖回旧版**，
+      #    target 就没了。那种情况要**整轮跳过**，而不是编到一半报"找不到 target"。
+      - name: Check whether the call app sources are here
+        id: gate
+        run: |
+          if [ -f AevisCall/App/CallApp.swift ] \
+             && grep -q '^  AevisCall:' project.yml; then
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+            echo "通话包源码和 target 都在，继续。"
+          else
+            echo "go=no" >> "$GITHUB_OUTPUT"
+            echo "缺少通话包源码或 project.yml 里没有这个 target，这一轮跳过。"
+          fi
+
+      - name: Decide whether to package an IPA
+        id: decide
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          REQ=$(tr -d ' \n\r' < .release/callapp 2>/dev/null || echo "0")
+          if [ "$REQ" = "1" ]; then
+            echo "should=yes" >> "$GITHUB_OUTPUT"
+            echo "本次会出通话包 IPA"
+          else
+            echo "should=no" >> "$GITHUB_OUTPUT"
+            echo "本次只验证能编过，不出 IPA"
+          fi
+
+      - name: Show toolchain
+        if: steps.gate.outputs.go == 'yes'
+        run: |
+          xcodebuild -version
+          echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install XcodeGen
+        if: steps.gate.outputs.go == 'yes'
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        if: steps.gate.outputs.go == 'yes'
+        run: xcodegen generate
+
+      # ——— 真机编译 ———
+      #
+      # ⚠️ 这个包的 deploymentTarget 是 **17.4**（LiveCommunicationKit 整个框架
+      #    17.4 起步）—— 源文件里 `import LiveCommunicationKit` 在没有 `@available`
+      #    保护时，17.0 会直接编译报错。这里编译不过就是"框架用不了"的第一条证据。
+      - name: Compile (device, unsigned)
+        if: steps.gate.outputs.go == 'yes'
+        env:
+          AEVIS_COMMIT: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Aevis.xcodeproj \
+            -target AevisCall \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            AEVIS_COMMIT="$AEVIS_COMMIT" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > callapp-build.log 2>&1 || { echo "===== CALLAPP BUILD FAILED ====="; tail -n 200 callapp-build.log; exit 1; }
+
+          echo "===== CALLAPP BUILD OK ====="
+          tail -n 6 callapp-build.log
+
+          # ⭐ 权限到底有没有被编进去 —— 当场看见。
+          #    编出来没有 entitlements 的话，装上去必然不通，白跑一轮。
+          echo "--- 产物 ---"
+          ls -la build/Release-iphoneos/ 2>/dev/null || true
+          echo "--- entitlements（编出来那份）---"
+          codesign -d --entitlements :- build/Release-iphoneos/AevisCall.app 2>/dev/null \
+            || echo "（未签名包读不到，正常 —— 以手机上重签后的为准）"
+
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          grep -E "error:" callapp-build.log 2>/dev/null | head -15 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+
+      # ——— 打包（只在被要求时）———
+      #
+      # ⚠️ 这个包**没有嵌套扩展**，所以打包只清外层签名痕迹。
+      - name: Package IPA
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        run: |
+          set -e
+          APP="build/Release-iphoneos/AevisCall.app"
+          test -d "$APP" || { echo "找不到 AevisCall.app"; exit 1; }
+
+          rm -rf Payload AevisCall-unsigned.ipa AevisCall-adhoc.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/AevisCall.app
+
+          # 清掉签名痕迹 —— 手机上「全能签」会重新签它。
+          rm -rf Payload/AevisCall.app/_CodeSignature
+          rm -f Payload/AevisCall.app/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X AevisCall-unsigned.ipa Payload
+
+          codesign -f -s - --deep Payload/AevisCall.app || true
+          /usr/bin/zip -qry -X AevisCall-adhoc.ipa Payload
+
+          echo "包里的版本："
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+            Payload/AevisCall.app/Info.plist || true
+          echo "包里的 bundle id："
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+            Payload/AevisCall.app/Info.plist || true
+          echo "包里的后台模式："
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" \
+            Payload/AevisCall.app/Info.plist || true
+          ls -lh AevisCall-unsigned.ipa AevisCall-adhoc.ipa
+
+      - name: Publish release
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: callapp-${{ github.run_number }}
+          name: Aevis 通话包 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            **仿苹果真来电界面包（Aevis 通话）** —— 独立的一个 App。
+
+            它在锁屏 / 灵动岛上弹出**苹果自己那种**来电界面（LiveCommunicationKit）。
+
+            怎么装：
+            1. 下载 `AevisCall-unsigned.ipa`
+            2. 用「全能签」等签名工具重签后安装
+            3. 打开 App，按提示把麦克风权限给它（不给会在起会话那一步被系统直接拒）
+
+            ⚠️ 这个包**不嵌任何扩展** —— "只有一个 bundle、一份签名"正是探针能弹
+               系统界面的关键；嵌扩展会多一个要签的 bundle，重签时最容易翻车。
+
+            - 提交：`${{ github.sha }}`
+          files: |
+            AevisCall-unsigned.ipa
+            AevisCall-adhoc.ipa
+            callapp-build.log
+
+      - name: Publish failure log
+        if: failure() && hashFiles('callapp-build.log') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: callapp-log-${{ github.run_number }}
+          name: 通话包失败日志 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            通话包编译失败 —— 错误见 `callapp-build.log`。
+
+            - 提交：`${{ github.sha }}`
+          files: |
+            callapp-build.log
+
+      # ⚠️ 这一步**故意不 push**（原因见 admin.yml 里那段血泪）。
+      - name: Remind to reset the flag
+        if: steps.gate.outputs.go == 'yes' && steps.decide.outputs.should == 'yes'
+        run: |
+          echo "::warning::通话包已出。把 .release/callapp 改回 0 再推一次，否则下次还会出包。"

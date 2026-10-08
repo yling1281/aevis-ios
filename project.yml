@@ -806,6 +806,85 @@ targets:
           SWIFT_COMPILATION_MODE: "wholemodule"
   # <<< probe2-ext:end
 
+  # ——— 手机状态上报（**独立的包**，不塞进主 App）———
+  #
+  # 只做一件事：把手机的状态（位置 / 步数 …）报给 TA，好让 TA 知道你在哪、今天动没动。
+  #
+  # ⚠️ 四个刻意的安排（跟 VPN 探针 / 通话探针那套一致）：
+  #   ① 它在 `extension` 标记块**外面** —— 走"摘掉录屏扩展"那条应急路时不会被连带摘掉。
+  #   ② 主 App **不依赖**它 —— 它出问题绝不影响买家那个包。
+  #   ③ 它自己一个包（com.aevis.status）。
+  #   ④ **不嵌任何扩展**，只有一个 bundle、一份签名（探针能弹系统界面靠的就是这个形状）。
+  #
+  # 要出包：把 `.release/status` 改成 1 再推。出完**人工**改回 0。
+  AevisStatus:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AevisStatus/App
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_NAME: AevisStatus
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.status
+        INFOPLIST_FILE: AevisStatus/App/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # 独立 App，版本号自己一套，跟主 App 的 0.0.x 无关
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+
+  # ——— 仿苹果真来电界面（**独立的包 = 隐形通话包**）———
+  #
+  # 目标：在锁屏 / 灵动岛上弹出**苹果自己那种**来电界面（`LiveCommunicationKit`）。
+  #
+  # ⚠️ 为什么独立成一个包、而且**绝不嵌套扩展**：
+  #   探针（`AevisCallProbe`）真机验过 —— "**只有一个 bundle、一份签名**"
+  #   这个形状**能**弹系统通话界面；而主 App（嵌了扩展、要签两个 bundle）
+  #   一直弹不出来。所以这个包照探针的成功形状做：单可执行文件、不嵌扩展。
+  #
+  # ⚠️ `deploymentTarget: "17.4"` **不是 17.0** —— LiveCommunicationKit
+  #   整个框架都是 17.4 起步的，写 17.0 会报一屏 "is only available in iOS 17.4 or newer"。
+  #
+  # ⚠️ 它**带 entitlements**（`aps-environment`）—— 内容**照抄**通话探针那份
+  #   （一字不改，那是跑通了的形状）。通话资格就写在这条权限里。
+  #
+  # 要出包：把 `.release/callapp` 改成 1 再推。出完**人工**改回 0。
+  AevisCall:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.4"
+    sources:
+      - path: AevisCall/App
+        excludes:
+          - "Info.plist"
+          - "AevisCall.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: AevisCall
+        PRODUCT_BUNDLE_IDENTIFIER: com.aevis.call
+        INFOPLIST_FILE: AevisCall/App/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: AevisCall/App/AevisCall.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # 独立 App，版本号自己一套，跟主 App 的 0.0.x 无关
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: "wholemodule"
+
 schemes:
   Aevis:
     build:
@@ -863,6 +942,28 @@ schemes:
     build:
       targets:
         AevisLive: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  # 状态上报包单独的 scheme —— CI 平时用 `-target` 编，这个是为了
+  # 以后谁拿 Xcode 打开也能直接选中它跑（照探针那几个 scheme 的写法）。
+  # ⚠️ 不在任何标记块里（不能被 strip_extension.py 摘掉）。
+  AevisStatus:
+    build:
+      targets:
+        AevisStatus: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  # 隐形通话包单独的 scheme —— 同上。
+  AevisCall:
+    build:
+      targets:
+        AevisCall: all
     run:
       config: Debug
     archive:

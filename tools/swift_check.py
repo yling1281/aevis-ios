@@ -61,6 +61,11 @@ SWIFT_ROOTS = [
     # 实时活动扩件（2026-10-01）。同样是独立源码、一样要过 CI 编译 ——
     # 它画的是灵动岛上那张卡，错了用户直接看不见，本地先扫一遍。
     os.path.join(PROJECT, "AevisLive"),
+    # 两个**新的独立 App**（2026-10-07）：手机状态上报（AevisStatus）/
+    # 仿苹果真来电界面（AevisCall）。它们各自是独立 target、一样过 CI 编译，
+    # 不进这里就等于"没人检查" —— 而这两个包偏偏是老板真机上要跑的。
+    os.path.join(PROJECT, "AevisStatus", "App"),
+    os.path.join(PROJECT, "AevisCall", "App"),
 ]
 
 # 每个 target 的 Info.plist 都要验。
@@ -72,6 +77,10 @@ INFO_PLISTS = {
     # 实时活动扩件那份。注册点写错同样是**静默失效**（编译能过、装得上，
     # 但灵动岛上永远不出现），所以一并解一遍，确保它是合法 plist。
     os.path.join(PROJECT, "AevisLive", "Info.plist"): "AevisLive",
+    # 两个新独立 App 的 Info.plist（2026-10-07）。格式错一个字符，
+    # `xcodebuild` 就会在构建日志深处失败，本地先用 plistlib 解一遍。
+    os.path.join(PROJECT, "AevisStatus", "App", "Info.plist"): "AevisStatus",
+    os.path.join(PROJECT, "AevisCall", "App", "Info.plist"): "AevisCall",
 }
 
 # 主 App 与扩展的权限声明文件。两份必须声明**同一个**应用组。
