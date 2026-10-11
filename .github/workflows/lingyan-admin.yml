@@ -132,7 +132,7 @@ jobs:
 
           say () { echo "$@" | tee -a "$SHOTLOG"; }
           # 跑一句命令：既进控制台也进日志，返回它自己的退出码
-          runlog () { say "\$ $*"; "$@" 2>&1 | tee -a "$SHOTLOG"; return "${PIPESTATUS[0]}"; }
+          runlog () { say "\$ $*\"; "$@" 2>&1 | tee -a "$SHOTLOG"; return "${PIPESTATUS[0]}"; }
 
           say "===== 截图自检 $(date -u +%FT%TZ) ====="
           mkdir -p shots
@@ -217,6 +217,13 @@ jobs:
           shot 03-设备       -demo -tab 2
           shot 04-卡密       -demo -tab 3
           shot 05-账号       -demo -tab 4
+          # ---- 码支付那一侧（-ws pay 把默认页切过去） ----
+          shot 06-码支付登录 -showSetup -ws pay
+          shot 07-码支付总览 -demo -ws pay -tab 0
+          shot 08-码支付订单 -demo -ws pay -tab 1
+          shot 09-码支付通道 -demo -ws pay -tab 2
+          shot 10-码支付财务 -demo -ws pay -tab 3
+          shot 11-码支付更多 -demo -ws pay -tab 4
 
           say "--- 4) 结果 ---"
           ls -la shots/ 2>&1 | tee -a "$SHOTLOG"
@@ -271,14 +278,19 @@ jobs:
           name: 零砚后台 iOS ${{ github.run_number }}
           prerelease: true
           body: |
-            零砚素材管理器 · **管理后台**（iOS，完整版：能看也能改）。
+            零砚后台 iOS —— **一个 App 装两个后台**（素材管理器 + 码支付）。
 
             - 提交：`${{ github.sha }}`
             - 安装：下载 `LingyanAdmin-unsigned.ipa`，用「全能签 / AltStore / Sideloadly」签名后安装
-            - 首次打开填 **服务器地址**（默认 `https://lingyan.cyou:8642`）+ **管理员账号密码**
-              —— 跟电脑上登 `/admin` 用的是同一个账号，不用再单独生成什么密钥
-            - 五个页签：总览 / 订单 / 设备 / 卡密 / 账号；审计日志、对外 API、设置在「总览」右上角菜单里
-            - `shots.zip` 是模拟器截图自检（演示数据，不含任何账号密码）
+            - 顶上一根切换条：**素材后台** / **码支付**，两边各有各的服务器地址和登录态
+              （一边退出登录、令牌过期，不影响另一边）
+            - **素材后台**：用电脑上登 `/admin` 的同一个管理员账号密码。
+              五个页签 总览 / 订单 / 设备 / 卡密 / 账号；审计日志、对外 API、设置在「总览」右上角菜单里
+            - **码支付**：用电脑上登 `/payadmin/` 的同一个账号密码。
+              五个页签 总览 / 订单 / 通道 / 财务 / 更多
+              （订单页里能看「到账流水有没有认上单」；通道页能探活、启停、改等级、填收款码和账号名字；
+                更多页里有 发货回调日志 / 收到的回调 / 轮询池 / 对外密钥 / 后台账号 / 工单 / 支付设置）
+            - `shots.zip` 是模拟器截图自检（全部演示数据，不含任何账号密码、不含任何真实地址）
           files: |
             LingyanAdmin-unsigned.ipa
             LingyanAdmin-adhoc.ipa
