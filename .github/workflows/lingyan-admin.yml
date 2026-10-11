@@ -131,8 +131,15 @@ jobs:
           : > "$SHOTLOG"
 
           say () { echo "$@" | tee -a "$SHOTLOG"; }
-          # 跑一句命令：既进控制台也进日志，返回它自己的退出码
-          runlog () { say "\$ $*\"; "$@" 2>&1 | tee -a "$SHOTLOG"; return "${PIPESTATUS[0]}"; }
+          # 跑一句命令：既进控制台也进日志，返回它自己的退出码。
+          # ⚠️ 故意**写成多行**，也不在字符串里塞转义引号 ——
+          #    单行紧凑写法里那对转义引号，在「改这个文件的工具链」上极容易被
+          #    多塞一个反斜杠；一旦引号配不上就是 bash 语法错，整步直接挂。
+          runlog () {
+            say "+ $*"
+            "$@" 2>&1 | tee -a "$SHOTLOG"
+            return "${PIPESTATUS[0]}"
+          }
 
           say "===== 截图自检 $(date -u +%FT%TZ) ====="
           mkdir -p shots
@@ -195,7 +202,7 @@ jobs:
             # ⚠️ 别写成 `if ! cmd | tee log`：管道的状态取的是 **tee** 的，
             #    tee 永远成功 → 启动失败会被静默吞掉（run #1 就是这么瞒过去的）。
             #    先把输出和退出码接下来，再分头判断。
-            say "\$ simctl launch cn.lingyan.admin $*"
+            say "+ simctl launch cn.lingyan.admin $*"
             OUT=$(xcrun simctl launch "$UDID" cn.lingyan.admin "$@" 2>&1); RC=$?
             echo "$OUT" | tee -a "$SHOTLOG"
             [ "$RC" -eq 0 ] || say "!! 启动失败（rc=$RC）"

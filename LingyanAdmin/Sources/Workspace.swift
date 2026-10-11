@@ -1,4 +1,8 @@
-import Foundation
+// ⚠️ 这个文件既有纯数据（Workspace 枚举）也有界面（WorkspaceBar），所以必须
+//    `import SwiftUI` —— 只 import Foundation 的话 `View` / `HStack` / `ForEach` /
+//    `@Binding` 全都不在作用域里，报的是一串 "cannot find 'HStack' in scope"。
+//    （2026-10-11 就是这么白跑了一轮 macOS 编译。）
+import SwiftUI
 
 /// 这个 App 里能进的**两个后台**。
 ///
@@ -53,8 +57,12 @@ enum Workspace: String, CaseIterable, Identifiable {
 ///    所以「后台」这一层用顶部条，「页签」那一层留给各自的 TabView。
 struct WorkspaceBar: View {
     @Binding var ws: Workspace
-    @ObservedObject private var cfg = AppConfig.shared
-    @ObservedObject private var pay = PayConfig.shared
+    // ⚠️ 这两个**故意不加 `private`**：`WorkspaceBar` 是从别的文件里
+    //    `WorkspaceBar(ws: $ws)` 建出来的，一旦有 private 存储属性，
+    //    成员初始化器的可见性就会被一起收紧，报
+    //    "'WorkspaceBar' initializer is inaccessible due to 'private' protection level"。
+    @ObservedObject var cfg = AppConfig.shared
+    @ObservedObject var pay = PayConfig.shared
 
     private var loggedIn: Bool {
         ws == .sucai ? cfg.configured : pay.configured
