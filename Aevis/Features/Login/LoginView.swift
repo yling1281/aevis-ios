@@ -14,15 +14,18 @@ import UIKit
 ///   但是浏览器直接跳转到 QQ 那里」
 /// 「你一定要强制性登录的，去退出登录的话，就回到初始界面，就要登录账号」
 ///
-/// ## 所以这里有三条路，**全在 App 里做完**
-/// 1. **验证码登录**：邮箱 → 收码 → 登（服务端 `/api/send_code` + `/api/verify`）
-/// 2. **密码登录**：账号号 / 邮箱 + 密码（`/api/login`，两样都能填）
-/// 3. **用 QQ 登录**：走**内置**浏览器（`ASWebAuthenticationSession`）跳 QQ 授权页，
-///    授权完由服务端 302 回 `aevis://login?token=…` → 浏览器自己收工、把 token 交回来。
-///    这是唯一一处用浏览器的地方 —— 因为 QQ 那边必须在浏览器环境里跳。
+/// ## 现在的入口（2026-10-13 老板定的）
+/// **主路径是「在浏览器里登录」**：点「登录 / 注册」→ 跳**系统 Safari** 打开账号站
+/// 登录页（`?app=1`）→ 在网页里用 账号密码 / QQ / 邮箱 / 扫码 登录，或直接注册
+/// → 网页确认后自动跳回 `aevis://login?token=…` → `RootView.onOpenURL`
+/// 交给 `AccountService.receiveWebLogin(_:)` 收下，直接进主界面。
 ///
-/// 另外还有「我有注册码」：注册也搬进 App 了，不用再去网页。
-/// 这样新买家拿到注册码之后**根本不需要打开浏览器**。
+/// ## 下面这几条是降级入口（收在「其它登录方式」里，`showNative == false` 时看不见）
+/// 1. 验证码登录 / 2. 密码登录 / 3. 用注册码注册：都在 App 内做完。
+/// 4. 用 QQ 登录：走**内置**浏览器（`ASWebAuthenticationSession`）跳 QQ 授权页。
+/// 5. 用手机扫码登录：本机出码、另一台已登录的手机扫。
+/// 用户 2026-09-28 的原话是「不要跳转网页了吧……邮箱验证码那些也是内置啊」——
+/// 2026-10-13 改成浏览器优先，但**这些路一条都没删**，随时能退回来。
 struct LoginView: View {
 
     @ObservedObject private var account = AccountService.shared
@@ -52,6 +55,13 @@ struct LoginView: View {
     @State private var showScan = false
     /// iPad 上**自动弹一次**扫码页，别弹第二次（用户关掉就是不想用）。
     @State private var didAutoOfferScan = false
+
+    /// 旧的几条路（验证码 / 密码 / 注册码 / QQ / 扫码）是不是展开着。
+    ///
+    /// ⭐ 老板 2026-10-13 定的新流程：**主入口只有「登录 / 注册」一个按钮** ——
+    ///    点它跳系统浏览器，登录／注册／扫码全在网页里做完，做完自动跳回 App。
+    ///    所以旧的那几条路默认**收起**（`false`），放进「其它登录方式」里备用。
+    @State private var showNative = false
 
     /// 这台设备是不是 iPad。
     ///
@@ -89,11 +99,14 @@ struct LoginView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
-                    if isPad { scanCallout }
-                    switcher
-                    card
-                    qqButton
-                    if !isPad { scanButton }
+                    browserCard
+                    if showNative {
+                        if isPad { scanCallout }
+                        switcher
+                        card
+                        qqButton
+                        if !isPad { scanButton }
+                    }
 
                     if let note {
                         Text(note)
@@ -121,7 +134,7 @@ struct LoginView: View {
         // iPad：进来就先把扫码那条路摆到面前。⚠️ 延后 0.4 秒再弹 ——
         // 在视图还没画完的时候弹 sheet，SwiftUI 会"吞掉"这一次（表现是点了没反应）。
         .task {
-            guard isPad, !didAutoOfferScan else { return }
+            guard isPad, showNative, !didAutoOfferScan else { return }
             didAutoOfferScan = true
             try? await Task.sleep(nanoseconds: 400_000_000)
             showScan = true
@@ -145,6 +158,61 @@ struct LoginView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: - 主入口：浏览器登录
+
+    /// ⭐ 主入口：整套登录／注册都在**系统浏览器**里做完，做完自动跳回 App。
+    ///
+    /// 老板 2026-10-13 定的流程：① 点登录 → 跳浏览器；② 浏览器里登录／注册／扫码；
+    /// ③ 确认后自动跳回 App。所以这里给一个最显眼的按钮，旧的几条路收进「其它登录方式」。
+    private var browserCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                openInBrowser()
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "safari")
+                        .font(.aevis(16))
+                    Text("登录 / 注册")
+                        .font(.aevis(16, weight: .semibold))
+                }
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .aevisGlass(cornerRadius: 16)
+            }
+            .buttonStyle(.plain)
+            .disabled(working)
+
+            Text("在浏览器里登录，登录完会自动回到 Aevis。账号密码、QQ、邮箱、扫码都能用；新用户也能在这一页注册。")
+                .font(.aevis(11.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { showNative.toggle() }
+            } label: {
+                Text(showNative ? "收起其它登录方式" : "其它登录方式")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .aevisGlass(cornerRadius: 18)
+    }
+
+    /// 开**系统浏览器**去网页登录页。
+    private func openInBrowser() {
+        guard let url = account.webLoginURL() else {
+            note = "账号服务器地址不对，检查一下「设置 → 账号」里的地址。"
+            noteIsBad = true
+            return
+        }
+        #if canImport(UIKit)
+        UIApplication.shared.open(url)
+        #endif
     }
 
     // MARK: - 三条路的切换
@@ -477,40 +545,12 @@ struct LoginView: View {
                 }
                 return
             }
-            note = qqFailureText(params["qq_error"])
+            note = AccountService.loginFailureText(params["qq_error"])
             noteIsBad = true
         }
     }
 
     private var appScheme: String {
         (Bundle.main.object(forInfoDictionaryKey: "AEVIS_APP_SCHEME") as? String) ?? "aevis"
-    }
-
-    private func qqFailureText(_ code: String?) -> String {
-        switch code {
-        case nil:
-            return "QQ 授权没走完，再点一次试试。"
-        case "not_configured":
-            return "服务器上还没配好 QQ 登录，先用验证码登录吧。"
-        case "state_expired":
-            return "这次授权过期了，再点一次。"
-        case "blocked":
-            return "这个账号已被停用，有疑问联系管理员。"
-        case let other?:
-            return "QQ 登录失败（\(other)），换个方式登录吧。"
-        }
-    }
-}
-
-private extension URL {
-    /// 把 `?a=1&b=2` 拆成字典（QQ 回调那一跳要用）。
-    var queryParameters: [String: String] {
-        guard let items = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
-        else { return [:] }
-        var result: [String: String] = [:]
-        for item in items {
-            result[item.name] = item.value ?? ""
-        }
-        return result
     }
 }

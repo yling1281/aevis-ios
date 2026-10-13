@@ -92,6 +92,16 @@ enum AevisBridge {
 
     // MARK: - 处理
 
+    /// 这条回跳是不是「网页登录把凭证带回来了」（`aevis://login?token=…`）。
+    ///
+    /// 单独开一个判断，是因为它**不能**走 `handle(_:)` ——
+    /// 那个函数是同步的（返回一句提示就完事），而登录要 `await` 一次服务器调用。
+    /// ⚠️ `login` 在 `handle` 的 switch 里落在 `default`，会被当成
+    ///    "不认识的指令：login" —— 所以 `RootView` 必须**先**问这一句。
+    static func isLoginCallback(_ url: URL) -> Bool {
+        parse(url)?.host == "login"
+    }
+
     /// 处理一条回传。返回一句给用户看的提示（没有就不显示）。
     @discardableResult
     static func handle(_ url: URL) -> String? {

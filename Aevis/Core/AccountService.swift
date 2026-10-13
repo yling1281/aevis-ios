@@ -155,9 +155,11 @@ final class AccountService: ObservableObject {
     // `aevis://login?token=...` 把凭证交回来，这里收下。
     // 输验证码的是系统那一层，**密码不经过我们的代码**。
     //
-    // ⚠️ 2026-09-29 删掉了 `webLoginURL()` —— 它只被 `AccountCard` 里一段
-    //    "从设置页开系统浏览器去官网登录"的死代码调用，那段已经清掉；
-    //    现在唯一入口是 `LoginView`（QQ 登录）里的 `WebAuth.shared.run`。
+    // ⚠️ `webLoginURL()` 曾经被删过一次（2026-09-29，当时它只被 `AccountCard`
+    //    里一段死代码调用）。**2026-10-13 又加回来了**，但语义完全不同：
+    //    现在是老板要的「点登录 → 跳系统 Safari → 网页里登录/注册/扫码 →
+    //    登完自动跳回 App」那条路的主入口（见 `webLoginURL()` / `receiveWebLogin(_:)`）。
+    //    别把它当成旧代码删掉。
 
     /// 收下登录页带回来的 token。拉一次资料确认它真的能用。
     @MainActor
@@ -292,6 +294,73 @@ final class AccountService: ObservableObject {
     /// 不是回网页登录页 —— 不然用户就被丢在浏览器里出不来了。
     func qqLoginURL() -> URL? {
         URL(string: base + "/api/qq/start?app=1")
+    }
+
+    /// App 里点「登录 / 注册」时要打开的那一页（**系统浏览器 Safari**）。
+    ///
+    /// `?app=1` 是给服务端的暗号：这一轮走完之后要跳回 App
+    /// （`aevis://login?token=…`），而不是把用户留在网页上。
+    func webLoginURL() -> URL? {
+        guard isConfigured else { return nil }
+        return URL(string: webRoot + "/login?app=1")
+    }
+
+    /// 把「接口根」还原成「人看的网页根」。
+    ///
+    /// 接口根带一段随机前缀（`https://account.aevis.cn/k5stbt2o`），
+    /// 那前缀**只给 `/api/…` 用** —— 服务器上根本没有带前缀的 `/login`
+    /// （`AevisHosts` 的注释里就写着"带前缀的 /me 服务器上根本不存在"）。
+    /// 所以这里把已知前缀剥掉。线路三本来就不带前缀，剥不到、原样返回。
+    ///
+    /// ⚠️ 按 `AevisHosts.apiPath` 这个**值**剥，不是按固定位置切 ——
+    ///    前缀以后改了这里跟着走，不用改两处。
+    private var webRoot: String {
+        var text = base
+        let prefix = AevisHosts.apiPath
+        if !prefix.isEmpty, text.hasSuffix(prefix) {
+            text.removeLast(prefix.count)
+        }
+        while text.hasSuffix("/") { text.removeLast() }
+        return text
+    }
+
+    /// 网页把凭证带回来了（`aevis://login?token=…`）。
+    ///
+    /// 走**真 Safari** 那条路时，回跳不经过 `ASWebAuthenticationSession`，
+    /// 而是系统的 URL scheme 唤起（`RootView.onOpenURL`）—— 所以必须在这里收。
+    /// 返回 `nil` 表示成功；否则是给用户看的一句话。
+    @MainActor
+    func receiveWebLogin(_ url: URL) async -> String? {
+        let params = url.queryParameters
+        let token = (params["token"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty {
+            do {
+                try await adoptWebToken(token)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        return AccountService.loginFailureText(params["qq_error"] ?? params["error"])
+    }
+
+    /// 网页没把 token 带回来时，把它给的原因翻成人话。
+    ///
+    /// ⚠️ 原来这段长在 `LoginView` 里（`qqFailureText`）。现在**两条路都要用**
+    ///    （App 内置浏览器那条 ＋ 真 Safari 这条）⇒ 提到这里当唯一实现。
+    static func loginFailureText(_ code: String?) -> String {
+        switch code {
+        case nil:
+            return "授权没走完，再点一次试试。"
+        case "not_configured":
+            return "服务器上还没配好 QQ 登录，先用别的邮箱登录吧。"
+        case "state_expired":
+            return "这次授权过期了，再点一次。"
+        case "blocked":
+            return "这个账号已被停用，有疑问联系管理员。"
+        case let other?:
+            return "登录失败（\(other)），换个方式登录吧。"
+        }
     }
 
     // MARK: - 用注册码注册（也在 App 里做完，不用去网页）
@@ -659,5 +728,18 @@ enum AccountError: LocalizedError {
         case .cannotRevokeCurrent:
             return "这是本机，退出登录请用「退出账号」。"
         }
+    }
+}
+
+extension URL {
+    /// 把 `?a=1&b=2` 拆成字典。QQ 回调 / 网页登录回跳都要用。
+    var queryParameters: [String: String] {
+        guard let items = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
+        else { return [:] }
+        var result: [String: String] = [:]
+        for item in items {
+            result[item.name] = item.value ?? ""
+        }
+        return result
     }
 }

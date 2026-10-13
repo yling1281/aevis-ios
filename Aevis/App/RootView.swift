@@ -76,6 +76,20 @@ struct RootView: View {
         // 快捷指令最后一步「打开 URL」打开的就是这里 ——
         // 这是我们唯一能把数据收回来的通道（run-shortcut 没有返回值）。
         .onOpenURL { url in
+            // ⭐ 网页登录的回跳（`aevis://login?token=…`）走这条路 —— 老板要的
+            //    「点登录 → 跳 Safari → 登完自动跳回 App」就靠它收尾。
+            //    它要 `await`（拿 token 去服务器换资料），而 `onOpenURL` 是**同步闭包**
+            //    ⇒ 起一个 Task 交给 `AccountService`，别在这里阻塞。
+            //    ⚠️ 不能塞进 `AevisBridge.handle`：那个是同步的，而且 `login`
+            //       在它的 switch 里是 `default`（会被当成"不认识的指令"丢掉）。
+            if AevisBridge.isLoginCallback(url) {
+                Task { @MainActor in
+                    if let problem = await account.receiveWebLogin(url) {
+                        bridgeNote = problem
+                    }
+                }
+                return
+            }
             bridgeNote = AevisBridge.handle(url)
         }
         .onChange(of: bridgeNote) { _, note in

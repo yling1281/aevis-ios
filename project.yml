@@ -321,8 +321,8 @@ settings:
     #      ⚠️ 旧代码里「冻 1 小时、没有 refresh、只能扫码」是**没有任何出处的二手说法**（全仓无佐证），已作废，别再改回去。
     #      ⚠️ `ish-scripts/wechat_bind.sh` 是 App 资源（每次启动由 `installScript()` 重写进 guest）
     #        ⇒ 改它只需出新包，**不需要重编 `libaevisish.a`**。
-    MARKETING_VERSION: "0.0.118"
-    CURRENT_PROJECT_VERSION: "118"
+    MARKETING_VERSION: "0.0.119"
+    CURRENT_PROJECT_VERSION: "119"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
