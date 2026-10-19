@@ -1,0 +1,39 @@
+--- a/Aevis/Core/AppSettings.swift
++++ b/Aevis/Core/AppSettings.swift
+@@ -111,0 +112,3 @@
++    /// 姜言自建后端（`ai.aevis.cn`）。**放第一个** —— 它是自家服务，
++    /// 用它不需要用户自己找地址、不需要自己有 API Key，登录后计费按账号走。
++    case aevis
+@@ -123,0 +127 @@
++        case .aevis: return "姜言云端"
+@@ -136,0 +141 @@
++        case .aevis: return AevisCloud.chatBase
+@@ -148,0 +154,3 @@
++        // 🔴 `aevis-chat` 是**兼容层自己合成的 id**（`/v1/models` 第一条永远返回它），
++        //    它内部按计费策略选真模型。用户不用知道后面挂了哪个。
++        case .aevis: return "aevis-chat"
+@@ -176,0 +185,2 @@
++        // 自家服务不用去别处申请 —— 登录姜言账号就有了（`AevisCloud` 会自动填）。
++        case .aevis: return "登录姜言账号就有，不用单独申请"
+@@ -525 +535 @@
+-        Color(red: 0.42, green: 0.35, blue: 0.95),
++        Color(red: 63/255, green: 157/255, blue: 144/255),
+@@ -533 +543 @@
+-    static let accentNames = ["紫", "蓝", "青", "玫红", "橙", "绿"]
++    static let accentNames = ["青", "蓝", "青绿", "玫红", "橙", "绿"]
+@@ -553 +563 @@
+-    static let bubbleColorNames = ["中性灰", "紫", "蓝", "青", "玫红", "橙", "绿"]
++    static let bubbleColorNames = ["中性灰", "青", "蓝", "青绿", "玫红", "橙", "绿"]
+@@ -1596,4 +1606,5 @@
+-        baseURL = defaults.string(forKey: Key.baseURL) ?? "https://api.deepseek.com/v1"
+-        // ⚠️ 这里必须和 `ProviderPreset.defaultModel` 的 DeepSeek 档保持一致 ——
+-        //    `deepseek-chat` 已于 2026-07-24 停用（见上面那段注释）。
+-        model = defaults.string(forKey: Key.model) ?? "deepseek-v4-flash"
++        // ⭐ 出厂指向**姜言自建后端**（2026-10-19）。用户明确要「API 提前加好」——
++        //    装完就是能用的，不用先去别家申请 Key 再回来填地址。
++        baseURL = defaults.string(forKey: Key.baseURL) ?? AevisCloud.chatBase
++        // ⚠️ 和 `ProviderPreset.defaultModel` 的 `.aevis` 档保持一致。
++        model = defaults.string(forKey: Key.model) ?? "aevis-chat"
+@@ -1602 +1613 @@
+-        providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .deepseek
++        providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .aevis
