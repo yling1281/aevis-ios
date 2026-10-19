@@ -141,7 +141,9 @@ enum AevisCloud {
         //    用 chatBase 而不是 /v1 以外的任何东西：兼容层就认这个前缀。
         let settings = AppSettings.shared
         settings.baseURL = chatBase
-        if (settings.model as NSString).isEmpty || settings.model == "gpt-4o-mini" {
+        // ⚠️ `isEmpty` 是 `String` 的成员，**不是 `NSString` 的**。
+        //    写成 `(x as NSString).isEmpty` 编译不过（'NSString' has no member 'isEmpty'）。
+        if settings.model.isEmpty || settings.model == "gpt-4o-mini" {
             settings.model = "aevis-chat"
         }
         return payload
