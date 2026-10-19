@@ -1,30 +1,81 @@
 --- a/Aevis/Core/AppSettings.swift
 +++ b/Aevis/Core/AppSettings.swift
-@@ -111,0 +112,3 @@
+@@ -109,6 +109,9 @@
+ /// **用户明确要求「API 你要提前加好」** —— 所以不许让他手填 URL。
+ /// 预设只是省事：地址和模型名都还能改，改完就当自定义。
+ enum ProviderPreset: String, CaseIterable, Identifiable {
 +    /// 姜言自建后端（`ai.aevis.cn`）。**放第一个** —— 它是自家服务，
 +    /// 用它不需要用户自己找地址、不需要自己有 API Key，登录后计费按账号走。
 +    case aevis
-@@ -123,0 +127 @@
+     case deepseek
+     case openai
+     case gemini
+@@ -121,6 +124,7 @@
+ 
+     var label: String {
+         switch self {
 +        case .aevis: return "姜言云端"
-@@ -136,0 +141 @@
+         case .deepseek: return "DeepSeek"
+         case .openai: return "ChatGPT"
+         case .gemini: return "Google AI"
+@@ -134,6 +138,7 @@
+     /// 都是 OpenAI 兼容的地址（这样一套调用逻辑能通吃）。
+     var baseURL: String {
+         switch self {
 +        case .aevis: return AevisCloud.chatBase
-@@ -148,0 +154,3 @@
+         case .deepseek: return "https://api.deepseek.com/v1"
+         case .openai: return "https://api.openai.com/v1"
+         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
+@@ -146,6 +151,9 @@
+ 
+     var defaultModel: String {
+         switch self {
 +        // 🔴 `aevis-chat` 是**兼容层自己合成的 id**（`/v1/models` 第一条永远返回它），
 +        //    它内部按计费策略选真模型。用户不用知道后面挂了哪个。
 +        case .aevis: return "aevis-chat"
-@@ -176,0 +185,2 @@
+         // 🔴 2026-10-07 修：原来这里是 `deepseek-chat` —— **那是个已经死掉的模型名**。
+         //
+         //    DeepSeek 官方「更新日志」原文（api-docs.deepseek.com/zh-cn/updates/）：
+@@ -174,6 +182,8 @@
+     /// 拿 Key 的地方，直接写给用户看。
+     var keyHint: String {
+         switch self {
 +        // 自家服务不用去别处申请 —— 登录姜言账号就有了（`AevisCloud` 会自动填）。
 +        case .aevis: return "登录姜言账号就有，不用单独申请"
-@@ -525 +535 @@
+         case .deepseek: return "platform.deepseek.com"
+         case .openai: return "platform.openai.com"
+         case .gemini: return "aistudio.google.com"
+@@ -522,7 +532,7 @@
+ 
+     /// 主题色候选。用户挑一个，界面里所有强调色跟着变。
+     static let accentPalette: [Color] = [
 -        Color(red: 0.42, green: 0.35, blue: 0.95),
 +        Color(red: 63/255, green: 157/255, blue: 144/255),
-@@ -533 +543 @@
+         Color(red: 0.20, green: 0.48, blue: 0.96),
+         Color(red: 0.13, green: 0.64, blue: 0.58),
+         Color(red: 0.88, green: 0.32, blue: 0.52),
+@@ -530,7 +540,7 @@
+         Color(red: 0.40, green: 0.62, blue: 0.20)
+     ]
+ 
 -    static let accentNames = ["紫", "蓝", "青", "玫红", "橙", "绿"]
 +    static let accentNames = ["青", "蓝", "青绿", "玫红", "橙", "绿"]
-@@ -553 +563 @@
+ 
+     /// 文字颜色候选。第一个是「跟随系统」。
+     static let fontColorPalette: [Color] = [
+@@ -550,7 +560,7 @@
+         Color(red: 0.55, green: 0.56, blue: 0.62)
+     ] + accentPalette
+ 
 -    static let bubbleColorNames = ["中性灰", "紫", "蓝", "青", "玫红", "橙", "绿"]
 +    static let bubbleColorNames = ["中性灰", "青", "蓝", "青绿", "玫红", "橙", "绿"]
-@@ -1596,4 +1606,5 @@
+ 
+     // MARK: - 模型接入
+ 
+@@ -1593,13 +1603,14 @@
+ 
+     private init() {
+         let defaults = UserDefaults.standard
 -        baseURL = defaults.string(forKey: Key.baseURL) ?? "https://api.deepseek.com/v1"
 -        // ⚠️ 这里必须和 `ProviderPreset.defaultModel` 的 DeepSeek 档保持一致 ——
 -        //    `deepseek-chat` 已于 2026-07-24 停用（见上面那段注释）。
@@ -34,6 +85,10 @@
 +        baseURL = defaults.string(forKey: Key.baseURL) ?? AevisCloud.chatBase
 +        // ⚠️ 和 `ProviderPreset.defaultModel` 的 `.aevis` 档保持一致。
 +        model = defaults.string(forKey: Key.model) ?? "aevis-chat"
-@@ -1602 +1613 @@
+         modelList = defaults.stringArray(forKey: Key.modelList) ?? []
+         apiKey = Keychain.get(Key.llmKeychain) ?? ""
 -        providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .deepseek
 +        providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .aevis
+ 
+         // ⚠️⚠️ 「把老存档里已停用的模型名换掉」那段迁移**挪到 init 的最末尾**了（见本函数结尾）。
+         //    它要读 `providerPreset` / `baseURL` / `model`，而这几个都是带 `didSet` 的
