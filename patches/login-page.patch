@@ -1,6 +1,7 @@
 --- a/Aevis/Features/Login/LoginView.swift
 +++ b/Aevis/Features/Login/LoginView.swift
-@@ -22,9 +22,10 @@
+@@ -21,19 +21,24 @@
+ /// 交给 `AccountService.receiveWebLogin(_:)` 收下，直接进主界面。
  ///
  /// ## 下面这几条是降级入口（收在「其它登录方式」里，`showNative == false` 时看不见）
 -/// 1. 验证码登录 / 2. 密码登录 / 3. 用注册码注册：都在 App 内做完。
@@ -15,22 +16,23 @@
 +/// 老板要的是「不是邮箱，就是账号密码」，邮箱那条降级成下面的圆形按钮。
  struct LoginView: View {
  
-@@ -32,7 +33,11 @@
+     @ObservedObject private var account = AccountService.shared
      @ObservedObject private var settings = AppSettings.shared
  
 -    @State private var tab: Tab = .code
--
--    // —— 验证码登录 ——
 +    /// 出厂落在**账号密码**（2026-10-19：邮箱验证码那条从 `Tab` 里撤了）。
 +    @State private var tab: Tab = .password
-+
+ 
+-    // —— 验证码登录 ——
 +    // —— 邮箱 / 验证码 ——
 +    // ⚠️ `email` / `code` / `codeSent` 现在只服务「我有注册码」那条路
 +    //    （`registerForm`），登录不再走验证码。**别顺手删** ——
 +    //    注册流程要靠它收验证码，删了注册就断了。
      @State private var email = ""
      @State private var code = ""
-@@ -77,6 +82,12 @@
+     @State private var codeSent = false
+@@ -76,15 +81,20 @@
+         #endif
      }
  
 +    /// ⭐ 老板 2026-10-19 定的登录方式：**去掉「验证码登录」**。
@@ -44,7 +46,7 @@
 +        case password, register
  
          var id: String { rawValue }
-@@ -84,6 +95,5 @@
+ 
          var label: String {
              switch self {
 -            case .code: return "验证码登录"
@@ -52,20 +54,26 @@
 +            case .password: return "账号密码登录"
              case .register: return "我有注册码"
              }
-@@ -105,5 +115,5 @@
+         }
+@@ -104,7 +114,7 @@
+                         if isPad { scanCallout }
                          switcher
                          card
 -                        qqButton
 +                        thirdPartyRow
                          if !isPad { scanButton }
                      }
-@@ -249,5 +259,4 @@
+ 
+@@ -248,7 +258,6 @@
+     private var card: some View {
          VStack(alignment: .leading, spacing: 13) {
              switch tab {
 -            case .code: codeForm
              case .password: passwordForm
              case .register: registerForm
-@@ -258,47 +267,4 @@
+             }
+@@ -257,49 +266,6 @@
+         .aevisGlass(cornerRadius: 18)
      }
  
 -    private var codeForm: some View {
@@ -113,14 +121,18 @@
 -    }
 -
      private var passwordForm: some View {
-@@ -319,5 +285,5 @@
+         VStack(alignment: .leading, spacing: 13) {
+@@ -318,7 +284,7 @@
+                 if working { ProgressView().controlSize(.small) }
              }
  
 -            Text("没设过密码的话，先用「验证码登录」进去，再到「设置 → 账号」里设一个。")
 +            Text("忘了密码的话，用下面的「邮箱登录」重设 —— 那条走网页，本页不敲验证码。")
                  .font(.aevis(11.5))
                  .foregroundStyle(.tertiary)
-@@ -418,18 +384,73 @@
+                 .fixedSize(horizontal: false, vertical: true)
+@@ -417,20 +383,75 @@
+         .disabled(working)
      }
  
 -    private var qqButton: some View {
@@ -132,12 +144,7 @@
 -                    .font(.aevis(15))
 -                Text("用 QQ 登录")
 -                    .font(.aevis(15, weight: .medium))
--            }
--            .foregroundStyle(.primary)
--            .frame(maxWidth: .infinity)
--            .padding(.vertical, 13)
--            .aevisGlass(cornerRadius: 16)
-+    /// ⭐ 第三方 / 其它登录入口 —— **圆形图标按钮**（2026-10-19 老板定的形态）。
++    /// ⭐ 第三方 / 其它登录入口 —— **圆形图标按钮**（2026-10-19 老板���的形态）。
 +    ///
 +    /// 原话：「就是那个圆圈嘛，弄一个 QQ 登录，弄一个邮箱登录」。
 +    /// 所以是**一排圆形图标 + 下面一行小字**，不是原来那种整条宽按钮
@@ -205,6 +212,11 @@
 +                Text(label)
 +                    .font(.aevis(12.5))
 +                    .foregroundStyle(.secondary)
-+            }
+             }
+-            .foregroundStyle(.primary)
+-            .frame(maxWidth: .infinity)
+-            .padding(.vertical, 13)
+-            .aevisGlass(cornerRadius: 16)
          }
          .buttonStyle(.plain)
+         .disabled(working)
