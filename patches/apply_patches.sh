@@ -2,9 +2,10 @@
 # 应用待办补丁。已经打过的不重复打。
 #
 # 依赖关系：
-#   brand-accent  →  引入 ProviderPreset.aevis（CloudCard 会用它）
-#   cloud-card    →  注册 CloudCard 到设置页
-#   login-page    →  独立，不依赖上面两个，放最后最稳
+#   brand-accent   →  引入 ProviderPreset.aevis（CloudCard 会用它）
+#   cloud-card     →  注册 CloudCard 到设置页
+#   cloudcard-fix  →  修 CloudCard 里的造码死循环（依赖 cloud-card）
+#   login-page     →  独立，不依赖上面，放最后最稳
 set -u
 
 cd "$(dirname "$0")/.." || exit 1
@@ -28,6 +29,7 @@ apply_one() {
 
 apply_one patches/brand-accent.patch
 apply_one patches/cloud-card.patch
+apply_one patches/cloudcard-fix.patch
 apply_one patches/login-page.patch
 
 echo
