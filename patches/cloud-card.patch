@@ -1,0 +1,18 @@
+--- a/Aevis/Features/Settings/SettingsView.swift
++++ b/Aevis/Features/Settings/SettingsView.swift
+@@ -138,5 +138,5 @@
+                                "qqbot", "qq", "system", "mcp", "console"]),
+             CardSection(id: "data", title: "账号与数据",
+-                        keys: ["account", "device", "devicelist", "pair", "share", "about"])
++                        keys: ["cloud", "account", "device", "devicelist", "pair", "share", "about"])
+         ]
+     }
+@@ -172,4 +172,8 @@
+         case "wechatbot": WeChatBotCard()
+         case "account": AccountCard()
++        // 姜言云端（充值 / 转移账号 / 内置 API 状态）。
++        // 放在「账号与数据」组**第一位**：它是「这个账号在云上还剩多少」的总账，
++        // 比「设备列表」这种细项更该先看见。
++        case "cloud": CloudCard()
+         case "device": DeviceCard()
+         case "devicelist": DeviceListCard()
