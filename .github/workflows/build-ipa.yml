@@ -2,7 +2,7 @@ name: CI
 
 # 每次推代码只做「编译 + 模拟器自检截图」，**不出 IPA**。
 # 需要 IPA 时，推一个以 `ipa-` 开头的 tag（如 `ipa-2026-10-19`），
-# 或把 .release/ipa 的内容改成 1 再推一次 —— 两者都会出包。
+# 或把 .release/ipa 的内容改成 1 / true / yes / on 再推一次 —— 都会出包。
 # 出完包后 workflow 会自动把 .release/ipa 重置回 0（用 [skip ci] 避免死循环）。
 #
 # ⚠️ 为什么要加 tag 触发、为什么开关还认字母（2026-10-19）：
@@ -247,7 +247,7 @@ jobs:
           tar xzf "$DEST/ish-vendor.tar.gz" -C vendor/ish
 
           # 3b) **内容体检**：libaevisish.a + ish_embed.h 是较新的 run 才有的产物。
-          #     回退到旧格式的包时在这里就报清楚，别一路编到链接期才炸。
+          #     回退到旧格式の包时在这里就报清楚，别一路编到链接期才炸。
           for f in libaevisish.a ish_embed.h; do
             [ -f "vendor/ish/$f" ] \
               || { echo "::error::VENDOR| vendor 包里缺 $f（来源 $VENDOR_TAG / $SRC）—— 这个 release 的 vendor 是旧格式；请等一轮新的 ish-sandbox 构建，或先跑一轮 ish-sandbox.yml 把 ish-vendor 建出来"; exit 1; }
@@ -259,7 +259,7 @@ jobs:
           #       判成「格式不对」，返回非 0（明明文件都对也红）。
           grep -v ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" | grep -v '^#' > "$DEST/files.sha256"
           ( cd vendor/ish && shasum -a 256 -c "$DEST/files.sha256" ) \
-            || { echo "::error::VENDOR| vendor 包内文件的 sha256 校验失败"; exit 1; }
+            || { echo "::error::VENDOR| vendor 包内ファイルの sha256 校验失败"; exit 1; }
 
           # 5) rootfs 解压到 aevis-ios/ish-rootfs/（要的是 data/ + meta.db 顶层）
           rm -rf ish-rootfs; mkdir -p ish-rootfs
@@ -375,7 +375,7 @@ jobs:
 
           UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
           if [ -z "$UDID" ]; then
-            UDID=$(xcrun simctl list devices available | grep -m1 -oE '\(([0-9A-F-]{36})\)' | -d '()')
+            UDID=$(xcrun simctl list devices available | grep -m1 -oE '\(([0-9A-F-]{36})\)' | tr -d '()')
           fi
           test -n "$UDID" || { echo "找不到可用模拟器"; exit 1; }
           echo "UDID=$UDID"
@@ -481,7 +481,7 @@ jobs:
           #
           # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**（灵动岛那个同理：
           # 扩件不在，实时活动永远不会显示），而界面不会报任何错 ——
-          # 用户只会觉得"点了没反应"。所以这里明确打出来，出问题时一眼能定位.
+          # 用户只会觉得"点了没反应"。所以这里明确打出来，出问题时一眼能定位。
           #
           # ⚠️ 要**逐个**打注册点。现在 PlugIns 里有**两个** appex
           #    （`AevisBroadcast` + `AevisLive`），原来那句 `... | head -1`
