@@ -5,11 +5,13 @@ name: CI
 # 或把 .release/ipa 的内容改成 1 再推一次 —— 两者都会出包。
 # 出完包后 workflow 会自动把 .release/ipa 重置回 0（用 [skip ci] 避免死循环）。
 #
-# ⚠️ 为什么要加 tag 触发（2026-10-19）：
+# ⚠️ 为什么要加 tag 触发、为什么开关还认字母（2026-10-19）：
 #   推文件时 `content` 传裸 `1` 会被某些接口当成整数而拒绝
 #   （`type: 1 has type "integer", want "string"`），
-#   于是「把开关改成 1」这件事本身推不上去。tag 触发绕开这个问题：
-#   推 tag 不需要传文件内容。
+#   而且**加前导/尾随空格也救不了**（参数解析会把空白吃掉）。
+#   ⇒ ① tag 触发：推 tag 不传文件内容，完全绕开；
+#     ② 开关额外认 `true` / `yes` / `on`：这些是纯字母，能正常当字符串传。
+#   两条路都留着，以后想用哪种都行。
 
 on:
   push:
@@ -147,11 +149,18 @@ jobs:
         id: decide
         run: |
           REQ=$(tr -d ' \n\r' < .release/ipa 2>/dev/null || echo "0")
-          # ⚠️ tag 触发（`ipa-*`）也算「要出包」—— 见文件头的说明。
-          #    推送 tag 不需要传文件内容，绕开了「裸 1 被当整数拒收」那个坑。
-          if [ "$REQ" = "1" ] || [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          # ⚠️ 认字母是**故意的**：推文件接口会把裸 `1` 当成整数而拒绝
+          #    （`type: 1 has type "integer", want "string"`），加空格也救不了。
+          #    所以 `true` / `yes` / `on` 这些纯字母串才是能推上去的形式。
+          # tag 触发（`ipa-*`）同样算出包，见文件头。
+          case "$REQ" in
+            1|true|yes|on) WANT=yes ;;
+            *)             WANT=no  ;;
+          esac
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then WANT=yes; fi
+          if [ "$WANT" = "yes" ]; then
             echo "should=yes" >> "$GITHUB_OUTPUT"
-            echo "本次会出 IPA（来源：开关=$REQ ref=$GITHUB_REF）"
+            echo "本次会出 IPA（开关=$REQ ref=$GITHUB_REF）"
           else
             echo "should=no" >> "$GITHUB_OUTPUT"
             echo "本次只做自检，不出 IPA"
@@ -366,7 +375,7 @@ jobs:
 
           UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
           if [ -z "$UDID" ]; then
-            UDID=$(xcrun simctl list devices available | grep -m1 -oE '\(([0-9A-F-]{36})\)' | tr -d '()')
+            UDID=$(xcrun simctl list devices available | grep -m1 -oE '\(([0-9A-F-]{36})\)' | -d '()')
           fi
           test -n "$UDID" || { echo "找不到可用模拟器"; exit 1; }
           echo "UDID=$UDID"
@@ -472,7 +481,7 @@ jobs:
           #
           # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**（灵动岛那个同理：
           # 扩件不在，实时活动永远不会显示），而界面不会报任何错 ——
-          # 用户只会觉得"点了没反应"。所以这里明确打出来，出问题时一眼能定位。
+          # 用户只会觉得"点了没反应"。所以这里明确打出来，出问题时一眼能定位.
           #
           # ⚠️ 要**逐个**打注册点。现在 PlugIns 里有**两个** appex
           #    （`AevisBroadcast` + `AevisLive`），原来那句 `... | head -1`
@@ -533,7 +542,7 @@ jobs:
             sim-build.log
 
       - name: Reset IPA request flag
-        if: steps.decide.outputs.should == 'yes' && hashFiles('.bootstrap-url') == ''
+        if: steps.decide.outputs.should == 'yes' && hashFiles('.bootstrap-url') == '' && github.ref == 'refs/heads/main'
         run: |
           printf '0\n' > .release/ipa
           git config user.name "aevis-bot"
