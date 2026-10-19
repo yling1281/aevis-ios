@@ -212,7 +212,7 @@
 +                Text(label)
 +                    .font(.aevis(12.5))
 +                    .foregroundStyle(.secondary)
-             }
+            }
 -            .foregroundStyle(.primary)
 -            .frame(maxWidth: .infinity)
 -            .padding(.vertical, 13)
