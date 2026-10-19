@@ -10,13 +10,17 @@
 #   才把「孤立的空行或 `-`」改回「空格」。
 #
 # 依赖顺序：
-#   brand-accent   →  引入 ProviderPreset.aevis（CloudCard 会用它）
-#   no-apikey      →  把 ProviderPreset 压成只剩 .aevis（内部自洽，可独立应用）
-#   cloud-card     →  注册 CloudCard 到设置页
-#   login-page     →  独立，不依赖上面
+#   no-apikey   →  AppSettings：ProviderPreset 压成只剩 .aevis + 品牌青主题色
+#                 （**自包含**：brand-accent 的那部分已经合进来了）
+#   cloud-card  →  注册 CloudCard 到设置页（用到上面那个 .aevis）
+#   login-page  →  独立，不依赖上面
 #
-# ⚠️ brand-accent 与 no-apikey 都改 AppSettings.swift，改的是**不同段落**，
-#    两个都打没问题；但顺序别颠倒：先加 `case .aevis`，再删掉其它 case。
+# ⚠️ 为什么不再打 brand-accent（2026-10-19）
+#   它和 no-apikey 改的是 AppSettings.swift **同一段**（ProviderPreset）。
+#   brand-accent 先加 `case aevis`，no-apikey 就找不到原文了 → 报「打不上」。
+#   现在 no-apikey 一份补丁同时给出两者（内置云端 + 品牌青），顺序无关。
+#   `brand-accent.patch` 留档但**不再应用** —— 真要回退，先把它从下面这行去掉、
+#   再把 no-apikey 也去掉。
 #
 # ⚠️ 少了一个：cloudcard-fix —— CloudCard.swift 已经直接改成修好的版本，
 #    那个补丁删掉了（再留着会重复应用）。
@@ -70,7 +74,6 @@ apply_one() {
   fi
 }
 
-apply_one patches/brand-accent.patch
 apply_one patches/no-apikey.patch
 apply_one patches/cloud-card.patch
 apply_one patches/login-page.patch
