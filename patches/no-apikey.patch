@@ -1,0 +1,184 @@
+--- a/Aevis/Core/AppSettings.swift
++++ b/Aevis/Core/AppSettings.swift
+@@ -106,82 +106,42 @@
+ }
+ 
+-/// 内置的 API 供应商预设。
+-/// **用户明确要求「API 你要提前加好」** —— 所以不许让他手填 URL。
+-/// 预设只是省事：地址和模型名都还能改，改完就当自定义。
++/// 模型接入方式。
++///
++/// ⭐ **2026-10-19 起只剩内置云端一个**（老板要求：改成平台内置的积分计费模式，
++///    不再让用户自己填 API Key）。
++///
++/// ## 为什么删掉了 DeepSeek / ChatGPT / Gemini / 豆包 / 千问 / Kimi
++/// 那些都是**外接 API**：用户要去对方的网站自己申请 Key、自己填、自己承担费用。
++/// 现在改成：用户登录姜言账号 → 直接用，按条从余额里扣（0.001 元/条）。
++/// 于是这些预设**连同它们的 Key 输入框一起删掉** —— 不是隐藏，是删。
++///
++/// ## 老用户怎么办
++/// `UserDefaults` 里存的还是 `"deepseek"` / `"openai"` 这些字符串，
++/// 但 `init` 里是 `ProviderPreset(rawValue:) ?? .aevis` —— **认不出来就落到内置**，
++/// 所以老用户装上新版自动就是内置云端，不需要写迁移代码。
++///
++/// ## 切模型不用改这里
++/// `aevis-chat` 是**兼容层自己合成的 id**，服务端 `/v1/models` 第一条永远返回它，
++/// 后面挂的是哪个真模型由服务端配置决定（现在是 DeepSeek Flash）。
++/// ⇒ 服务端换模型，前端一个字都不用动。
+ enum ProviderPreset: String, CaseIterable, Identifiable {
+-    case deepseek
+-    case openai
+-    case gemini
+-    case doubao
+-    case qwen
+-    case kimi
+-    case custom
++    /// 姜言云端。**唯一选项** —— 用户不需要、也不应该有 Key 输入框。
++    case aevis
+ 
+     var id: String { rawValue }
+ 
+-    var label: String {
+-        switch self {
+-        case .deepseek: return "DeepSeek"
+-        case .openai: return "ChatGPT"
+-        case .gemini: return "Google AI"
+-        case .doubao: return "豆包"
+-        case .qwen: return "千问"
+-        case .kimi: return "Kimi"
+-        case .custom: return "自定义"
+-        }
+-    }
+-
+-    /// 都是 OpenAI 兼容的地址（这样一套调用逻辑能通吃）。
+-    var baseURL: String {
+-        switch self {
+-        case .deepseek: return "https://api.deepseek.com/v1"
+-        case .openai: return "https://api.openai.com/v1"
+-        case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
+-        case .doubao: return "https://ark.cn-beijing.volces.com/api/v3"
+-        case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+-        case .kimi: return "https://api.moonshot.cn/v1"
+-        case .custom: return ""
+-        }
+-    }
+-
+-    var defaultModel: String {
+-        switch self {
+-        // 🔴 2026-10-07 修：原来这里是 `deepseek-chat` —— **那是个已经死掉的模型名**。
+-        //
+-        //    DeepSeek 官方「更新日志」原文（api-docs.deepseek.com/zh-cn/updates/）：
+-        //      「旧有的 API 接口的两个模型名 deepseek-chat 与 deepseek-reasoner
+-        //        将于三个月后（2026-07-24）停止使用。」
+-        //    2026-04-24 起新模型名是 `deepseek-v4-pro` / `deepseek-v4-flash`
+-        //    （**base_url 不变**，只换 model 参数）。
+-        //
+-        //    ⇒ 拿今天（2026-10-07）去调 `deepseek-chat`，**每次都是 400**。
+-        //      而 400 在老代码里会触发"卸工具"降级 ⇒ ta 连手都没了，
+-        //      表现就是用户说的「APP 意识不到自己有能力」。
+-        //
+-        //    ⚠️ 官方给的迁移目标是 **V4-Flash**，而且**价格完全一样**
+-        //       （两个旧别名当年就是指到 V4-Flash 的）。千万别顺手迁到 `v4-pro`：
+-        //       那是贵约 3 倍的另一个档，不是迁移目标。
+-        case .deepseek: return "deepseek-v4-flash"
+-        case .openai: return "gpt-4o-mini"
+-        case .gemini: return "gemini-2.0-flash"
+-        case .doubao: return ""
+-        case .qwen: return "qwen-plus"
+-        case .kimi: return "moonshot-v1-8k"
+-        case .custom: return ""
+-        }
+-    }
+-
+-    /// 拿 Key 的地方，直接写给用户看。
+-    var keyHint: String {
+-        switch self {
+-        case .deepseek: return "platform.deepseek.com"
+-        case .openai: return "platform.openai.com"
+-        case .gemini: return "aistudio.google.com"
+-        case .doubao: return "火山方舟控制台（注意要填接入点 ID 当模型名）"
+-        case .qwen: return "阿里云百炼控制台"
+-        case .kimi: return "platform.moonshot.cn"
+-        case .custom: return "你自己的中转站或自建服务"
+-        }
+-    }
++    var label: String { "姜言云端" }
++
++    /// 兼容层地址（OpenAI 协议）。
++    var baseURL: String { AevisCloud.chatBase }
++
++    var defaultModel: String { "aevis-chat" }
++
++    /// ⚠️ 这里**绝不能**出现任何「去某个网站申请 Key」的指引——
++    ///    内置模式下用户不需要 Key，这个位置是给用户看的。
++    var keyHint: String { "不用填，登录姜言账号就能用" }
++
++    /// 单价说明。放在设置页给用户看，避免他反复问「一条多少钱」。
++    var billingHint: String { "按条计费：每条消息 0.001 元，从余额里扣" }
+ }
+ 
+@@ -273,5 +233,7 @@
+     var lastUsedAt: Double = 0
+ 
+-    var preset: ProviderPreset { ProviderPreset(rawValue: provider) ?? .custom }
++    /// ⚠️ 兜底是 `.aevis`（内置云端）：`.custom` 那档 2026-10-19 删掉了，
++    ///    老存档里的 provider 字符串认不出来时，落到内置而不是崩。
++    var preset: ProviderPreset { ProviderPreset(rawValue: provider) ?? .aevis }
+ 
+@@ -1594,11 +1556,14 @@
+     private init() {
+         let defaults = UserDefaults.standard
+-        baseURL = defaults.string(forKey: Key.baseURL) ?? "https://api.deepseek.com/v1"
+-        // ⚠️ 这里必须和 `ProviderPreset.defaultModel` 的 DeepSeek 档保持一致 ——
+-        //    `deepseek-chat` 已于 2026-07-24 停用（见上面那段注释）。
+-        model = defaults.string(forKey: Key.model) ?? "deepseek-v4-flash"
++        // ⭐ 出厂指向**姜言云端**（2026-10-19）。用户明确要「不要外接 API、
++        //    改成内置积分制」—— 装完就是能用的，不用自己去别家申请 Key。
++        //    ⚠️ 真模型由服务端配置决定，前端只发 `aevis-chat` 这个合成 id。
++        baseURL = defaults.string(forKey: Key.baseURL) ?? AevisCloud.chatBase
++        model = defaults.string(forKey: Key.model) ?? "aevis-chat"
+         modelList = defaults.stringArray(forKey: Key.modelList) ?? []
+         apiKey = Keychain.get(Key.llmKeychain) ?? ""
+-        providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .deepseek
++        // ⚠️ 老用户 UserDefaults 里存的是 "deepseek" / "openai" 这些，
++        //    认不出来就落 `.aevis` —— 所以老用户升级后自动切到内置，不用迁移代码。
++        providerPreset = ProviderPreset(rawValue: defaults.string(forKey: Key.providerPreset) ?? "") ?? .aevis
+ 
+-        // ⚠️⚠️ 「把老存档里已停用的模型名换掉」那段迁移**挪到 init 的最末尾**了（见本函数结尾）。
++        // ⚠️⚠️ 原来下面还有一段「把老存档里已停用的模型名换掉」的迁移，
++        //    它被挪到这里是因为要读 `providerPreset` / `baseURL` / `model`，
++        //    而这三个都是带 `didSet` 的 `@Published` —— 在所有存储属性赋值完之前
++        //    碰 `self` 会报 'self used in property access before all stored
++        //    properties are initialized'（build-155 / 156 连挂在这一点）。
++        //    **2026-10-19 那段迁移已删**（内置模式下前端不再决定模型）。
++        //    上面这个约束对**将来新增的任何 init 内逻辑**依然有效，别踩。
+@@ -1840,28 +1805,12 @@
+         }
+ 
+-        // 🔴 2026-10-07 迁移：**把老存档里那个已停用的模型名换掉**。
+-        //
+-        //    ⚠️⚠️ 这段**必须待在 init 最末尾**（上面那句「才能调方法」同样适用于它）：
+-        //       它要读 `providerPreset` / `baseURL` / `model`，而这三个都是带 `didSet`
+-        //       的 `@Published` —— 在所有存储属性赋值完之前碰 `self`，Swift 直接报
+-        //       `'self' used in property access 'X' before all stored properties are initialized`。
+-        //       🔴 build-155 / build-156 连续挂在这一条上，别再往前面挪。
+-        //
+-        //    只改 `defaultModel` 是**救不到老用户的** —— 他们手机里 UserDefaults
+-        //    已经存着 `deepseek-chat` 了（老板这台就是）。留着它 = 每次请求都 400
+-        //    ⇒ 触发"卸工具"降级 ⇒ ta 变成只会聊天、张口就来。
+-        //
+-        //    ⚠️ 判据要**宽一点**：预设选的是 DeepSeek，**或者**地址就是 deepseek 域名
+-        //       （有些人是从"自定义"进去手填的 `api.deepseek.com`，预设字段还停在 .custom）。
+-        //       两种都算"这台在打 DeepSeek"，否则老板那台照样救不回来。
+-        //    ⚠️ 但**只认那两个已停用的别名**才换；用户填的别的名字一律不动 ——
+-        //       那可能是中转站的自定义名，动了会坏。
+-        //    ⚠️ 换完**要写回 UserDefaults**，否则每次冷启动都白算一遍。
+-        let looksLikeDeepSeek = providerPreset == .deepseek
+-            || baseURL.lowercased().contains("deepseek")
+-        if looksLikeDeepSeek, Self.retiredDeepSeekAliases.contains(model) {
+-            model = "deepseek-v4-flash"
+-            defaults.set(model, forKey: Key.model)
+-        }
+     }
+ 
+     // MARK: - 派生
