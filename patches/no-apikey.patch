@@ -125,6 +125,34 @@
 +    ///    老存档里的 provider 字符串认不出来时，落到内置而不是崩。
 +    var preset: ProviderPreset { ProviderPreset(rawValue: provider) ?? .aevis }
  
+     static func newID() -> String { UUID().uuidString }
+@@ -522,7 +484,7 @@
+ 
+     /// 主题色候选。用户挑一个，界面里所有强调色跟着变。
+     static let accentPalette: [Color] = [
+-        Color(red: 0.42, green: 0.35, blue: 0.95),
++        Color(red: 63/255, green: 157/255, blue: 144/255),
+         Color(red: 0.20, green: 0.48, blue: 0.96),
+         Color(red: 0.13, green: 0.64, blue: 0.58),
+         Color(red: 0.88, green: 0.32, blue: 0.52),
+@@ -530,7 +492,7 @@
+         Color(red: 0.40, green: 0.62, blue: 0.20)
+     ]
+ 
+-    static let accentNames = ["紫", "蓝", "青", "玫红", "橙", "绿"]
++    static let accentNames = ["青", "蓝", "青绿", "玫红", "橙", "绿"]
+ 
+     /// 文字颜色候选。第一个是「跟随系统」。
+     static let fontColorPalette: [Color] = [
+@@ -550,7 +512,7 @@
+         Color(red: 0.55, green: 0.56, blue: 0.62)
+     ] + accentPalette
+ 
+-    static let bubbleColorNames = ["中性灰", "紫", "蓝", "青", "玫红", "橙", "绿"]
++    static let bubbleColorNames = ["中性灰", "青", "蓝", "青绿", "玫红", "橙", "绿"]
+ 
+     // MARK: - 模型接入
+ 
 @@ -1594,11 +1556,14 @@
      private init() {
          let defaults = UserDefaults.standard
