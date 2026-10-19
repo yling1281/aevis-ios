@@ -1,9 +1,28 @@
 # 待应用的补丁
 
-这两个文件太大（`AppSettings.swift` 78KB、`SettingsView.swift` 42KB），
+这几个文件太大（`AppSettings.swift` 78KB、`SettingsView.swift` 42KB），
 走工具整文件覆盖不现实，所以把改动做成了补丁。
 
-## 已直接推送（不用管）
+## 一条命令搞定
+
+仓库根目录：
+
+```bash
+bash patches/apply_patches.sh
+```
+
+打完后：
+
+```bash
+xcodegen generate
+```
+
+脚本会跳过已经打过的补丁，所以**可以重复跑**。
+
+⚠️ 顺序有依赖：`brand-accent` 引入 `ProviderPreset.aevis`，`cloud-card` 里的
+`CloudCard` 会用它。脚本已经排好序，别自己改顺序。
+
+## 直接推送（不用管）
 
 | 文件 | 内容 |
 | --- | --- |
@@ -17,24 +36,27 @@
 | --- | --- |
 | `brand-accent.patch` | `AppSettings.swift`：主题色默认档改品牌青 + 新增 `ProviderPreset.aevis` |
 | `cloud-card.patch` | `SettingsView.swift`：把 `CloudCard()` 注册进设置页 |
+| `cloudcard-fix.patch` | `CloudCard.swift`：备份码造码死循环 + 文案更正 |
+| `login-page.patch` | `LoginView.swift`：去掉邮箱验证码登录，改账号密码 + 圆形第三方入口 |
 
-## 怎么用
+## 🔴 脚本为什么要「修补丁」
 
-仓库根目录：
+2026-10-19 踩了一整天：四个补丁**全打不上**，报 `corrupt patch at ...`。
+根因是**空白被破坏**，有三种：
 
-```bash
-bash patches/apply_patches.sh
-```
+1. **末尾换行被剥掉** —— GitHub 存文本文件时会去掉最后那个换行。
+2. **上下文空行被吞成真空行** —— hunk 里的上下文空行正确形态是「**一个空格** + 换行」，
+   肉眼看不见，过一趟网络/编辑器就没了。
+3. **上下文空行被写成 `-`** —— 看着像删除行，hunk 的行数计数直接对不上。
 
-脚本会跳过已经打过���补丁，所以可以重复跑。
+`apply_patches.sh` 里的 `fix_blank()` 就是修这三种的（用 awk，不依赖 python）。
 
-⚠️ **顺序有依赖**：必须先 `brand-accent`（引入 `ProviderPreset.aevis`），
-再 `cloud-card`。反过来的话 `CloudCard` 引用不到 `AevisCloud` 会编译失败。
+⚠️ **如果你手改补丁**，改完自己 `git apply --check` 验一下，别直接上。
 
 ## 不想用命令行
 
-`brand-accent.patch` 一共 10 处改动，都是纯文本新增/替换，
-可以直接在 Xcode 里手动改。
+`brand-accent.patch` 是 10 处改动，都是纯文本新增/替换，可以在 Xcode 里手动改。
+其余三个补丁（改动较多）建议直接用脚本。
 
 ### 1. `ProviderPreset` 加一个 case
 
