@@ -1,0 +1,210 @@
+--- a/Aevis/Features/Login/LoginView.swift
++++ b/Aevis/Features/Login/LoginView.swift
+@@ -22,9 +22,10 @@
+ ///
+ /// ## 下面这几条是降级入口（收在「其它登录方式」里，`showNative == false` 时看不见）
+-/// 1. 验证码登录 / 2. 密码登录 / 3. 用注册码注册：都在 App 内做完。
+-/// 4. 用 QQ 登录：走**内置**浏览器（`ASWebAuthenticationSession`）跳 QQ 授权页。
+-/// 5. 用手机扫码登录：本机出码、另一台已登录的手机扫。
++/// 1. 账号密码登录 / 2. 用注册码注册：都在 App 内做完。
++/// 3. **圆形图标入口**：QQ 登录（内置浏览器跳 QQ 授权页）、邮箱登录（跳网页登录页）。
++/// 4. 用手机扫码登录：本机出码、另一台已登录的手机扫。
+ /// 用户 2026-09-28 的原话是「不要跳转网页了吧……邮箱验证码那些也是内置啊」——
+-/// 2026-10-13 改成浏览器优先，但**这些路一条都没删**，随时能退回来。
++/// 2026-10-13 改成浏览器优先；**2026-10-19 又撤掉了「验证码登录」**：
++/// 老板要的是「不是邮箱，就是账号密码」，邮箱那条降级成下面的圆形按钮。
+ struct LoginView: View {
+ 
+@@ -32,7 +33,11 @@
+     @ObservedObject private var settings = AppSettings.shared
+ 
+-    @State private var tab: Tab = .code
+-
+-    // —— 验证码登录 ——
++    /// 出厂落在**账号密码**（2026-10-19：邮箱验证码那条从 `Tab` 里撤了）。
++    @State private var tab: Tab = .password
++
++    // —— 邮箱 / 验证码 ——
++    // ⚠️ `email` / `code` / `codeSent` 现在只服务「我有注册码」那条路
++    //    （`registerForm`），登录不再走验证码。**别顺手删** ——
++    //    注册流程要靠它收验证码，删了注册就断了。
+     @State private var email = ""
+     @State private var code = ""
+@@ -77,6 +82,12 @@
+     }
+ 
++    /// ⭐ 老板 2026-10-19 定的登录方式：**去掉「验证码登录」**。
++    ///
++    /// 原话：「不是邮箱，就是账号密码登录」—— 邮箱验证码那条路从切换器里撤掉，
++    /// 想用邮箱的人在下面的**圆形按钮**里点「邮箱登录」进（那条走内置网页，
++    /// 不在本页敲验证码）。所以 `case .code` 整个删了，不是隐藏 —— 留着两套
++    /// 邮箱入口会让人以为有两个地方能登，体验上是乱的。
+     enum Tab: String, CaseIterable, Identifiable {
+-        case code, password, register
++        case password, register
+ 
+         var id: String { rawValue }
+@@ -84,6 +95,5 @@
+         var label: String {
+             switch self {
+-            case .code: return "验证码登录"
+-            case .password: return "密码登录"
++            case .password: return "账号密码登录"
+             case .register: return "我有注册码"
+             }
+@@ -105,5 +115,5 @@
+                         switcher
+                         card
+-                        qqButton
++                        thirdPartyRow
+                         if !isPad { scanButton }
+                     }
+@@ -249,5 +259,4 @@
+         VStack(alignment: .leading, spacing: 13) {
+             switch tab {
+-            case .code: codeForm
+             case .password: passwordForm
+             case .register: registerForm
+@@ -258,47 +267,4 @@
+     }
+ 
+-    private var codeForm: some View {
+-        VStack(alignment: .leading, spacing: 13) {
+-            field("邮箱", placeholder: "你注册时用的邮箱", text: $email, secret: false)
+-
+-            if codeSent {
+-                field("验证码", placeholder: "邮箱里那 6 位数字", text: $code,
+-                      secret: false, isCode: true)
+-            }
+-
+-            HStack(spacing: 10) {
+-                if codeSent {
+-                    Button {
+-                        run { try await account.signIn(email: email, code: code) }
+-                    } label: {
+-                        primaryLabel(working ? "登录中…" : "登录")
+-                    }
+-                    .disabled(working || code.isEmpty)
+-
+-                    Button {
+-                        run { try await account.sendLoginCode(email: email); codeSent = true }
+-                    } label: {
+-                        secondaryLabel("重发")
+-                    }
+-                    .disabled(working || email.isEmpty)
+-                } else {
+-                    Button {
+-                        run { try await account.sendLoginCode(email: email); codeSent = true }
+-                    } label: {
+-                        primaryLabel(working ? "发送中…" : "发验证码")
+-                    }
+-                    .disabled(working || email.isEmpty)
+-                }
+-
+-                Spacer(minLength: 0)
+-                if working { ProgressView().controlSize(.small) }
+-            }
+-
+-            Text("验证码只发给「已经注册过」的邮箱。没注册过的话，用「我有注册码」那条路。")
+-                .font(.aevis(11.5))
+-                .foregroundStyle(.tertiary)
+-                .fixedSize(horizontal: false, vertical: true)
+-        }
+-    }
+-
+     private var passwordForm: some View {
+@@ -319,5 +285,5 @@
+             }
+ 
+-            Text("没设过密码的话，先用「验证码登录」进去，再到「设置 → 账号」里设一个。")
++            Text("忘了密码的话，用下面的「邮箱登录」重设 —— 那条走网页，本页不敲验证码。")
+                 .font(.aevis(11.5))
+                 .foregroundStyle(.tertiary)
+@@ -418,18 +384,73 @@
+     }
+ 
+-    private var qqButton: some View {
+-        Button {
+-            loginWithQQ()
+-        } label: {
+-            HStack(spacing: 9) {
+-                Image(systemName: "bubble.left.and.bubble.right.fill")
+-                    .font(.aevis(15))
+-                Text("用 QQ 登录")
+-                    .font(.aevis(15, weight: .medium))
+-            }
+-            .foregroundStyle(.primary)
+-            .frame(maxWidth: .infinity)
+-            .padding(.vertical, 13)
+-            .aevisGlass(cornerRadius: 16)
++    /// ⭐ 第三方 / 其它登录入口 —— **圆形图标按钮**（2026-10-19 老板定的形态）。
++    ///
++    /// 原话：「就是那个圆圈嘛，弄一个 QQ 登录，弄一个邮箱登录」。
++    /// 所以是**一排圆形图标 + 下面一行小字**，不是原来那种整条宽按钮
++    /// —— 宽按钮太抢眼，会让人以为它才是主入口；圆点收着，主次才对。
++    ///
++    /// ⚠️ 「邮箱登录」走的是**内置网页**（`openInBrowser`），不在本页敲验证码：
++    ///    验证码那套已经从 `Tab` 里撤了（见 `Tab` 的注释），这里是它剩下的入口。
++    private var thirdPartyRow: some View {
++        VStack(spacing: 9) {
++            HStack(spacing: 26) {
++                orbButton(
++                    system: "bubble.left.and.bubble.right.fill",
++                    tint: Color(red: 0.11, green: 0.62, blue: 0.92),
++                    label: "QQ 登录"
++                ) {
++                    loginWithQQ()
++                }
++
++                orbButton(
++                    system: "envelope.fill",
++                    tint: Color(red: 0.36, green: 0.52, blue: 0.96),
++                    label: "邮箱登录"
++                ) {
++                    openInBrowser()
++                }
++            }
++
++            Text("其它登录方式")
++                .font(.aevis(11.5))
++                .foregroundStyle(.tertiary)
++        }
++        .frame(maxWidth: .infinity)
++        .padding(.vertical, 4)
++    }
++
++    /// 一个圆形图标按钮：**圆底 + 白色图标 + 下面小字**。
++    ///
++    /// 尺寸跟着 `.aevis(20)` 的字号走 —— 这个 App 整体是可调字号的（`ConfigShare`
++    /// 能整套导出），按钮跟着一起缩才不会在放大字号时显得突兀。
++    private func orbButton(
++        system: String,
++        tint: Color,
++        label: String,
++        action: @escaping () -> Void
++    ) -> some View {
++        Button(action: action) {
++            VStack(spacing: 7) {
++                Image(systemName: system)
++                    .font(.aevis(19, weight: .medium))
++                    .foregroundStyle(.white)
++                    .frame(width: 50, height: 50)
++                    // ⚠️ 不写 `.background(Circle())` 再叠 clipShape ——
++                    //    玻璃材质（`aevisGlass`）在 Circle 上会被裁出锯齿，
++                    //    所以用 `Circle().fill()` 实底，玻璃留给下面那层卡片。
++                    .background(Circle().fill(tint.gradient))
++                    .overlay(
++                        Circle().strokeBorder(
++                            Color.white.opacity(0.22),
++                            lineWidth: 0.8
++                        )
++                    )
++                    .shadow(color: tint.opacity(0.32), radius: 7, y: 3)
++                    .contentShape(Circle())
++
++                Text(label)
++                    .font(.aevis(12.5))
++                    .foregroundStyle(.secondary)
++            }
+         }
+         .buttonStyle(.plain)
