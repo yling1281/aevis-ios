@@ -104,6 +104,33 @@ jobs:
             fi
           fi
 
+      # ——— 应用 patches/ 里的改动 ———
+      #
+      # 为什么需要这一步：`AppSettings.swift`（78KB）、`SettingsView.swift`（42KB）
+      # 太大，推代码时只能整文件覆盖，而连接器接口塞不进这么大的内容 ——
+      # 所以那几处改动做成了 `patches/*.patch`。**仓库里的源码仍是改之前的版本**，
+      # 不打补丁就编译，出来的包没有主题色改动、没有云端卡片、没有新登录页。
+      #
+      # ⚠️ 顺序死线：**必须在 `xcodegen generate` 之前**，也必须在所有 build 之前。
+      # ⚠️ 脚本失败**不许静默继续** —— 静默的话会编出一个「看起来成功、
+      #    其实少了一半功能」的包，比直接红更难查。所以下面 `exit 1`。
+      - name: Apply patches
+        if: hashFiles('patches/apply_patches.sh') != ''
+        run: |
+          set -e
+          bash patches/apply_patches.sh
+          echo "打补丁后抽查："
+          grep -c "case .aevis" Aevis/Core/AppSettings.swift || true
+          grep -c "CloudCard" Aevis/Features/Settings/SettingsView.swift || true
+          grep -c "thirdPartyRow" Aevis/Features/Login/LoginView.swift || true
+          # 三个计数必须都 > 0，否则说明补丁没真正落地
+          test "$(grep -c 'case .aevis' Aevis/Core/AppSettings.swift || true)" -gt 0 \
+            || { echo "::error::PATCH| AppSettings 的 aevis 预设没打上"; exit 1; }
+          test "$(grep -c 'CloudCard' Aevis/Features/Settings/SettingsView.swift || true)" -gt 0 \
+            || { echo "::error::PATCH| 设置页没注册 CloudCard"; exit 1; }
+          test "$(grep -c 'thirdPartyRow' Aevis/Features/Login/LoginView.swift || true)" -gt 0 \
+            || { echo "::error::PATCH| 登录页的圆形入口没打上"; exit 1; }
+
       - name: Show toolchain
         run: |
           sw_vers
@@ -221,7 +248,7 @@ jobs:
           rm -rf ish-rootfs; mkdir -p ish-rootfs
           unzip -q vendor/ish/alpine-rootfs.zip -d ish-rootfs
 
-          # 6) 目录非空自查：解错了 / 没解出来都要当场红
+          # 6) 目录非空自查（解错了 / 没解出来都要当场红）
           { test -d vendor/ish && [ -n "$(ls -A vendor/ish 2>/dev/null)" ]; } \
             || { echo "::error::VENDOR| vendor/ish 不存在或为空"; exit 1; }
           { test -d ish-rootfs && [ -n "$(ls -A ish-rootfs 2>/dev/null)" ]; } \
