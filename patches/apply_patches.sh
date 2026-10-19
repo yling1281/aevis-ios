@@ -1,12 +1,13 @@
 #!/bin/bash
 # 应用待办补丁。已经打过的不重复打。
 #
-# 🔴 为什么需要这两步「修补丁」
-#   1. GitHub 存文本文件时会剥掉末尾那个换行，而 `git apply` 要求补丁以换行结尾，
-#      缺了就报 `corrupt patch at ...`。
-#   2. hunk 里的**上下文空行**正确形态是「一个空格 + 换行」，肉眼看不见，
-#      过一趟网络/编辑器很容易被吞成真正的空行 —— 一空 `git apply` 同样报 corrupt。
-#      下面把「文件中间的孤立空行」补成「空格行」，这就是上下文行该有的样子。
+# 🔴 为什么需要「修补丁」这一步（2026-10-19 亲历，四个补丁全打不上）
+#   GitHub / 编辑器 / 网络传输会破坏补丁里的**空白**：
+#   1. 末尾那个换行被剥掉 → `git apply` 报 `corrupt patch at ...`
+#   2. hunk 里的**上下文空行**（「一个空格 + 换行」）被吞成真空行 → 同样报 corrupt
+#   3. 更隐蔽的：上下文空行被写成 `-`（看着像删除行）→ hunk 的行数计数对不上 → 还是 corrupt
+#   下面把三种都修掉。判据统一用 awk：只在 hunk 内、且后一行是缩进上下文时，
+#   才把「孤立的空行或 `-`」改回「空格」。
 #
 # 依赖顺序：
 #   brand-accent   →  引入 ProviderPreset.aevis（CloudCard 会用它）
@@ -17,6 +18,25 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+# 修掉被破坏的空白。三种坏法见上面注释。
+fix_blank() {
+  awk '
+    /^@@/            { inhunk = 1 }
+    inhunk == 1 {
+      # 孤立空行 / 被误写成 "-" 的上下文空行 → 还原成「一个空格」
+      if ($0 == "" || $0 == "-") {
+        # 只有「后面紧跟一行以空格开头的上下文」时才是该修的那行
+        if ((getline nxt) > 0) {
+          if (nxt ~ /^ /) { print " "; print nxt; next }
+          print "-"; print nxt; next
+        }
+        print "-"; next
+      }
+    }
+    { print }
+  ' "$1" > "$1.fixed" && mv "$1.fixed" "$1"
+}
+
 apply_one() {
   local patch="$1"
   if [ ! -f "$patch" ]; then
@@ -24,17 +44,12 @@ apply_one() {
     return 0
   fi
 
-  # ① 末尾补换行（GitHub 会剥掉）
+  # ① 末尾补换行（GitHub 会剥掉它）
   if [ -n "$(tail -c1 "$patch")" ]; then
     printf '\n' >> "$patch"
   fi
-
-  # ② 文件中间的孤立空行 → 空格行（上下文行）
-  #    sed 的地址 'a0<空行>'：空行出现在第 1 行之后（文件头两行是 --- / +++，不算）。
-  #    末尾那个换行不算行，所以不受影响。
-  if grep -qx '' "$patch"; then
-    sed -i '' 's/^$/ /' "$patch" 2>/dev/null || sed -i 's/^$/ /' "$patch"
-  fi
+  # ② 修 hunk 里的空白
+  fix_blank "$patch"
 
   if git apply --reverse --check "$patch" 2>/dev/null; then
     echo "跳过：$(basename "$patch") 已经打过"
