@@ -1,13 +1,16 @@
 --- a/Aevis/Features/Settings/SettingsView.swift
 +++ b/Aevis/Features/Settings/SettingsView.swift
-@@ -138,5 +138,5 @@
+@@ -137,7 +137,7 @@
+                         keys: ["aitools", "wechatbot", "companion", "baidupan", "music",
                                 "qqbot", "qq", "system", "mcp", "console"]),
              CardSection(id: "data", title: "账号与数据",
 -                        keys: ["account", "device", "devicelist", "pair", "share", "about"])
 +                        keys: ["cloud", "account", "device", "devicelist", "pair", "share", "about"])
          ]
      }
-@@ -172,4 +172,8 @@
+ 
+@@ -171,6 +171,10 @@
+         case "qqbot": QQBotCard()
          case "wechatbot": WeChatBotCard()
          case "account": AccountCard()
 +        // 姜言云端（充值 / 转移账号 / 内置 API 状态）。
@@ -16,3 +19,4 @@
 +        case "cloud": CloudCard()
          case "device": DeviceCard()
          case "devicelist": DeviceListCard()
+         case "pair": PairCard()
