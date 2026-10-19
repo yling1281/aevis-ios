@@ -11,8 +11,12 @@
 #
 # 依赖顺序：
 #   brand-accent   →  引入 ProviderPreset.aevis（CloudCard 会用它）
+#   no-apikey      →  把 ProviderPreset 压成只剩 .aevis（内部自洽，可独立应用）
 #   cloud-card     →  注册 CloudCard 到设置页
 #   login-page     →  独立，不依赖上面
+#
+# ⚠️ brand-accent 与 no-apikey 都改 AppSettings.swift，改的是**不同段落**，
+#    两个都打没问题；但顺序别颠倒：先加 `case .aevis`，再删掉其它 case。
 #
 # ⚠️ 少了一个：cloudcard-fix —— CloudCard.swift 已经直接改成修好的版本，
 #    那个补丁删掉了（再留着会重复应用）。
@@ -51,7 +55,7 @@ apply_one() {
   if [ -n "$(tail -c1 "$patch")" ]; then
     printf '\n' >> "$patch"
   fi
-  # ② 修 hunk里的空白
+  # ② 修 hunk 里的空白
   fix_blank "$patch"
 
   if git apply --reverse --check "$patch" 2>/dev/null; then
@@ -67,6 +71,7 @@ apply_one() {
 }
 
 apply_one patches/brand-accent.patch
+apply_one patches/no-apikey.patch
 apply_one patches/cloud-card.patch
 apply_one patches/login-page.patch
 
