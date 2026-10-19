@@ -41,6 +41,8 @@ jobs:
       # 所以改成：把源码打成包放到一个公开地址，让 CI 自己去取。
       # **这是临时的** —— 等源码用正常方式推上来之后，把 `.bootstrap-url` 删掉，
       # 这一步会自动跳过（下面有 if 判断）。
+      #
+      # 取回的东西已经验过：能下载、大小对、sha256 与本地一致、解压正常。
 
       - name: Bootstrap source (temporary)
         if: hashFiles('.bootstrap-url') != ''
@@ -89,6 +91,11 @@ jobs:
           # `.github/workflows` 下的任何改动，整个 push 都会被 GitHub 拒绝，
           # 报 "refusing to allow a GitHub App to create or update workflow"。
           #
+          # 踩过：第一次跑成功，是因为那时 workflow 文件跟仓库里的一模一样；
+          # 后来改了截图列表（加一张 emoji），工作区里的 workflow 就和仓库里的
+          # 有了差异 → 这一步直接挂掉，而且它挂在编译**之前**，
+          # 整个构建连编译都没跑到。
+          #
           # 这一步的目的只是「把源码落回仓库」，流水线文件本来就在仓库里，
           # 由正常的推送去更新它。
           git add -A
@@ -123,14 +130,35 @@ jobs:
           set -e
           bash patches/apply_patches.sh
           echo "打补丁后抽查："
-          # 三个计数必须都 > 0，否则说明补丁没真正落地
-          N1=$(grep -c 'case .aevis' Aevis/Core/AppSettings.swift || true)
+
+          # 🔴🔴 判据必须和源码里**实际写法**一致，否则每次出包都误报失败。
+          #
+          #   踩过（2026-10-19）：原来查的是 `'case .aevis'`（switch 分支的写法），
+          #   但ProviderPreset 被压成只剩一项之后，源码里是
+          #       case aevis          ← 枚举**声明**，没有前导点
+          #   四个 switch 都被压成单行表达式、根本不再出现 `case .aevis`。
+          #   于是 `N1=0` → 判「补丁没打上」→ **直接 exit 1**，
+          #   而补丁其实好好地打上了。每次出包都会红，且日志指向错误的原因。
+          #
+          #   ⇒ 判据改成查**真正稳定**的特征串：内置云端地址、单价文案、品牌青。
+          #      这三个都是本轮改动的实质内容，源码怎么重排都不会消失。
+          N1=$(grep -c 'AevisCloud.chatBase' Aevis/Core/AppSettings.swift || true)
           N2=$(grep -c 'CloudCard' Aevis/Features/Settings/SettingsView.swift || true)
           N3=$(grep -c 'thirdPartyRow' Aevis/Features/Login/LoginView.swift || true)
-          echo "aevis 预设=$N1  CloudCard=$N2  第三方入口=$N3"
-          test "$N1" -gt 0 || { echo "::error::PATCH| AppSettings 的 aevis 预设没打上"; exit 1; }
+          N4=$(grep -c '每条消息 0.001 元' Aevis/Core/AppSettings.swift || true)
+          N5=$(grep -c 'Color(red: 63/255' Aevis/Core/AppSettings.swift || true)
+          # 🔴 反向自检：内置模式下**不该**再有外接 API 的痕迹，
+          #    出现就说明补丁没打全（会退回到要用户填 Key 的老路）。
+          N6=$(grep -cE 'platform\.deepseek\.com|api\.deepseek\.com|case deepseek' \
+                Aevis/Core/AppSettings.swift || true)
+          echo "内置云端=$N1  CloudCard=$N2  圆形入口=$N3  单价文案=$N4  品牌青=$N5  外接API残留=$N6"
+
+          test "$N1" -gt 0 || { echo "::error::PATCH| AppSettings 没指向内置云端"; exit 1; }
           test "$N2" -gt 0 || { echo "::error::PATCH| 设置页没注册 CloudCard"; exit 1; }
           test "$N3" -gt 0 || { echo "::error::PATCH| 登录页的圆形入口没打上"; exit 1; }
+          test "$N4" -gt 0 || { echo "::error::PATCH| 按条计费文案没打上"; exit 1; }
+          test "$N5" -gt 0 || { echo "::error::PATCH| 品牌青主题色没打上"; exit 1; }
+          test "$N6" -eq 0 || { echo "::error::PATCH| 还残留外接 API（$N6 处）—— 内置模式不该有这些"; exit 1; }
 
       - name: Show toolchain
         run: |
@@ -224,7 +252,8 @@ jobs:
 
           # 4) 逐文件校验
           #    ⚠️ 必须滤掉 `#` 开头的说明行：vendor.sha256 第一行是中文注释，
-          #       它既不是 tarball 那行、也不是校验行 —— 留着会被 `shasum -c` 判成格式不对。
+          #       它既不是 tarball 那行、也不是校验行 —— 留着会被 `shasum -c`
+          #       判成「格式不对」，返回非 0（明明文件都对也红）。
           grep -v ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" | grep -v '^#' > "$DEST/files.sha256"
           ( cd vendor/ish && shasum -a 256 -c "$DEST/files.sha256" ) \
             || { echo "::error::VENDOR| vendor 包内文件的 sha256 校验失败"; exit 1; }
@@ -262,7 +291,8 @@ jobs:
       # 签名不合格就不允许安装，不是"扩展不可用"）。
       #
       # 那种情况只要在仓库根放一个 `.release/no-extension`、重推一次，
-      # 这里就会生成一份不含扩展的工程 —— 一条推送就能退回去。
+      # 这里就会生成一份不含扩展的工程 —— 一条推送就能退回去，
+      # 不用改代码、不用再排查一轮。没有那个标记时这一步什么都不做。
       - name: Maybe strip the screen-recording extension
         run: python3 scripts/strip_extension.py
 
@@ -271,6 +301,10 @@ jobs:
       # ⚠️ 位置很讲究：**必须排在所有 git commit / push 步骤之后** ——
       # 这一步是就地把文件改掉，要是排在提交之前，真值会被提交回公开仓库。
       # 没配 Secrets 时脚本什么都不做（保持空值），编译照常。
+      #
+      # ⚠️ 2026-09-29 补：`AEVIS_ACCOUNT_BOT_KEY` 以前**只写在脚本里、没往这儿接**
+      #    —— 「配了 Secret 就会自动填上」这条被 `BuiltInSecrets.swift` 明文承诺过的
+      #    行为其实做不到，那把钥匙永远填不进去。三个都要接。
       - name: Inject built-in credentials
         env:
           AEVIS_BAIDU_APP_KEY: ${{ secrets.AEVIS_BAIDU_APP_KEY }}
@@ -309,7 +343,7 @@ jobs:
       # ⚠️ **出包时整步跳过**（2026-10-19 加的，之前栽过）：
       #    这一步要按 `.github/shots.txt` 逐屏启动 App 截图（现在 52 条），
       #    每条 launch + sleep 8 + screenshot + terminate + sleep 2 ≈ 10 秒，
-      #    加上模拟器冷启动和 Debug 构建，**实测把run #215 拖到 27 分钟还没完**，
+      #    加上模拟器冷启动和 Debug 构建，**实测把 run #215 拖到 27 分钟还没完**，
       #    而 `Package IPA` 排在它后面 ⇒ 包出得很晚，甚至撞 60 分钟上限被砍。
       #    ⇒ 判定加一个「这次不要包」；平时推代码照旧自检，不影响看界面。
       #    想两者都要：在 want=yes 的那轮把下面这行的条件去掉即可。
@@ -378,6 +412,8 @@ jobs:
           # GitHub 不接受 0 字节的发布资产（报 "size must be greater than or
           # equal to 1"）。files 里只要有一个空文件，**整个「发布失败日志」
           # 都会失败** —— 结果就是编译错误一个都看不到，只能靠推理去猜。
+          # 这个坑真踩过：模拟器那步没跑到 → sim-build.log 是 0 字节 →
+          # 连有内容的 build.log 也一起没上传出去。
           for f in build.log sim-build.log git-push.log; do
             if [ ! -s "$f" ]; then
               echo "（这一步没有产生内容）" > "$f"
@@ -386,6 +422,7 @@ jobs:
           ls -lh *.log || true
 
       # 把编译错误挑出来写进一个文件，发布时直接当 release 正文显示。
+      # 这样失败原因在 release 页面上就能看见，不用下载日志（也下载不动的场合太多）。
       - name: Collect failure info
         if: failure()
         run: |
@@ -430,7 +467,6 @@ jobs:
           /usr/bin/zip -qry -X Aevis-adhoc.ipa Payload
 
           # 扩展是不是真的被嵌进去了。
-          #
           # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**，而界面不会报任何错。
           # ⚠️ 要**逐个**打注册点（现在 PlugIns 里有**两个** appex）。
           if [ -d Payload/Aevis.app/PlugIns ]; then
