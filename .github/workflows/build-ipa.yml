@@ -41,8 +41,6 @@ jobs:
       # 所以改成：把源码打成包放到一个公开地址，让 CI 自己去取。
       # **这是临时的** —— 等源码用正常方式推上来之后，把 `.bootstrap-url` 删掉，
       # 这一步会自动跳过（下面有 if 判断）。
-      #
-      # 取回的东西已经验过：能下载、大小对、sha256 与本地一致、解压正常。
 
       - name: Bootstrap source (temporary)
         if: hashFiles('.bootstrap-url') != ''
@@ -90,11 +88,6 @@ jobs:
           # CI 里的 GITHUB_TOKEN **没有 workflows 权限**：暂存区只要带了
           # `.github/workflows` 下的任何改动，整个 push 都会被 GitHub 拒绝，
           # 报 "refusing to allow a GitHub App to create or update workflow"。
-          #
-          # 踩过：第一次跑成功，是因为那时 workflow 文件跟仓库里的一模一样；
-          # 后来改了截图列表（加一张 emoji），工作区里的 workflow 就和仓库里的
-          # 有了差异 → 这一步直接挂掉，而且它挂在编译**之前**，
-          # 整个构建连编译都没跑到。
           #
           # 这一步的目的只是「把源码落回仓库」，流水线文件本来就在仓库里，
           # 由正常的推送去更新它。
@@ -171,32 +164,17 @@ jobs:
 
       # ——— 取「内置真 Linux」的 vendor 产物并铺好 ———
       #
-      # 为什么需要这一步：主 App 现在**链接** iSH 合并静态库（`libaevisish.a`）
-      # 并带一个桥接头（`Aevis/Core/AevisIshBridge.h` → `ish_embed.h`）。
-      # 这两样**都不在仓库里**（静态库 / 头文件是生成物，推不上来）——
-      # 由 `ish-sandbox.yml` 编好后发成 Release，这里下载、校验、铺到本地，
-      # 供 `project.yml` 里的搜索路径取用。
-      #
-      # 取源两级回退（消除引导期的鸡生蛋）：
-      #   ① 优先固定 tag `ish-vendor`（ish-sandbox 每轮成功构建都会更新它）；
-      #   ② 它还不存在（引导期）或被人误删时 → 回退到「编号最大的
-      #      `ish-sandbox-macos-<run>`」。**固定 tag 永远优先**，回退只兜那两种情况。
+      # 这两样**不在仓库里**（静态库 / 头文件是生成物，推不上来）——
+      # 由 `ish-sandbox.yml` 编好后发成 Release，这里下载、校验、铺到本地。
       #
       # ⚠️ 顺序死线：**必须在 `xcodegen generate` 之前**（也在所有 build 之前）。
-      #    `project.yml` 给 Aevis target 配了
-      #    `HEADER_SEARCH_PATHS = $(SRCROOT)/vendor/ish`、
-      #    `LIBRARY_SEARCH_PATHS = $(SRCROOT)/vendor/ish` 和 `-laevisish`；
-      #    目录不在时 xcodegen 之后必然编不过。
-      # ⚠️ rootfs 在 `project.yml` 里是**文件夹引用**（`type: folder`），
-      #    布局必须是 `ish-rootfs/data/…` + `ish-rootfs/meta.db` ——
-      #    unzip 出来的就是这两项，**不要再套一层 `ish-rootfs/`**。
-      # ⚠️ 失败一律 `exit 1`，**不许静默继续**（否则会去编一个缺 vendor 的包）。
+      #    `project.yml` 配了 `HEADER_SEARCH_PATHS` / `LIBRARY_SEARCH_PATHS`
+      #    指向 `vendor/ish` 并链 `-laevisish`；目录不在时 xcodegen 之后必然编不过。
+      # ⚠️ 失败一律 `exit 1`，**不许静默继续**。
       - name: Fetch iSH vendor (libaevisish.a + rootfs)
         # ⚠️ 必须显式给 gh 传 token：`gh` **不会**自己拿到 GITHUB_TOKEN
         #    （runner 上根本没有这个环境变量），不传的话
-        #    `gh release view` / `gh release list` 全部失败 ——
-        #    表现是「取源取不到、报错说没有 ish-sandbox release」，看着像 release
-        #    不存在，其实是没登录。2026-10-06 真栽过（run 145）。
+        #    `gh release view` / `gh release list` 全部失败。
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -204,83 +182,70 @@ jobs:
           DEST="/tmp/ishvendor"
           rm -rf "$DEST"; mkdir -p "$DEST"
 
-          # —— 取源：固定 tag 优先；缺失时回退到「编号最大的 ish-sandbox-macos-*」——
-          # 为什么要有回退：本项目是**整树推送**，没法只推 ish-sandbox.yml 一个文件，
-          #   所以第一次推向 main 时 `ish-vendor` 必然还不存在 —— 没有回退就会死锁。
+          # —— 取源：固定 tag 优先；缺失时回退到「编号最大的 ish-sandbox-macos-*」
           VENDOR_TAG="ish-vendor"
           SRC="fixed"
           if ! gh release view "$VENDOR_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             SRC="fallback"
-            # ⚠️ 用 `--json tagName` 取，**不要**靠默认表格的 `$1`。
-            #    默认表格第一列是 TITLE 不是 TAG（且 TITLE 里可能有空格，
-            #    比如「失败日志 145」），列顺序是 gh 的内部实现、会变。
-            #    走 json 就是一行一个 tag，稳稳的。
-            # ⚠️ limit 要给得够大：build-<n>/check-<n>/log-<n> 这类 release 每推一次
-            #    至少多一个、会把列表挤满；limit 太小会漏掉较老的 ish-sandbox release
-            #    （漏掉会走到下面的 `-z` 分支、明确报错，不会静默用错包）。
+            # ⚠️ 用 `--json tagName`，**不要**靠默认表格的 `$1`
+            #    （第一列是 TITLE 不是 TAG，列顺序还是 gh 的内部实现、会变）。
             VENDOR_TAG=$(gh release list --repo "${{ github.repository }}" --limit 300 \
               --json tagName --jq '.[].tagName' \
               | awk '/^ish-sandbox-macos-/ { n=$1; sub(/^ish-sandbox-macos-/,"",n); if (n+0 > best) { best=n+0; tag=$1 } } END { print tag }')
             if [ -z "$VENDOR_TAG" ]; then
-              echo "::error::VENDOR| 既没有固定 tag ish-vendor，也没有任何 ish-sandbox-macos-* release —— 先成功跑一轮 ish-sandbox.yml"
+              echo "::error::VENDOR| 既没有固定 tag ish-vendor，也没有任何 ish-sandbox-macos-* release"
               exit 1
             fi
             echo "::warning::VENDOR| 固定 tag ish-vendor 不存在，回退到 $VENDOR_TAG"
           fi
           echo "VENDOR-SOURCE| tag=$VENDOR_TAG source=$SRC"
 
-          # 1) 下载（gh 在 runner 上自带；失败直接红）
+          # 1) 下载
           gh release download "$VENDOR_TAG" --repo "${{ github.repository }}" \
             --pattern 'ish-vendor.tar.gz' --pattern 'vendor.sha256' \
             --dir "$DEST" --clobber \
             || { echo "::error::VENDOR| 从 $VENDOR_TAG 下载失败"; exit 1; }
 
-          # 2) 先校验 tarball 自身（vendor.sha256 里最后一行就是它）——
-          #    这是防「下载到半截」的唯一手段。
+          # 2) 校验 tarball 自身 —— 这是防「下载到半截」的唯一手段
           grep ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" > "$DEST/tar.sha256" \
-            || { echo "::error::VENDOR| vendor.sha256 里没有 ish-vendor.tar.gz 这一行"; exit 1; }
+            || { echo "::error::VENDOR| vendor.sha256 里没有 tarball 那一行"; exit 1; }
           ( cd "$DEST" && shasum -a 256 -c tar.sha256 ) \
-            || { echo "::error::VENDOR| ish-vendor.tar.gz 的 sha256 校验失败"; exit 1; }
+            || { echo "::error::VENDOR| tarball 的 sha256 校验失败"; exit 1; }
 
-          # 3) 解包到 aevis-ios/vendor/ish/（tar 里是平铺的七个文件）
+          # 3) 解包
           rm -rf vendor/ish; mkdir -p vendor/ish
           tar xzf "$DEST/ish-vendor.tar.gz" -C vendor/ish
 
-          # 3b) **内容体检**：libaevisish.a + ish_embed.h 是较新的 run 才有的产物。
-          #     回退到旧格式の包时在这里就报清楚，别一路编到链接期才炸。
+          # 3b) 内容体检：回退到旧格式的包时在这里就报清楚，别编到链接期才炸
           for f in libaevisish.a ish_embed.h; do
             [ -f "vendor/ish/$f" ] \
-              || { echo "::error::VENDOR| vendor 包里缺 $f（来源 $VENDOR_TAG / $SRC）—— 这个 release 的 vendor 是旧格式；请等一轮新的 ish-sandbox 构建，或先跑一轮 ish-sandbox.yml 把 ish-vendor 建出来"; exit 1; }
+              || { echo "::error::VENDOR| vendor 包里缺 $f（来源 $VENDOR_TAG / $SRC）"; exit 1; }
           done
 
-          # 4) 再逐文件校验解出来的七个文件（vendor.sha256 里除末行外的那些）
-          #    ⚠️ 必须把 `#` 开头的说明行也滤掉：vendor.sha256 第一行是中文注释，
-          #       它既不是 tarball 那行、也不是校验行 —— 留着会被 `shasum -c`
-          #       判成「格式不对」，返回非 0（明明文件都对也红）。
+          # 4) 逐文件校验
+          #    ⚠️ 必须滤掉 `#` 开头的说明行：vendor.sha256 第一行是中文注释，
+          #       它既不是 tarball 那行、也不是校验行 —— 留着会被 `shasum -c` 判成格式不对。
           grep -v ' ish-vendor.tar.gz$' "$DEST/vendor.sha256" | grep -v '^#' > "$DEST/files.sha256"
           ( cd vendor/ish && shasum -a 256 -c "$DEST/files.sha256" ) \
-            || { echo "::error::VENDOR| vendor 包内ファイルの sha256 校验失败"; exit 1; }
+            || { echo "::error::VENDOR| vendor 包内文件的 sha256 校验失败"; exit 1; }
 
-          # 5) rootfs 解压到 aevis-ios/ish-rootfs/（要的是 data/ + meta.db 顶层）
+          # 5) rootfs 解压（要的是 data/ + meta.db 顶层，不要再套一层）
           rm -rf ish-rootfs; mkdir -p ish-rootfs
           unzip -q vendor/ish/alpine-rootfs.zip -d ish-rootfs
 
-          # 6) 目录非空自查（解错了 / 没解出来都要当场红）
+          # 6) 目录非空自查
           { test -d vendor/ish && [ -n "$(ls -A vendor/ish 2>/dev/null)" ]; } \
             || { echo "::error::VENDOR| vendor/ish 不存在或为空"; exit 1; }
           { test -d ish-rootfs && [ -n "$(ls -A ish-rootfs 2>/dev/null)" ]; } \
             || { echo "::error::VENDOR| ish-rootfs 不存在或为空"; exit 1; }
 
-          # 7) 可追溯信息写进 job summary（含「实际用了哪个 tag / 走的哪条路」）
+          # 7) 可追溯信息写进 job summary
           NSHA=$(shasum -a 256 vendor/ish/libaevisish.a | cut -d' ' -f1 | cut -c1-16)
           NFILES=$(find ish-rootfs -type f | wc -l | tr -d ' ')
-          PUB=$(gh release view "$VENDOR_TAG" --repo "${{ github.repository }}" \
-                  --json publishedAt --jq '.publishedAt' 2>/dev/null || echo "?")
           {
             echo "## iSH vendor"
             echo ""
-            echo "- 取源: tag=\`$VENDOR_TAG\`  source=$SRC (fixed=固定 tag / fallback=回退)"
-            echo "- 发布时间: $PUB"
+            echo "- 取源: tag=\`$VENDOR_TAG\`  source=$SRC"
             echo "- libaevisish.a sha256[:16]: \`$NSHA\`"
             echo "- rootfs 解压后文件数: $NFILES"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -297,25 +262,15 @@ jobs:
       # 签名不合格就不允许安装，不是"扩展不可用"）。
       #
       # 那种情况只要在仓库根放一个 `.release/no-extension`、重推一次，
-      # 这里就会生成一份不含扩展的工程 —— 一条推送就能退回去，
-      # 不用改代码、不用再排查一轮。没有那个标记时这一步什么都不做。
+      # 这里就会生成一份不含扩展的工程 —— 一条推送就能退回去。
       - name: Maybe strip the screen-recording extension
         run: python3 scripts/strip_extension.py
 
       # 把 Secrets 里的凭据就地写进 BuiltInSecrets.swift，让包内自带。
       #
       # ⚠️ 位置很讲究：**必须排在所有 git commit / push 步骤之后** ——
-      # 这一步是就地把文件改掉，要是排在提交之前，真值会被提交回公开仓库，
-      # 等于白做还泄露。上面那个会用 `git add -A` 的步骤（临时通道用的）
-      # 远在这之前；下面重置标记的步骤只 add 单个文件，也不会把它带上。
-      #
+      # 这一步是就地把文件改掉，要是排在提交之前，真值会被提交回公开仓库。
       # 没配 Secrets 时脚本什么都不做（保持空值），编译照常。
-      #
-      # ⚠️ 2026-09-29 补：`AEVIS_ACCOUNT_BOT_KEY` 以前**只写在脚本里、没往这儿接**
-      #    —— 「配了 Secret 就会自动填上」这条被 `BuiltInSecrets.swift` 明文承诺过的
-      #    行为其实做不到，那把钥匙永远填不进去。三个都要接。
-      #    （另注：GitHub 仓库上那份 workflow **比本地旧**，连这一段都没有，
-      #     见 `.workbuddy/memory/topics/ci.md`。）
       - name: Inject built-in credentials
         env:
           AEVIS_BAIDU_APP_KEY: ${{ secrets.AEVIS_BAIDU_APP_KEY }}
@@ -326,7 +281,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # ——— 编译真机版本：只为验证能编过，不出包 ———
+      # ——— 编译真机版本 ———
 
       - name: Compile (device, unsigned)
         env:
@@ -349,12 +304,17 @@ jobs:
 
       # ——— 模拟器自检：装进去、跑起来、截图 ———
       #
-      # 这是「交给人之前先自己看一眼」的那一步，能拦住布局类 bug
-      # （元素被挤出屏幕、气泡错位、配色看不清）。
-      # 交互类 bug 拦不住，那需要真机。
+      # 这是「交给人之前先自己看一眼」的那一步，能拦住布局类 bug。
 
+      # ⚠️ **出包时整步跳过**（2026-10-19 加的，之前栽过）：
+      #    这一步要按 `.github/shots.txt` 逐屏启动 App 截图（现在 52 条），
+      #    每条 launch + sleep 8 + screenshot + terminate + sleep 2 ≈ 10 秒，
+      #    加上模拟器冷启动和 Debug 构建，**实测把run #215 拖到 27 分钟还没完**，
+      #    而 `Package IPA` 排在它后面 ⇒ 包出得很晚，甚至撞 60 分钟上限被砍。
+      #    ⇒ 判定加一个「这次不要包」；平时推代码照旧自检，不影响看界面。
+      #    想两者都要：在 want=yes 的那轮把下面这行的条件去掉即可。
       - name: Simulator self-check
-        if: success()
+        if: success() && steps.decide.outputs.should != 'yes'
         continue-on-error: true
         env:
           AEVIS_COMMIT: ${{ github.sha }}
@@ -397,7 +357,6 @@ jobs:
 
           # 截图清单放在 .github/shots.txt 里，不写死在这 ——
           # 以后加界面只要推那个几百字节的小文件，不用动 workflow。
-          # （动 workflow 会牵扯到 GITHUB_TOKEN 的 workflows 权限，麻烦。）
           if [ -f .github/shots.txt ]; then
             while IFS= read -r line; do
               case "$line" in
@@ -419,8 +378,6 @@ jobs:
           # GitHub 不接受 0 字节的发布资产（报 "size must be greater than or
           # equal to 1"）。files 里只要有一个空文件，**整个「发布失败日志」
           # 都会失败** —— 结果就是编译错误一个都看不到，只能靠推理去猜。
-          # 这个坑真踩过：模拟器那步没跑到 → sim-build.log 是 0 字节 →
-          # 连有内容的 build.log 也一起没上传出去。
           for f in build.log sim-build.log git-push.log; do
             if [ ! -s "$f" ]; then
               echo "（这一步没有产生内容）" > "$f"
@@ -429,7 +386,6 @@ jobs:
           ls -lh *.log || true
 
       # 把编译错误挑出来写进一个文件，发布时直接当 release 正文显示。
-      # 这样失败原因在 release 页面上就能看见，不用下载日志（也下载不动的场合太多）。
       - name: Collect failure info
         if: failure()
         run: |
@@ -447,12 +403,8 @@ jobs:
           } > errors.txt
           cat errors.txt
 
-          # 再把编译错误以 workflow 命令的形式发一遍 —— 它们会出现在页面的
-          # Annotations 区域，而且是**不需要鉴权就能读到**的。
-          #
-          # 为什么要多这一手：下载运行日志的接口
-          # （/actions/jobs/{id}/logs）对开源仓库返回 403，这次就是被它卡住的 ——
-          # 明明只差一条编译错误，却拿不到。Annotations 走另一条路，能读。
+          # 再把编译错误以 workflow 命令的形式发一遍 ——
+          # Annotations 区域**不需要鉴权就能读到**。
           grep -E "error:" build.log 2>/dev/null | head -15 | while IFS= read -r line; do
             echo "::error::$line"
           done
@@ -479,13 +431,8 @@ jobs:
 
           # 扩展是不是真的被嵌进去了。
           #
-          # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**（灵动岛那个同理：
-          # 扩件不在，实时活动永远不会显示），而界面不会报任何错 ——
-          # 用户只会觉得"点了没反应"。所以这里明确打出来，出问题时一眼能定位。
-          #
-          # ⚠️ 要**逐个**打注册点。现在 PlugIns 里有**两个** appex
-          #    （`AevisBroadcast` + `AevisLive`），原来那句 `... | head -1`
-          #    只会打第一个 —— 于是靠这行日志判断"灵动岛扩件嵌进去没有"会看不全。
+          # 没嵌进去的话，装到手机上**不会有「Aevis 录屏」这一项**，而界面不会报任何错。
+          # ⚠️ 要**逐个**打注册点（现在 PlugIns 里有**两个** appex）。
           if [ -d Payload/Aevis.app/PlugIns ]; then
             echo "内嵌扩展："
             ls -1 Payload/Aevis.app/PlugIns/
@@ -515,14 +462,10 @@ jobs:
 
             - 提交：`${{ github.sha }}`
             - 安装：下载 `Aevis-unsigned.ipa`，用「全能签」签名后安装
-
-            同一次的自检截图与构建日志也在这里。
           files: |
             Aevis-unsigned.ipa
             Aevis-adhoc.ipa
-            shots/*.png
             build.log
-            sim-build.log
 
       - name: Publish self-check release
         if: steps.decide.outputs.should != 'yes'
@@ -558,8 +501,6 @@ jobs:
           tag_name: log-${{ github.run_number }}
           name: 失败日志 ${{ github.run_number }}
           prerelease: true
-          # 正文直接用上一步挑出来的编译错误 —— release 页面上就能看见，
-          # 免得又碰到「日志下载要鉴权」那种情况
           body_path: errors.txt
           files: |
             errors.txt
