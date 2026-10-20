@@ -1,0 +1,19 @@
+{
+  "version": "2026.10.20",
+  "resources": [
+    {
+      "id": "rootfs",
+      "name": "Aevis Linux rootfs",
+      "kind": "rootfs",
+      "arch": "arm64",
+      "required": true,
+      "size": 0,
+      "sha256": "",
+      "mirrors": [
+        "https://raw.githubusercontent.com/yling1281/aevis-ios/main/linux/aevis-rootfs-arm64.zip",
+        "https://cdn.jsdelivr.net/gh/yling1281/aevis-ios@main/linux/aevis-rootfs-arm64.zip",
+        "https://ghproxy.net/https://raw.githubusercontent.com/yling1281/aevis-ios/main/linux/aevis-rootfs-arm64.zip"
+      ]
+    }
+  ]
+}
