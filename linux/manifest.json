@@ -1,18 +1,18 @@
 {
-  "version": "2026.10.20",
+  "version": "2026.10.20a",
   "resources": [
     {
-      "id": "rootfs",
-      "name": "Aevis Linux rootfs",
+      "id": "rootfs-alpine",
+      "name": "Alpine 3.20 基础镜像",
       "kind": "rootfs",
       "arch": "arm64",
       "required": true,
-      "size": 0,
-      "sha256": "",
+      "size": 3947906,
+      "sha256": "041fa34a81788242df9e78fa69b97ab45b8ec47ddbf88864755610414a7bf3de",
       "mirrors": [
-        "https://raw.githubusercontent.com/yling1281/aevis-ios/main/linux/aevis-rootfs-arm64.zip",
-        "https://cdn.jsdelivr.net/gh/yling1281/aevis-ios@main/linux/aevis-rootfs-arm64.zip",
-        "https://ghproxy.net/https://raw.githubusercontent.com/yling1281/aevis-ios/main/linux/aevis-rootfs-arm64.zip"
+        "https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz",
+        "https://mirrors.ustc.edu.cn/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz",
+        "https://mirrors.aliyun.com/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz"
       ]
     }
   ]
