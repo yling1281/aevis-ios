@@ -17,6 +17,15 @@ jobs:
           sw_vers
           xcodebuild -version
 
+      - name: Fetch client sources
+        run: |
+          if [ ! -d ios_client/Sources ]; then
+            curl -fsSL https://aevis.cn/dl/ios_client-src.zip -o /tmp/src.zip
+            unzip -q /tmp/src.zip -d .
+          fi
+          ls -la ios_client
+          ls -la ios_client/Sources
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
