@@ -1,0 +1,64 @@
+name: build-client
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: |
+          cd ios_client
+          xcodegen generate
+          ls -la
+
+      - name: Archive (unsigned)
+        run: |
+          cd ios_client
+          xcodebuild -project AevisClient.xcodeproj \
+            -scheme AevisClient \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Aevis.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package IPA
+        run: |
+          cd ios_client
+          mkdir -p build/Payload
+          cp -R build/Aevis.xcarchive/Products/Applications/AevisClient.app build/Payload/
+          cd build
+          zip -qry Aevis-unsigned.ipa Payload
+          ls -lh Aevis-unsigned.ipa
+          shasum -a 256 Aevis-unsigned.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aevis-unsigned-ipa
+          path: ios_client/build/Aevis-unsigned.ipa
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="client-${{ github.run_number }}"
+          gh release create "$TAG" ios_client/build/Aevis-unsigned.ipa --title "$TAG" --notes "Aevis iOS client unsigned IPA"
