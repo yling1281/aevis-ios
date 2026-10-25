@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
@@ -19,10 +22,9 @@ jobs:
 
       - name: Fetch client sources
         run: |
-          if [ ! -d ios_client/Sources ]; then
-            curl -fsSL https://aevis.cn/dl/ios_client-src.zip -o /tmp/src.zip
-            unzip -q /tmp/src.zip -d .
-          fi
+          rm -rf ios_client
+          curl -fsSL https://aevis.cn/dl/ios_client-src.zip -o /tmp/src.zip
+          unzip -q /tmp/src.zip -d .
           ls -la ios_client
           ls -la ios_client/Sources
 
@@ -52,7 +54,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
             2>&1 | tee "$GITHUB_WORKSPACE/xcodebuild.log"
 
       - name: Package IPA
@@ -75,20 +76,24 @@ jobs:
           name: Aevis-unsigned-ipa
           path: ios_client/build/Aevis-unsigned.ipa
 
-      - name: Publish release
+      - name: Publish IPA release
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="client-${{ github.run_number }}"
-          gh release create "$TAG" ios_client/build/Aevis-unsigned.ipa --title "$TAG" --notes "Aevis iOS client unsigned IPA"
+          gh release create "$TAG" ios_client/build/Aevis-unsigned.ipa --title "Aevis iOS 客户端 ${{ github.run_number }}" --notes "未签名 IPA（unsigned），自签后安装"
 
-      - name: Publish build log on failure
-        if: failure()
+      - name: Publish build log
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cd ios_client
+          find build -name '*.app' -maxdepth 3 2>/dev/null | head -5 > app-list.txt || true
+          { echo "workflow=build-client run=${{ github.run_number }} sha=${{ github.sha }}"; \
+            echo "--- app list ---"; cat app-list.txt 2>/dev/null; \
+            echo "--- xcodebuild tail ---"; tail -n 400 "$GITHUB_WORKSPACE/xcodebuild.log" 2>/dev/null; } > "$GITHUB_WORKSPACE/client-build.log"
           TAG="log-client-${{ github.run_number }}"
-          printf '%s\n' "workflow=build-client run=${{ github.run_number }} sha=${{ github.sha }}" > "$GITHUB_WORKSPACE/header.txt"
-          cat "$GITHUB_WORKSPACE/header.txt" "$GITHUB_WORKSPACE/xcodebuild.log" > "$GITHUB_WORKSPACE/full.log" 2>/dev/null || cp "$GITHUB_WORKSPACE/header.txt" "$GITHUB_WORKSPACE/full.log"
-          tail -n 300 "$GITHUB_WORKSPACE/full.log" > "$GITHUB_WORKSPACE/log-tail.txt"
-          gh release create "$TAG" "$GITHUB_WORKSPACE/log-tail.txt" --title "$TAG" --notes "xcodebuild 失败日志（尾部 300 行）" || true
+          gh release create "$TAG" "$GITHUB_WORKSPACE/client-build.log" --title "客户端构建日志 ${{ github.run_number }}" --notes "xcodebuild 输出尾部 400 行" || \
+          gh release upload "$TAG" "$GITHUB_WORKSPACE/client-build.log" --clobber
