@@ -1,0 +1,51 @@
+name: Cancel stale runs
+
+# 一次性运维 workflow：把仓库里所有「排队中 / 进行中」的 run 全部取消。
+# 为什么要有它：本地没有 PAT，github.com 也直连不上（ERR_CONNECTION_RESET），
+# 而 Actions 自己的 GITHUB_TOKEN 有 actions:write，可以让云端替我们取消。
+# 触发方式：只认 ops-cancel-stale 分支的 push，不碰 main，避免惊动 macOS 构建。
+
+on:
+  push:
+    branches: [ 'ops-cancel-stale' ]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Cancel every other in_progress / queued run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SELF: ${{ github.run_id }}
+        run: |
+          set -u
+          for round in 1 2 3; do
+            echo "== round $round"
+            gh api -X GET "repos/$REPO/actions/runs" -f per_page=100 \
+              --jq '.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="waiting") | "\(.id) \(.status) \(.name)"' > runs.txt || true
+            if [ ! -s runs.txt ]; then echo "nothing left to cancel"; break; fi
+            cat runs.txt
+            while read -r id status name; do
+              if [ "$id" = "$SELF" ]; then continue; fi
+              echo "cancelling $id ($name, $status)"
+              gh api -X POST "repos/$REPO/actions/runs/$id/cancel" >/dev/null 2>&1 || echo "  cancel request failed for $id"
+            done < runs.txt
+            sleep 20
+          done
+
+      - name: Report remaining
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "== remaining active runs"
+          gh api -X GET "repos/$REPO/actions/runs" -f per_page=100 \
+            --jq '.workflow_runs[] | select(.status!="completed") | "\(.id) \(.status) \(.name)"' || true
+          echo "== done"
