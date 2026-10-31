@@ -33,6 +33,57 @@ struct MusicTrack: Identifiable, Hashable {
     }
 }
 
+/// 一个官方榜单（列表用的轻量版 —— **不带曲目**，点进去才现拉）。
+///
+/// 2026-10-31 按用户截图1「排行榜」页加的：网易云官方那个页是**三列宫格**，
+/// 每格一个彩色渐变方块 + 榜单名。所以这里除了 id/name，还带一个 `tint`
+/// —— 宫格背景色。没有它的话十二个方块会长得一模一样，跟官方完全不像。
+struct NeteaseRank: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var trackCount: Int
+    var coverURL: URL?
+    /// 宫格渐变色（两个端点的 RGB）。按榜单在官方列表里的位置固定分配，
+    /// 这样每次进来颜色都一样（官方也是固定配色）。
+    var tint: (top: RGB, bottom: RGB)
+
+    /// 官方那 12 个榜的名字与配色（顺序 = 截图里的排列顺序）。
+    ///
+    /// ⚠️ 名字必须**一字不差**地和网易返回的 `name` 对上 ——
+    /// 对不上就取不到（`topLists()` 里按名字查表）。
+    /// 「小天才手表热歌榜」网易接口里已经没有（2026-10-31 实测），
+    /// 所以它不会出现在列表里 —— 这是网易那边没了，不是我们漏了。
+    struct OfficialSpec {
+        var name: String
+        var tint: (top: RGB, bottom: RGB)
+    }
+
+    static let officialOrder: [OfficialSpec] = [
+        OfficialSpec(name: "飙升榜",      tint: (RGB(0x8B, 0x5C, 0xF6), RGB(0x6D, 0x3B, 0xE0))),
+        OfficialSpec(name: "新歌榜",      tint: (RGB(0x22, 0xC5, 0x5E), RGB(0x0E, 0xA8, 0x4A))),
+        OfficialSpec(name: "原创榜",      tint: (RGB(0x38, 0xBD, 0xF8), RGB(0x0E, 0xA5, 0xE9))),
+        OfficialSpec(name: "热歌榜",      tint: (RGB(0xFB, 0x71, 0x85), RGB(0xE1, 0x1D, 0x48))),
+        OfficialSpec(name: "网易云古典榜", tint: (RGB(0x81, 0x8C, 0xF8), RGB(0x4F, 0x46, 0xE5))),
+        OfficialSpec(name: "网易云电音榜", tint: (RGB(0x4A, 0xDE, 0x80), RGB(0x16, 0xA3, 0x4A))),
+        OfficialSpec(name: "网易云中文说唱榜", tint: (RGB(0xFB, 0x92, 0x3C), RGB(0xEA, 0x58, 0x0C))),
+        OfficialSpec(name: "荣耀音乐热歌榜", tint: (RGB(0xF4, 0x72, 0xB6), RGB(0xDB, 0x27, 0x77))),
+        OfficialSpec(name: "实时分享榜",  tint: (RGB(0xF8, 0x71, 0x71), RGB(0xDC, 0x26, 0x26))),
+        OfficialSpec(name: "网易云全球说唱榜", tint: (RGB(0x60, 0xA5, 0xFA), RGB(0x25, 0x63, 0xEB))),
+        OfficialSpec(name: "潮流风向榜",  tint: (RGB(0x34, 0xD3, 0x99), RGB(0x05, 0x96, 0x69)))
+    ]
+}
+
+/// 一个 RGB 颜色（`Color` 要在 SwiftUI 里才建，这个文件只用 Foundation）。
+struct RGB: Hashable {
+    var r: UInt8
+    var g: UInt8
+    var b: UInt8
+
+    init(_ r: UInt8, _ g: UInt8, _ b: UInt8) {
+        self.r = r; self.g = g; self.b = b
+    }
+}
+
 /// 一个歌单（列表用的轻量版 —— **不带曲目**，点进去才现拉）。
 ///
 /// 为什么不复用 `MusicTrack` 那套：歌单和曲目是两个东西，硬塞进一个结构体
@@ -290,6 +341,42 @@ final class NeteaseClient {
 
     // MARK: - 歌单与推荐
 
+    /// 官方榜单列表（2026-10-31 按用户截图1「排行榜」页加的）。
+    ///
+    /// 网易这个接口一次给 60+ 个榜（各种地区榜/特色榜），但用户截图里
+    /// 只有 12 个官方榜，所以**这里按固定名单过滤并保持顺序**——
+    /// 否则每次打开顺序都变、还会多出一堆不认识的地方榜。
+    ///
+    /// 直连 `music.163.com`，**不经过我们的服务器**。
+    func topLists() async throws -> [NeteaseRank] {
+        let json = try await request(
+            plain: ("/api/toplist", ["type": "0"]),
+            encrypted: ("/weapi/toplist", ["type": 0])
+        )
+        guard let list = json["list"] as? [[String: Any]] else {
+            throw NeteaseError.badResponse("榜单接口没给 list（\(Self.brief(json))）")
+        }
+        let byName = Dictionary(uniqueKeysWithValues:
+            list.compactMap { item -> (String, [String: Any])? in
+                guard let n = item["name"] as? String else { return nil }
+                return (n, item)
+            })
+
+        var out: [NeteaseRank] = []
+        for spec in NeteaseRank.officialOrder {
+            guard let item = byName[spec.name],
+                  let id = Self.idString(item["id"]) else { continue }
+            out.append(NeteaseRank(
+                id: id,
+                name: spec.name,
+                trackCount: (item["trackCount"] as? Int) ?? 0,
+                coverURL: (item["coverImgUrl"] as? String).flatMap(URL.init(string:)),
+                tint: spec.tint
+            ))
+        }
+        return out
+    }
+
     func playlistDetail(_ id: String) async throws -> [MusicTrack] {
         let json = try await request(
             plain: ("/api/v6/playlist/detail", ["id": id, "n": "1000", "s": "8"]),
@@ -408,6 +495,33 @@ final class NeteaseClient {
                 "没找到「我喜欢的音乐」这张歌单 —— 可能是还没红心过任何歌。")
         }
         return try await playlistDetail(liked.id)
+    }
+
+    /// 红心一首歌 —— **加进「我喜欢的音乐」那张歌单**。
+    ///
+    /// ## 为什么不是调网易的 `/api/song/like`
+    /// 那个接口（红心/取消红心）要 POST 且带 csrf，而且**它红的是"我喜欢"这个标签**，
+    /// 跟歌单是两套东西，行为对不上。这里走「把歌加进『我喜欢的音乐』歌单」，
+    /// 用的是已经探针验证过的 `/api/playlist/manipulate/tracks`（`add`），
+    /// **跟 `addTracks` 走同一条路**，少一个不确定的接口。
+    ///
+    /// ## 重复红心
+    /// `add` 对已经在歌单里的歌是幂等的（网易不会报错、也不会加两份），
+    /// 所以这里不先查「在不在」——多一次往返换来的是「点了就有反馈」。
+    func like(songID: String) async throws {
+        guard !songID.isEmpty else { return }
+        guard let liked = try await likedPlaylist() else {
+            throw NeteaseError.badResponse(
+                "没找到「我喜欢的音乐」这张歌单 —— 先去网易云红心一首歌，它才会出现。")
+        }
+        try await addTracks([songID], to: liked.id)
+    }
+
+    /// 这首歌是不是已经红心了（查「我喜欢的音乐」里有没有它）。
+    func isLiked(songID: String) async -> Bool {
+        guard !songID.isEmpty else { return false }
+        guard let tracks = try? await likedTracks() else { return false }
+        return tracks.contains { $0.id == songID }
     }
 
     /// 最近播放。

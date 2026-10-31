@@ -517,6 +517,18 @@ final class MusicPlayer: NSObject, ObservableObject {
         return lyricLines[index + 1].text
     }
 
+    /// **整份歌词**（带时间轴），给「网易云那种整屏滚动歌词」用。
+    ///
+    /// 2026-10-31 按用户截图5 加的：网易云的播放器歌词是**一整屏往下滚**、
+    /// 当前那行放大高亮，其余的淡着 —— 不是只显示当前行 + 下一行。
+    ///
+    /// ⚠️ 这里返回的是**副本**：内部那份是缓存的 `lineCache`，
+    /// 直接把它的数组暴露出去的话，视图层排序会污染缓存（虽然 SwiftUI
+    /// 不会真的改，但为了保险还是给一份新的）。
+    var scrollLyricLines: [(time: Double, text: String)] {
+        lyricLines.map { (time: $0.time, text: $0.text) }
+    }
+
     /// 把 `[01:23.45] 歌词内容` 拆成「几秒 + 文字」。
     ///
     /// 认不出来的行直接跳过 —— 歌词文件里常有 `[ti:]`、`[by:]` 这类元信息。

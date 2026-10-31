@@ -59,6 +59,16 @@ struct PlayerView: View {
     /// 换皮肤那个小面板开没开。
     @State private var showThemePicker = false
 
+    /// 红心状态（当前这首歌是不是已经在「我喜欢的音乐」里）。
+    @State private var likedNow = false
+
+    /// 底部功能行的提示语（红心成功、还没接上的功能都靠它说话）。
+    ///
+    /// ⚠️ 项目里**没有全局 toast**，所以在播放器自己挂一条。
+    ///   3 秒后自己消失，不挡操作。
+    @State private var note: String? = nil
+    @State private var noteTask: Task<Void, Never>? = nil
+
     private var persona: Persona { personaStore.persona }
 
     /// 唱片直径。跟屏幕宽度挂钩，但别大得离谱。
@@ -173,9 +183,22 @@ struct PlayerView: View {
             controlArea
 
             bottomArea
+
+            // 功能行的提示语（红心成功 / 还没接上的功能）。
+            // 放在最底下、跟着内容走 —— 不做成浮层，免得挡住唱片。
+            if let note {
+                Text(note)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(theme.onBackground.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+                    .transition(.opacity)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 8)
+        .animation(.easeOut(duration: 0.2), value: note)
     }
 
     // MARK: - 顶部
@@ -344,23 +367,45 @@ struct PlayerView: View {
 
     // MARK: - 歌词 + ta的话
 
+    /// **整屏滚动歌词**（2026-10-31 按用户截图5 加的）。
+    ///
+    /// 网易云的播放器歌词是一整屏往下滚、当前行放大高亮、其余淡着，
+    /// 不是只显示当前行 + 下一行。所以这里改成 ScrollView。
     private var lyricArea: some View {
         VStack(spacing: 11) {
-            if let line = player.currentLyricLine {
-                Text(line)
-                    .font(.aevis(21, weight: .semibold))
-                    .foregroundStyle(theme.lyricDone)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+            let lines = player.scrollLyricLines
+            if !lines.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 11) {
+                            // 顶部留白：让第一行能滚到中间那个位置
+                            Color.clear.frame(height: 92)
 
-                if let next = player.nextLyricLine {
-                    Text(next)
-                        .font(.aevis(14))
-                        .foregroundStyle(theme.lyricWaiting)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                            ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
+                                let on = idx == (player.lyricCursor ?? -1)
+                                Text(line.text.isEmpty ? " " : line.text)
+                                    .font(.aevis(on ? 18 : 15, weight: on ? .semibold : .regular))
+                                    .foregroundStyle(on
+                                                     ? theme.lyricDone
+                                                     : theme.lyricWaiting)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .id(idx)
+                            }
+
+                            Color.clear.frame(height: 120)
+                        }
+                        .padding(.horizontal, 22)
+                    }
+                    .onChange(of: player.lyricCursor) { _, cursor in
+                        guard let cursor else { return }
+                        // 滚到当前行 —— 用 anchor 把这一行顶到中间偏上。
+                        withAnimation(.easeOut(duration: 0.28)) {
+                            proxy.scrollTo(cursor, anchor: .center)
+                        }
+                    }
                 }
+                .frame(minHeight: 116)
             } else if player.current != nil {
                 Text(player.lyric.isEmpty ? "这首歌没有歌词" : "前奏…")
                     .font(.aevis(17, weight: .medium))
@@ -517,6 +562,15 @@ struct PlayerView: View {
 
     private var bottomArea: some View {
         VStack(spacing: 11) {
+            // 网易云式功能行（2026-10-31 按用户截图5/6 加的）。
+            //
+            // 官方播放器最下面那一排是：红心 / 评论 / 麦克风 / 视频 / 分享。
+            // 我们对应的功能是：
+            //   红心 → 存进「我喜欢的音乐」；评论 → 网易云评论（先占位）；
+            //   麦克风 → 跟 ta 语音（打字聊的语音版还没有，先开打字聊）；
+            //   视频 → 音乐视频（还没有，占位）；分享 → 分享给 ta。
+            neteaseActionRow
+
             if together.active {
                 togetherRow
 
@@ -618,6 +672,104 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 10)
         .padding(.bottom, 4)
+    }
+
+    // MARK: - 网易云式功能行
+
+    /// 网易云播放器最下面那一排（截图5/6）：红心 / 评论 / 麦克风 / 视频 / 分享。
+    ///
+    /// 我们的对应关系：
+    /// - **红心** → 加进「我喜欢的音乐」（真接口 `NeteaseClient.like`）
+    /// - **评论** → 网易云评论（还没接，先给个说明而不是装死按钮）
+    /// - **麦克风** → 语音（还没做，退到「打字聊」）
+    /// - **视频** → 音乐视频（还没做）
+    /// - **分享** → 分享给 ta（走一起听那条线：让 ta 知道你在听什么）
+    private var neteaseActionRow: some View {
+        HStack(spacing: 0) {
+            actionButton(icon: likedNow ? "heart.fill" : "heart",
+                         tint: likedNow ? .red : theme.onBackground.opacity(0.85),
+                         label: "红心") {
+                Task { await toggleLike() }
+            }
+
+            actionButton(icon: "bubble.left.and.bubble.right.fill",
+                         tint: theme.onBackground.opacity(0.85),
+                         label: "评论") {
+                say("评论功能还没接上")
+            }
+
+            actionButton(icon: "mic.fill",
+                         tint: theme.onBackground.opacity(0.85),
+                         label: "语音") {
+                say("语音还没做好，先用打字聊")
+                showChat = true
+            }
+
+            actionButton(icon: "play.rectangle.fill",
+                         tint: theme.onBackground.opacity(0.85),
+                         label: "视频") {
+                say("音乐视频还没接上")
+            }
+
+            actionButton(icon: "paperplane.fill",
+                         tint: theme.onBackground.opacity(0.85),
+                         label: "分享") {
+                shareCurrentToHer()
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
+    }
+
+    private func actionButton(icon: String, tint: Color,
+                              label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.aevis(18))
+                    .foregroundStyle(tint)
+                Text(label)
+                    .font(.aevis(9.5))
+                    .foregroundStyle(theme.onBackground.opacity(0.55))
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(player.current == nil)
+        .opacity(player.current == nil ? 0.4 : 1)
+    }
+
+    private func say(_ text: String) {
+        note = text
+        noteTask?.cancel()
+        noteTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if !Task.isCancelled { note = nil }
+        }
+    }
+
+    private func toggleLike() async {
+        guard let track = player.current else { return }
+        do {
+            try await NeteaseClient.shared.like(songID: track.id)
+            likedNow = true
+            say("已加进「我喜欢的音乐」")
+        } catch {
+            say("红心没成功：\(error.localizedDescription)")
+        }
+    }
+
+    /// 把正在听的歌告诉 ta —— 走一起听那条线（ta 会知道你在听什么）。
+    private func shareCurrentToHer() {
+        guard let track = player.current else { return }
+        let text = "我在听《\(track.title)》"
+            + (track.artist.isEmpty ? "" : " - \(track.artist)")
+        if together.active {
+            say("已经在一起听了，ta 听得到")
+        } else {
+            say("\(text)（一起听开着时 ta 能直接听到）")
+        }
     }
 
     // MARK: - 一起听
