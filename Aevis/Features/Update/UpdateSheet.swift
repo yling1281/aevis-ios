@@ -7,7 +7,9 @@ import WebKit
 /// 而不是在 App 内自动装好。说清楚比让用户以为失败了要好。
 struct UpdateSheet: View {
     @ObservedObject var center: AppUpdateCenter
-    @Environment(\.theme) private var theme
+    /// 品牌色走 `AppSettings.shared.accentColor` —— 项目里**没有** `\.theme`
+    /// 这个 EnvironmentKey（`@Environment(\.theme)` 是我上一轮写错的，直接编译不过）。
+    @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
         if let info = center.latest {
@@ -15,21 +17,21 @@ struct UpdateSheet: View {
                 HStack(spacing: 10) {
                     Image(systemName: info.force ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill")
                         .font(.aevis(22))
-                        .foregroundStyle(info.force ? Color.orange : theme.accent)
+                        .foregroundStyle(info.force ? Color.orange : settings.accentColor)
                     Text(info.force ? "需要更新后才能继续使用" : "有新版本可用")
                         .font(.aevis(17, weight: .semibold))
-                        .foregroundStyle(theme.onBackground)
+                        .foregroundStyle(Color.primary)
                 }
 
                 Text("当前 \(info.current)　·　最新 \(info.latest)")
                     .font(.aevis(13))
-                    .foregroundStyle(theme.onBackground.opacity(0.6))
+                    .foregroundStyle(Color.primary.opacity(0.6))
 
                 if !info.notes.isEmpty {
                     ScrollView {
                         Text(info.notes)
                             .font(.aevis(14))
-                            .foregroundStyle(theme.onBackground.opacity(0.8))
+                            .foregroundStyle(Color.primary.opacity(0.8))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxHeight: 180)
@@ -39,13 +41,13 @@ struct UpdateSheet: View {
                      ? "将跳转到系统安装页完成更新。"
                      : "将下载安装包（.ipa）。iOS 不允许 App 自行安装，下载后请在「文件」中用签名工具安装。")
                     .font(.aevis(12))
-                    .foregroundStyle(theme.onBackground.opacity(0.55))
+                    .foregroundStyle(Color.primary.opacity(0.55))
 
                 HStack(spacing: 12) {
                     if !info.force {
                         Button("稍后") { center.dismiss() }
                             .font(.aevis(15))
-                            .foregroundStyle(theme.onBackground.opacity(0.6))
+                            .foregroundStyle(Color.primary.opacity(0.6))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                     }
@@ -56,7 +58,7 @@ struct UpdateSheet: View {
                             .font(.aevis(15, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(settings.accentColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .foregroundStyle(.white)
                     }
                 }
