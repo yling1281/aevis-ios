@@ -16,6 +16,8 @@ struct MeView: View {
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
     @State private var showHealth = false
+    /// 站内信（通知 + 可领的福利积分）。
+    @State private var showInbox = false
     /// 「怎么使用 / 规则 / 常见问题」—— 现在是原生页（2026-10-31 改）。
     @State private var showRules = false
     /// 积分页（2026-10-31 新增）
@@ -46,6 +48,10 @@ struct MeView: View {
                         // 但**界面上从来没露过脸**。补这一行：到期时间 / 未开通。
                         entry("会员", "crown", memberLine) {
                             showPoints = true
+                        }
+                        // 2026-11-01：站内信（通知 + 可领的福利积分）
+                        entry("站内信", "bell.badge", inboxLine) {
+                            showInbox = true
                         }
                         entry("这台设备", "iphone.gen3", deviceLine) {
                             route = SettingsRoute(focus: "device")
@@ -138,6 +144,9 @@ struct MeView: View {
             }
             .sheet(isPresented: $showRules) {
                 RulesView()
+            }
+            .sheet(isPresented: $showInbox) {
+                NavigationStack { InboxView() }
             }
             .sheet(isPresented: $showPoints) {
                 PointsView()
@@ -246,6 +255,11 @@ struct MeView: View {
     /// 账号那一行。**不填也能用**这件事必须写在行上，
     /// 否则会让人以为"没登录就不能用"。
     /// 会员那一行：有效期 / 未开通。
+    /// 站内信那一行的描述。
+    private var inboxLine: String {
+        AppSettings.shared.accountEmail.isEmpty ? "登录后可查收通知和福利" : "通知与福利积分"
+    }
+
     private var memberLine: String {
         guard let until = account.profile?.expiresAt else {
             return "还没开通（可在积分里兑换）"
