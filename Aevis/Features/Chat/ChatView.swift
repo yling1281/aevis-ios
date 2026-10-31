@@ -909,6 +909,19 @@ struct ChatView: View {
 
             // 一起听 / 通话 默认不显示（见 `Experimental`）：这两个入口以前藏在
             // 「更多」面板里，买家点进去只会遇到"要订阅 / 要授权 / 连不上"。
+            //
+            // ⚠️ 2026-10-31 按用户截图10 补的：**「音乐」入口要在**
+            //   （截图10 那个加号面板里就是：表情包 / 音乐 / 照片）。
+            //   之前只有「网易云」那个（还要开 Experimental 才显示），
+            //   用户在截图里点名要「音乐」这个位置，所以单独加一个**不依赖
+            //   Experimental** 的入口 —— 它开的就是全屏播放器。
+            Button {
+                closeMorePanel()
+                router.showPlayer = true
+            } label: {
+                moreTile("音乐", "music.note")
+            }
+
             if Experimental.enabled {
                 Button {
                     closeMorePanel()
