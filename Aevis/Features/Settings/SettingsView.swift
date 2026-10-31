@@ -129,7 +129,7 @@ struct SettingsView: View {
                         //    `wallet`（虚拟钱包/银行）、`qqbot` / `wechatbot`（QQ 桥接）。
                         //    **不是隐藏，是入口彻底不生成**：key 不在这张表里，
                         //    `card(_:)` 那个 switch 也就永远不会被调到。
-                        keys: ["aitools", "companion", "music",
+                        keys: ["aitools", "wxbot", "companion", "music",
                                "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
                         keys: ["account", "sync", "device", "devicelist", "pair", "share", "about"])
@@ -167,6 +167,7 @@ struct SettingsView: View {
         //    留在 switch 里会有"入口没了但卡片还在"的错觉，以后有人加回去
         //    只要把各自那张卡和 `sections` 里的 key 一起加回来。
         case "account": AccountCard()
+        case "wxbot": WxBotCard()
         case "sync": SyncCard()
         case "device": DeviceCard()
         case "devicelist": DeviceListCard()
