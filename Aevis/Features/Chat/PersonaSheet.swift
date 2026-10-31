@@ -48,6 +48,7 @@ struct PersonaSheet: View {
                         moodCard
                     }
                     editCard
+                    squareCard
                     dangerCard
 
                     if let note {
@@ -252,6 +253,70 @@ struct PersonaSheet: View {
         let hours = minutes / 60
         if hours < 24 { return "\(hours) 小时前" }
         return "\(hours / 24) 天前"
+    }
+
+    /// ⭐ 2026-11-01：把这个人设上传到「人设广场」（提交后 AI 审核 → 先上架 →
+    ///    站长邮件人工复审）。小程序端不上这个功能（过不了审），只有 App 有。
+    @State private var publishing = false
+
+    private var squareCard: some View {
+        VStack(spacing: 0) {
+            Button {
+                Task { await publishToSquare() }
+            } label: {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.aevis(15))
+                    Text(publishing ? "正在提交…" : "把 TA 上传到人设广场")
+                        .font(.aevis(15))
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(publishing || persona.name.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .aevisGlass(cornerRadius: 20)
+        .padding(.bottom, 14)
+    }
+
+    /// 上传：走 `/v1/psquare/publish`（X-Account 标识用户）。
+    /// 提交后进 `pending`，AI 审核通过先上架，然后邮件通知站长人工复审。
+    private func publishToSquare() async {
+        publishing = true
+        defer { publishing = false }
+        let account = AppSettings.shared.accountEmail
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !account.isEmpty else {
+            note = "先登录账号，才能上传到人设广场"
+            return
+        }
+        var req = URLRequest(url: URL(string: AevisHosts.accountBase + "/v1/psquare/publish")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(account, forHTTPHeaderField: "X-Account")
+        let body: [String: String] = [
+            "name": persona.name,
+            "gender": persona.gender.rawValue,
+            "identity": persona.callUser,
+            "relation": persona.relationship,
+            "personality": persona.personality,
+            "appearance": persona.speakingStyle,
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            if (obj["code"] as? Int) == 0 {
+                note = "已提交到人设广场，AI 审核通过后会先上架"
+            } else {
+                note = (obj["msg"] as? String) ?? "提交失败，稍后再试"
+            }
+        } catch {
+            note = "网络异常：\(error.localizedDescription)"
+        }
     }
 
     private var dangerCard: some View {
