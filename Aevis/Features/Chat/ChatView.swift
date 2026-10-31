@@ -806,7 +806,7 @@ struct ChatView: View {
                 .padding(.bottom, 1)
             }
 
-            // 「更多」—— 微信里那个加号
+            // 「更多」—— 微信里那个加号（TG 里是回形针，位置和用法一样）
             Button {
                 composerFocused = false
                 withAnimation(.snappy(duration: 0.22)) {
@@ -818,14 +818,22 @@ struct ChatView: View {
                     .foregroundStyle(.primary)
                     .frame(width: settings.simpleMode ? 38 : 34,
                            height: settings.simpleMode ? 38 : 34)
-                    .aevisGlass(cornerRadius: settings.simpleMode ? 19 : 17)
+                    // ⚠️ 这里**不套玻璃** —— 它已经在胶囊玻璃**里面**了，
+                    //    玻璃套玻璃会糊成一团（两层半透明叠起来就没有边界了）。
+                    //    用一层淡淡的实色底就够，跟 TG 那个圆钮一个观感。
+                    .background(
+                        Circle().fill(Color.primary.opacity(showMorePanel ? 0.12 : 0.07))
+                    )
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .padding(.bottom, 1)
         }
-        .padding(6)
-        .aevisGlass(cornerRadius: 26)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        // 🫧 胶囊输入栏（用户 2026-10-31：TG/纸飞机那种胶囊，可以用玻璃）。
+        //   ⚠️ 玻璃只到这一层为止 —— 聊天气泡是实色降级的，不许套玻璃。
+        .aevisGlassCapsule()
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 6)

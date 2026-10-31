@@ -73,7 +73,9 @@ struct MeView: View {
                         entry("积分", "star.circle", pointsLine) {
                             showPoints = true
                         }
-                        entry("经期 / 健康", "drop.fill", "记录经期、看下次预测，写在健康 App 里") {
+                        // 2026-10-31 用户：「经期点进去的话，应该是你所有的一些数据…
+                        // 不只是经期」。所以入口改叫「健康」，进去是健康总览。
+                        entry("健康", "heart.text.square", "步数、跑步走路、心率、睡眠、经期") {
                             showHealth = true
                         }
                     }

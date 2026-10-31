@@ -95,6 +95,72 @@ extension View {
                 )
         }
     }
+
+    /// **胶囊**形玻璃 —— 底部输入栏专用（用户 2026-10-31：TG/纸飞机那种胶囊）。
+    ///
+    /// 为什么不复用 `aevisGlass(cornerRadius:)`：圆角矩形在单行时**看起来**像胶囊，
+    /// 但多行时会露出四个直角切边（输入框最多长到 5 行）。Capsule 是按
+    /// **实际高度的一半**取圆角的，行数怎么变都是圆头。
+    ///
+    /// ## 玻璃的边界（用户明确要求）
+    /// 「聊天气泡是要降级的」—— 气泡**永远不套这层**（`MessageBubble` 用的是
+    /// `RoundedRectangle.fill(color)` 实色）。这里只管输入栏、Dock、小按钮。
+    @ViewBuilder
+    func aevisGlassCapsule() -> some View {
+        if AppSettings.shared.useGlass, #available(iOS 26.0, *) {
+            self.glassEffect(
+                AppSettings.shared.glassStyle == .clear ? .clear : .regular,
+                in: Capsule()
+            )
+        } else if AppSettings.shared.useGlass {
+            // iOS 26 以下降级成加厚毛玻璃（跟 `aevisGlass` 同一套观感）。
+            // ⚠️ 两个覆盖层都必须 `allowsHitTesting(false)` —— 见上面那段事故说明。
+            let material: AnyShapeStyle = AppSettings.shared.glassStyle == .clear
+                ? AnyShapeStyle(.ultraThinMaterial)
+                : AnyShapeStyle(.regularMaterial)
+
+            self
+                .background(Capsule().fill(material).allowsHitTesting(false))
+                .overlay(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.20), .clear],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.55),
+                                    Color.white.opacity(0.08),
+                                    Color.black.opacity(0.10)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                        .allowsHitTesting(false)
+                )
+                .shadow(color: Color.black.opacity(0.07), radius: 8, x: 0, y: 3)
+        } else {
+            self
+                .background(
+                    Capsule().fill(Color.primary.opacity(0.055)).allowsHitTesting(false)
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                        .allowsHitTesting(false)
+                )
+        }
+    }
 }
 
 /// 底部／顶部的横向长条。比玻璃实，避免内容从底下透上来 —— 用户要的「留白」。
