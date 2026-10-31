@@ -33,11 +33,16 @@ struct MusicView: View {
     @State private var showLogin = false
     @State private var showSearch = false
     /// 三个 Tab：排行榜 / 我的 / 搜索
-    @State private var tab: MusicTab = .rank
+    @State private var tab: MusicTab = .recommend
     /// 榜单数据（懒加载，进了「排行榜」才拉）
     @State private var ranks: [NeteaseRank] = []
     @State private var ranksLoading = false
     @State private var ranksFailed = false
+
+    /// 「推荐」页的歌（网易云每日推荐）。默认进这一页，所以它最先加载。
+    @State private var recommend: [MusicTrack] = []
+    @State private var recommendLoading = false
+    @State private var recommendFailed = false
     /// 「我的」Tab 的歌单
     @State private var myPlaylists: [NeteasePlaylist] = []
     @State private var playlistsLoading = false
@@ -47,10 +52,13 @@ struct MusicView: View {
     @State private var provider: MusicProvider = .netease
 
     enum MusicTab: String, CaseIterable, Identifiable {
-        case rank, mine, search
+        // 2026-10-31 用户要求「默认是推荐页」—— 所以 recommend 排第一，
+        // 也是 `tab` 的初始值。排行榜仍在，只是不再抢首位。
+        case recommend, rank, mine, search
         var id: String { rawValue }
         var title: String {
             switch self {
+            case .recommend: return "推荐"
             case .rank: return "排行榜"
             case .mine: return "我的"
             case .search: return "搜索"
@@ -64,6 +72,15 @@ struct MusicView: View {
                 brandBar
                 tabBar
                 content
+                // 播放条是**全局的**（网易云也是这样）：一直在最底下，
+                // 点一下才进全屏播放页 —— 而不是点一首歌就直接被拽进全屏。
+                if player.current != nil {
+                    nowPlayingBar
+                        .padding(.horizontal, 14)
+                        .padding(.top, 8)
+                        .padding(.bottom, 8)
+                        .background(.bar)
+                }
             } else {
                 AppleMusicView()
             }
@@ -196,6 +213,7 @@ struct MusicView: View {
             ForEach(MusicTab.allCases) { t in
                 Button {
                     tab = t
+                    if t == .recommend { loadRecommend() }
                     if t == .rank { loadRanks() }
                     if t == .mine { loadMine() }
                 } label: {
@@ -223,10 +241,127 @@ struct MusicView: View {
     @ViewBuilder
     private var content: some View {
         switch tab {
+        case .recommend: recommendTab
         case .rank: rankTab
         case .mine: mineTab
         case .search: searchTab
         }
+    }
+
+    // MARK: - 推荐（默认页）
+
+    /// 默认进来看到的一页：每日推荐。
+    ///
+    /// 交互和网易云一致 —— **点一首歌只是开始放**（底下出现播放条），
+    /// 想进全屏播放器再点那条播放条。以前是点一下直接被拽进全屏，
+    /// 想连着听几首就得来回退，那是"容易上下"的根源。
+    private var recommendTab: some View {
+        ScrollView {
+            if recommendLoading && recommend.isEmpty {
+                ProgressView().padding(.top, 60)
+            } else if recommendFailed && recommend.isEmpty {
+                failBox("推荐没拉下来") { loadRecommend(force: true) }
+            } else if recommend.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "sparkles")
+                        .font(.aevis(28, weight: .light))
+                        .foregroundStyle(.tertiary)
+                    Text("每日推荐要登录网易云账号才有")
+                        .font(.aevis(13.5))
+                        .foregroundStyle(.secondary)
+                    Button("去登录") { showLogin = true }
+                        .font(.aevis(14, weight: .medium))
+                        .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                }
+                .padding(.top, 56)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text("每日推荐")
+                            .font(.aevis(17, weight: .bold))
+                        Text("\(recommend.count) 首")
+                            .font(.aevis(12))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button {
+                            Task { await playRecommend(from: 0) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                Text("播放全部")
+                            }
+                            .font(.aevis(12.5, weight: .medium))
+                            .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
+
+                    ForEach(Array(recommend.enumerated()), id: \.element.id) { idx, track in
+                        Button {
+                            Task { await playRecommend(from: idx) }
+                        } label: {
+                            recommendRow(index: idx, track: track)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+        }
+        .task { loadRecommend() }
+    }
+
+    private func recommendRow(index: Int, track: MusicTrack) -> some View {
+        let playing = player.current?.id == track.id
+        return HStack(spacing: 11) {
+            Text("\(index + 1)")
+                .font(.aevisMono(12.5))
+                .foregroundStyle(playing
+                                 ? Color(red: 0.9, green: 0.13, blue: 0.18)
+                                 : Color.secondary.opacity(0.6))
+                .frame(width: 22, alignment: .trailing)
+
+            AsyncImage(url: track.coverURL) { img in
+                img.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color(.tertiarySystemFill)
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(track.title)
+                    .font(.aevis(14, weight: playing ? .semibold : .regular))
+                    .foregroundStyle(playing
+                                     ? Color(red: 0.9, green: 0.13, blue: 0.18)
+                                     : Color.primary)
+                    .lineLimit(1)
+                Text(track.display)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if playing && player.isPlaying {
+                Image(systemName: "waveform")
+                    .font(.aevis(13))
+                    .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+
+    /// 从推荐页的第 `index` 首开始放。**不自动跳全屏** —— 用户点的是"播放"。
+    private func playRecommend(from index: Int) async {
+        guard recommend.indices.contains(index) else { return }
+        await player.play(recommend, startingAt: index)
     }
 
     // MARK: - 排行榜（截图1）
@@ -494,18 +629,13 @@ struct MusicView: View {
 
     private var searchTab: some View {
         VStack(spacing: 0) {
-            if player.current == nil {
-                VStack(spacing: 0) {
-                    Spacer()
-                    Text("输入关键词，搜索网易云曲库")
-                        .font(.aevis(13.5))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-            } else {
-                // 正在放着的时候显示播放条（和网易云一致）
-                nowPlayingBar.padding(.horizontal, 14).padding(.top, 12)
-            }
+            // 播放条现在是**全局的**（挂在 `body` 里），这里不再重复画一份 ——
+            // 画两份会同时出现两条一模一样的。
+            Spacer()
+            Text("输入关键词，搜索网易云曲库")
+                .font(.aevis(13.5))
+                .foregroundStyle(.secondary)
+            Spacer()
         }
     }
 
@@ -570,6 +700,31 @@ struct MusicView: View {
     }
 
     // MARK: - 数据
+
+    private func loadRecommend(force: Bool = false) {
+        if !recommend.isEmpty, !force { return }
+        guard netease.isLoggedIn else {
+            recommendLoading = false
+            return
+        }
+        recommendLoading = true
+        recommendFailed = false
+        Task {
+            do {
+                let list = try await netease.dailyRecommend()
+                await MainActor.run {
+                    recommend = list
+                    recommendLoading = false
+                    recommendFailed = list.isEmpty
+                }
+            } catch {
+                await MainActor.run {
+                    recommendLoading = false
+                    recommendFailed = true
+                }
+            }
+        }
+    }
 
     private func loadRanks(force: Bool = false) {
         if !ranks.isEmpty, !force { return }

@@ -79,6 +79,7 @@ final class ListenTogetherService: ObservableObject {
         statusLine = nil
         // 一起听默认打开外放语音？不 —— 音乐在放，让ta念会盖住歌。
         observeLyrics()
+        startHeartbeat()
     }
 
     func stop() {
@@ -86,11 +87,54 @@ final class ListenTogetherService: ObservableObject {
         owner = nil
         cancellable?.cancel()
         cancellable = nil
+        stopHeartbeat()
         lyricCount = 0
         // 「结束一起听」= 这一场散了，口头聊的那些也清掉。
         // ⚠️ 只是**界面上**清掉 —— 两边的话都已经进了正式聊天记录
         //    （见 `send`），所以什么都不会丢。
         chatLines = []
+    }
+
+    // MARK: - 定时自动说一句（用户 2026-10-31 要求）
+
+    /// 上一版只有两种开口方式：**跟着歌词说** 和 **手戳一下「让ta说一句」**。
+    /// 用户点名把那个按钮取消掉、改成「要不就定时说一句，AI 自己自动说」——
+    /// 因为他听的多半是纯音乐 / 前奏很长的歌，纯靠歌词的话整场没声音，
+    /// 看着就像一起听没生效。
+    ///
+    /// 所以加一条**兜底心跳**：只要在放歌、且上一句已经过去 `autoSpeakGap` 秒，
+    /// 就自己开口。跟歌词那条**共用 `lastSpokeAt`**，不会两边抢着说。
+    @Published var autoSpeakEnabled = true
+
+    /// 两句之间至少隔多久（秒）。别小 —— 音乐在放，人一直说话是噪音。
+    var autoSpeakGap: Double = 75
+
+    private var heartbeat: Timer?
+
+    private func startHeartbeat() {
+        stopHeartbeat()
+        heartbeat = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.heartbeatTick() }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeat?.invalidate()
+        heartbeat = nil
+    }
+
+    private func heartbeatTick() {
+        guard active, autoSpeakEnabled else { return }
+        // 没歌、暂停、正在想、正在打字回你 —— 都不插嘴。
+        guard MusicPlayer.shared.current != nil,
+              MusicPlayer.shared.isPlaying,
+              !thinking,
+              !replying else { return }
+        guard Date().timeIntervalSince(lastSpokeAt) >= autoSpeakGap else { return }
+        // 有歌词就接着当前这句说，没有（纯音乐/前奏）就说"这首歌"，
+        // 让模型知道自己在什么场景里。
+        let line = MusicPlayer.shared.currentLyricLine ?? ""
+        Task { await react(to: line.isEmpty ? "（这段没有歌词）" : line) }
     }
 
     /// ta说的话要不要顺带念出来。只有用户主动点才念。

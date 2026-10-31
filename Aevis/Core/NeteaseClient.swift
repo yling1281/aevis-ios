@@ -532,6 +532,128 @@ final class NeteaseClient {
         return tracks.contains { $0.id == songID }
     }
 
+    // MARK: - 评论 / 音乐视频（2026-10-31 用户点名要接）
+
+    /// 一条评论。只留界面上真的会显示的那几样。
+    struct NeteaseComment: Identifiable, Hashable {
+        var id: String
+        var nickname: String
+        var avatarURL: URL?
+        var content: String
+        var likedCount: Int
+        /// 已经是"几天前/几小时前"这种人话，直接显示。
+        var timeText: String
+        var isHot: Bool
+    }
+
+    /// 拉一首歌的评论。
+    ///
+    /// ## 路径为什么是 `R_SO_4_` 这种怪东西
+    /// `R_SO_4` = Resource 单曲 4 号类型，网易自家网页就是这么请求的。
+    /// **这个路径直连 music.163.com 就通、而且不需要登录**（实测 200，返回
+    /// `hotComments` + `comments`）。
+    ///
+    /// ⚠️ 别改成 `/api/v1/comment/music` —— 那个路径在网易本体上是
+    ///    `{"code":404,"message":"接口未找到！"}`。它是 NeteaseCloudMusicApi
+    ///    那个代理服务自己的路由，跟 iOS 直连这条链路不是一回事。
+    func comments(songID: String, limit: Int = 30) async throws -> [NeteaseComment] {
+        guard !songID.isEmpty else { return [] }
+        let json = try await plainRequest(
+            "/api/v1/resource/comments/R_SO_4_" + songID,
+            ["limit": "\(limit)", "offset": "0"])
+
+        let hot = (json["hotComments"] as? [[String: Any]]) ?? []
+        let normal = (json["comments"] as? [[String: Any]]) ?? []
+
+        func build(_ rows: [[String: Any]], flag: Bool) -> [NeteaseComment] {
+            rows.compactMap { row in
+                let user = (row["user"] as? [String: Any]) ?? [:]
+                let text = (row["content"] as? String) ?? ""
+                guard !text.isEmpty else { return nil }
+                let avatar = (user["avatarUrl"] as? String) ?? ""
+                // commentId 网易有时给 Int、有时给 Int64，两种都接住
+                // （`as? Int64` 对 Int 是失败的，所以得单独兜一层）。
+                let cid: Int
+                if let v = row["commentId"] as? Int {
+                    cid = v
+                } else if let v = row["commentId"] as? Int64 {
+                    cid = Int(truncatingIfNeeded: v)
+                } else {
+                    cid = 0
+                }
+                return NeteaseComment(
+                    id: String(cid),
+                    nickname: (user["nickname"] as? String) ?? "网易云用户",
+                    avatarURL: avatar.isEmpty ? nil : URL(string: avatar),
+                    content: text,
+                    likedCount: row["likedCount"] as? Int ?? 0,
+                    timeText: Self.relative(row["time"] as? Double ?? 0),
+                    isHot: flag)
+            }
+        }
+
+        // 热门在前、后面接最新 —— 跟网易云一样（热门重复的会被 id 去掉）。
+        var seen = Set<String>()
+        return (build(hot, flag: true) + build(normal, flag: false)).filter {
+            seen.insert($0.id).inserted
+        }
+    }
+
+    /// 毫秒时间戳 → "3天前" 这种人话。
+    private static func relative(_ millis: Double) -> String {
+        guard millis > 0 else { return "" }
+        let date = Date(timeIntervalSince1970: millis / 1000)
+        let fmt = RelativeDateTimeFormatter()
+        fmt.locale = Locale(identifier: "zh_CN")
+        fmt.unitsStyle = .full
+        return fmt.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// 这首歌的 MV id（没有 MV 返回 nil）。
+    ///
+    /// `mv` 字段就在 `/api/v3/song/detail` 的 songs[] 里，顺手就能拿到，
+    /// 不用另开一个接口。
+    func mvID(songID: String) async -> String? {
+        guard !songID.isEmpty else { return nil }
+        guard let json = try? await plainRequest(
+            "/api/v3/song/detail", ["c": "[{\"id\":\(songID)}]"]) else { return nil }
+        guard let songs = json["songs"] as? [[String: Any]],
+              let first = songs.first else { return nil }
+        // 网易这里 0 表示没有 MV。
+        if let mv = first["mv"] as? Int, mv > 0 { return String(mv) }
+        if let mv = first["mv"] as? Int64, mv > 0 { return String(mv) }
+        return nil
+    }
+
+    /// MV 的播放地址 + 标题。
+    ///
+    /// 路径 `/api/song/enhance/play/mv/url`（明文 GET 就通，不用 weapi）。
+    /// `r` 是清晰度，传 1080 拿不到时网易会自动降（实测返回 480）。
+    func mvURL(songID: String) async throws -> (url: URL, title: String) {
+        guard let mvid = await mvID(songID: songID) else {
+            throw NeteaseError.badResponse("这首歌没有 MV")
+        }
+        let json = try await plainRequest(
+            "/api/song/enhance/play/mv/url", ["id": mvid, "r": "1080"])
+
+        let data = (json["data"] as? [String: Any]) ?? [:]
+        guard let raw = data["url"] as? String, !raw.isEmpty,
+              let url = URL(string: raw) else {
+            throw NeteaseError.badResponse("这个 MV 暂时没有可播放的地址（可能要会员）")
+        }
+
+        // 标题从 mv/detail 拿（拿不到就回空串，由调用方退回歌名 ——
+        // ⚠️ 这里**不能**去读 `MusicPlayer.shared`：它是 @MainActor，
+        //    NeteaseClient 不是，跨 actor 读会直接编译不过。
+        var title = ""
+        if let detail = try? await plainRequest("/api/mv/detail", ["id": mvid]),
+           let d = detail["data"] as? [String: Any],
+           let name = d["name"] as? String, !name.isEmpty {
+            title = name
+        }
+        return (url, title)
+    }
+
     /// 最近播放。
     ///
     /// ⚠️ 这个接口**未登录会被直接拒**（探针实测 `code -2`），和搜索不一样 ——

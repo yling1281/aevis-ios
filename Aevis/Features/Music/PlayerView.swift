@@ -62,6 +62,26 @@ struct PlayerView: View {
     /// 红心状态（当前这首歌是不是已经在「我喜欢的音乐」里）。
     @State private var likedNow = false
 
+    /// 中间那块现在是**唱片**还是**歌词**（用户 2026-10-31：
+    /// 「中间要不就是大圆圈在那里转圈，要不就是点一下是歌词」）。
+    ///
+    /// 只看这一块，不要把两样同时摆出来 —— 上下各占一半的结果是
+    /// 唱片不够大、歌词只露三行，两头都不好看。
+    @State private var showLyrics = false
+
+    /// 评论面板（真实网易云评论）。
+    @State private var showComments = false
+
+    /// 正在拉的 MV。有值就掀开播放器；`nil` 什么都不做。
+    @State private var mv: MVRequest?
+
+    /// MV 播放要用的那两个值。
+    struct MVRequest: Identifiable {
+        let id = UUID()
+        var url: URL
+        var title: String
+    }
+
     /// 底部功能行的提示语（红心成功、还没接上的功能都靠它说话）。
     ///
     /// ⚠️ 项目里**没有全局 toast**，所以在播放器自己挂一条。
@@ -87,6 +107,15 @@ struct PlayerView: View {
             content
                 .sheet(isPresented: $showChat) {
                     ListenChatSheet()
+                }
+                // 评论 / MV 各自挂一层 —— 同一个视图上叠多个 `.sheet` 时
+                // SwiftUI 只认最后一个（见 `showChat` 的说明），所以必须分开挂。
+                .sheet(isPresented: $showComments) {
+                    MusicCommentsSheet(songID: player.current?.id ?? "",
+                                       title: player.current?.title ?? "")
+                }
+                .sheet(item: $mv) { item in
+                    MVPlayerSheet(url: item.url, title: item.title)
                 }
         }
         .onAppear {
@@ -170,11 +199,8 @@ struct PlayerView: View {
 
             Spacer(minLength: 6)
 
-            discArea
-
-            Spacer(minLength: 8)
-
-            lyricArea
+            // 中间这一块：唱片 ⇄ 歌词，点一下换。两样**不同时出现**。
+            stage
 
             Spacer(minLength: 8)
 
@@ -199,6 +225,30 @@ struct PlayerView: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 8)
         .animation(.easeOut(duration: 0.2), value: note)
+    }
+
+    /// 中间那块：**会转的唱片** 或 **整屏歌词**，点一下切换。
+    ///
+    /// 高度锁在唱片直径上 —— 不锁的话切到歌词时整页会跳一下，
+    /// 因为 ScrollView 的高度和 Circle 不一样。
+    private var stage: some View {
+        ZStack {
+            if showLyrics {
+                lyricArea
+                    .transition(.opacity)
+            } else {
+                discArea
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: discSize + 30)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard player.current != nil else { return }
+            BlackBox.tap(showLyrics ? "播放器 · 切回唱片" : "播放器 · 切到歌词")
+            withAnimation(.easeInOut(duration: 0.26)) { showLyrics.toggle() }
+        }
     }
 
     // MARK: - 顶部
@@ -281,8 +331,44 @@ struct PlayerView: View {
                     .font(.aevis(17, weight: .semibold))
                     .foregroundStyle(theme.onBackground)
             }
+
+            // 两个人的头像**挪到上面来了**（用户 2026-10-31：把头像移到上面去）。
+            // 原来它在最底下、压着功能行，得往下滑才看得见 ——
+            // 而"一起听"最该一眼看到的就是这两个人。
+            if together.active {
+                compactTogetherRow
+                    .padding(.top, 2)
+            }
         }
         .padding(.top, 6)
+    }
+
+    /// 压缩版的一起听头像：小一圈、没名字。
+    ///
+    /// 用户要的是「压缩一下」—— 原来 44pt 一个还要带名字，
+    /// 摆在歌名下面直接顶掉 60pt 高度，唱片就小了。这里 30pt、
+    /// 名字只在 accessibility 里留一份。
+    private var compactTogetherRow: some View {
+        HStack(spacing: 10) {
+            AevisAvatar(source: .me, size: 30, seed: persona.avatarSeed)
+                .overlay(Circle().strokeBorder(theme.onBackground.opacity(0.30), lineWidth: 1))
+
+            Image(systemName: "heart.fill")
+                .font(.aevis(10))
+                .foregroundStyle(theme.onBackground.opacity(0.55))
+
+            AevisAvatar(source: .ai, size: 30, seed: persona.avatarSeed)
+                .overlay(Circle().strokeBorder(theme.onBackground.opacity(0.30), lineWidth: 1))
+
+            if together.thinking {
+                Text("\(Pronoun.current)在想…")
+                    .font(.aevis(10.5))
+                    .foregroundStyle(theme.onBackground.opacity(0.5))
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("你正在和\(persona.name.isEmpty ? "ta" : persona.name)一起听")
     }
 
     // MARK: - 唱片
@@ -463,30 +549,6 @@ struct PlayerView: View {
         .frame(minHeight: 116, alignment: .center)
     }
 
-    // MARK: - 两个人的头像
-
-    /// 一起听开着才出现 —— 你在左、ta 在右。
-    private var togetherRow: some View {
-        HStack(spacing: 16) {
-            avatarSlot(source: .me, title: "我")
-            Image(systemName: "heart.fill")
-                .font(.aevis(13))
-                .foregroundStyle(theme.onBackground.opacity(0.7))
-            avatarSlot(source: .ai, title: persona.name.isEmpty ? "ta" : persona.name)
-        }
-    }
-
-    private func avatarSlot(source: AevisAvatar.Source, title: String) -> some View {
-        VStack(spacing: 5) {
-            AevisAvatar(source: source, size: 44, seed: persona.avatarSeed)
-                .overlay(Circle().strokeBorder(theme.onBackground.opacity(0.35), lineWidth: 1.5))
-            Text(title)
-                .font(.aevis(10.5))
-                .foregroundStyle(theme.onBackground.opacity(0.7))
-                .lineLimit(1)
-        }
-    }
-
     // MARK: - 进度
 
     private var progressArea: some View {
@@ -561,19 +623,18 @@ struct PlayerView: View {
     // MARK: - 底部：一起听
 
     private var bottomArea: some View {
-        VStack(spacing: 11) {
-            // 网易云式功能行（2026-10-31 按用户截图5/6 加的）。
-            //
-            // 官方播放器最下面那一排是：红心 / 评论 / 麦克风 / 视频 / 分享。
-            // 我们对应的功能是：
-            //   红心 → 存进「我喜欢的音乐」；评论 → 网易云评论（先占位）；
-            //   麦克风 → 跟 ta 语音（打字聊的语音版还没有，先开打字聊）；
-            //   视频 → 音乐视频（还没有，占位）；分享 → 分享给 ta。
+        VStack(spacing: 9) {
+            // 网易云式功能行（2026-10-31 按用户截图5/6 加的）：
+            // 红心 / 评论 / 语音 / 视频 / 分享 —— 五个**全部接的真接口**。
             neteaseActionRow
 
             if together.active {
-                togetherRow
-
+                // 头像已经挪到上面去了（见 `compactTogetherRow`），
+                // 这里只剩两个动作：打字聊、结束。
+                //
+                // ⚠️ 「让ta说一句」那个按钮**用户点名取消了** ——
+                //    改成定时自己说（见 `ListenTogetherService.autoSpeakEnabled`）。
+                //    留着一个要人戳才开口的按钮，等于把"ta在旁边"变成"ta是个点唱机"。
                 HStack(spacing: 8) {
                     // 「打字聊」—— 用户 2026-09-30 点名的那个输入框。
                     // 摆在这一排的**第一个**：他说的是"不能互相打字聊天"，
@@ -590,39 +651,27 @@ struct PlayerView: View {
                                 .lineLimit(1)
                         }
                         .foregroundStyle(theme.onBackground.opacity(0.92))
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(Capsule().fill(theme.accent.opacity(0.55)))
                     }
                     .buttonStyle(.plain)
 
                     Button {
-                        Task { await together.pokeHer() }
-                    } label: {
-                        Text(together.thinking ? "\(Pronoun.current)在想…" : "让\(Pronoun.current)说一句")
-                            .font(.aevis(13, weight: .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .foregroundStyle(theme.onBackground.opacity(0.9))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Capsule().fill(theme.onBackground.opacity(0.14)))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(together.thinking)
-
-                    Button {
                         together.stop()
+                        say("这一场一起听到这儿")
                     } label: {
                         Text("结束")
                             .font(.aevis(13))
                             .lineLimit(1)
-                            .foregroundStyle(theme.onBackground.opacity(0.65))
-                            .padding(.horizontal, 12)
+                            .foregroundStyle(theme.onBackground.opacity(0.7))
+                            .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(Capsule().fill(theme.onBackground.opacity(0.08)))
+                            .background(Capsule().fill(theme.onBackground.opacity(0.10)))
                     }
                     .buttonStyle(.plain)
+
+                    Spacer(minLength: 0)
                 }
             } else {
                 // ⚠️ 这里原来是一个「同步听 / ta控制 / 一起听房间」的**形态选择器**。
@@ -676,14 +725,14 @@ struct PlayerView: View {
 
     // MARK: - 网易云式功能行
 
-    /// 网易云播放器最下面那一排（截图5/6）：红心 / 评论 / 麦克风 / 视频 / 分享。
+    /// 网易云播放器最下面那一排（截图5/6）：红心 / 评论 / 语音 / 视频 / 分享。
     ///
-    /// 我们的对应关系：
-    /// - **红心** → 加进「我喜欢的音乐」（真接口 `NeteaseClient.like`）
-    /// - **评论** → 网易云评论（还没接，先给个说明而不是装死按钮）
-    /// - **麦克风** → 语音（还没做，退到「打字聊」）
-    /// - **视频** → 音乐视频（还没做）
-    /// - **分享** → 分享给 ta（走一起听那条线：让 ta 知道你在听什么）
+    /// 五个**全部是真实功能**，没有占位按钮：
+    /// - **红心** → 加进「我喜欢的音乐」（`NeteaseClient.like`）
+    /// - **评论** → 拉这首歌的真实网易云评论（`NeteaseClient.comments`）
+    /// - **语音** → 跟 ta 说话（退到打字聊，语音版还在排期）
+    /// - **视频** → 这首歌的 MV（`NeteaseClient.mvURL` → AVPlayer）
+    /// - **分享** → 分享给 AI（`together.send`，两边都落进正式聊天记录）
     private var neteaseActionRow: some View {
         HStack(spacing: 0) {
             actionButton(icon: likedNow ? "heart.fill" : "heart",
@@ -695,7 +744,9 @@ struct PlayerView: View {
             actionButton(icon: "bubble.left.and.bubble.right.fill",
                          tint: theme.onBackground.opacity(0.85),
                          label: "评论") {
-                say("评论功能还没接上")
+                guard player.current != nil else { return }
+                BlackBox.tap("播放器 · 评论")
+                showComments = true
             }
 
             actionButton(icon: "mic.fill",
@@ -708,13 +759,13 @@ struct PlayerView: View {
             actionButton(icon: "play.rectangle.fill",
                          tint: theme.onBackground.opacity(0.85),
                          label: "视频") {
-                say("音乐视频还没接上")
+                Task { await openMV() }
             }
 
             actionButton(icon: "paperplane.fill",
                          tint: theme.onBackground.opacity(0.85),
                          label: "分享") {
-                shareCurrentToHer()
+                shareCurrentToAI()
             }
         }
         .padding(.horizontal, 4)
@@ -760,16 +811,42 @@ struct PlayerView: View {
         }
     }
 
-    /// 把正在听的歌告诉 ta —— 走一起听那条线（ta 会知道你在听什么）。
-    private func shareCurrentToHer() {
+    // MARK: - 视频（这首歌的 MV）
+
+    /// 打开这首歌的 MV。
+    ///
+    /// 链路是 `/api/v3/song/detail` 拿 `mv` id → `/api/song/enhance/play/mv/url`
+    /// 拿 mp4 地址 → 系统播放器。**全是直连网易，不经过我们的服务器。**
+    private func openMV() async {
         guard let track = player.current else { return }
+        BlackBox.tap("播放器 · 视频")
+        say("正在找这首歌的 MV…")
+        do {
+            let result = try await NeteaseClient.shared.mvURL(songID: track.id)
+            note = nil
+            mv = MVRequest(url: result.url,
+                           title: result.title.isEmpty ? track.title : result.title)
+        } catch {
+            say(error.localizedDescription)
+        }
+    }
+
+    /// 把正在听的歌**分享给 AI** —— 用户点名要的「分享就是分享给 AI」。
+    ///
+    /// 走 `together.send` 这条路而不是自己拼一条消息：
+    /// 它会把这句话同时写进**正式聊天记录**（关掉播放器之后这段不会凭空消失），
+    /// 还带着"正在听什么"一起交给模型，让 ta 真的接着这首歌聊。
+    private func shareCurrentToAI() {
+        guard let track = player.current else { return }
+        BlackBox.tap("播放器 · 分享给 AI")
         let text = "我在听《\(track.title)》"
             + (track.artist.isEmpty ? "" : " - \(track.artist)")
-        if together.active {
-            say("已经在一起听了，ta 听得到")
-        } else {
-            say("\(text)（一起听开着时 ta 能直接听到）")
-        }
+            + "，跟我聊聊这首歌"
+        say("已分享给\(Pronoun.current)")
+        // 没在一起听就先开起来 —— 否则 `together.send` 手上没有模型配置，
+        // 这句话会石沉大海（只剩聊天记录里一行，ta 永远不会回）。
+        if !together.active { startTogether() }
+        Task { await together.send(text) }
     }
 
     // MARK: - 一起听
