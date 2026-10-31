@@ -16,6 +16,8 @@ struct MeView: View {
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
     @State private var showHealth = false
+    /// 「怎么使用 / 规则 / 常见问题」—— 现在是原生页（2026-10-31 改）。
+    @State private var showRules = false
     /// 积分页（2026-10-31 新增）
     @State private var showPoints = false
     /// 「更多设置」折起来了没有。默认收起 —— 这一页的主角是上面那些常点的。
@@ -85,9 +87,9 @@ struct MeView: View {
                     card {
                         // 规则和免责声明放在**最上面两条**：它们是要给人看的，
                         // 不该埋在设置里（这次的教训：功能藏进设置页 = 用户以为没做）。
-                        entry("使用规则 / 常见问题", "questionmark.circle",
-                              "怎么领注册码、群规则、常见问题") {
-                            openRules()
+                        entry("怎么使用 / 规则 / 常见问题", "questionmark.circle",
+                              "怎么开始用、有哪些规则、常见问题") {
+                            showRules = true
                         }
                         entry("免责声明", "doc.text",
                               "风险、数据存放、第三方服务") {
@@ -127,6 +129,9 @@ struct MeView: View {
             .sheet(isPresented: $showHealth) {
                 PeriodView()
             }
+            .sheet(isPresented: $showRules) {
+                RulesView()
+            }
             .sheet(isPresented: $showPoints) {
                 PointsView()
             }
@@ -136,10 +141,6 @@ struct MeView: View {
     /// 规则页在网站上单独一页 —— 群里发的、App 里点的，都是同一个地址。
     /// ⚠️ 用**不带 `.html`** 的那个（2026-10-02 站上统一成干净地址，
     ///    `.html` 那种会 301 跳一下）。
-    private func openRules() {
-        guard let url = AevisHosts.siteURL("/rules") else { return }
-        openURL(url)
-    }
 
     // MARK: - 我的资料
 
