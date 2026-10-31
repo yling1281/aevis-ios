@@ -27,6 +27,7 @@ struct DiscoverView: View {
     @State private var showRealLife = false
     @State private var showHerPhone = false
     @State private var showBrowser = false
+    @State private var showAppleMusic = false
 
     var body: some View {
         NavigationStack {
@@ -42,23 +43,15 @@ struct DiscoverView: View {
                         entry("情侣空间", "heart.text.square", coupleLine) {
                             showCouple = true
                         }
-                        // 一起听 / 音乐：**已经放开了**（2026-10-04）。
-                        // 原来它们裹在 `Experimental.enabled` 里（虽然那个开关恒为 true）。
-                        // 现在跟「情侣空间」一样是**裸入口** —— 这块功能已经定下来，
-                        // 不该再挂在"内测"的名头后面。
-                        //
-                        // ⚠️ 「一起听」开的是**全屏播放器**（2026-10-01）：
-                        //    以前它开 `TogetherView`（三张设置卡片），用户说「不好用」，
-                        //    那个面板已删，形态选择和找歌都搬进 `PlayerView` 了。
-                        entry("一起听", "music.note.list", togetherLine) {
+                        // ⭐ 2026-10-31 用户要求：音乐与「一起听」**合并成一个「网易云音乐」**，
+                        //    取消「一起玩」，并新增「苹果音乐」。
+                        //    合并后的入口直接开全屏播放器（PlayerView），里面已经含
+                        //    "ta 跟着听 + 想切歌就切"，不需要再摆第二个入口。
+                        entry("网易云音乐", "music.note", togetherLine) {
                             router.showPlayer = true
                         }
-                        entry("音乐", "music.note", musicLine) {
-                            showMusic = true
-                        }
-                        // ⭐ 一起玩《我的世界》（2026-10-04 从电脑版同步过来）。
-                        entry("一起玩", "gamecontroller", "选个人设，陪你在《我的世界》里过一天") {
-                            showMC = true
+                        entry("苹果音乐", "music.note.house", "用系统 MusicKit 搜歌、播放（需 Apple Music 订阅）") {
+                            showAppleMusic = true
                         }
                         // ⭐ 2026-10-06：内置浏览器 —— 页内能上网，看到好的点右上角
                         //    「纸飞机」就发给 ta。入口放在发现页第一张卡。
@@ -147,6 +140,10 @@ struct DiscoverView: View {
                             }
                         }
                 }
+            }
+            // 苹果音乐（Apple Music / MusicKit）。⚠️ 模拟器不支持 MusicKit，只能真机。
+            .sheet(isPresented: $showAppleMusic) {
+                AppleMusicView()
             }
             .onAppear {
                 applyLaunchOptions()

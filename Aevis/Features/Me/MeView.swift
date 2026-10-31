@@ -52,23 +52,13 @@ struct MeView: View {
                         entry("外观", "paintpalette", "玻璃、背景、主题色、字体") {
                             route = SettingsRoute(focus: "appearance")
                         }
-                        entry("朋友圈", "photo.on.rectangle.angled", "\(Pronoun.current)发动态的节奏、配图、样式") {
-                            route = SettingsRoute(focus: "moments")
-                        }
-                        if Experimental.enabled {
-                            entry("百度网盘", "externaldrive.connected.to.line.below", baiduLine) {
-                                route = SettingsRoute(focus: "baidupan")
-                            }
-                        }
-                        entry("QQ 机器人", "bubble.left.and.bubble.right", qqBotLine) {
-                            route = SettingsRoute(focus: "qqbot")
-                        }
-                        // 🚀 老板在设置页里找不到「微信机器人」，所以在「我」这一页也挂一条
-                        //    直达（跟 QQ 机器人并排 —— 都是「机器人」那条线），
-                        //    多一个入口，总好过让人找不到。
-                        entry("微信机器人", "message.badge", "在手机上跑，不用电脑（扫码绑定）") {
-                            route = SettingsRoute(focus: "wechatbot")
-                        }
+                        // 2026-10-31 用户要求：「我的」页移除朋友圈 / 百度网盘 / QQ 机器人 /
+                        // 微信机器人 四个入口。功能本身不删，只是不在这里露出 ——
+                        //   朋友圈    → 「发现」页
+                        //   百度网盘  → 设置 → 高级（Experimental）
+                        //   QQ/微信机器人 → 设置 → 机器人
+                        // 道理：这一页是"个人信息 + 账号安全"，bot 与云盘属于"外接能力"，
+                        // 混在一起会让人觉得整页都是开关。
                         // 「AI 权限」放这一组，而且**不藏在「更多设置」里** ——
                         // 用户要的就是一句话能关掉ta的手脚，藏起来等于没有。
                         entry("AI 权限", "lock.shield", aiToolsLine) {

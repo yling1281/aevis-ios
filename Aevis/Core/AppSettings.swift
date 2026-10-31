@@ -1735,7 +1735,7 @@ final class AppSettings: ObservableObject {
         disabledToolCategories = defaults.stringArray(forKey: Key.aiToolsDisabled) ?? []
         companionEnabled = defaults.object(forKey: Key.companionEnabled) as? Bool ?? false
         companionInterval = defaults.object(forKey: Key.companionInterval) as? Double ?? 20
-        defaultTab = defaults.string(forKey: Key.defaultTab) ?? "contacts"
+        defaultTab = defaults.string(forKey: Key.defaultTab) ?? "chats"   // 2026-10-31：启动默认进聊天页
         lockShortcutName = defaults.string(forKey: Key.lockShortcutName) ?? ""
         screenTimeShortcutName = defaults.string(forKey: Key.screenTimeShortcutName) ?? ""
         // ⚠️ 必须用 object(forKey:) 判「有没有设过」。

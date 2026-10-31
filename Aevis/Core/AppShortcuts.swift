@@ -430,7 +430,7 @@ struct AevisAppShortcuts: AppShortcutsProvider {
                 "用\(.applicationName)一起听",
                 "用\(.applicationName)打开一起听"
             ],
-            shortTitle: "一起听",
+            shortTitle: "网易云",
             systemImageName: "headphones"
         )
         AppShortcut(

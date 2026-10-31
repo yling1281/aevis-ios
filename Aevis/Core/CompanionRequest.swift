@@ -43,7 +43,7 @@ final class CompanionRequest: ObservableObject {
             switch self {
             case .call: return "接听"
             case .screenShare: return "让\(Pronoun.current)看"
-            case .listenTogether: return "一起听"
+            case .listenTogether: return "网易云"
             }
         }
 

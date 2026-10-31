@@ -189,7 +189,7 @@ struct PlayerView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "person.2.fill")
                             .font(.aevis(11, weight: .medium))
-                        Text("一起听")
+                        Text("网易云")
                             .font(.aevis(11.5, weight: .medium))
                     }
                     .foregroundStyle(theme.onBackground.opacity(0.85))

@@ -915,7 +915,7 @@ struct ChatView: View {
                     // 一起听 → 直接开全屏播放器（它现在就是一起听的界面）
                     router.showPlayer = true
                 } label: {
-                    moreTile("一起听", "music.note.list")
+                    moreTile("网易云", "music.note")
                 }
 
                 Button {

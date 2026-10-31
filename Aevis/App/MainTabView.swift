@@ -61,7 +61,10 @@ struct MainTabView: View {
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    @State private var tab: MainTab = .contacts
+    @State private var tab: MainTab = .chats
+
+    /// 热更新检测（2026-10-31）。启动 / 回前台各查一次，服务端 6 小时节流。
+    @StateObject private var updateCenter = AppUpdateCenter.shared
 
     var body: some View {
         Group {
@@ -70,6 +73,15 @@ struct MainTabView: View {
             } else {
                 phoneTabs
             }
+        }
+        .task { await updateCenter.checkIfNeeded() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await updateCenter.checkIfNeeded() }
+        }
+        // 强制更新不可关闭（interactiveDismissDisabled 在 UpdateSheet 内已设置）
+        .sheet(isPresented: Binding(get: { updateCenter.shouldPrompt },
+                                    set: { _ in })) {
+            UpdateSheet(center: updateCenter)
         }
         // 这几个面板提到根上，二级页面和根视图都能触发（截图自检也靠它）
         .sheet(isPresented: $router.showSettings, onDismiss: { router.settingsFocus = nil }) {

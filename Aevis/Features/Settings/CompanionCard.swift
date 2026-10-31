@@ -34,7 +34,7 @@ struct CompanionCard: View {
 
                 entry(
                     symbol: "music.note.list",
-                    title: "一起听",
+                    title: "网易云",
                     detail: together.active
                         ? "进行中 · \(together.currentTrackTitle)"
                         : (player.current?.display ?? "歌在这台手机上放，\(Pronoun.current)跟着一起听")
