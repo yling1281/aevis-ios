@@ -95,9 +95,12 @@ struct AppleMusicView: View {
                                     .font(.aevis(14.5))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
-                                Text([song.artistName, song.albumTitle]
-                                    .filter { !$0.isEmpty }
-                                    .joined(separator: " · "))
+                                Text(
+                                    ([song.artistName, song.albumTitle]
+                                        .compactMap { $0 }
+                                        .filter { !$0.isEmpty }
+                                        .joined(separator: " · "))
+                                )
                                     .font(.aevis(12))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -150,8 +153,8 @@ struct AppleMusicView: View {
     private func play(_ song: Song) async {
         do {
             let player = ApplicationMusicPlayer.shared
-            let items = MusicItemCollection([song])
-            player.queue = ApplicationMusicPlayer.Queue(playing: items)
+            let entry = ApplicationMusicPlayer.Queue.Entry(song)
+            player.queue = ApplicationMusicPlayer.Queue([entry])
             try await player.play()
         } catch {
             note = "放不了：\(error.localizedDescription)（多半是没 Apple Music 会员）"

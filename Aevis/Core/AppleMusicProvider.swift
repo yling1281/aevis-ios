@@ -21,7 +21,7 @@ final class AppleMusicProvider: ObservableObject {
     private init() {}
 
     func refreshStatus() {
-        authStatus = MusicAuthorization.current
+        authStatus = MusicAuthorization.currentStatus
         Task { await updatePlayability() }
     }
 
@@ -31,16 +31,14 @@ final class AppleMusicProvider: ObservableObject {
     }
 
     private func updatePlayability() async {
-        if let subscription = try? await MusicSubscription.current() {
-            canPlay = subscription.canPlayCatalogContent
-        }
+        canPlay = MusicSubscription.current.canPlayCatalogContent
     }
 
     /// 搜歌（catalog 搜索，不需要会员也能搜）。
     func search(_ term: String, limit: Int = 20) async throws -> [Song] {
-        var request = MusicCatalogResourceRequest<Song>(matching: \.title, contains: term)
+        var request = MusicCatalogSearchRequest<Song>(term: term)
         request.limit = limit
         let response = try await request.response()
-        return response.items
+        return Array(response.songs)
     }
 }
