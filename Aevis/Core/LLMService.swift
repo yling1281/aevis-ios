@@ -5,13 +5,18 @@ enum LLMError: LocalizedError {
     case badURL
     case emptyReply
     case http(status: Int, body: String)
+    /// 积分不够（后端 402）。要提示充值，不能只说"失败"。
+    case insufficientPoints(need: Int, have: Int)
 
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "还没填 API Key。打开右上角设置 →「模型接入」填上再试。"
+            // ★ 2026-10-31：不再让用户填 API Key —— 改成登录 + 充值积分。
+            return "还没登录账号。先登录，聊天按积分计费。"
         case .badURL:
             return "接口地址不对，检查一下 Base URL。"
+        case .insufficientPoints(let need, let have):
+            return "积分不够了（还差 \(max(0, need - have)) 积分）。去「我的 → 积分」充值。"
         case .emptyReply:
             return "\(Pronoun.current)这次没说话，再试一次。"
         case let .http(status, body):
@@ -488,7 +493,13 @@ enum LLMService {
         var base = config.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else { throw LLMError.badURL }
         while base.hasSuffix("/") { base.removeLast() }
-        if !base.hasSuffix("/chat/completions") {
+        // ★ 2026-10-31：走我们自己的云端网关（`/v1/llm/chat`），
+        //   不是 OpenAI 那种 `/chat/completions`。
+        //   ⚠️ 云端网关**透传 tools**，设备工具循环靠它 ——
+        //      所以千万别把 baseURL 改到 `ai.aevis.cn`（那一层会剥掉 tools）。
+        if base.hasSuffix(AevisHosts.accountBase) {
+            base += "/v1/llm/chat"
+        } else if !base.hasSuffix("/chat/completions") {
             base += "/chat/completions"
         }
         guard let url = URL(string: base) else { throw LLMError.badURL }
@@ -532,6 +543,22 @@ enum LLMService {
             for try await line in bytes.lines {
                 collected += line
                 if collected.count > 800 { break }
+            }
+            // ★ 402 = 积分不足（云端网关的约定），要给能引导充值的提示，
+            //   而不是把 {"code":4020,...} 甩给用户看。
+            if http.statusCode == 402 {
+                var need = 0, have = 0
+                if let d = collected.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                   let payload = (obj["data"] as? [String: Any]) ?? obj {
+                    need = (payload["need"] as? Int) ?? 0
+                    have = (payload["points"] as? Int) ?? 0
+                }
+                throw LLMError.insufficientPoints(need: need, have: have)
+            }
+            // 401 = 没登录 / token 过期
+            if http.statusCode == 401 {
+                throw LLMError.notConfigured
             }
             throw LLMError.http(status: http.statusCode, body: collected)
         }

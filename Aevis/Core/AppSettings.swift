@@ -2001,11 +2001,23 @@ final class AppSettings: ObservableObject {
         return try? JSONDecoder().decode(BubbleLook.self, from: data)
     }
 
+    /// 模型调用参数快照。
+    ///
+    /// ★ 2026-10-31：**不再让用户自己填 API Key 和接口地址**。
+    /// 用户 2026-10-31 原话：「我们的那个 API 就取消啊，把那个积分顶替掉那个 API，
+    /// 用我们云端的那个 API，云端的大模型……让用户自己选择」。
+    ///
+    /// 所以这里固定走**我们自己的云端网关**（`AevisHosts.accountBase`），
+    /// 鉴权用**账号 token**（不是 DeepSeek 的 key），费用从**积分**里扣。
+    /// 模型由用户在设置里从云端下发的列表里挑（`CloudModelStore.selectedID`）。
+    ///
+    /// ⚠️ 这里**不再读** `baseURL` / `apiKey` / `model` 三个用户填的值 ——
+    ///    但 `tts` 仍会回落到 `baseURL`（外接语音地址是另一回事，用户自己填）。
     var llm: LLMConfig {
         LLMConfig(
-            baseURL: baseURL,
-            apiKey: apiKey,
-            model: model,
+            baseURL: AevisHosts.accountBase,
+            apiKey: accountToken,
+            model: CloudModelStore.shared.selectedID,
             reasoning: reasoningBudget,
             contextLimit: contextLimit
         )

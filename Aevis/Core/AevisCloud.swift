@@ -4,7 +4,7 @@ import Foundation
 import UIKit
 #endif
 
-/// 姜言自建后端（`ai.aevis.cn` / `aevis.cn`）的接入层。
+/// 自有后端（`ai.aevis.cn` / `aevis.cn`）的接入层。
 ///
 /// ## 为什么单独一个文件，不塞进 `AccountService`
 /// `AccountService` 连的是**账号站**（`account.aevis.cn`，登录 / 激活 / 注册码），
@@ -55,7 +55,7 @@ enum AevisCloud {
         var errorDescription: String? {
             switch self {
             case .notSignedIn:
-                return "还没登录姜言账号，先登录再操作。"
+                return "还没登录账号，先登录再操作。"
             case .badURL:
                 return "接口地址不对。"
             case let .http(code, body):
@@ -153,15 +153,11 @@ enum AevisCloud {
         }
         token = t
 
-        // ⚠️ 顺手把内置 API 填进去 —— 用户明确要「API 提前加好」，不许让他手填地址。
-        //    用 chatBase 而不是 /v1 以外的任何东西：兼容层就认这个前缀。
-        let settings = AppSettings.shared
-        settings.baseURL = chatBase
-        // ⚠️ `isEmpty` 是 `String` 的成员，**不是 `NSString` 的**。
-        //    写成 `(x as NSString).isEmpty` 编译不过（'NSString' has no member 'isEmpty'）。
-        if settings.model.isEmpty || settings.model == "gpt-4o-mini" {
-            settings.model = "aevis-chat"
-        }
+        // ★ 2026-10-31：**不再往设置里塞内置 API**。
+        //   以前这里会写 `settings.baseURL` / `settings.model`，那套已经废掉了 ——
+        //   现在模型一律走我们自己的云端（`AevisHosts.accountBase` + `/v1/llm/chat`），
+        //   由用户在设置里从云端下发的列表里挑（`CloudModelStore.selectedID`）。
+        //   在这里偷偷改 `settings.model` 会把用户的选择冲掉。
         return payload
     }
 

@@ -55,11 +55,14 @@ enum ConfigShare {
         let settings = AppSettings.shared
         let persona = PersonaStore.shared.persona
 
+        // ★ 2026-10-31：不再分享接口地址和 API Key（自带 API 那套已取消）。
+        //   `model` 这个字段现在装的是**云端模型 id**（deepseek-flash 等），
+        //   对方扫了就是同一个模型 —— 这才是真正该分享的东西。
         let payload = Payload(
             provider: settings.providerPreset.rawValue,
-            baseURL: settings.baseURL,
-            model: settings.model,
-            apiKey: includeKey && !settings.apiKey.isEmpty ? settings.apiKey : nil,
+            baseURL: nil,
+            model: CloudModelStore.shared.selectedID,
+            apiKey: nil,
             systemVoice: persona.voiceIdentifier,
             accentIndex: settings.accentIndex,
             simpleMode: settings.simpleMode,
@@ -99,20 +102,18 @@ enum ConfigShare {
             settings.providerPreset = parsed
             changed.append("服务商")
         }
-        if let base = payload.baseURL, !base.isEmpty {
-            settings.baseURL = base
-            changed.append("接口地址")
-        }
+        // ⚠️ 接口地址不再接收（自带 API 已取消）——
+        //    老配置里带 baseURL 的就当没这回事，别把本机改回去。
         if let model = payload.model, !model.isEmpty {
-            settings.model = model
-            changed.append("模型")
+            // 只接受**云端认识的**模型 id，别的（老配置里的 "gpt-4o" 之类）忽略。
+            let known = CloudModelStore.shared.models.map(\.id)
+                + CloudModelStore.fallbackIDs
+            if known.contains(model) {
+                CloudModelStore.shared.selectedID = model
+                changed.append("模型")
+            }
         }
-        // ⚠️ Key 是**单独一步**，而且只在对方真的带过来时才覆盖 ——
-        // 不带 Key 的二维码绝不该把本机已填的 Key 清掉。
-        if let key = payload.apiKey, !key.isEmpty {
-            settings.apiKey = key
-            changed.append("API Key")
-        }
+        // ★ 2026-10-31：不再接收 API Key（自带 API 已取消，Key 由服务端统一管）。
         if let voice = payload.systemVoice {
             persona.voiceIdentifier = voice
             personaTouched = true
@@ -179,8 +180,9 @@ enum ConfigShare {
         }
 
         guard !changed.isEmpty else { return "这段配置里没有能用的东西。" }
-        return "套用了：" + changed.joined(separator: "、")
-            + (payload.apiKey == nil ? "。（这段里没有 API Key，你还是得填自己的）" : "。")
+        // ★ 2026-10-31：不再提示"你得填自己的 API Key" —— 自带 API 已取消，
+        //   云端模型由服务器统一管，扫码过去就是同一个模型。
+        return "套用了：" + changed.joined(separator: "、") + "。"
     }
 
     // MARK: - 二维码

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 「姜言云端」设置卡 —— 充值 + 转移账号 + 内置 API 状态。
+/// 「<主角名>云端」设置卡 —— 充值 + 转移账号 + 内置 API 状态。
 ///
 /// ## ⭐ 充值和网页端**是同一笔账**
 /// 后端 `/v1/*` 的鉴权是同一个 `current_user()`（`app.py:370`），
@@ -22,6 +22,9 @@ import SwiftUI
 struct CloudCard: View {
 
     @ObservedObject private var settings = AppSettings.shared
+    /// 云端的名字跟着**主角自己的名字**走（用户 2026-10-31：
+    /// 「云端的话就是我们名字的云端」）。以前这里写死过"姜言"，改名后一直是旧的。
+    @ObservedObject private var personaStore = PersonaStore.shared
 
     @State private var wallet: AevisCloud.Wallet?
     @State private var products: [AevisCloud.Product] = []
@@ -34,9 +37,19 @@ struct CloudCard: View {
 
     private var signedIn: Bool { AevisCloud.isSignedIn }
 
+    /// 云端的显示名：「<主角名>云端」。
+    ///
+    /// ⚠️ **不能写死**。这个名字以前在三个地方硬编码成"姜言"，
+    ///    用户换了主角名之后界面上还是"姜言云端"，看着像别人的东西。
+    ///    没设主角名时退回「我的云端」，别显示"云端"两个孤零零的字。
+    private var cloudTitle: String {
+        let n = personaStore.persona.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (n.isEmpty ? "我的" : n) + "云端"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            title("姜言云端")
+            title(cloudTitle)
 
             walletRow
             rule
@@ -83,7 +96,7 @@ struct CloudCard: View {
                         .font(.aevis(11.5))
                         .foregroundStyle(.secondary)
                 } else {
-                    Text(signedIn ? "正在取…" : "先登录姜言账号才能充值和搬家")
+                    Text(signedIn ? "正在取…" : "先登录账号才能充值和搬家")
                         .font(.aevis(11.5))
                         .foregroundStyle(.secondary)
                 }
@@ -101,11 +114,13 @@ struct CloudCard: View {
     private var apiRow: some View {
         row {
             VStack(alignment: .leading, spacing: 3) {
-                Text("内置 API")
+                Text("云端模型")
                     .font(.aevis(15))
+                // ★ 2026-10-31：显示**当前选的云端模型**（用户自己在设置里挑），
+                //   不再显示用户填的接口地址 —— 那套已经取消。
                 Text(usingAevisAPI
-                     ? "正在用姜言云端 · \(settings.model)"
-                     : "当前用 \(settings.baseURL.isEmpty ? "未设置" : settings.baseURL)")
+                     ? "正在用\(cloudTitle) · \(currentModelLabel)"
+                     : "当前用 \(currentModelLabel)")
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -132,7 +147,7 @@ struct CloudCard: View {
             HStack(spacing: 14) {
                 Button("充值") {
                     if signedIn { showingTopUp = true }
-                    else { note = "先登录姜言账号。" }
+                    else { note = "先登录账号。" }
                 }
                 .buttonStyle(.borderless)
                 .font(.aevis(14))
@@ -140,7 +155,7 @@ struct CloudCard: View {
 
                 Button("转移账号") {
                     if signedIn { showingTransfer = true }
-                    else { note = "先登录姜言账号。" }
+                    else { note = "先登录账号。" }
                 }
                 .buttonStyle(.borderless)
                 .font(.aevis(14))
@@ -169,19 +184,30 @@ struct CloudCard: View {
         }
     }
 
+    /// 当前选中的云端模型名（显示用）。
+    private var currentModelLabel: String {
+        CloudModelStore.shared.selected?.label ?? "DeepSeek V4.1 Flash"
+    }
+
     /// 「内置 API」的实际判定：**地址**和兼容层一致才算用上了。
-    /// 只比地址不比 model —— 用户自己换个模型名很正常，不该因此显示"没在用"。
+    ///
+    /// ★ 2026-10-31：判定改成「是不是走我们自己的云端」。
+    ///   模型调用现在**恒定**走 `AevisHosts.accountBase`（`/v1/llm/chat`），
+    ///   不再由用户填的 `settings.baseURL` 决定 —— 所以这里看云端地址。
     private var usingAevisAPI: Bool {
-        settings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .hasSuffix(AevisCloud.chatBase)
+        AevisHosts.accountBase.hasSuffix(AevisCloud.chatBase)
+            || !AevisHosts.accountBase.isEmpty
     }
 
     /// 不用 `ProviderPreset` 的写入口，是为了不动 `syncIntoActiveProfile` 那套回写逻辑 ——
     /// 这里只改当前生效的两栏，语义更窄也更安全。
+    ///
+    /// ★ 2026-10-31：不再改 `settings.baseURL` / `settings.model`（那套已废）。
+    ///   模型由用户在设置里的「云端模型」列表选，这里只提示一下。
     private func applyAevisAPI() {
-        settings.baseURL = AevisCloud.chatBase
-        settings.model = "aevis-chat"
-        note = "已经切到姜言云端。按这个账号的余额计费。"
+        // 云端模型本来就是默认路径，这里只需要把话说明白。
+        // （原来这里会写 settings.baseURL / settings.model，那套已随自带 API 一起废掉。）
+        note = "已经切到\(cloudTitle)。按这个账号的余额计费。"
     }
 
     // MARK: - 零件

@@ -29,14 +29,6 @@ struct SettingsView: View {
     @State private var newSourceTemplate = ""
     /// 折起来的组。默认空 = **全部展开**（理由见下面 sections 的注释）。
     @State private var folded: Set<String> = []
-    // —— API 预设 ——
-    @State private var showNewProfile = false
-    @State private var newProfileName = ""
-    @State private var editingProfileID = ""
-    @State private var renameDraft = ""
-    @State private var renameNote = ""
-    @State private var deleteTarget: APIProfile?
-    @State private var showDeleteConfirm = false
     /// 截图自检用：带 `-aevisOpenConsole` 启动时，**自动**把命令台那一页推出来。
     ///
     /// 为什么需要它：命令台藏在设置页那张卡的 `NavigationLink` 后面，
@@ -377,237 +369,88 @@ struct SettingsView: View {
     //
     // 所以这一块只干两件事：**列出所有预设** + **点一下切过去**。
     // 改具体内容（地址 / 模型 / Key）还是用下面那三栏 —— 免得同一个字段有两套输入框。
-
-    private var profileSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("我的 API 预设")
-                    .font(.aevis(12.5))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Button("存为预设") {
-                    newProfileName = ""
-                    showNewProfile = true
-                }
-                .font(.aevis(12.5))
-                .buttonStyle(.borderless)
-            }
-
-            if settings.apiProfiles.isEmpty {
-                Text("还没有预设。把现在这套「存为预设」起个名字，以后填别的商家再存一套，"
-                     + "就能一键切换 —— 地址、模型、Key 会一起换过去。")
-                    .font(.aevis(11.5))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(settings.sortedProfiles) { profile in
-                    profileRow(profile)
-                }
-                Text("点一行就切过去；长按可以收藏、改名、复制、删除。收藏的排在前面。")
-                    .font(.aevis(11))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .alert("存为预设", isPresented: $showNewProfile) {
-            TextField("给它起个名字，比如「DeepSeek 主号」", text: $newProfileName)
-            Button("保存") {
-                settings.saveCurrentAsProfile(name: newProfileName)
-                newProfileName = ""
-                modelMessage = "存好了。以后切别的商家时，点一下就能换回来。"
-            }
-            Button("取消", role: .cancel) { newProfileName = "" }
-        } message: {
-            Text("会记住当前的地址、模型和 Key。")
-        }
-        .alert("改名 / 备注", isPresented: Binding(
-            get: { !editingProfileID.isEmpty },
-            set: { if !$0 { editingProfileID = "" } }
-        )) {
-            TextField("名字", text: $renameDraft)
-            TextField("备注（可留空）", text: $renameNote)
-            Button("保存") {
-                settings.renameProfile(editingProfileID, to: renameDraft, note: renameNote)
-                editingProfileID = ""
-            }
-            Button("取消", role: .cancel) { editingProfileID = "" }
-        } message: {
-            Text("备注是给你自己看的，比如「余额 20」「便宜但慢」。")
-        }
-        .alert("删除这个预设？", isPresented: $showDeleteConfirm) {
-            Button("删除", role: .destructive) {
-                if let target = deleteTarget { settings.deleteProfile(target.id) }
-                deleteTarget = nil
-            }
-            Button("取消", role: .cancel) { deleteTarget = nil }
-        } message: {
-            Text("只删掉这套预设（名字、地址、Key）。聊天记录和别的设置都不受影响。")
-        }
-    }
-
-    private func profileRow(_ profile: APIProfile) -> some View {
-        let active = settings.activeProfileID == profile.id
-        let missingKey = settings.apiKey(forProfile: profile.id)
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return Button {
-            guard !active else { return }
-            settings.useProfile(profile.id)
-            modelMessage = "已切到「\(profile.name)」。"
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: active ? "largecircle.fill.circle" : "circle")
-                    .font(.aevis(15))
-                    .foregroundStyle(active ? settings.accentColor : Color.secondary.opacity(0.55))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        Text(profile.name)
-                            .font(.aevis(14.5, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if profile.favorite {
-                            Image(systemName: "star.fill")
-                                .font(.aevis(9.5))
-                                .foregroundStyle(.yellow)
-                        }
-                    }
-                    Text(profileSubtitle(profile))
-                        .font(.aevis(11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 6)
-
-                if missingKey {
-                    Text("缺 Key")
-                        .font(.aevis(11))
-                        .foregroundStyle(.orange)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(active ? settings.accentColor.opacity(0.12)
-                                 : Color.primary.opacity(0.045))
-            )
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                settings.toggleFavorite(profile.id)
-            } label: {
-                Label(profile.favorite ? "取消收藏" : "收藏（置顶）", systemImage: "star")
-            }
-            Button {
-                renameDraft = profile.name
-                renameNote = profile.note
-                editingProfileID = profile.id
-            } label: {
-                Label("改名 / 备注", systemImage: "pencil")
-            }
-            Button {
-                settings.duplicateProfile(profile.id)
-            } label: {
-                Label("复制一份", systemImage: "doc.on.doc")
-            }
-            Divider()
-            Button(role: .destructive) {
-                deleteTarget = profile
-                showDeleteConfirm = true
-            } label: {
-                Label("删除", systemImage: "trash")
-            }
-        }
-    }
-
-    /// 一行副标题：模型 · 域名 ·（备注）。认得出是哪个商家就够了，不铺太满。
-    private func profileSubtitle(_ profile: APIProfile) -> String {
-        var parts: [String] = []
-        if !profile.model.isEmpty { parts.append(profile.model) }
-        parts.append(profile.hostLabel)
-        if !profile.note.isEmpty { parts.append(profile.note) }
-        return parts.joined(separator: " · ")
-    }
+    /// 云端模型列表（模型 + 积分单价由后端下发）
+    @ObservedObject private var cloudModels = CloudModelStore.shared
 
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardTitle("模型接入")
 
-            // 我的 API 预设放在最上头 —— 用户要的「能加很多个商家、能收藏、有记忆」
-            // 就是这一块。它管的是"用哪一套"，下面三栏是"这一套具体长什么样"。
-            profileSection
-            rule
-
-            // 供应商预设：切一下就自动填好地址和模型名，不用手打 URL
+            // ★ 2026-10-31：云端模型 —— 不再让用户填 API Key / 接口地址。
+            //    聊天统一走我们的云端网关（`/v1/llm/chat`），按 token 扣积分，
+            //    价格 = DeepSeek 官方价 × 1.5。用户只负责「选哪个模型」。
             VStack(alignment: .leading, spacing: 9) {
-                Text("供应商")
-                    .font(.aevis(12.5))
-                    .foregroundStyle(.secondary)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(ProviderPreset.allCases) { preset in
-                            Button {
-                                settings.providerPreset = preset
-                                if preset != .custom {
-                                    settings.baseURL = preset.baseURL
-                                    if !preset.defaultModel.isEmpty {
-                                        settings.model = preset.defaultModel
-                                    }
-                                    settings.modelList = []
-                                }
-                                modelMessage = "已切成「\(preset.label)」，去 \(preset.keyHint) 拿 Key。"
-                            } label: {
-                                Text(preset.label)
-                                    .font(.aevis(13, weight: .medium))
-                                    .foregroundStyle(
-                                        settings.providerPreset == preset ? Color.white : Color.primary
-                                    )
-                                    .padding(.horizontal, 13)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        Capsule().fill(
-                                            settings.providerPreset == preset
-                                                ? settings.accentColor
-                                                : Color.primary.opacity(0.07)
-                                        )
-                                    )
-                            }
-                            .buttonStyle(.plain)
+                HStack {
+                    Text("云端模型")
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if cloudModels.loading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button {
+                            Task { await cloudModels.refresh(force: true) }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 2)
                 }
 
-                Text("预设只是帮你把地址和模型名填好，下面两栏随时能改。"
-                     + "改了会存进「当前那套」预设 —— 想试别的又不想动现在这套，"
-                     + "先长按「复制一份」。Key 从 \(settings.providerPreset.keyHint) 拿。")
+                ForEach(cloudModels.models) { m in
+                    Button {
+                        cloudModels.selectedID = m.id
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: cloudModels.selectedID == m.id
+                                  ? "largecircle.fill.circle" : "circle")
+                                .font(.system(size: 17))
+                                .foregroundStyle(cloudModels.selectedID == m.id
+                                                 ? settings.accentColor : Color.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(m.label)
+                                        .font(.aevis(14, weight: .medium))
+                                    if m.isDefault {
+                                        Text("推荐")
+                                            .font(.aevis(10, weight: .medium))
+                                            .foregroundStyle(settings.accentColor)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Capsule().fill(settings.accentColor.opacity(0.14)))
+                                    }
+                                }
+                                if !m.note.isEmpty {
+                                    Text(m.note)
+                                        .font(.aevis(11.5))
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Text(m.priceHint)
+                                    .font(.aevis(11))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if cloudModels.models.isEmpty {
+                    Text("正在取模型列表…")
+                        .font(.aevis(12))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Text("聊天按 token 计费，从积分里扣。价格 = DeepSeek 官方价 × 1.5，"
+                     + "1 元 = 200 积分。积分不够会提示你去充值。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            rule
-
-            labeledField("接口地址", hint: "https://api.deepseek.com/v1", text: $settings.baseURL)
-            rule
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text("API Key")
-                    .font(.aevis(12.5))
-                    .foregroundStyle(.secondary)
-                SecureField("sk-...", text: $settings.apiKey)
-                    .font(.aevis(14))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 11)
-                    .background(fieldBackground)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -615,8 +458,6 @@ struct SettingsView: View {
 
             // ⚠️ hint 别写死成 `deepseek-chat`（2026-10-07 改）——
             //    那个模型名已于 2026-07-24 停用，写在那儿等于**教用户填一个已经死掉的**名字。
-            labeledField("模型名", hint: "deepseek-v4-flash", text: $settings.model)
-            rule
 
             // 推理预算 + 上下文 + 启动自检
             VStack(alignment: .leading, spacing: 14) {
@@ -698,21 +539,6 @@ struct SettingsView: View {
                     }
                     .disabled(testing)
 
-                    Button(action: pullModels) {
-                        HStack(spacing: 7) {
-                            if pullingModels {
-                                ProgressView().controlSize(.small)
-                            }
-                            Text(pullingModels ? "正在拉…" : "拉取模型")
-                                .font(.aevis(14, weight: .medium))
-                        }
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 9)
-                        .aevisGlass(cornerRadius: 14)
-                    }
-                    .disabled(pullingModels)
-
                     Spacer(minLength: 0)
                 }
 
@@ -730,39 +556,8 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // 拉到的模型：做成可点的列表，一眼看得出哪个在用。
-                // 之前用下拉菜单，在 iOS 上只渲染出一个很小的箭头，看着像坏了。
-                if !settings.modelList.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("选一个")
-                            .font(.aevis(12))
-                            .foregroundStyle(.secondary)
-                            .padding(.bottom, 4)
-
-                        ForEach(settings.modelList, id: \.self) { name in
-                            Button {
-                                settings.model = name
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text(name)
-                                        .font(.aevis(14))
-                                        .foregroundStyle(.primary)
-                                    Spacer(minLength: 8)
-                                    if settings.model == name {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(settings.accentColor)
-                                    }
-                                }
-                                .padding(.vertical, 9)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                Text("Key 只存在这台手机的钥匙串里，不会上传到任何地方，也不会进代码仓库。支持任何 OpenAI 兼容接口。")
+                Text("不需要填 Key —— 登录账号就能用，费用从积分里扣。"
+                     + "Key 只在服务器上，你手机里不存任何第三方密钥。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1117,21 +912,18 @@ struct SettingsView: View {
         }
     }
 
+    /// 刷新云端模型列表。
+    ///
+    /// ★ 2026-10-31：模型清单现在由**我们自己的云端**下发
+    ///   （`/v1/llm/models`），不再问第三方接口要 —— 所以这里只调云端。
     private func pullModels() {
         pullingModels = true
         modelMessage = nil
-        let config = settings.llm
-
         Task { @MainActor in
-            do {
-                let entries = try await ModelCatalog.fetchModels(config: config)
-                settings.modelList = entries.map(\.id)
-                modelMessage = entries.isEmpty
-                    ? "接口没返回模型清单，可以直接手填模型名。"
-                    : "拉到 \(entries.count) 个模型。"
-            } catch {
-                modelMessage = error.localizedDescription
-            }
+            await cloudModels.refresh(force: true)
+            modelMessage = cloudModels.lastError.isEmpty
+                ? "云端有 \(cloudModels.models.count) 个模型可选。"
+                : "取模型列表失败：\(cloudModels.lastError)"
             pullingModels = false
         }
     }

@@ -90,6 +90,18 @@ enum AevisHosts {
     static func accountWebURL(_ path: String) -> URL? { URL(string: accountWebBase + path) }
     static func siteURL(_ path: String) -> URL? { URL(string: siteBase + path) }
 
+    // MARK: - 云端 AI（积分计费，2026-10-31）
+
+    /// 可选模型列表（用户自己选模型）。
+    static var llmModelsURL: String { account("/v1/llm/models") }
+    /// 积分余额。
+    static var llmBalanceURL: String { account("/v1/llm/balance") }
+    /// 对话（OpenAI 兼容，流式/非流式都支持）。
+    ///
+    /// ⚠️ 这个接口**透传 tools** —— iOS 的设备工具循环靠它，
+    ///    所以别把 baseURL 改到 `ai.aevis.cn`（那一层会剥掉 tools）。
+    static var llmChatURL: String { account("/v1/llm/chat") }
+
     // MARK: - 备用域名（线路二 / 线路三）
 
     /// 最老的备用域名（线路三）。⚠️ **不是废弃值，是"备用域名"**：
