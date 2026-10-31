@@ -8,6 +8,10 @@ import EventKit
 import UIKit
 #endif
 
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+
 /// 一个能被ta调用的工具。
 /// `parameters` 是给模型看的 JSON Schema，`run` 是真正干活的实现。
 struct DeviceTool {
@@ -151,7 +155,7 @@ enum DeviceTools {
     private static var allGroups: [(category: ToolCategory, tools: [DeviceTool])] {
         [
             (.core, [timeTool, clipboardReadTool, clipboardWriteTool, calculatorTool]),
-            (.calendar, [calendarListTool, calendarCreateTool, reminderCreateTool]),
+            (.calendar, [calendarListTool, calendarCreateTool, reminderCreateTool, reminderListTool, reminderCompleteTool]),
             (.sense, senseTools),
             (.web, webTools),
             (.browser, browserTools),
@@ -160,9 +164,9 @@ enum DeviceTools {
             (.diary, DiaryTools.tools),
             (.pan, panTools),
             (.qq, qqTools + qqBotTools),
-            // 系统动作 + `shellTool`（命令行）放一类 ——
-            // shell 是这里最狠的一个，它就该跟"能不能替我操作这台手机"捆在一起。
-            (.system, systemTools + [shellTool]),
+            // 系统动作 + `shellTool`（命令行）+ `ttsTool`（文字转语音）放一类 ——
+            // 这一类都跟"能不能替我操作这台手机"捆在一起。
+            (.system, systemTools + [shellTool, ttsTool]),
             (.wallet, WalletTools.walletTools),
             (.couple, CoupleTools.coupleTools),
             // ta**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
@@ -440,6 +444,54 @@ enum DeviceTools {
         return value
     }
 
+    // MARK: - 文字转语音
+
+    /// 设备上的语音合成。AVSpeechSynthesizer 必须在主线程上创建和朗读，
+    /// 所以整个调用切到主线程；念完不需要等，直接回一句话就行。
+    /// 存一份引用，避免局部变量被回收导致念到一半被掐掉。
+    private static var ttsSynthesizer: Any?
+
+    private static var ttsTool: DeviceTool {
+        DeviceTool(
+            name: "text_to_speech",
+            title: "念了一段文字",
+            description: """
+            把一段文字用设备的语音合成大声念出来（文字转语音 / TTS）。
+            用户说「念给我听」「大声读出来」「用语音告诉我」时用它。
+            """,
+            parameters: [
+                "type": "object",
+                "properties": [
+                    "text": ["type": "string", "description": "要朗读的文字"],
+                    "language": ["type": "string", "description": "语言代码，可选，例如 zh-CN、en-US，不给就用系统默认"]
+                ],
+                "required": ["text"]
+            ]
+        ) { args in
+            #if canImport(AVFoundation) && canImport(UIKit)
+            guard let text = args["text"] as? String, !text.isEmpty else {
+                return "没给要朗读的文字。"
+            }
+            let language = (args["language"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let preview = String(text.prefix(40))
+            return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+                DispatchQueue.main.async {
+                    let utterance = AVSpeechUtterance(string: text)
+                    if let language, let voice = AVSpeechSynthesisVoice(language: language) {
+                        utterance.voice = voice
+                    }
+                    let synth = AVSpeechSynthesizer()
+                    ttsSynthesizer = synth
+                    synth.speak(utterance)
+                    continuation.resume(returning: "已经在用语音念出来了：\(preview)")
+                }
+            }
+            #else
+            return "当前平台不支持语音合成。"
+            #endif
+        }
+    }
+
     // MARK: - 日历与提醒
 
     #if canImport(EventKit)
@@ -606,6 +658,96 @@ enum DeviceTools {
             return "当前平台不支持提醒事项。"
             #endif
         }
+    }
+
+    private static var reminderListTool: DeviceTool {
+        DeviceTool(
+            name: "list_reminders",
+            title: "翻了翻你的提醒事项",
+            description: """
+            读取用户「提醒事项」里还没完成的待办。用户问「我还有什么没做」「提醒里有什么」时用它。
+            每条都带一个 id，要标记完成时把这个 id 交给 complete_reminder。
+            """,
+            parameters: [
+                "type": "object",
+                "properties": [
+                    "limit": ["type": "integer", "description": "最多返回几条，1~50，默认 20"]
+                ],
+                "required": [] as [String]
+            ]
+        ) { args in
+            #if canImport(EventKit)
+            guard let store = await authorizedReminders() else {
+                return "用户没有授权访问提醒事项，我看不到。"
+            }
+            let limit = min(max((args["limit"] as? Int) ?? 20, 1), 50)
+            let predicate = store.predicateForIncompleteReminders(
+                withDueDateStarting: nil, ending: nil, calendars: nil
+            )
+            let reminders: [EKReminder]? = await withCheckedContinuation { cont in
+                store.fetchReminders(matching: predicate) { cont.resume(returning: $0) }
+            }
+            let incomplete = (reminders ?? []).filter { !$0.isCompleted }
+            guard !incomplete.isEmpty else { return "提醒事项里没有还没做的待办。" }
+            let lines = incomplete.prefix(limit).enumerated().map { index, reminder in
+                let due = reminder.dueDateComponents
+                    .flatMap { Calendar.current.date(from: $0) }
+                    .map { Self.reminderDate($0) } ?? ""
+                let id = reminder.calendarItemIdentifier
+                return "\(index + 1). [\(id)] \(reminder.title ?? "（没写标题）")\(due.isEmpty ? "" : "（\(due)）")"
+            }
+            return "还有 \(incomplete.count) 件待办：\n" + lines.joined(separator: "\n")
+            #else
+            return "当前平台不支持提醒事项。"
+            #endif
+        }
+    }
+
+    private static var reminderCompleteTool: DeviceTool {
+        DeviceTool(
+            name: "complete_reminder",
+            title: "帮你打勾了一件待办",
+            description: """
+            把「提醒事项」里某条待办标记为已完成。用户说「那个买牛奶的搞定了」「那条划掉」时用它。
+            id 从 list_reminders 的返回里拿。
+            """,
+            parameters: [
+                "type": "object",
+                "properties": [
+                    "id": ["type": "string", "description": "要完成的提醒的 id，来自 list_reminders"]
+                ],
+                "required": ["id"]
+            ]
+        ) { args in
+            #if canImport(EventKit)
+            guard let store = await authorizedReminders() else {
+                return "用户没有授权访问提醒事项，我改不了。"
+            }
+            guard let id = args["id"] as? String, !id.isEmpty else {
+                return "没给要完成的提醒 id（先用 list_reminders 看一下）。"
+            }
+            guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+                return "找不到这条提醒（id 可能过期了，再 list_reminders 一次）。"
+            }
+            reminder.isCompleted = true
+            do {
+                try store.save(reminder, commit: true)
+                return "已标记完成：\(reminder.title ?? "那条待办")"
+            } catch {
+                return "标记完成失败：\(error.localizedDescription)"
+            }
+            #else
+            return "当前平台不支持提醒事项。"
+            #endif
+        }
+    }
+
+    /// 把提醒的截止时间格式化成「M月d日 HH:mm」这种短格式。
+    private static func reminderDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 HH:mm"
+        return formatter.string(from: date)
     }
 
     // MARK: - 零件
