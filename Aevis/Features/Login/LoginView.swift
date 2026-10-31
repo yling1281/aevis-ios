@@ -42,8 +42,7 @@ struct LoginView: View {
     @State private var accountField = ""
     @State private var password = ""
 
-    // —— 注册码注册 ——
-    @State private var invite = ""
+    // —— 注册（邮箱 + 密码 + 验证码；2026-10-31 起不再需要注册码）——
     @State private var invited = false
 
     @State private var working = false
@@ -85,7 +84,7 @@ struct LoginView: View {
             switch self {
             case .code: return "验证码登录"
             case .password: return "密码登录"
-            case .register: return "我有注册码"
+            case .register: return "注册"
             }
         }
     }
@@ -169,7 +168,12 @@ struct LoginView: View {
     private var browserCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                openInBrowser()
+                // 🔴 2026-10-31：账号迁到 4-4 后，**"跳浏览器登录"这条路断了** ——
+                //    新的网页登录页（`aevis.cn/account.html`）把 token 存在自己的
+                //    sessionStorage 里，**不会**跳 `aevis://login` 把凭证交回 App。
+                //    继续跳浏览器 = 用户登完回不来（页面还是 200，看起来一切正常）。
+                //    ⇒ 主按钮改成**在 App 内直接展开登录/注册表单**（验证码 / 密码 / 注册）。
+                withAnimation(.snappy(duration: 0.25)) { showNative = true }
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "safari")
@@ -327,8 +331,10 @@ struct LoginView: View {
 
     private var registerForm: some View {
         VStack(alignment: .leading, spacing: 13) {
-            field("注册码", placeholder: "群里机器人给你的那串", text: $invite, secret: false)
+            // 🔴 2026-10-31：注册改成「邮箱 + 密码 + 邮箱验证码」，
+            //    **不再要注册码**（老体系那套一人一码已随老后端下线）。
             field("邮箱", placeholder: "用来收验证码的邮箱", text: $email, secret: false)
+            field("密码", placeholder: "至少 8 位，含字母和数字", text: $password, secret: true)
 
             if invited {
                 field("验证码", placeholder: "邮箱里那 6 位数字", text: $code,
@@ -339,27 +345,31 @@ struct LoginView: View {
                 if invited {
                     Button {
                         run {
-                            try await account.registerFinish(code: invite, email: email,
-                                                              emailCode: code)
+                            try await account.register(email: email,
+                                                        password: password,
+                                                        code: code)
                         }
                     } label: {
                         primaryLabel(working ? "注册中…" : "注册并登录")
                     }
-                    .disabled(working || code.isEmpty)
+                    .disabled(working || code.isEmpty || password.isEmpty)
                 } else {
                     Button {
-                        run { try await account.registerStart(code: invite, email: email); invited = true }
+                        run {
+                            try await account.requestRegisterCode(email: email)
+                            invited = true
+                        }
                     } label: {
-                        primaryLabel(working ? "验证中…" : "下一步")
+                        primaryLabel(working ? "发送中…" : "发送验证码")
                     }
-                    .disabled(working || invite.isEmpty || email.isEmpty)
+                    .disabled(working || email.isEmpty || password.count < 8)
                 }
 
                 Spacer(minLength: 0)
                 if working { ProgressView().controlSize(.small) }
             }
 
-            Text("注册码在 QQ 群 683699963 里找机器人领，一人一码。")
+            Text("密码至少 8 位，要同时包含字母和数字。注册即赠 30 天体验。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -516,11 +526,6 @@ struct LoginView: View {
 
     /// QQ：内置浏览器跳授权 → 服务端把 token 送回 `aevis://login`。
     private func loginWithQQ() {
-        guard let url = account.qqLoginURL() else {
-            note = "账号服务器地址不对，检查一下「设置 → 账号」里的地址。"
-            noteIsBad = true
-            return
-        }
         guard !working else { return }
         note = nil
         noteIsBad = false
@@ -528,6 +533,15 @@ struct LoginView: View {
 
         Task { @MainActor in
             defer { working = false }
+            // 🔴 2026-10-31：4-4 改成先进程问一次授权地址（`POST /v1/auth/qq/url`），
+            //    所以这里必须先 await 拿到 URL 才能开浏览器。
+            //    拿不到只有两种原因：服务端没配 QQ 互联（当前就是这种），或网络断了 ——
+            //    两种都给同一句人话，别让用户去猜"账号服务器地址不对"。
+            guard let url = await account.qqLoginURL() else {
+                note = "QQ 登录暂不可用（服务端还未配置 QQ 互联），先用邮箱验证码登录吧。"
+                noteIsBad = true
+                return
+            }
             // ⚠️ scheme 必须是 `aevis` —— 服务端就是往这个 scheme 跳的
             //    （`AEVIS_APP_SCHEME`，默认 aevis）。对不上就永远收不到回调，
             //    表现是"点了 QQ 登录，转一圈没反应"。

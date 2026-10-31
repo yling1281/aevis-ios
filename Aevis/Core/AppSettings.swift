@@ -491,6 +491,8 @@ final class AppSettings: ObservableObject {
         static let weChatBotBoundAt = "aevis.weChatBot.boundAt"
         static let accountServerURL = "aevis.account.serverURL"
         static let accountExpiresAt = "aevis.account.expiresAt"
+        /// 登录账号的完整邮箱（4-4 的 /v1/me 只回打码值，完整值在这里存着）
+        static let accountEmail = "aevis.account.email"
         /// 这台设备通过了授权（设备码绑到某个账号上了）。
         /// **授权一次就永久记住** —— 服务器抖一下、地铁里没信号，
         /// 都不该让用户打不开自己手机里的聊天记录。
@@ -1447,6 +1449,15 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(accountExpiresAt, forKey: Key.accountExpiresAt) }
     }
 
+    /// 登录账号的**完整邮箱**。
+    ///
+    /// 为什么本地要记一份：4-4 的 `/v1/me` **故意只回打码邮箱**（`p***@aevis.cn`），
+    /// 而界面（「我的」页、资料卡）要显示完整的那一个。完整值只在
+    /// `/v1/auth/login/email` 的响应里出现过一次，所以那时就存下来。
+    @Published var accountEmail: String {
+        didSet { UserDefaults.standard.set(accountEmail, forKey: Key.accountEmail) }
+    }
+
     /// 这台设备通过授权了没有。**一旦为真就一直为真** ——
     /// 这是「一个账号一个设备码」那条规矩的本地凭据，不是每次都联网问。
     @Published var deviceAuthorized: Bool {
@@ -1778,6 +1789,7 @@ final class AppSettings: ObservableObject {
         accountServerURL = storedAccountServer.isEmpty ? Self.builtInAccountServer : storedAccountServer
         accountToken = Keychain.get(Key.accountTokenKeychain) ?? ""
         accountExpiresAt = defaults.double(forKey: Key.accountExpiresAt)
+        accountEmail = defaults.string(forKey: Key.accountEmail) ?? ""
         deviceAuthorized = defaults.object(forKey: Key.deviceAuthorized) as? Bool ?? false
         deviceAuthorizedAccount = defaults.string(forKey: Key.deviceAuthorizedAccount) ?? ""
         // ⚠️ 必须用 object(forKey:) 判「有没有设过」—— 出厂值不是 0

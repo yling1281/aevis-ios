@@ -114,15 +114,28 @@ final class AccountService: ObservableObject {
 
     /// 账号号 / 邮箱 + 密码 登录。
     ///
-    /// 「账号」那一栏**两种都收**（服务端自己分辨是邮箱还是账号号）——
-    /// 别让用户去想"我该填哪个"，老用户压根没有账号号。
+    /// 「账号」那一栏**两种都收** —— 别让用户去想"我该填哪个"。
+    ///
+    /// 🔴 2026-10-31：后端换成 4-4 的 `aevis_auth`，路径从 `/api/login` 拆成两条：
+    ///    含 `@` 走 `/v1/auth/login/email`，否则走 `/v1/auth/login/phone`。
+    ///    老后端那个"一个 `/api/login` 自己分辨"的接口**已经不存在了**。
     func signIn(account: String, password: String) async throws {
         let name = account.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !password.isEmpty else { throw AccountError.missingFields }
-        let json = try await post("/api/login", ["account": name, "password": password])
+        let json: [String: Any]
+        if name.contains("@") {
+            json = try await post("/v1/auth/login/email",
+                                  ["email": name.lowercased(), "password": password,
+                                   "device_id": DeviceIdentity.wireCode])
+        } else {
+            json = try await post("/v1/auth/login/phone",
+                                  ["phone": name, "password": password,
+                                   "device_id": DeviceIdentity.wireCode])
+        }
         try adopt(json)
-        // 登录接口只回 token（不回资料）→ 顺手拉一次，界面上就能立刻显示
-        // 昵称 / 账号号 / 头像，不用用户再点一下「刷新资料」。
+        // 登录响应里已经带了 email/uid/membership（4-4 的契约），先落进 profile，
+        // 再拉一次完整资料补齐昵称/头像。
+        profile = profileFrom(json)
         await afterSignIn()
     }
 
@@ -141,7 +154,8 @@ final class AccountService: ObservableObject {
         busy = true
         defer { busy = false }
         do {
-            profile = Self.profile(from: try await get("/api/me"))
+            let me = try await get("/v1/me")
+            profile = profileFrom(me)
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -171,7 +185,8 @@ final class AccountService: ObservableObject {
         let previous = settings.accountToken
         settings.accountToken = token
         do {
-            profile = Self.profile(from: try await get("/api/me"))
+            let me = try await get("/v1/me")
+            profile = profileFrom(me)
             lastError = nil
         } catch {
             // 拉不到就回滚 —— 别留一个"看起来登录了、其实用不了"的状态
@@ -205,7 +220,7 @@ final class AccountService: ObservableObject {
     func sendLoginCode(email: String) async throws {
         let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard target.contains("@") else { throw AccountError.missingFields }
-        _ = try await post("/api/send_code", ["email": target])
+        _ = try await post("/v1/auth/email/code", ["email": target])
     }
 
     /// 验证码登录。成功就存下 token 并拉一次资料。
@@ -213,8 +228,11 @@ final class AccountService: ObservableObject {
         let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let pin = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard target.contains("@"), !pin.isEmpty else { throw AccountError.missingFields }
-        let json = try await post("/api/verify", ["email": target, "code": pin])
+        let json = try await post("/v1/auth/login/email-code",
+                                  ["email": target, "code": pin,
+                                   "device_id": DeviceIdentity.wireCode])
         try adopt(json)
+        profile = profileFrom(json)
         await afterSignIn()
     }
 
@@ -255,45 +273,40 @@ final class AccountService: ObservableObject {
     }
 
     /// ① 要一张二维码的票。
+    ///
+    /// 🔴 2026-10-31：4-4 的 `aevis_auth` **没有设备扫码登录这套接口**
+    ///    （老的 `/api/device/login/new` + `poll` 随老服务一起下线了）。
+    ///    这里**明确抛出"不可用"**，让 `ScanLoginView` 显示一句人话并提示改走密码/验证码，
+    ///    而不是画一张永远扫不开的二维码 —— 那是最坑人的"看起来能用"。
     @MainActor
     func newDeviceLoginTicket() async throws -> DeviceTicket {
-        let json = try await post("/api/device/login/new", [:])
-        guard let ticket = json["ticket"] as? String, !ticket.isEmpty,
-              let url = json["scan_url"] as? String, !url.isEmpty else {
-            throw AccountError.badResponse("服务器没给二维码内容")
-        }
-        return DeviceTicket(ticket: ticket,
-                            scanURL: url,
-                            expiresIn: (json["expires_in"] as? Int) ?? 300)
+        throw AccountError.server("扫码登录暂不可用（服务端未提供该接口），请用邮箱验证码或密码登录。")
     }
 
     /// ② 问一句「有人批了吗」。
-    ///
-    /// ⚠️ **"还没人批"是 200 + `pending`**，不是错误 —— 调用方在每两秒轮询，
-    ///    把它当异常处理会让"等待"这个过程看起来像一直在报错。
-    ///    只有**真的不能再用**（过期 / 用过 / 不认）才是 4xx，那时候必须停下来。
     @MainActor
     func pollDeviceLogin(ticket: String) async throws -> DeviceLoginStatus {
-        let encoded = ticket.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ticket
-        let json: [String: Any]
-        do {
-            json = try await get("/api/device/login/poll?t=" + encoded)
-        } catch AccountError.http(let status, let body) {
-            throw DeviceLoginError.rejected(status: status, reason: body)
-        }
-        if (json["status"] as? String) == "approved",
-           let token = json["token"] as? String, !token.isEmpty {
-            return .approved(email: (json["email"] as? String) ?? "", token: token)
-        }
-        return .pending
+        throw AccountError.server("扫码登录暂不可用。")
     }
 
     /// App 里点 QQ 登录时要打开的那一页（内置浏览器）。
     ///
-    /// `?app=1` 是给服务端的暗号：**这一次跳完要回 App**（`aevis://login?token=…`），
-    /// 不是回网页登录页 —— 不然用户就被丢在浏览器里出不来了。
-    func qqLoginURL() -> URL? {
-        URL(string: base + "/api/qq/start?app=1")
+    /// 🔴 2026-10-31：4-4 改成**先 POST 换授权地址**（`POST /v1/auth/qq/url`
+    ///    → `{auth_url, state}`），不再有"直接 GET `/api/qq/start` 就跳走"那种接口。
+    ///    所以这个方法从同步变成了 `async`。
+    ///
+    /// ⚠️ 当前 4-4 的 `.env` 里**没有 `AEVIS_QQ_APP_ID`**，调用会拿到
+    ///    "QQ 登录未配置"，这里回 nil，界面提示用户先用邮箱登录。
+    ///    等后台把 QQ 互联的 AppID/AppKey 配上，这个入口自动就通了。
+    func qqLoginURL() async -> URL? {
+        do {
+            let json = try await post("/v1/auth/qq/url", ["redirect_uri": "aevis://login"])
+            guard let raw = json["auth_url"] as? String, !raw.isEmpty,
+                  let url = URL(string: raw) else { return nil }
+            return url
+        } catch {
+            return nil
+        }
     }
 
     /// App 里点「登录 / 注册」时要打开的那一页（**系统浏览器 Safari**）。
@@ -302,7 +315,11 @@ final class AccountService: ObservableObject {
     /// （`aevis://login?token=…`），而不是把用户留在网页上。
     func webLoginURL() -> URL? {
         guard isConfigured else { return nil }
-        return URL(string: webRoot + "/login?app=1")
+        // 🔴 2026-10-31：4-4 没有 `/login` 这个页面（那个路径被 nginx 兜成官网首页了，
+        //    返回 200 但是 HTML 首页，看起来"能打开"其实什么都不是）。
+        //    真正的账号网页是 `/account.html`。它**不会**回跳 `aevis://`
+        //    —— 所以 LoginView 的主按钮已经改成在 App 内登录，这里只留作保底入口。
+        return URL(string: webRoot + "/account.html")
     }
 
     /// 把「接口根」还原成「人看的网页根」。
@@ -363,60 +380,70 @@ final class AccountService: ObservableObject {
         }
     }
 
-    // MARK: - 用注册码注册（也在 App 里做完，不用去网页）
+    // MARK: - 注册（2026-10-31 重写）
     //
-    // 两步，跟服务端一致：① 注册码 + 邮箱 → 服务器发验证码（**这一步不消费注册码**，
-    // 邮箱写错、没收到信都能重来）；② 邮箱验证码 → 建号、这时才把注册码吃掉 → 直接给登录态。
+    // 🔴 老流程是「注册码（群里机器人发的一人一码）+ 邮箱验证码」，**已经废弃**：
+    //    4-4 的 `aevis_auth` 走的是「邮箱 + 密码 + 邮箱验证码」，没有邀请码这个概念。
+    //    新流程两步，跟服务端一致：
+    //      ① `requestRegisterCode(email:)` → `POST /v1/auth/email/code` 发码
+    //      ② `register(email:password:code:)` → `POST /v1/auth/register` 建号并直接给登录态
 
-    /// 第一步：验注册码，让服务器给这个邮箱发验证码。
-    func registerStart(code: String, email: String) async throws {
-        let invite = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    /// 第一步：给这个邮箱发注册验证码。
+    ///
+    /// ⚠️ 4-4 的 `/v1/auth/email/code` 对**没注册过的邮箱**也发（注册和登录共用这一个端点），
+    ///    所以这里不需要先判断"这个邮箱是不是已存在" —— 已存在的话第二步会明确告诉用户。
+    func requestRegisterCode(email: String) async throws {
         let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !invite.isEmpty, target.contains("@") else { throw AccountError.missingFields }
-        _ = try await post("/api/register/start", ["code": invite, "email": target])
+        guard target.contains("@") else { throw AccountError.missingFields }
+        _ = try await post("/v1/auth/email/code", ["email": target])
     }
 
-    /// 第二步：验证码 + 注册码 → 建号并直接登录。
-    func registerFinish(code: String, email: String, emailCode: String) async throws {
-        let invite = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    /// 第二步：邮箱 + 密码 + 验证码 → 建号并直接登录。
+    ///
+    /// 密码策略在**本地先挡一次**（≥8 位、同时含字母和数字）：
+    /// 服务端也校验，但让用户填完验证码才被退回"密码太简单"是很糟的体验 ——
+    /// 验证码还白白烧掉一次。
+    func register(email: String, password: String, code: String) async throws {
         let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let pin = emailCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !invite.isEmpty, target.contains("@"), !pin.isEmpty else {
-            throw AccountError.missingFields
+        let pin = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard target.contains("@"), !pin.isEmpty else { throw AccountError.missingFields }
+        guard password.count >= 8,
+              password.rangeOfCharacter(from: .letters) != nil,
+              password.rangeOfCharacter(from: .decimalDigits) != nil else {
+            throw AccountError.server("密码至少 8 位，并且要同时包含字母和数字。")
         }
-        let json = try await post("/api/register/finish",
-                                 ["code": invite, "email": target, "email_code": pin])
+        let json = try await post("/v1/auth/register",
+                                  ["email": target, "password": password, "code": pin])
         try adopt(json)
         await afterSignIn()
     }
 
     /// 「我的资料」改名 → 推到账号上。
     ///
-    /// ⚠️ 服务端**只认这几个键**（`nickname` / `account_no`），多传的会被忽略；
-    ///    传 `nickname` 就是只改昵称，不会顺手动别的。
+    /// 🔴 2026-10-31：4-4 的 `POST /v1/me/profile` 只回 `{ok,uid,nickname,avatar}`，
+    ///    **不带 email / 会员**（老后端回的是 `{"profile":{…}}` 整块）。所以改完必须
+    ///    再拉一次 `/v1/me`，否则 profile 被这份"残缺响应"覆盖后，
+    ///    界面上邮箱和到期日会凭空消失。
     @MainActor
     @discardableResult
     func pushNickname(_ nickname: String) async throws -> Profile {
-        let json = try await post("/api/me/profile", ["nickname": nickname])
-        let fresh = Self.profile(from: (json["profile"] as? [String: Any]) ?? json)
-        profile = fresh
-        return fresh
+        _ = try await post("/v1/me/profile", ["nickname": nickname])
+        await refreshProfile()
+        return profile ?? Profile(id: "", username: settings.accountEmail,
+                                  nickname: nickname, accountNo: "", avatar: "",
+                                  expiresAt: nil)
     }
 
-    /// 换头像：压到 512 传上去（服务端收 **base64 的 JSON**，不收 multipart）。
+    /// 换头像。
     ///
-    /// ⚠️ `@MainActor`：里面会改 `@Published profile`，而 `await` 回来之后
-    ///    线程是随机的 —— 不在主线程上改 `@Published` 在 iOS 26 上会硬崩。
+    /// 🔴 2026-10-31：4-4 的 `aevis_auth` **没有图片上传接口** —— `avatar` 只是个
+    ///    字符串字段，没有收文件/收 base64 的端点（老后端那个 `POST /api/me/avatar`
+    ///    已随老服务下线）。这里**显式报错**，不静默假装成功：假装成功的话
+    ///    用户以为换好了，下次登录又变回去，比直接说"不支持"糟糕得多。
     @MainActor
     @discardableResult
     func uploadAvatar(_ image: UIImage) async throws -> Profile {
-        guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
-            throw AccountError.badResponse("这张图压不出来，换一张试试。")
-        }
-        let json = try await post("/api/me/avatar", ["image": jpeg.base64EncodedString()])
-        let fresh = Self.profile(from: (json["profile"] as? [String: Any]) ?? json)
-        profile = fresh
-        return fresh
+        throw AccountError.server("头像上传暂未开放（服务端还没提供图片存储），昵称可以先改。")
     }
 
     /// 把账号上的资料落到**本地**（`ProfileStore`）。
@@ -465,17 +492,16 @@ final class AccountService: ObservableObject {
         await bindThisDevice()
     }
 
-    /// 把**这台设备**绑到刚登录的账号上（`/api/device/bind`）。
+    /// 把**这台设备**绑到刚登录的账号上。
     ///
-    /// 用户 2026-09-28：「设备码的话，就是也不是绑定账号吗？」
-    /// 绑上之后这台机器就跟账号挂钩了：换机要审批、封设备能连账号一起治 ——
-    /// 这是反白嫖那条线。**失败不报错**：绑不上不影响他用 App，
-    /// 而且服务端本来就有「一台设备只能绑一个账号」的规矩（409 也是正常的）。
+    /// 🔴 2026-10-31：4-4 的 `aevis_auth` **没有「设备绑定」这个概念** ——
+    ///    登录态只靠 token（`auth_session` 里记 device_id 用于展示），
+    ///    不存在"一台设备只能绑一个账号"的老规矩。老后端那个 `/api/device/bind`
+    ///    已经跟着老服务一起下线了。
+    ///    这里保留空实现（而不是删掉调用点），是为了不让 `afterSignIn` 分叉。
     @MainActor
     func bindThisDevice() async {
-        let code = DeviceIdentity.wireCode
-        guard !code.isEmpty else { return }
-        _ = try? await post("/api/device/bind", ["device_id": code])
+        // 无需绑定：新体系里登录即可，设备只是会话上的一个备注字段。
     }
 
     // MARK: - 登录设备管理（跟微信一样：看几台、把别的踢下线）
@@ -500,46 +526,57 @@ final class AccountService: ObservableObject {
     }
 
     /// 拉一份「当前账号登着哪些设备」的清单。
+    ///
+    /// 🔴 2026-10-31：数据源从老后端的 `GET /api/devices`（按设备聚合）
+    ///    换成 4-4 的 `GET /v1/auth/sessions`（**按会话/token 列**）。
+    ///    差别：新接口一条 = 一次登录，所以 `tokenCount` 恒为 1，
+    ///    也拿不到 UA 和"上次在线"——那些字段只能留空，界面显示「未知设备」。
     @MainActor
     func listDevices() async throws -> [DeviceSession] {
-        let json = try await get("/api/devices")
-        let rows = (json["devices"] as? [[String: Any]]) ?? []
+        let json = try await get("/v1/auth/sessions")
+        let rows = (json["items"] as? [[String: Any]]) ?? []
+        let mine = settings.accountToken
         return rows.map { row in
-            DeviceSession(
+            let token = (row["token"] as? String) ?? ""
+            let created = Self.unix(fromISO: (row["created_at"] as? String) ?? "")
+            return DeviceSession(
                 deviceID: (row["device_id"] as? String) ?? "",
-                name: (row["name"] as? String) ?? "",
-                userAgent: (row["ua"] as? String) ?? "",
+                name: "",
+                userAgent: "",
                 ip: (row["ip"] as? String) ?? "",
-                lastSeen: Self.int(row["last_seen"]),
-                firstSeen: Self.int(row["first_seen"]),
-                tokenCount: Self.int(row["tokens"]),
-                isCurrent: (row["current"] as? Bool) ?? false
+                lastSeen: created,
+                firstSeen: created,
+                tokenCount: 1,
+                isCurrent: !token.isEmpty && token == mine
             )
         }
     }
 
     /// 把某台设备踢下线。返回服务器说踢掉了几条登录（`revoked`）。
     ///
-    /// 「踢自己」后端会回 400 + `cannot_revoke_current` —— 这里翻成
-    /// `AccountError.cannotRevokeCurrent`，界面就能说人话（提示他用「退出账号」）。
+    /// 🔴 2026-10-31：4-4 的 `aevis_auth` **只有 `POST /v1/auth/logout`（登出自己）**，
+    ///    没有"按设备踢下线"的接口。所以：
+    ///      · 踢本机 → 走登出，返回 1
+    ///      · 踢别人 → 明确报不支持，**不假装踢掉了**
     @MainActor
     @discardableResult
     func revokeDevice(_ deviceID: String) async throws -> Int {
-        do {
-            let json = try await post("/api/devices/revoke", ["device_id": deviceID])
-            return Self.int(json["revoked"])
-        } catch AccountError.http(let status, let body)
-                    where status == 400 && body.contains("cannot_revoke_current") {
+        if deviceID.isEmpty {
             throw AccountError.cannotRevokeCurrent
         }
+        throw AccountError.server("暂不支持远程退出其它设备（服务端未提供该接口）。"
+                                   + "你可以在那台设备上点「退出账号」。")
     }
 
     // MARK: - 底层
 
     private func adopt(_ json: [String: Any]) throws {
         guard let token = json["token"] as? String, !token.isEmpty else {
+            // 4-4 失败时不会走到这里（`send` 已经把 `code != 200` 抛成 `.server`）——
+            // 能到这儿的只有"200 但没给 token"这种契约不符的情况。
             throw AccountError.badResponse(
-                (json["error"] as? String) ?? "服务器没给 token（返回里有这些字段："
+                (json["msg"] as? String) ?? (json["error"] as? String)
+                    ?? "服务器没给 token（返回里有这些字段："
                     + json.keys.sorted().joined(separator: ",") + "）"
             )
         }
@@ -549,8 +586,17 @@ final class AccountService: ObservableObject {
         } else if let stamp = json["expires_at"] as? Double {
             settings.accountExpiresAt = stamp
         }
+        // 4-4 的登录响应是**扁平的**（没有 `user`/`profile` 包一层）：
+        // `{ok,token,uid,email,membership}`。完整 email 只在这里出现一次
+        // （`/v1/me` 回的是打码值）→ 顺手存下来给界面用。
+        let mail = (json["email"] as? String) ?? ""
+        if mail.contains("@"), !mail.contains("***") {
+            settings.accountEmail = mail
+        }
         if let user = json["user"] as? [String: Any] {
-            profile = Self.profile(from: user)
+            profile = profileFrom(user)
+        } else {
+            profile = profileFrom(json)
         }
         lastError = nil
     }
@@ -604,6 +650,21 @@ final class AccountService: ObservableObject {
             guard let json else {
                 throw AccountError.badResponse(String(decoding: data.prefix(160), as: UTF8.self))
             }
+            // 🔴 2026-10-31：后端换成 4-4 的 `aevis_auth` 后，**所有业务响应都套了一层信封**：
+            //     成功 `{"code":200,"data":{…},"msg":"ok"}`
+            //     失败 `{"code":4103,"data":null,"msg":"邮箱格式不对"}`
+            //   在这里统一拆开，上层（signIn / adopt / profile…）继续按扁平字段取，
+            //   不用每个方法都写一遍 `json["data"]`。
+            //   ⚠️ 判据是**顶层同时有 `code` 和 `data` 两个键** —— 万一是老式扁平响应
+            //      （比如某个本地回落接口）就没有这两个键，原样返回，不影响其他调用点。
+            if let code = json["code"] as? Int, json.keys.contains("data") {
+                if code == 200 {
+                    return (json["data"] as? [String: Any]) ?? json
+                }
+                let msg = (json["msg"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? "请求失败（\(code)）"
+                throw AccountError.server(msg)
+            }
             return json
         case 401, 403:
             // token 失效就把本地那份清掉，免得界面一直显示"已登录"
@@ -623,28 +684,68 @@ final class AccountService: ObservableObject {
 
     // MARK: - 零件
 
-    private static func profile(from json: [String: Any]) -> Profile {
-        // 服务器三种形状都认：
-        //   `{"profile": {…}}` ← **我们后端 `/api/me` 就是这种**（2026-09-28 起：
-        //                        资料在 `profile` 里，顶层的 email/created_at 是账号元信息）
-        //   `{"user": {…}}`
-        //   用户字段直接平铺在顶层
-        //
-        // ⚠️ 顺序不能反：`profile` 优先。顶层的 email 和 profile 里的 email 是同一个值，
-        //    但 `account_no` / `nickname` / `avatar` **只在 profile 里** ——
-        //    先取平铺的话，这几个字段永远是空的（界面上就是"昵称头像一直不显示"）。
+    /// 把一份响应解析成 `Profile`。
+    ///
+    /// 服务器**三种形状都认**：
+    ///   · `{"profile": {…}}` —— 老后端 `/api/me`（已下线，留作兼容）
+    ///   · `{"user":    {…}}` —— 老登录接口
+    ///   · 字段直接平铺在顶层  —— **4-4 的 `/v1/me` 和 `/v1/auth/login/email` 都是这种**
+    ///
+    /// 4-4 的差异（2026-10-31）：
+    ///   · 主键叫 `uid`（老的是 `id`）
+    ///   · `/v1/me` 的 `email` 是**打码**的（`p***@aevis.cn`）→ 回落到本地存的完整邮箱
+    ///   · 没有 `account_no`（那 8 位号是老账本特有的）→ 用 uid 顶上，界面有东西可显示
+    ///   · 会员信息在 `membership.expire_at` 里，解析成 `expiresAt`
+    private func profileFrom(_ json: [String: Any]) -> Profile {
         let user = (json["profile"] as? [String: Any])
             ?? (json["user"] as? [String: Any])
             ?? json
-        let email = Self.text(user["email"])
+        var email = Self.text(user["email"])
+        // 打码值（含 `***`）不能拿来当账号名显示 —— 用登录时存下的完整邮箱。
+        if email.contains("***") {
+            email = settings.accountEmail
+        }
+        let uid = Self.text(user["uid"])
+        let legacyID = Self.text(user["id"])
+        let rawID = uid.isEmpty ? legacyID : uid
+        var accountNo = Self.text(user["account_no"])
+        if accountNo.isEmpty, uid.isEmpty == false {
+            accountNo = uid          // 4-4 没有账号号，用 uid 占位（界面要显示"账号 ID"）
+        }
+        var expires: Date?
+        if let mem = user["membership"] as? [String: Any],
+           let stamp = mem["expire_at"] as? String, !stamp.isEmpty {
+            expires = Self.date(fromISO: stamp)
+        }
         return Profile(
-            id: Self.text(user["id"]).isEmpty ? email : Self.text(user["id"]),
+            id: rawID.isEmpty ? email : rawID,
             username: email.isEmpty ? ((user["username"] as? String) ?? "") : email,
             nickname: (user["nickname"] as? String) ?? "",
-            accountNo: Self.text(user["account_no"]),
+            accountNo: accountNo,
             avatar: Self.text(user["avatar"]),
-            expiresAt: nil
+            expiresAt: expires
         )
+    }
+
+    /// 解析后端给的 ISO 时间（`2026-11-24T09:34:11+00:00` 或 `2026-11-24 18:55:39`）。
+    private static func date(fromISO text: String) -> Date? {
+        guard !text.isEmpty else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: text) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: text) { return d }
+        // 4-4 有一部分历史数据是 `YYYY-MM-DD HH:MM:SS`（不带时区，按本地算）
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return df.date(from: text)
+    }
+
+    /// ISO 时间 → Unix 秒（解析不出来给 0，语义是"时间不详"）。
+    private static func unix(fromISO text: String) -> Int {
+        guard let d = date(fromISO: text) else { return 0 }
+        return Int(d.timeIntervalSince1970)
     }
 
     private static func text(_ value: Any?) -> String {
@@ -706,6 +807,9 @@ enum AccountError: LocalizedError {
     case unauthorized
     case http(status: Int, body: String)
     case badResponse(String)
+    /// 后端业务错误（4-4 的信封里 `code != 200`）。`msg` 已经是中文人话，直接展示。
+    /// 单独一个 case 是为了**不要把 4xxx 业务码显示成 HTTP 状态**（"服务器返回 4103" 很吓人）。
+    case server(String)
     /// 想踢的就是**本机** —— 后端拒（400 `cannot_revoke_current`）。
     case cannotRevokeCurrent
 
@@ -725,6 +829,8 @@ enum AccountError: LocalizedError {
             return "服务器返回 \(status)：\(body.prefix(120))"
         case let .badResponse(text):
             return "服务器返回的内容看不懂：\(text.prefix(120))"
+        case let .server(msg):
+            return msg
         case .cannotRevokeCurrent:
             return "这是本机，退出登录请用「退出账号」。"
         }

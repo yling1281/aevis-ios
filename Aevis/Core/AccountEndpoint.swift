@@ -92,7 +92,11 @@ enum AccountEndpoint {
     ///
     /// **非 private** —— 管理端要复用同一套判断口径，两个 App 不能各判各的。
     static func reachable(_ base: String) async -> Bool {
-        guard let url = URL(string: base + "/api/health") else { return false }
+        // 🔴 2026-10-31：健康检查从老后端的 `/api/health` 换成 4-4 的 `/health`
+        //    （`aevis_auth` 挂载在 `/v1/` 下，健康检查是应用根的 `/health`）。
+        //    那台服务对任何未匹配路径都回 Flask 的 404 **HTML** —— 用 `<400` 判断会把
+        //    "域名活着但路径错了"也当成可用，所以这里**要求 2xx**。
+        guard let url = URL(string: base + "/health") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 6
@@ -100,7 +104,7 @@ enum AccountEndpoint {
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { return false }
-            return http.statusCode < 400
+            return (200..<300).contains(http.statusCode)
         } catch {
             return false
         }

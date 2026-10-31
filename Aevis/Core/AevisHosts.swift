@@ -22,7 +22,11 @@ enum AevisHosts {
     static let siteDomain = "sucai.aevis.cn"
 
     /// 账号站：登录、激活、注册码、管理后台。和静态站同一台服务器、同一套后端。
-    static let accountDomain = "account.aevis.cn"
+    ///
+    /// 🔴 2026-10-31 切换：**账号体系整体迁到 4-4**（`aevis_auth` / `/v1/*`）。
+    ///    老的 `account.aevis.cn`（123.57.33.160 上那 8511 行单文件后端）
+    ///    **已停止接入**，用户按用户要求「不保留旧登录入口」全部迁移完毕。
+    static let accountDomain = "aevis.cn"
 
     // MARK: - 接口的随机入口（2026-10-02）
 
@@ -42,7 +46,15 @@ enum AevisHosts {
     /// ⚠️ **老路径 `/api/...` 必须继续活着**（老板要求「做过渡」）：
     ///    手机上装的老包（≤0.0.95）、QQ / 百度的回调、支付宝 / PayPro 的回调
     ///    都还指着它。等大家都换了新包再单独收掉。
-    static let apiPath = "/k5stbt2o"
+    /// 接口前缀。
+    ///
+    /// 🔴 2026-10-31 起**就是 4-4 的 nginx 前缀**，不再是一段随机串：
+    ///    `aevis.cn/prod-api/aevis/` → HK 反代剥前缀 → 隧道 18878 → 4-4 `aevis_auth`。
+    ///    原来那段 `/k5stbt2o` 是挂在老 `account.aevis.cn` 上的，那套已经下线。
+    ///
+    /// ⚠️ 别凭空改这个值：`webRoot` 靠剥它把「接口根」还原成「人看的网页根」，
+    ///    改了前缀网页登录页的地址就跟着变（`https://aevis.cn` 下没有 `/prod-api` 的前缀）。
+    static let apiPath = "/prod-api/aevis"
 
     /// 远端配置里那个能**覆盖接口地址**的键（存在后端的 `app_config` 表里）。
     /// 改它的值 = 所有装了新包的 App 下次启动 / 回前台就切过去，**不用重新出包**。
@@ -108,18 +120,15 @@ enum AevisHosts {
     /// 三条线路，**顺序就是优先级**。用户口径：「三个路线你自己点选」——
     /// 主 App 和管理端**共用这一份**，别再各写一遍。
     ///
-    /// 线路一 = `aevis.cn`（新主站，主用）+ **接口随机前缀**；
-    /// 线路二 = `apekin.com`（上一代，现役 → 转备用）+ **接口随机前缀**；
-    /// 线路三 = `lingyan.cyou`（最老）**裸 `/api/`，故意不加前缀**。
-    /// App 启动时依次探一下，谁通走谁（`AccountEndpoint.refresh()`）；
-    /// 用户也能在设置里手动点选（`AccountEndpoint.use(_:)`）。
-    /// ⚠️ 线路一 / 线路二**都带前缀**（两台都配了 `location ^~ /k5stbt2o/api/`）；
-    ///    线路三**故意不带** —— 老域名那台上没配那条前缀规则，
-    ///    加了就是 404；它走的是原来那条裸 `/api/`。
+    /// 🔴 2026-10-31：三条线**全部指向 4-4 同一套后端**（`aevis_auth` / `/v1/*`），
+    ///    区别只在走哪个域名 —— `aevis.cn` 备案稳作主用，`faka.lingyan.cyou` /
+    ///    `lingyan.cyou` 是备用入口（同一条 HK 反代 → 隧道 18878）。三条实测均 200。
+    ///    ⚠️ 老的三条（`account.aevis.cn` / `apekin.com` / 裸 `account.lingyan.cyou`）
+    ///       指向的是**已下线的老后端**，别再加回来。
     static let accountLines: [Line] = [
-        Line(name: "线路一", base: accountBase),         // aevis.cn（新主站）+ 接口随机前缀
-        Line(name: "线路二", base: apekinAccountBase),    // apekin.com（上一代）+ 接口随机前缀
-        Line(name: "线路三", base: legacyAccountBase),    // lingyan.cyou（最老，裸 /api/，不带前缀）
+        Line(name: "线路一", base: accountBase),                              // aevis.cn（主用）
+        Line(name: "线路二", base: "https://faka.lingyan.cyou" + apiPath),    // lingyan 备用
+        Line(name: "线路三", base: "https://lingyan.cyou" + apiPath),         // lingyan 主域备用
     ]
 
     static var accountCandidates: [String] { accountLines.map { $0.base } }

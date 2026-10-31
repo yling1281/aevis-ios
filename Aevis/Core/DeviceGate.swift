@@ -281,81 +281,23 @@ final class DeviceGate: ObservableObject {
         }
 
         // ⭐ 每次刷新（含断网这次）都先就地重算"体验到期了没有"。
-        //    放在网络之前 —— 就算请求失败，24 小时一到这里照样会把 App 锁上。
         evaluateTrial()
 
-        guard let url = lookupURL() else {
-            // ⚠️ 拼不出地址也是一种"够不着服务器"（多半被改过配置）—— 记一次 miss。
-            problem = "设备码拼不出查询地址，重装一次 App 试试。"
-            noteServerMiss()
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        // 这个结果必须是最新的 —— 用户刚在网页上点完"绑定"就切回来，
-        // 缓存会把旧的 `bound:false` 又喂给他一遍。
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                problem = "服务器没回正经东西，等会儿再试。"
-                return
-            }
-            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            // ✅ 拿到了 HTTP 回应 = 够得着服务器 → 清掉"异常离线"的计数 / 时间窗。
-            noteServerHit()
-            // ⭐ 服务端下发的"断网多久算异常"宽限值（钳位后生效，见 applyOfflineGrace）。
-            applyOfflineGrace(json["offline_grace"] as? Int)
-
-            guard http.statusCode == 200 else {
-                problem = "服务器说：\((json["message"] as? String) ?? "HTTP \(http.statusCode)")"
-                return
-            }
-
-            // ⚠️ **先看被封**。服务器说这台被停用了，就别再管 bound 是什么。
-            if (json["blocked"] as? Bool) ?? false {
-                blocked = true
-                authorized = false
-                // ⚠️ 本地那个"已授权"标记也要清掉。
-                // 不清的话，下次启动 `init()` 又按它免检放行 ——
-                // 断网时能钻出去用（被封的设备不该有这条路）。
-                // 代价是被封的人必须联网才能恢复，但**解封后第一次查询会自动放行**。
-                AppSettings.shared.deviceAuthorized = false
-                problem = nil
-                return
-            }
-            // 没封（或者刚被解封）→ 清掉标记，让下面的正常流程接管
-            blocked = false
-
-            if (json["bound"] as? Bool) ?? false {
-                // ⭐ 服务端权威的体验到期时间（永久账号是 nil）+ 服务端当前时间（防改时间锚点）。
-                let exp = json["expires_at"] as? Int
-                let srvNow = json["now"] as? Int
-                // ⭐ 服务端**显式**判定的"这台设备现在锁了没有"（服务器拿 devices.expires_at
-                //    比服务器当前时间算出来的）。为真就必须**立刻**锁 ——
-                //    不允许只靠本地倒计时推（老板 2026-10-07：「服务器那边检测到的话，也锁」）。
-                let srvOver = (json["trial_over"] as? Bool) ?? false
-                // 已经授权过就别再 grant 一遍了：那个方法会往 UserDefaults 写东西，
-                // 而现在是**隔一会儿就查一次**，没必要每次都写。
-                if !authorized {
-                    grant(account: json["account"] as? String,
-                          expiresAt: exp, serverNow: srvNow, serverSaysOver: srvOver)
-                } else {
-                    // 已授权：把服务端给的到期时间同步成本地窗口（续费后会变成 nil → 解锁）。
-                    syncTrial(expiresAt: exp, serverNow: srvNow, serverSaysOver: srvOver)
-                }
-            } else {
-                // 还没绑 —— 这是最正常的状态，不是错误
-                problem = nil
-            }
-        } catch {
-            // 断网/超时。**不撤销已有授权**（原来的口径：断一下不能把人踢出去），
-            // 但记一次 miss —— 连着够不着够久就会走 `unreachable` 这条锁（见 `noteServerMiss`）。
-            problem = "没连上服务器（\(error.localizedDescription)）"
-            noteServerMiss()
-        }
+        // 🔴 2026-10-31：账号体系迁到 4-4 之后，**设备码门禁这套接口已经不存在了**。
+        //    老后端（`account.aevis.cn`）提供的 `/api/device/lookup` 随它一起下线，
+        //    现在请求它必然 404 —— 而下面的老逻辑是"查不到就保持锁着"，
+        //    结果就是**所有用户（含刚迁移过来的老用户）被永久挡在门禁页**。
+        //
+        //    新体系里"能不能用"只取决于**账号登录**（`auth_session` 里的 token），
+        //    没有"一台设备绑一个账号"这条规矩，也没有设备查封。
+        //    ⇒ 门禁直接放行；`RootView` 会因为 `authorized == true` 不再走门禁页。
+        //
+        //    ⚠️ 这不是"把校验删了图省事"：真正该拦的（账号停用）在 `/v1/auth/login/email`
+        //       那一步由服务端挡（`code 4112 账号已停用`），这里再拦一次只会拦错人。
+        authorized = true
+        blocked = false
+        problem = nil
+        return
     }
 
     // MARK: - 授权通过
@@ -511,7 +453,7 @@ final class DeviceGate: ObservableObject {
         var base = AppSettings.shared.accountServerURL
             .trimmingCharacters(in: .whitespacesAndNewlines)
         while base.hasSuffix("/") { base.removeLast() }
-        guard !base.isEmpty, let url = URL(string: base + "/api/me") else { return }
+        guard !base.isEmpty, let url = URL(string: base + "/v1/me") else { return }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
