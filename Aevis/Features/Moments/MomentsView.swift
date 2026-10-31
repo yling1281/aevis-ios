@@ -69,8 +69,6 @@ struct MomentsView: View {
     }
 
     /// 卡片疏密：0 紧凑 / 1 标准 / 2 宽松。
-    private var density: Int { min(max(settings.momentDensityIndex, 0), 2) }
-    private var cardSpacing: CGFloat { [10, 14, 20][density] }
     private var cardCorner: CGFloat { CGFloat(settings.momentCorner) }
 
     /// 时间文字。两种口径由用户选：
@@ -90,18 +88,22 @@ struct MomentsView: View {
                 // 封面通栏（半屏、无圆角），单独占一行；下面那些才有左右留白。
                 coverHeader
 
-                LazyVStack(spacing: cardSpacing) {
+                // 2026-10-31 用户：「我要的是微信朋友圈那种信息流」。
+                // 微信是**通栏一行一条 + 细分隔线**，没有卡片、没有圆角、没有间距。
+                // 所以这里 spacing 归 0、去掉左右留白，每条后面插一根分隔线（左侧缩进）。
+                LazyVStack(spacing: 0) {
                     composer
+                    feedDivider
 
                     if moments.moments.isEmpty {
                         emptyState
                     }
 
                     ForEach(moments.moments) { moment in
-                        card(moment)
+                        feedRow(moment)
+                        feedDivider
                     }
                 }
-                .padding(.horizontal, 14)
                 .padding(.top, 10)
                 .padding(.bottom, 30)
             }
@@ -318,8 +320,11 @@ struct MomentsView: View {
                 .disabled(!canPost)
             }
         }
-        .padding(14)
-        .aevisGlass(cornerRadius: cardCorner)
+        // 微信没有"发一条"的输入卡 —— 它藏在右上角相机里。
+        // 这里保留一个极简通栏（说话框就在信息流顶上），但**不再包玻璃卡片**，
+        // 否则又变成"卡片流"了。
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     private var canPost: Bool {
@@ -371,113 +376,118 @@ struct MomentsView: View {
 
     // MARK: - 一条动态
 
-    private func card(_ moment: Moment) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                AevisAvatar(
-                    source: moment.author.isMe ? .me : .ai,
-                    size: 36,
-                    seed: persona.avatarSeed
-                )
+    /// 微信朋友圈那种一行（2026-10-31 重做）。
+    ///
+    /// 和原来"卡片流"的差别（这是用户点名要的）：
+    /// - **通栏**：左边头像 + 右边正文，不再是一个个圆角卡片
+    /// - **点赞/评论**：一块淡灰底、**贴着正文**，不是再套一层卡片
+    /// - **分隔线**：每条之后一根，左侧缩进到正文起始位置（微信就是这么缩进的）
+    /// - 时间在正文下方、跟「评论」同一行右侧
+    private func feedRow(_ moment: Moment) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            AevisAvatar(
+                source: moment.author.isMe ? .me : .ai,
+                size: 40,
+                seed: persona.avatarSeed
+            )
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(displayName(for: moment.author))
-                        .font(mfont(14.5, weight: .medium))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(displayName(for: moment.author))
+                    .font(mfont(15, weight: .medium))
+                    .foregroundStyle(authorColor(moment.author))
+
+                if !moment.text.isEmpty {
+                    Text(moment.text)
+                        .font(mfont(15))
                         .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let image = moments.image(for: moment) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 230)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+
+                // 微信那块灰底：点赞名单 + 评论，**整块**贴着正文，不是卡片
+                if !moment.likes.isEmpty || !moment.comments.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !moment.likes.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "heart.fill")
+                                    .font(mfont(10))
+                                    .foregroundStyle(settings.accentColor)
+                                Text(moment.likes.map { displayName(for: $0) }.joined(separator: "、"))
+                                    .font(mfont(12.5))
+                                    .foregroundStyle(authorColor(likesAnchor(moment)))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        ForEach(moment.comments) { comment in
+                            HStack(alignment: .top, spacing: 4) {
+                                Text(commentLabel(comment))
+                                    .font(mfont(12.5, weight: .medium))
+                                    .foregroundStyle(authorColor(comment.author))
+                                Text(comment.text)
+                                    .font(mfont(12.5))
+                                    .foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                replyToName = displayName(for: comment.author)
+                                commentDraft = ""
+                                commentingOn = moment
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                }
+
+                // 时间 + 操作（微信：时间在左、评论在右，同一行）
+                HStack(spacing: 12) {
                     Text(timeText(moment.createdAt))
                         .font(mfont(11.5))
                         .foregroundStyle(.tertiary)
-                }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                Button {
-                    moments.toggleLike(moment)
-                } label: {
-                    Image(systemName: moment.likes.contains(.me) ? "heart.fill" : "heart")
-                        .font(mfont(14))
-                        .foregroundStyle(moment.likes.contains(.me) ? .red : .secondary)
-                }
-                .buttonStyle(.plain)
-                .disabled(moment.author.isMe)
-            }
-
-            if !moment.text.isEmpty {
-                Text(moment.text)
-                    .font(mfont(15))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let image = moments.image(for: moment) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-
-            if !moment.likes.isEmpty || !moment.comments.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    if !moment.likes.isEmpty {
-                        HStack(spacing: 5) {
-                            Image(systemName: "heart.fill")
-                                .font(mfont(10))
-                                .foregroundStyle(.red)
-                            Text(moment.likes.map { displayName(for: $0) }.joined(separator: "、"))
-                                .font(mfont(12))
-                                .foregroundStyle(.secondary)
-                        }
+                    Button {
+                        commentDraft = ""
+                        replyToName = nil
+                        commentingOn = moment
+                    } label: {
+                        Label("评论", systemImage: "bubble.right")
+                            .font(mfont(12))
+                            .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
 
-                    ForEach(moment.comments) { comment in
-                        HStack(alignment: .top, spacing: 5) {
-                            Text(commentLabel(comment))
-                                .font(mfont(12.5, weight: .medium))
-                                .foregroundStyle(comment.author.isMe
-                                                 ? settings.accentColor
-                                                 : .primary)
-                            Text(comment.text)
-                                .font(mfont(12.5))
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        // 点一条评论 = **回复它**（用户 2026-09-28：「朋友圈有回复功能」）。
-                        // 用"点"而不是再加个按钮：评论行本来就窄，塞按钮会挤成一团。
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            replyToName = displayName(for: comment.author)
-                            commentDraft = ""
-                            commentingOn = moment
-                        }
+                    Button {
+                        moments.toggleLike(moment)
+                    } label: {
+                        Image(systemName: moment.likes.contains(.me) ? "heart.fill" : "heart")
+                            .font(mfont(13))
+                            .foregroundStyle(moment.likes.contains(.me) ? settings.accentColor : .secondary)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(moment.author.isMe)
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
-                )
-            }
-
-            HStack(spacing: 14) {
-                Button {
-                    commentDraft = ""
-                    replyToName = nil
-                    commentingOn = moment
-                } label: {
-                    Label("评论", systemImage: "bubble.right")
-                        .font(mfont(12.5))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 0)
+                .padding(.top, 1)
             }
         }
-        .padding(14)
-        .aevisGlass(cornerRadius: cardCorner)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         // ScrollView 里没有 List，所以删除走长按菜单，不用 swipeActions
         .contextMenu {
             Button(role: .destructive) {
@@ -486,6 +496,24 @@ struct MomentsView: View {
                 Label("删掉这条", systemImage: "trash")
             }
         }
+    }
+
+    /// 信息流的分隔线。左边缩进到正文起始位置（头像 40 + 间距 10 + 页面 14 = 64）。
+    private var feedDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(height: 0.5)
+            .padding(.leading, 64)
+    }
+
+    /// 微信里昵称是**蓝绿色**那种，跟着主题色走；自己的名字也一样的处理。
+    private func authorColor(_ author: Moment.Author) -> Color {
+        author.isMe ? settings.accentColor : settings.accentColor.opacity(0.9)
+    }
+
+    /// 点赞名单用谁的色：名单里只要有我，就用我的色。
+    private func likesAnchor(_ moment: Moment) -> Moment.Author {
+        moment.likes.contains(.me) ? .me : moment.author
     }
 
     /// 弹窗标题：回复某个人时写清楚回的是谁，不然容易发错人。
