@@ -332,8 +332,8 @@ settings:
     #   ⑤ 新增积分页（「我的」→ 积分）：1 元 = 200 积分，充值走易支付收银台，
     #      兑换会员 / 看流水；退款按用户要求**只能人工**（后台标记 + 扣回积分）。
     #   ⑥ 热更新弹窗的主题入口修正（`@Environment(\.theme)` 项目里不存在，会编译失败）。
-    MARKETING_VERSION: "0.0.123"
-    CURRENT_PROJECT_VERSION: "123"
+    MARKETING_VERSION: "0.0.124"
+    CURRENT_PROJECT_VERSION: "124"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
