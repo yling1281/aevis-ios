@@ -38,12 +38,17 @@ struct DiscoverView: View {
                         entry("情侣空间", "heart.text.square", coupleLine) {
                             showCouple = true
                         }
-                        // ⭐ 2026-10-31 用户要求：音乐与「一起听」**合并成一个「网易云音乐」**，
-                        //    取消「一起玩」，并新增「苹果音乐」。
-                        //    合并后的入口直接开全屏播放器（PlayerView），里面已经含
-                        //    "ta 跟着听 + 想切歌就切"，不需要再摆第二个入口。
-                        entry("网易云音乐", "music.note", togetherLine) {
-                            router.showPlayer = true
+                        // ⭐ 2026-10-31 用户要求：音乐与「一起听」合并成「网易云音乐」。
+                        //
+                        // 🔴 2026-10-31 晚修正：之前这里直接 `router.showPlayer = true`
+                        //    —— 打开的是**全屏播放器**，用户点进去看到的还是"以前那个播放器"，
+                        //    新做的「推荐 / 排行榜 / 我的」三页根本没机会出现。
+                        //    用户反馈「网易云音乐还是以前那样子的」就是这个原因。
+                        //
+                        //    现在开 **MusicView**（三 Tab）。播放器从底下那条播放条进 ——
+                        //    点歌只开始播，点播放条才进全屏，这才是网易云的手感。
+                        entry("网易云音乐", "music.note", musicLine) {
+                            showMusic = true
                         }
                         entry("苹果音乐", "music.note.house", "用系统 MusicKit 搜歌、播放（需 Apple Music 订阅）") {
                             showAppleMusic = true

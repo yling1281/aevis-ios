@@ -30,6 +30,8 @@ struct DeviceCard: View {
             rule
             statusRow
             rule
+            memberRow
+            rule
             actionRow
 
             if let note {
@@ -97,6 +99,41 @@ struct DeviceCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
+    }
+
+    /// 会员状态（2026-10-31 用户：「它这个会员你没有显示啊，首先这个设备」）。
+    /// 设备卡是最能"证明这个号还能用多久"的地方，所以会员到期摆在这儿。
+    private var memberRow: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("会员")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                Text(memberText)
+                    .font(.aevis(14))
+                    .foregroundStyle(isMember ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: isMember ? "crown.fill" : "crown")
+                .font(.aevis(16))
+                .foregroundStyle(isMember ? AppSettings.shared.accentColor : .secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+    }
+
+    private var memberUntil: Date? { AccountService.shared.profile?.expiresAt }
+    private var isMember: Bool {
+        guard let until = memberUntil else { return false }
+        return until > Date()
+    }
+    private var memberText: String {
+        guard let until = memberUntil else { return "没开通" }
+        if until < Date() { return "已到期（" + until.formatted(date: .abbreviated, time: .omitted) + "）" }
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: until).day ?? 0
+        return "有效期到 " + until.formatted(date: .abbreviated, time: .omitted)
+            + (days > 0 ? "，还剩 \(days) 天" : "")
     }
 
     private var statusRow: some View {

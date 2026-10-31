@@ -24,6 +24,11 @@ struct MusicView: View {
     /// 登录状态变化靠 `AppSettings`（settings 是 ObservedObject）带动刷新。
     private let netease = NeteaseClient.shared
 
+    /// 主题色。**整个音乐页只认这一个** —— 以前这里写死了网易云那个红
+    /// （`Color(red: 0.9, green: 0.13, blue: 0.18)`，10 处），
+    /// 用户在「外观」里换主题色时这一页纹丝不动，看着就像"主题色没同步"。
+    private var accent: Color { settings.accentColor }
+
     /// 点一首歌就弹全屏播放器 —— 和网易云一样，点了直接进播放界面。
     @ObservedObject private var router = AppRouter.shared
 
@@ -157,7 +162,7 @@ struct MusicView: View {
                     Text("NETEASE CLOUD MUSIC")
                         .font(.system(size: 9, weight: .semibold))
                         .tracking(1.6)
-                        .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                        .foregroundStyle(accent)
                     Text("网易云")
                         .font(.aevis(19, weight: .bold))
                         .foregroundStyle(.primary)
@@ -200,7 +205,7 @@ struct MusicView: View {
         .background(
             LinearGradient(
                 colors: [Color(red: 1, green: 0.93, blue: 0.93),
-                         Color(red: 1, green: 0.96, blue: 0.96)],
+                         accent.opacity(0.07)],
                 startPoint: .top, endPoint: .bottom
             )
         )
@@ -222,7 +227,7 @@ struct MusicView: View {
                             .font(.aevis(15, weight: tab == t ? .semibold : .regular))
                             .foregroundStyle(tab == t ? .primary : .secondary)
                         Rectangle()
-                            .fill(Color(red: 0.9, green: 0.13, blue: 0.18))
+                            .fill(accent)
                             .frame(width: 18, height: 2.5)
                             .opacity(tab == t ? 1 : 0)
                     }
@@ -233,7 +238,7 @@ struct MusicView: View {
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 8)
-        .background(Color(red: 1, green: 0.96, blue: 0.96))
+        .background(accent.opacity(0.07))
     }
 
     // MARK: - 内容区
@@ -271,7 +276,7 @@ struct MusicView: View {
                         .foregroundStyle(.secondary)
                     Button("去登录") { showLogin = true }
                         .font(.aevis(14, weight: .medium))
-                        .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                        .foregroundStyle(accent)
                 }
                 .padding(.top, 56)
             } else {
@@ -291,7 +296,7 @@ struct MusicView: View {
                                 Text("播放全部")
                             }
                             .font(.aevis(12.5, weight: .medium))
-                            .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                            .foregroundStyle(accent)
                         }
                         .buttonStyle(.plain)
                     }
@@ -320,7 +325,7 @@ struct MusicView: View {
             Text("\(index + 1)")
                 .font(.aevisMono(12.5))
                 .foregroundStyle(playing
-                                 ? Color(red: 0.9, green: 0.13, blue: 0.18)
+                                 ? accent
                                  : Color.secondary.opacity(0.6))
                 .frame(width: 22, alignment: .trailing)
 
@@ -336,7 +341,7 @@ struct MusicView: View {
                 Text(track.title)
                     .font(.aevis(14, weight: playing ? .semibold : .regular))
                     .foregroundStyle(playing
-                                     ? Color(red: 0.9, green: 0.13, blue: 0.18)
+                                     ? accent
                                      : Color.primary)
                     .lineLimit(1)
                 Text(track.display)
@@ -350,7 +355,7 @@ struct MusicView: View {
             if playing && player.isPlaying {
                 Image(systemName: "waveform")
                     .font(.aevis(13))
-                    .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                    .foregroundStyle(accent)
             }
         }
         .padding(.horizontal, 16)
@@ -436,7 +441,7 @@ struct MusicView: View {
                     } label: {
                         HStack(spacing: 12) {
                             ZStack {
-                                Circle().fill(Color(red: 0.9, green: 0.13, blue: 0.18))
+                                Circle().fill(accent)
                                 Image(systemName: "music.note")
                                     .font(.aevis(19))
                                     .foregroundStyle(.white)
@@ -668,7 +673,7 @@ struct MusicView: View {
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.aevis(24))
-                        .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                        .foregroundStyle(accent)
                 }
                 .buttonStyle(.plain)
             }
@@ -693,7 +698,7 @@ struct MusicView: View {
                 .foregroundStyle(.secondary)
             Button("再试一次", action: retry)
                 .font(.aevis(14, weight: .medium))
-                .foregroundStyle(Color(red: 0.9, green: 0.13, blue: 0.18))
+                .foregroundStyle(accent)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)

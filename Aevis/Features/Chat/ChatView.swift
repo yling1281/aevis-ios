@@ -553,8 +553,13 @@ struct ChatView: View {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
+            // ⚠️ **这里不能带动画**（2026-10-31 用户报「一发消息就闪一下」）。
+            //    带动画时，新消息一进来整段列表会"滑"到底 —— 一屏内容一起动，
+            //    眼睛看到的就是闪。微信是**瞬间**贴底，没有过渡。
             .onChange(of: chat.messages.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
@@ -571,7 +576,9 @@ struct ChatView: View {
                 }
             }
             .onChange(of: errorText) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }

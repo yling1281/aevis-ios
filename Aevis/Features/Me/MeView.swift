@@ -40,6 +40,13 @@ struct MeView: View {
                         entry("记忆库", "brain.head.profile", memoryLine) {
                             route = SettingsRoute(focus: "memory")
                         }
+                        // 2026-10-31 用户：「它这个会员你没有显示啊」——
+                        // 后端登录响应里一直有 `membership.expire_at`，
+                        // `AccountService` 也早就解析进 `profile.expiresAt` 了，
+                        // 但**界面上从来没露过脸**。补这一行：到期时间 / 未开通。
+                        entry("会员", "crown", memberLine) {
+                            showPoints = true
+                        }
                         entry("这台设备", "iphone.gen3", deviceLine) {
                             route = SettingsRoute(focus: "device")
                         }
@@ -238,6 +245,17 @@ struct MeView: View {
 
     /// 账号那一行。**不填也能用**这件事必须写在行上，
     /// 否则会让人以为"没登录就不能用"。
+    /// 会员那一行：有效期 / 未开通。
+    private var memberLine: String {
+        guard let until = account.profile?.expiresAt else {
+            return "还没开通（可在积分里兑换）"
+        }
+        if until < Date() { return "已到期（可在积分里续）" }
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: until).day ?? 0
+        return "有效期到 " + until.formatted(date: .abbreviated, time: .omitted)
+            + (days > 0 ? "（还剩 \(days) 天）" : "")
+    }
+
     private var accountLine: String {
         if !account.isConfigured { return "服务器连不上" }
         return account.statusLine
