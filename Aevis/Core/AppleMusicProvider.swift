@@ -31,12 +31,15 @@ final class AppleMusicProvider: ObservableObject {
     }
 
     private func updatePlayability() async {
-        canPlay = MusicSubscription.current.canPlayCatalogContent
+        if let subscription = try? await MusicSubscription.current {
+            canPlay = subscription.canPlayCatalogContent
+        }
     }
 
     /// 搜歌（catalog 搜索，不需要会员也能搜）。
     func search(_ term: String, limit: Int = 20) async throws -> [Song] {
-        var request = MusicCatalogSearchRequest<Song>(term: term)
+        var request = MusicCatalogSearchRequest(term: term)
+        request.types = [.songs]
         request.limit = limit
         let response = try await request.response()
         return Array(response.songs)
