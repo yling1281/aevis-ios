@@ -2017,7 +2017,8 @@ final class AppSettings: ObservableObject {
         LLMConfig(
             baseURL: AevisHosts.accountBase,
             apiKey: accountToken,
-            model: CloudModelStore.shared.selectedID,
+            // ⚠️ 用**非隔离的静态**存取器 —— `llm` getter 不在 MainActor 上。
+            model: CloudModelStore.selectedID,
             reasoning: reasoningBudget,
             contextLimit: contextLimit
         )

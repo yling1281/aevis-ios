@@ -549,8 +549,11 @@ enum LLMService {
             if http.statusCode == 402 {
                 var need = 0, have = 0
                 if let d = collected.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-                   let payload = (obj["data"] as? [String: Any]) ?? obj {
+                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                    // ⚠️ `obj["data"]` 可能没有这层（有的接口直接平铺），
+                    //    `?? obj` 的结果**不是 Optional**，不能写成 `let x = … ?? y` 再绑定 ——
+                    //    那样编译器报「initializer for conditional binding must have Optional type」。
+                    let payload: [String: Any] = (obj["data"] as? [String: Any]) ?? obj
                     need = (payload["need"] as? Int) ?? 0
                     have = (payload["points"] as? Int) ?? 0
                 }

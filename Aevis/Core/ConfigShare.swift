@@ -61,7 +61,7 @@ enum ConfigShare {
         let payload = Payload(
             provider: settings.providerPreset.rawValue,
             baseURL: nil,
-            model: CloudModelStore.shared.selectedID,
+            model: CloudModelStore.selectedID,
             apiKey: nil,
             systemVoice: persona.voiceIdentifier,
             accentIndex: settings.accentIndex,
@@ -106,10 +106,10 @@ enum ConfigShare {
         //    老配置里带 baseURL 的就当没这回事，别把本机改回去。
         if let model = payload.model, !model.isEmpty {
             // 只接受**云端认识的**模型 id，别的（老配置里的 "gpt-4o" 之类）忽略。
-            let known = CloudModelStore.shared.models.map(\.id)
-                + CloudModelStore.fallbackIDs
-            if known.contains(model) {
-                CloudModelStore.shared.selectedID = model
+            // ⚠️ 用**非隔离的静态**存取器 —— ConfigShare 不在 MainActor 上，
+            //    访问 @MainActor 的实例属性会编译不过。
+            if CloudModelStore.knownIDs.contains(model) {
+                CloudModelStore.selectedID = model
                 changed.append("模型")
             }
         }

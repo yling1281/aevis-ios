@@ -23,6 +23,25 @@ struct CloudModel: Identifiable, Codable, Hashable {
         case officialInputYuanPerM, officialOutputYuanPerM
     }
 
+    /// ⚠️ **必须显式写这个初始化器**。
+    ///
+    /// 一旦写了 `init(from decoder:)`，编译器就**不再自动合成**成员初始化器 ——
+    /// 于是 `CloudModel(id:label:note:isDefault:...)` 这种写法会报
+    /// 「extra arguments … missing argument for parameter 'from'」。
+    /// 所以这里把全参初始化器补回来（兜底名单就是用它建的）。
+    init(id: String, label: String, note: String, isDefault: Bool,
+         inputPointsPerM: Double, outputPointsPerM: Double,
+         officialInputYuanPerM: Double, officialOutputYuanPerM: Double) {
+        self.id = id
+        self.label = label
+        self.note = note
+        self.isDefault = isDefault
+        self.inputPointsPerM = inputPointsPerM
+        self.outputPointsPerM = outputPointsPerM
+        self.officialInputYuanPerM = officialInputYuanPerM
+        self.officialOutputYuanPerM = officialOutputYuanPerM
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -60,7 +79,9 @@ final class CloudModelStore: ObservableObject {
     private let ttl: TimeInterval = 6 * 3600
 
     /// 兜底名单（与后端 PRICE_TABLE 对齐）。后端不可达时至少让用户能选。
-    private static let fallback: [CloudModel] = [
+    ///
+    /// ⚠️ **非隔离**（不加 @MainActor）：`ConfigShare` 在非隔离上下文里要读它。
+    static let fallback: [CloudModel] = [
         CloudModel(id: "deepseek-flash", label: "DeepSeek V4.1 Flash",
                    note: "日常聊天，快而省。默认推荐。", isDefault: true,
                    inputPointsPerM: 300, outputPointsPerM: 1200,
@@ -82,20 +103,42 @@ final class CloudModelStore: ObservableObject {
     private init() { loadCache() }
 
     /// 兜底名单的 id（供别处校验「这个模型 id 我们认不认」）。
-    static var fallbackIDs: [String] { Self.fallback.map(\.id) }
+    ///
+    /// ⚠️ **非隔离**：`ConfigShare.apply` 在非隔离上下文里用它做白名单校验。
+    nonisolated static var fallbackIDs: [String] { Self.fallback.map(\.id) }
+
+    /// 「当前选中的模型 id」—— **非隔离**的静态存取器。
+    ///
+    /// ⚠️ 为什么单独拎出来：`AppSettings.llm` 与 `ConfigShare` 都要读它，
+    ///    而它们不在 MainActor 上。放在这里（纯 UserDefaults 读写）就绕开了 actor 边界。
+    private static let selectedKey = "aevis.cloudModel.selected"
+
+    nonisolated static var selectedID: String {
+        get { UserDefaults.standard.string(forKey: selectedKey) ?? DEFAULT_ID }
+        set { UserDefaults.standard.set(newValue, forKey: selectedKey) }
+    }
+
+    /// 我们认识的模型 id：云端下发的 + 兜底的。
+    /// ⚠️ 非隔离（`ConfigShare.apply` 要用）。
+    nonisolated static var knownIDs: [String] {
+        var ids = fallbackIDs
+        if let cached = UserDefaults.standard.array(forKey: "aevis.cloudModels.v1.ids")
+            as? [String] {
+            for x in cached where !ids.contains(x) { ids.append(x) }
+        }
+        return ids
+    }
+
+    /// 默认模型 id（与后端 DEFAULT_MODEL 对齐）。
+    nonisolated static let DEFAULT_ID = "deepseek-flash"
 
     /// 当前选中的模型 id（与后端默认一致）。
+    ///
+    /// 转发到**非隔离的静态存取器** —— 这样 `AppSettings.llm` / `ConfigShare`
+    /// 在非隔离上下文里也能用同一个值（两边不会选出两个不同的模型）。
     var selectedID: String {
-        get {
-            let saved = UserDefaults.standard.string(forKey: "aevis.cloudModel.selected")
-            if let saved, models.contains(where: { $0.id == saved }) { return saved }
-            if let saved, Self.fallback.contains(where: { $0.id == saved }) { return saved }
-            return models.first(where: { $0.isDefault })?.id
-                ?? Self.fallback.first?.id ?? "deepseek-flash"
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "aevis.cloudModel.selected")
-        }
+        get { Self.selectedID }
+        set { Self.selectedID = newValue }
     }
 
     var selected: CloudModel? {
@@ -148,6 +191,8 @@ final class CloudModelStore: ObservableObject {
         if let data = try? JSONEncoder().encode(list) {
             UserDefaults.standard.set(data, forKey: cacheKey)
         }
+        // 另存一份纯 id 数组 —— 非隔离的 `knownIDs` 要用（它拿不到 @Published 的 models）
+        UserDefaults.standard.set(list.map(\.id), forKey: cacheKey + ".ids")
     }
 
     private func loadCache() {
