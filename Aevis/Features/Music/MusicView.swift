@@ -258,7 +258,7 @@ struct MusicView: View {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack {
                     LinearGradient(
-                        colors: [Color(rgb: rank.tint.top), Color(rgb: rank.tint.bottom)],
+                        colors: [Color(rgb: rank.tintTop), Color(rgb: rank.tintBottom)],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
                     if let cover = rank.coverURL {

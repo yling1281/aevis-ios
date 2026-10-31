@@ -38,14 +38,20 @@ struct MusicTrack: Identifiable, Hashable {
 /// 2026-10-31 按用户截图1「排行榜」页加的：网易云官方那个页是**三列宫格**，
 /// 每格一个彩色渐变方块 + 榜单名。所以这里除了 id/name，还带一个 `tint`
 /// —— 宫格背景色。没有它的话十二个方块会长得一模一样，跟官方完全不像。
+///
+/// ⚠️ 渐变色用**两个独立字段**（`tintTop` / `tintBottom`），不是元组 ——
+///    元组 `(RGB, RGB)` 不能自动合成 `Hashable`，
+///    CI 报 `type 'NeteaseRank' does not conform to protocol 'Hashable'`。
 struct NeteaseRank: Identifiable, Hashable {
     var id: String
     var name: String
     var trackCount: Int
     var coverURL: URL?
-    /// 宫格渐变色（两个端点的 RGB）。按榜单在官方列表里的位置固定分配，
+    /// 宫格渐变色的上端点。按榜单在官方列表里的位置固定分配，
     /// 这样每次进来颜色都一样（官方也是固定配色）。
-    var tint: (top: RGB, bottom: RGB)
+    var tintTop: RGB
+    /// 宫格渐变色的下端点。
+    var tintBottom: RGB
 
     /// 官方那 12 个榜的名字与配色（顺序 = 截图里的排列顺序）。
     ///
@@ -55,21 +61,22 @@ struct NeteaseRank: Identifiable, Hashable {
     /// 所以它不会出现在列表里 —— 这是网易那边没了，不是我们漏了。
     struct OfficialSpec {
         var name: String
-        var tint: (top: RGB, bottom: RGB)
+        var top: RGB
+        var bottom: RGB
     }
 
     static let officialOrder: [OfficialSpec] = [
-        OfficialSpec(name: "飙升榜",      tint: (RGB(0x8B, 0x5C, 0xF6), RGB(0x6D, 0x3B, 0xE0))),
-        OfficialSpec(name: "新歌榜",      tint: (RGB(0x22, 0xC5, 0x5E), RGB(0x0E, 0xA8, 0x4A))),
-        OfficialSpec(name: "原创榜",      tint: (RGB(0x38, 0xBD, 0xF8), RGB(0x0E, 0xA5, 0xE9))),
-        OfficialSpec(name: "热歌榜",      tint: (RGB(0xFB, 0x71, 0x85), RGB(0xE1, 0x1D, 0x48))),
-        OfficialSpec(name: "网易云古典榜", tint: (RGB(0x81, 0x8C, 0xF8), RGB(0x4F, 0x46, 0xE5))),
-        OfficialSpec(name: "网易云电音榜", tint: (RGB(0x4A, 0xDE, 0x80), RGB(0x16, 0xA3, 0x4A))),
-        OfficialSpec(name: "网易云中文说唱榜", tint: (RGB(0xFB, 0x92, 0x3C), RGB(0xEA, 0x58, 0x0C))),
-        OfficialSpec(name: "荣耀音乐热歌榜", tint: (RGB(0xF4, 0x72, 0xB6), RGB(0xDB, 0x27, 0x77))),
-        OfficialSpec(name: "实时分享榜",  tint: (RGB(0xF8, 0x71, 0x71), RGB(0xDC, 0x26, 0x26))),
-        OfficialSpec(name: "网易云全球说唱榜", tint: (RGB(0x60, 0xA5, 0xFA), RGB(0x25, 0x63, 0xEB))),
-        OfficialSpec(name: "潮流风向榜",  tint: (RGB(0x34, 0xD3, 0x99), RGB(0x05, 0x96, 0x69)))
+        OfficialSpec(name: "飙升榜",      top: RGB(0x8B, 0x5C, 0xF6), bottom: RGB(0x6D, 0x3B, 0xE0)),
+        OfficialSpec(name: "新歌榜",      top: RGB(0x22, 0xC5, 0x5E), bottom: RGB(0x0E, 0xA8, 0x4A)),
+        OfficialSpec(name: "原创榜",      top: RGB(0x38, 0xBD, 0xF8), bottom: RGB(0x0E, 0xA5, 0xE9)),
+        OfficialSpec(name: "热歌榜",      top: RGB(0xFB, 0x71, 0x85), bottom: RGB(0xE1, 0x1D, 0x48)),
+        OfficialSpec(name: "网易云古典榜", top: RGB(0x81, 0x8C, 0xF8), bottom: RGB(0x4F, 0x46, 0xE5)),
+        OfficialSpec(name: "网易云电音榜", top: RGB(0x4A, 0xDE, 0x80), bottom: RGB(0x16, 0xA3, 0x4A)),
+        OfficialSpec(name: "网易云中文说唱榜", top: RGB(0xFB, 0x92, 0x3C), bottom: RGB(0xEA, 0x58, 0x0C)),
+        OfficialSpec(name: "荣耀音乐热歌榜", top: RGB(0xF4, 0x72, 0xB6), bottom: RGB(0xDB, 0x27, 0x77)),
+        OfficialSpec(name: "实时分享榜",  top: RGB(0xF8, 0x71, 0x71), bottom: RGB(0xDC, 0x26, 0x26)),
+        OfficialSpec(name: "网易云全球说唱榜", top: RGB(0x60, 0xA5, 0xFA), bottom: RGB(0x25, 0x63, 0xEB)),
+        OfficialSpec(name: "潮流风向榜",  top: RGB(0x34, 0xD3, 0x99), bottom: RGB(0x05, 0x96, 0x69))
     ]
 }
 
@@ -371,7 +378,8 @@ final class NeteaseClient {
                 name: spec.name,
                 trackCount: (item["trackCount"] as? Int) ?? 0,
                 coverURL: (item["coverImgUrl"] as? String).flatMap(URL.init(string:)),
-                tint: spec.tint
+                tintTop: spec.top,
+                tintBottom: spec.bottom
             ))
         }
         return out
