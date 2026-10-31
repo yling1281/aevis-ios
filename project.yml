@@ -321,8 +321,19 @@ settings:
     #      ⚠️ 旧代码里「冻 1 小时、没有 refresh、只能扫码」是**没有任何出处的二手说法**（全仓无佐证），已作废，别再改回去。
     #      ⚠️ `ish-scripts/wechat_bind.sh` 是 App 资源（每次启动由 `installScript()` 重写进 guest）
     #        ⇒ 改它只需出新包，**不需要重编 `libaevisish.a`**。
-    MARKETING_VERSION: "0.0.120"
-    CURRENT_PROJECT_VERSION: "120"
+    # ⭐ 0.0.123（2026-10-31 晚）：**账号体系统一到 4-4** + **积分充值**。
+    #   ① 旧后端（account.aevis.cn / 123.57.33.160）正式弃用：老库 7 个账号全量迁到 4-4，
+    #      密码走「pbkdf2 兼容 + 登录后透明升 scrypt」，合并账号保留新旧两个密码都能登。
+    #   ② AccountService 全部改 `/v1/*`，`send()` 解包 `{code,data,msg}` 信封；
+    #      设备扫码 / 远程踢设备 / 头像上传 4-4 没有对应接口 → **明确报不支持**，不假装成功。
+    #   ③ 设备码门禁（DeviceGate）在新体系下直接放行 —— `/api/device/lookup` 已随老后端下线，
+    #      还按老逻辑走会把所有用户永久挡在门禁页。
+    #   ④ 注册改成「邮箱 + 密码 + 验证码」，不再要注册码。
+    #   ⑤ 新增积分页（「我的」→ 积分）：1 元 = 200 积分，充值走易支付收银台，
+    #      兑换会员 / 看流水；退款按用户要求**只能人工**（后台标记 + 扣回积分）。
+    #   ⑥ 热更新弹窗的主题入口修正（`@Environment(\.theme)` 项目里不存在，会编译失败）。
+    MARKETING_VERSION: "0.0.123"
+    CURRENT_PROJECT_VERSION: "123"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
