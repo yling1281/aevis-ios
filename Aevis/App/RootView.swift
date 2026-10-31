@@ -15,7 +15,6 @@ struct RootView: View {
     /// 「换设备自动恢复」这辈子只试一次 —— 见下面那个 `.task`。
     @State private var didTryRestore = false
     /// ⭐ 2026-10-04：登录之后那条「把东西存到你自己的网盘」的引导（只弹一次）。
-    @State private var showPanGuide = false
 
     /// 崩了要不要弹那一屏。
     ///
@@ -63,10 +62,8 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showCrash) {
             CrashReportView { showCrash = false }
         }
-        // ⭐ 2026-10-04：登录后一次性的「把东西存到你自己的网盘」引导。
-        .sheet(isPresented: $showPanGuide) {
-            BaiduPanGuideSheet()
-        }
+        // ⚠️ 2026-10-31 下线：百度网盘引导（授权没拿到，功能已关）。
+        //    这块原来会在登录后弹「把东西存到你的网盘」—— 留着就是骗人。
         // 授权通过的那一刻：门禁页淡出、主界面淡入。
         // ⚠️ 盯的是 `gate.authorized` 而不是 `isBlocking` —— 后者是计算属性，
         // 不是 `@Published`，在这里不会触发刷新。
@@ -103,13 +100,8 @@ struct RootView: View {
         // **只在这里算** —— 放到 accentColor 那个属性里现算会把界面拖死。
         .onAppear {
             settings.refreshAvatarTint(from: personaStore.avatarImage)
-            // 冷启动不会走 scenePhase 的 active 变化，所以这里也补一次
-            if settings.qqBotEnabled {
-                QQBotService.shared.reconnectIfNeeded()
-            }
-            if settings.weChatBotEnabled {
-                WeChatBotService.shared.reconnectIfNeeded()
-            }
+            // ⚠️ 2026-10-31：QQ 桥接 / 微信机器人已下线，这里不再重连。
+            //    （服务实现本身留着，见 `ToolCategory.isRetired` 的说明。）
             // 她"弹出来过但还没进聊天"的那几句话，补进聊天记录
             // （用户 2026-09-29：「弹窗出来的消息是要联动到消息里面去的」）。
             Task { await ProactiveService.shared.deliverPendingToChat() }
@@ -178,18 +170,6 @@ struct RootView: View {
             // 用户切回 App 的那一下，正是最该知道"我还能不能用"的时刻。
             Task { await DeviceGate.shared.refresh() }
 
-            // QQ 机器人：后台被系统掐掉的连接，回到前台要自己接上。
-            // （它靠 SilentKeeper 的静音音频尽量活着，但系统真要掐也没辙。）
-            if settings.qqBotEnabled {
-                QQBotService.shared.reconnectIfNeeded()
-            }
-
-            // 微信机器人（ClawBot）：那条常驻轮询跑在内置 Linux 里，回到前台要确认
-            // 轮询器还活着、并把断线期间攒下的消息补读一次。
-            if settings.weChatBotEnabled {
-                WeChatBotService.shared.reconnectIfNeeded()
-            }
-
             // 顺手看看她该不该发朋友圈了（后台跑不了模型，只能回到前台补）
             let persona = personaStore.persona
             guard persona.isComplete else { return }
@@ -246,27 +226,12 @@ struct RootView: View {
         //    「造一个她」切到主界面 —— 不用我们手动跳。
         .task(id: account.isSignedIn) {
             guard account.isSignedIn, !gate.isBlocking else { return }
-            // ⭐ 登录之后**弹一次**「把东西存到你自己的网盘」的引导 ——
-            //    只弹一次（`AppSettings.panGuideShown` 落盘记着），
-            //    而且只在还没授权网盘的时候提。见 `BaiduPanGuideSheet`。
-            offerPanGuideIfNeeded()
             guard !didTryRestore else { return }
             didTryRestore = true
             if let what = await AutoSync.shared.autoRestoreIfNewDevice() {
                 bridgeNote = "已从百度网盘恢复\(what)。"
             }
         }
-    }
-
-    /// 该不该弹网盘引导：**已登录 且 还没授权网盘 且 从没弹过**。
-    ///
-    /// ⚠️ 先置 `panGuideShown = true` 再弹 —— 用户点了「以后再说」也算弹过，
-    ///    不能因为没授权就每次登录都来烦一遍。
-    private func offerPanGuideIfNeeded() {
-        guard !AppSettings.shared.panGuideShown else { return }
-        guard !BaiduPanClient.shared.isAuthorized else { return }
-        AppSettings.shared.panGuideShown = true
-        showPanGuide = true
     }
 
     @ViewBuilder

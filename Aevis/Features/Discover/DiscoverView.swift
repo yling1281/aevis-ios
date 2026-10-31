@@ -13,19 +13,14 @@ struct DiscoverView: View {
     @ObservedObject private var together = ListenTogetherService.shared
     @ObservedObject private var player = MusicPlayer.shared
     @ObservedObject private var couple = CoupleStore.shared
-    @ObservedObject private var wallet = WalletStore.shared
     @ObservedObject private var diary = DiaryStore.shared
     @ObservedObject private var todo = TodoStore.shared
-    @ObservedObject private var herPhone = HerPhoneStore.shared
 
     @State private var showMusic = false
     @State private var showCouple = false
-    @State private var showWallet = false
     @State private var showDiary = false
     @State private var showTodo = false
     @State private var showMC = false
-    @State private var showRealLife = false
-    @State private var showHerPhone = false
     @State private var showBrowser = false
     @State private var showAppleMusic = false
 
@@ -60,25 +55,15 @@ struct DiscoverView: View {
                         }
                     }
                     card {
-                        // ⭐ 2026-10-04：虚拟银行搬进发现页（以前只藏在聊天页加号里），
-                        //    并且跟聊天记录一起进网盘备份。
-                        entry("虚拟银行", "yensign.circle", walletLine) {
-                            showWallet = true
-                        }
+                        // ⚠️ 2026-10-31 下线三样（用户：「所有的口都取消掉」）：
+                        //    「虚拟银行」（钱包/银行）、「真实生活」（点外卖/买东西）、
+                        //    「ta 的小手机」。这一整张卡原来就是这三样 + 日记 + 一起做，
+                        //    现在只剩后两个 —— 卡片本身留着，不然日记和清单也会跟着消失。
                         entry("日记", "book.closed", diaryLine) {
                             showDiary = true
                         }
                         entry("一起做的事", "checklist", todoLine) {
                             showTodo = true
-                        }
-                        // ⭐ 2026-10-06：真实生活（逛店 / 点外卖）。这一页的物流进度
-                        //    是**跟着时钟自己往前走**的，停在那儿就能看见它推进。
-                        entry("真实生活", "takeoutbag.and.cup.and.straw", realLifeLine) {
-                            showRealLife = true
-                        }
-                        // ⭐ 2026-10-06：ta 的小手机 —— 看 ta 装了哪些 App、刚才在干什么。
-                        entry("ta 的小手机", "iphone.gen3", herPhoneLine) {
-                            showHerPhone = true
                         }
                     }
                     // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
@@ -104,9 +89,6 @@ struct DiscoverView: View {
                 // CoupleSpaceView 自带 NavigationStack。
                 CoupleSpaceView()
             }
-            .sheet(isPresented: $showWallet) {
-                WalletView()
-            }
             .sheet(isPresented: $showDiary) {
                 DiaryView()
             }
@@ -115,15 +97,6 @@ struct DiscoverView: View {
             }
             .sheet(isPresented: $showMC) {
                 MCView()
-            }
-            .sheet(isPresented: $showRealLife) {
-                // RealLifeView 自带 `.aevisScreen("真实生活")`（返回 + 关闭），
-                // 这里**别再套 NavigationStack**（套了会多一层壳）。
-                RealLifeView()
-            }
-            .sheet(isPresented: $showHerPhone) {
-                // HerPhoneView 自带 NavigationStack + 「关闭」，同样**别再套**。
-                HerPhoneView()
             }
             .sheet(isPresented: $showBrowser) {
                 // 内置浏览器。它自己的标题栏 / 返回键**只在被导航壳包住时才成立**
@@ -155,12 +128,9 @@ struct DiscoverView: View {
     private func applyLaunchOptions() {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("-aevisOpenWallet") { showWallet = true }
         if args.contains("-aevisOpenDiary") { showDiary = true }
         if args.contains("-aevisOpenTodo") { showTodo = true }
         if args.contains("-aevisOpenMC") { showMC = true }
-        if args.contains("-aevisOpenRealLife") { showRealLife = true }
-        if args.contains("-aevisOpenHerPhone") { showHerPhone = true }
         #endif
     }
 
@@ -185,10 +155,6 @@ struct DiscoverView: View {
         return "倒数日、在一起多少天"
     }
 
-    private var walletLine: String {
-        "我钱包里还有 " + WalletStore.money(wallet.myBalance)
-    }
-
     private var diaryLine: String {
         let count = diary.sorted.count
         return count == 0 ? "两个人写同一个本子" : "已经写了 \(count) 篇"
@@ -198,15 +164,6 @@ struct DiscoverView: View {
         if todo.items.isEmpty { return "想一起做的事，都写在这儿" }
         if todo.openCount == 0 { return "清单上这些都做完啦" }
         return "还有 \(todo.openCount) 件等着一起做"
-    }
-
-    private var realLifeLine: String {
-        "点外卖、买东西，进度跟着时钟走"
-    }
-
-    private var herPhoneLine: String {
-        let count = herPhone.apps.count
-        return count == 0 ? "看 ta 的手机装了啥、刚才在干什么" : "看 ta 的手机，已经装了 \(count) 个 App"
     }
 
     // MARK: - 零件

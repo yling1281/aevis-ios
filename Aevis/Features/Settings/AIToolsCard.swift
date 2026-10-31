@@ -57,7 +57,7 @@ struct AIToolsCard: View {
                 .padding(.top, 12)
                 .padding(.bottom, 2)
 
-                ForEach(ToolCategory.allCases) { category in
+                ForEach(ToolCategory.live) { category in
                     categoryRow(category)
                 }
             } else {
@@ -81,7 +81,7 @@ struct AIToolsCard: View {
     // MARK: - 动作
 
     private func setAll(_ on: Bool) {
-        for category in ToolCategory.allCases {
+        for category in ToolCategory.live {
             settings.setTool(category, on: on)
         }
     }

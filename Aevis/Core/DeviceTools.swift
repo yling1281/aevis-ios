@@ -97,6 +97,27 @@ enum ToolCategory: String, CaseIterable, Identifiable {
         default: return false
         }
     }
+
+    /// **已经下线的类别**（2026-10-31 用户：「就等于所有的口都取消掉，知道吗？」）。
+    ///
+    /// 下线的三样：
+    /// - `.wallet` 虚拟钱包 / 虚拟银行（转账、红包、余额）
+    /// - `.pan`    百度网盘（授权没拿到）
+    /// - `.qq`     QQ 桥接
+    ///
+    /// ⚠️ 这里**只是把"口"封掉**，枚举 case 和后台实现都留着 ——
+    ///    删 case 会牵动 `CapabilitySpec` 的一堆 switch 和用户已有的设置键，
+    ///    收益很小、风险很大。用户要的是"点不到、AI 也调不到"，这两条都做到了：
+    ///    `allGroups` 里没有这三组 → 模型收不到定义；UI 只列 `live` → 界面上没有开关。
+    var isRetired: Bool {
+        switch self {
+        case .pan, .wallet, .qq: return true
+        default: return false
+        }
+    }
+
+    /// 还活着的类别。UI 和运行时一律用这个，别再用 `allCases`。
+    static var live: [ToolCategory] { allCases.filter { !$0.isRetired } }
 }
 
 /// ta 的手。
@@ -162,12 +183,12 @@ enum DeviceTools {
             (.music, musicTools),
             (.moment, momentTools),
             (.diary, DiaryTools.tools),
-            (.pan, panTools),
-            (.qq, qqTools + qqBotTools),
+            // ⚠️ 2026-10-31 下线：`.pan`（百度网盘）、`.qq`（QQ 桥接）、`.wallet`（钱包）
+            //    三组从这里摘掉 —— 这就是"AI 也调不到"的那一刀。
+            //    详见 `ToolCategory.isRetired`。
             // 系统动作 + `shellTool`（命令行）+ `ttsTool`（文字转语音）放一类 ——
             // 这一类都跟"能不能替我操作这台手机"捆在一起。
             (.system, systemTools + [shellTool, ttsTool]),
-            (.wallet, WalletTools.walletTools),
             (.couple, CoupleTools.coupleTools),
             // ta**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
             // 跟别的不一样的地方：这几个只是"提出来"，真正开始还要用户点头。
@@ -236,7 +257,7 @@ enum DeviceTools {
     static var disabledCategoryLabels: [String] {
         guard masterEnabled else { return [] }
         let off = Set(AppSettings.shared.disabledToolCategories)
-        return ToolCategory.allCases.filter { off.contains($0.rawValue) }.map(\.label)
+        return ToolCategory.live.filter { off.contains($0.rawValue) }.map(\.label)
     }
 
     // 🔴 2026-10-07：这里**曾经**加过一个 `capabilityNote`（「你现在真的有下面这些手」），

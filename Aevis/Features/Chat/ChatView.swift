@@ -69,8 +69,8 @@ struct ChatView: View {
     @State private var showScreenPanel = false
     /// 加号里的「转发朋友圈」面板。
     @State private var shareToMoments = false
-    /// 加号里的「转账 / 红包」面板（假钱包）。
-    @State private var showWallet = false
+    // ⚠️ 2026-10-31 下线：加号里的「转账 / 红包」（虚拟钱包）连同它的面板一起摘掉。
+    //    用户原话「虚拟钱包现在也关吧…等于所有的口都取消掉」。
     /// 点开的那条转账气泡（看详情）。
     @State private var transferDetail: ChatMessage?
     @FocusState private var composerFocused: Bool
@@ -153,10 +153,6 @@ struct ChatView: View {
             if ProcessInfo.processInfo.arguments.contains("-aevisOpenMore") {
                 showMorePanel = true
             }
-            // 截图自检：直接把钱包（转账/红包）那张打开 —— 不然截不到它。
-            if ProcessInfo.processInfo.arguments.contains("-aevisOpenWallet") {
-                showWallet = true
-            }
             #endif
             drainBridgeInbox()
             // 录屏扩展在另一个进程里攒着文字，进聊天页先拉一次 ——
@@ -197,10 +193,6 @@ struct ChatView: View {
             ShareToMomentsSheet()
                 .environmentObject(chat)
                 .environmentObject(personaStore)
-        }
-        // 假钱包：转账 / 红包（用户 2026-09-29 要的）
-        .sheet(isPresented: $showWallet) {
-            WalletView()
         }
         // 点开一条转账看详情
         .sheet(item: $transferDetail) { message in
@@ -897,14 +889,6 @@ struct ChatView: View {
                 shareToMoments = true
             } label: {
                 moreTile("转发朋友圈", "arrowshape.turn.up.right")
-            }
-
-            // 假钱包：转账 / 红包（用户 2026-09-29：「支付功能也是气泡」）
-            Button {
-                closeMorePanel()
-                showWallet = true
-            } label: {
-                moreTile("转账 / 红包", "yensign.circle")
             }
 
             // 一起听 / 通话 默认不显示（见 `Experimental`）：这两个入口以前藏在

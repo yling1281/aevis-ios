@@ -123,11 +123,14 @@ struct SettingsView: View {
             CardSection(id: "power", title: "能力",
                         // 「AI 权限」排在最前：它是这一组的总闸，
                         // 其余那些能力都归它管，放中间会让人以为只是并列的一项。
-                        // 🚀 「微信机器人」提到第 2 位（2026-10-07）：老板反馈在设置页里
-                        //    找不到它（原来夹在 qqbot 后面），所以挪到最显眼处，
-                        //    一眼就能看到。其余 key 的顺序、名字一个都没动。
-                        keys: ["aitools", "wechatbot", "companion", "baidupan", "music",
-                               "qqbot", "qq", "system", "mcp", "console"]),
+                        //
+                        // ⚠️ 2026-10-31 用户：「就等于所有的口都取消掉，知道吗？」
+                        //    这里摘掉了三张卡 —— `baidupan`（授权没拿到）、
+                        //    `wallet`（虚拟钱包/银行）、`qqbot` / `wechatbot`（QQ 桥接）。
+                        //    **不是隐藏，是入口彻底不生成**：key 不在这张表里，
+                        //    `card(_:)` 那个 switch 也就永远不会被调到。
+                        keys: ["aitools", "companion", "music",
+                               "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
                         keys: ["account", "device", "devicelist", "pair", "share", "about"])
         ]
@@ -159,15 +162,15 @@ struct SettingsView: View {
         case "console": consoleCard
         case "model": modelCard
         case "search": searchCard
-        case "qq": QQCard()
-        case "qqbot": QQBotCard()
-        case "wechatbot": WeChatBotCard()
+        // `qq`（QQ 桥接）2026-10-31 下线 —— 跟 qqbot / wechatbot 一起摘的。
+        // ⚠️ `qqbot` / `wechatbot` / `baidupan` 三个 case 已摘（2026-10-31 下线）。
+        //    留在 switch 里会有"入口没了但卡片还在"的错觉，以后有人加回去
+        //    只要把各自那张卡和 `sections` 里的 key 一起加回来。
         case "account": AccountCard()
         case "device": DeviceCard()
         case "devicelist": DeviceListCard()
         case "pair": PairCard()
         case "share": ShareCard()
-        case "baidupan": BaiduPanCard()
         case "system": SystemBridgeCard()
         case "mcp": MCPCard()
         case "chat": chatCard

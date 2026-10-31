@@ -30,7 +30,7 @@ enum CapabilitySpec {
         guard AppSettings.shared.aiToolsEnabled else { return nil }
 
         var lines: [String] = [header]
-        for category in ToolCategory.allCases where DeviceTools.isOn(category) {
+        for category in ToolCategory.live where DeviceTools.isOn(category) {
             if let line = line(for: category) { lines.append(line) }
         }
         // 一类都没开（理论上有可能：总开关开着、逐类全关）时别硬塞一句空话。

@@ -389,10 +389,6 @@ struct MeView: View {
                     }
                 }
                 divider
-                entry("QQ 桥接", "message", "接上你自己的 QQ") {
-                    route = SettingsRoute(focus: "qq")
-                }
-                divider
                 entry("系统桥接", "link", "快捷指令、剪贴板") {
                     route = SettingsRoute(focus: "system")
                 }
