@@ -2,7 +2,7 @@ import Foundation
 
 /// 云端可选模型（由后端 `/v1/llm/models` 下发）。
 ///
-/// ⚠️ 计价口径在后端（DeepSeek 官方价 × 1.5，1 元 = 200 积分），
+/// ⚠️ 计价口径在后端（DeepSeek 官方价 × 1.5，1 元 = 300 积分），
 ///    这里**只负责展示**，不参与任何金额计算 —— 免得两边算出两个价。
 struct CloudModel: Identifiable, Codable, Hashable {
     let id: String

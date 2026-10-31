@@ -265,7 +265,7 @@ struct MeView: View {
     private var pointsLine: String {
         let pts = pointsService.points
         if pts > 0 { return "\(pts) 积分 · 可兑换会员" }
-        return "1 元 = 200 积分，充值后可换会员"
+        return "1 元 = 300 积分，充值后可换会员"
     }
 
     /// 「AI 权限」那一行 —— 一眼看出现在ta能不能动手、关了几类。

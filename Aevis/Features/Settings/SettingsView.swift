@@ -451,7 +451,7 @@ struct SettingsView: View {
                 }
 
                 Text("聊天按 token 计费，从积分里扣。价格 = DeepSeek 官方价 × 1.5，"
-                     + "1 元 = 200 积分。积分不够会提示你去充值。")
+                     + "1 元 = 300 积分。积分不够会提示你去充值。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

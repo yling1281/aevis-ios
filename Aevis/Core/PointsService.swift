@@ -3,7 +3,7 @@ import Foundation
 /// 积分（2026-10-31 新增）
 ///
 /// 用户要求：「目前只有会员充值，需要补做积分充值功能，本次一并实现，
-/// 兑换比例为 1 元 = 200 积分」。
+/// 兑换比例为 1 元 = 300 积分」。
 ///
 /// ⚠️ **比例只在服务端算**（`points_for_cents`），这里一律用后端返回的 `points`，
 ///    不在客户端再乘一次 —— 两处各算一次迟早对不上，而且对不上时用户只会骂"少给了"。
@@ -17,7 +17,7 @@ final class PointsService: ObservableObject {
     // ---- 余额 ----
     @Published private(set) var points: Int = 0
     @Published private(set) var yuan: String = "0.00"
-    @Published private(set) var rate: String = "1 元 = 200 积分"
+    @Published private(set) var rate: String = "1 元 = 300 积分"
 
     // ---- 商店 ----
     @Published private(set) var items: [ShopItem] = []
@@ -101,7 +101,7 @@ final class PointsService: ObservableObject {
 
             points = (h["points"] as? Int) ?? 0
             yuan = (h["yuan"] as? String) ?? "0.00"
-            rate = (h["rate"] as? String) ?? "1 元 = 200 积分"
+            rate = (h["rate"] as? String) ?? "1 元 = 300 积分"
             items = ((h["items"] as? [[String: Any]]) ?? []).map { d in
                 ShopItem(
                     id: (d["id"] as? Int) ?? 0,
