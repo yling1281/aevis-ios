@@ -11,6 +11,13 @@ final class ChatStore: ObservableObject {
     /// 当前联系人的消息（老入口，保持不变）。
     @Published private(set) var messages: [ChatMessage] = []
 
+    /// 正在把**云端拉回来的**消息写进本地 —— 这时候**不要再推回去**。
+    ///
+    /// ⚠️ 没有这个闸门就是死循环：拉 → 写本地 → 触发推送 → 服务端镜像一份 →
+    ///    下次拉又回来。服务端靠 `msg_id` 幂等不会写重复，但请求量会翻倍。
+    ///    由 `ChatSyncService.sync()` 在写之前置 true、写完置 false。
+    var isApplyingRemote = false
+
     /// 每个人的消息分开放，按联系人 id 归。
     private var byContact: [UUID: [ChatMessage]] = [:]
     private var currentID: UUID?
@@ -138,6 +145,17 @@ final class ChatStore: ObservableObject {
         track(message)
         save()
         notifyAppended(message, currentID)
+        pushToCloud(message, peer: currentContactID)
+    }
+
+    /// 把一条消息推上云（多端同步）。**失败静默** —— 网络抖一下不能挡住聊天。
+    private func pushToCloud(_ message: ChatMessage, peer: UUID?) {
+        guard !isApplyingRemote, let peer else { return }
+        Task { @MainActor in
+            ChatSyncService.shared.push(message,
+                                       peer: peer.uuidString,
+                                       ownerIsMe: message.role == .user)
+        }
     }
 
     // MARK: - 转账 / 红包（假钱包）
@@ -408,6 +426,7 @@ final class ChatStore: ObservableObject {
         track(message)
         save()
         notifyAppended(message, id)
+        pushToCloud(message, peer: id)
     }
 
     /// 现在能不能接收她主动发来的消息。

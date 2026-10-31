@@ -161,6 +161,11 @@ struct RootView: View {
             // 从后台切回来走这里。少一个就有场景漏。
             Task { await ProactiveService.shared.deliverPendingToChat() }
 
+            // ⭐ 回到前台拉一次聊天记录（多端同步，2026-10-31）。
+            //    用户要的「聊天记录同步到云端、多端同步」—— 推是每发一条就推，
+            //    拉只能在这些"人回来了"的时刻做，不然就得常驻轮询。
+            Task { await ChatSyncService.shared.sync() }
+
             // 回到前台顺手问一句「我这个账号还在不在」——
             // 卖家在后台把账号删掉之后，这台设备就该**立刻退回未授权**，
             // 但**本地数据一条都不动**（人设、聊天、记忆全留着）。
@@ -226,6 +231,12 @@ struct RootView: View {
         //    「造一个她」切到主界面 —— 不用我们手动跳。
         .task(id: account.isSignedIn) {
             guard account.isSignedIn, !gate.isBlocking else { return }
+
+            // 登录后先拉一次聊天记录（换机第一次登录 since=0 → 全量）。
+            // ⚠️ 这件事跟下面那个 `didTryRestore` 无关 —— 那个是一次性网盘恢复，
+            //    同步是每次登录都该做的。
+            await ChatSyncService.shared.sync()
+
             guard !didTryRestore else { return }
             didTryRestore = true
             if let what = await AutoSync.shared.autoRestoreIfNewDevice() {
