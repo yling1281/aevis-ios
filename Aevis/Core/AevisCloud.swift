@@ -24,7 +24,13 @@ enum AevisCloud {
     // MARK: - 地址
 
     /// 业务站根。账号站是另一个域名，别混。
-    static let webBase = "https://aevis.cn"
+    /// 业务站根地址。
+    ///
+    /// 🔴 2026-10-31：加上 4-4 的 nginx 前缀。原来这里是 `https://aevis.cn`，
+    ///    拼出来的是 `https://aevis.cn/v1/xxx` —— 那条路径在线上**根本没有反代**，
+    ///    会被 nginx 兜成官网首页 HTML（状态 200，内容是网页），解析必然失败。
+    ///    真正的接口根是 `https://aevis.cn/prod-api/aevis`（= `AevisHosts.accountBase`）。
+    static let webBase = AevisHosts.accountBase
 
     /// **模型兼容层**（OpenAI 协议）。`/v1/models`、`/v1/chat/completions` 都在这儿。
     ///
@@ -65,7 +71,17 @@ enum AevisCloud {
     static let tokenKey = "aevis.cloud.token"
 
     static var token: String {
-        get { Keychain.get(tokenKey) ?? "" }
+        get {
+            // 🔴 2026-10-31：账号体系统一到 4-4 之后，**账号站和业务站是同一个后端、
+            //    同一个令牌**（`auth_session` 那一套）。原来这里存的 `aevis.cloud.token`
+            //    来自 `/v1/auth/login` —— 那个路径在 4-4 上不存在，方法本身也是零调用点的死代码。
+            //    继续留两套令牌的后果很具体：账号明明登着，`/v1/points`、`/v1/wallet`
+            //    全部 401，界面表现为"一直转圈/一直让我登录"。
+            //    所以优先用账号令牌；钥匙串里那份只作为**极老版本**的兜底。
+            let account = AppSettings.shared.accountToken
+            if !account.isEmpty { return account }
+            return Keychain.get(tokenKey) ?? ""
+        }
         set { Keychain.set(newValue, for: tokenKey) }
     }
 

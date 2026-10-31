@@ -10,10 +10,14 @@ struct MeView: View {
     @ObservedObject private var settings = AppSettings.shared
     /// 观察账号 —— 拉到资料后这一页要跟着刷新（昵称/账号号那一行）。
     @ObservedObject private var account = AccountService.shared
+    /// 观察积分 —— 「积分」那一行要显示余额，余额变了得跟着变。
+    @ObservedObject private var pointsService = PointsService.shared
 
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
     @State private var showHealth = false
+    /// 积分页（2026-10-31 新增）
+    @State private var showPoints = false
     /// 「更多设置」折起来了没有。默认收起 —— 这一页的主角是上面那些常点的。
     @State private var showMore = false
     @Environment(\.openURL) private var openURL
@@ -63,6 +67,11 @@ struct MeView: View {
                         // 用户要的就是一句话能关掉ta的手脚，藏起来等于没有。
                         entry("AI 权限", "lock.shield", aiToolsLine) {
                             route = SettingsRoute(focus: "aitools")
+                        }
+                        // 2026-10-31 新增：积分（充值 / 兑换 / 流水）
+                        // 放在「账号」那一组的旁边 —— 它本质是"我的资产"，不是设置项。
+                        entry("积分", "star.circle", pointsLine) {
+                            showPoints = true
                         }
                         entry("经期 / 健康", "drop.fill", "记录经期、看下次预测，写在健康 App 里") {
                             showHealth = true
@@ -115,6 +124,9 @@ struct MeView: View {
             }
             .sheet(isPresented: $showHealth) {
                 PeriodView()
+            }
+            .sheet(isPresented: $showPoints) {
+                PointsView()
             }
         }
     }
@@ -226,6 +238,13 @@ struct MeView: View {
     private var accountLine: String {
         if !account.isConfigured { return "服务器连不上" }
         return account.statusLine
+    }
+
+    /// 「积分」那一行：有余额就显示余额，没余额就说清楚能用它干什么。
+    private var pointsLine: String {
+        let pts = pointsService.points
+        if pts > 0 { return "\(pts) 积分 · 可兑换会员" }
+        return "1 元 = 200 积分，充值后可换会员"
     }
 
     /// 「AI 权限」那一行 —— 一眼看出现在ta能不能动手、关了几类。
