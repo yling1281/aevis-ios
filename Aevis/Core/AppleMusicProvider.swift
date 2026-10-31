@@ -37,9 +37,12 @@ final class AppleMusicProvider: ObservableObject {
     }
 
     /// 搜歌（catalog 搜索，不需要会员也能搜）。
+    ///
+    /// ⚠️ `types:` 必须在 init 里给 —— 它是只读属性，不能先建再赋值
+    ///    （CI 报过 `missing argument for parameter 'types'` /
+    ///     `reference to member 'songs' cannot be resolved`，就是踩这个坑）。
     func search(_ term: String, limit: Int = 20) async throws -> [Song] {
-        var request = MusicCatalogSearchRequest(term: term)
-        request.types = [.songs]
+        var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
         request.limit = limit
         let response = try await request.response()
         return Array(response.songs)
