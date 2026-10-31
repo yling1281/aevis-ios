@@ -13,6 +13,7 @@ struct MeView: View {
 
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
+    @State private var showHealth = false
     /// 「更多设置」折起来了没有。默认收起 —— 这一页的主角是上面那些常点的。
     @State private var showMore = false
     @Environment(\.openURL) private var openURL
@@ -73,6 +74,9 @@ struct MeView: View {
                         entry("AI 权限", "lock.shield", aiToolsLine) {
                             route = SettingsRoute(focus: "aitools")
                         }
+                        entry("经期 / 健康", "drop.fill", "记录经期、看下次预测，写在健康 App 里") {
+                            showHealth = true
+                        }
                     }
 
                     defaultTabCard
@@ -118,6 +122,9 @@ struct MeView: View {
             }
             .fullScreenCover(isPresented: $showDisclaimer) {
                 DisclaimerView()
+            }
+            .sheet(isPresented: $showHealth) {
+                PeriodView()
             }
         }
     }

@@ -1695,9 +1695,10 @@ final class AppSettings: ObservableObject {
         proactiveLines = defaults.stringArray(forKey: Key.proactiveLines) ?? []
         // 「ta打给你」默认**关**：一条会响的来电通知，不该在用户没要求时就排上。
         callEnabled = defaults.object(forKey: Key.callEnabled) as? Bool ?? false
-        // 系统通话界面默认**关**（2026-10-01 探针真机实测：侧载签名不给通话资格，
-        // 苹果那张卡弹不出来）。开了也只是每次多一行"调不出来"的提示 —— 见属性注释。
-        systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? false
+        // 系统通话界面默认**开**（2026-10-31：用户已取得开发者账号与通话资格，
+        // 真机签名带得上 `aps-environment` + `voip`，苹果那张卡能弹出来了）。
+        // 旧注释说"侧载弹不出"——那是没开发者账号时的限制，现在解除了。
+        systemCallUI = defaults.object(forKey: Key.systemCallUI) as? Bool ?? true
         // ta可以主动拨过来：默认**开**（接不接永远是你点一下说了算）。
         callProactive = defaults.object(forKey: Key.callProactive) as? Bool ?? true
         // ta的消息上灵动岛：默认**开**（挂机态在灵动岛角落留一个不起眼的小标记）。

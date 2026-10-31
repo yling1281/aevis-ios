@@ -71,6 +71,13 @@ final class NeteaseLogin: NSObject, ObservableObject {
         webView.load(URLRequest(url: url))
     }
 
+    /// 跳到手机号登录页（网页里的那一页）。「跳转链接手机号登录」用。
+    func loadPhoneLogin() {
+        loading = true
+        guard let url = URL(string: "https://music.163.com/#/login") else { return }
+        webView.load(URLRequest(url: url))
+    }
+
     // MARK: - 状态
 
     private func refreshStatus() {

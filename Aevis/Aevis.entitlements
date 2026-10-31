@@ -28,8 +28,9 @@
 	  ⚠️ 探针（`AevisCallProbe`）里这一条是**真机验证过能编过、能装**的，
 	  所以主 App 照搬 —— 现在两个 target 的这条值保持一致，别再分叉。
 
-	  ⚠️ 值只能是 `development`：我们**没有钱买开发者账号**，也不上架。
-	  `production` 那条要走 WWDR 签发的推送证书，侧载这条路拿不到。
+  ⚠️ 值保持 `development`：现在是**开发者账号 + 真机签名**出包，
+  这一条会随描述文件带过来，系统通话界面（LiveCommunicationKit）也靠它。
+  `production` 只在走 TestFlight / App Store 上架时才换，那时候另说。
 
 	  ⚠️ 侧载最大的疑点仍然在：全能签重签时用的是**它自己的**证书和描述文件，
 	  这一条到底有没有被继承过去，谁也说不准 —— 只能装上去真跑一次。
@@ -39,5 +40,14 @@
 	-->
 	<key>aps-environment</key>
 	<string>development</string>
+
+	<!--
+	  ⭐ 苹果健康（2026-10-31 新增）。
+	  要读/写健康数据（经期样本、步数、心率、睡眠）必须有这一条。
+	  同时要在 developer.apple.com 的 App ID 里打开 HealthKit 能力，
+	  否则运行时会直接被系统拒绝。
+	-->
+	<key>com.apple.developer.healthkit</key>
+	<true/>
 </dict>
 </plist>

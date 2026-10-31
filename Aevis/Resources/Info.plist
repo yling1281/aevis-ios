@@ -79,6 +79,8 @@
 		<string>zhihu</string>
 		<string>xiaohongshu</string>
 		<string>music</string>
+		<string>orpheus</string>
+		<string>orpheuswidget</string>
 		<string>mqq</string>
 		<string>mqqapi</string>
 		<string>mqqopensdkapiV2</string>
@@ -105,8 +107,14 @@
 	<string>Aevis 需要知道你大概在哪，这样才能告诉你当地的天气、以及「离家多远」这类事。不会上传位置。</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Aevis 需要读取你的步数、心率和睡眠，这样你问「今天走了多少」「昨晚睡得怎么样」时 TA 答得出来。数据不会离开这台手机。</string>
+	<!-- 2026-10-31：经期记录要写回健康 App（月经流血量样本），必须给「写」的授权说明。 -->
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Aevis 需要把经期记录写进健康 App，这样你在这边记的经期能和系统的健康数据对上。数据不会离开这台手机。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Aevis 需要使用相机：拍一张照片让 TA 把上面的字读出来，以及扫二维码（扫电脑版的配对码、扫别人分享的配置码）。</string>
+	<!-- 2026-10-31：Apple Music 用系统 MusicKit，授权时系统会读这一条说明给用户看。 -->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Aevis 会用 Apple Music 给你放歌、搜曲库。授权后曲库和播放都走系统 Apple Music。</string>
 	<!-- 允许明文 http。
 	     实测：网易云给的播放地址是 http://m701.music.126.net/... —— 
 	     不放开这条，歌能搜到也放不出来（ATS 会直接掐掉请求）。

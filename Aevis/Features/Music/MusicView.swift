@@ -30,16 +30,27 @@ struct MusicView: View {
     @State private var showLogin = false
     /// 找歌面板（搜索的唯一实现）
     @State private var showSearch = false
+    /// 音乐源：网易云 / Apple Music（2026-10-31 新增双源）。
+    @State private var provider: MusicProvider = .netease
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                loginCard
-                if NeteaseClient.shared.isLoggedIn {
-                    findCard
+                Picker("音乐源", selection: $provider) {
+                    ForEach(MusicProvider.allCases) { Text($0.title).tag($0) }
                 }
-                nowPlayingCard
-                hintCard
+                .pickerStyle(.segmented)
+
+                if provider == .netease {
+                    loginCard
+                    if NeteaseClient.shared.isLoggedIn {
+                        findCard
+                    }
+                    nowPlayingCard
+                    hintCard
+                } else {
+                    AppleMusicView()
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -305,5 +316,18 @@ struct MusicView: View {
         guard seconds.isFinite, seconds > 0 else { return "0:00" }
         let total = Int(seconds)
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// 音乐源：网易云（逆向接入）或 Apple Music（系统 MusicKit）。
+enum MusicProvider: String, CaseIterable, Identifiable {
+    case netease
+    case apple
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .netease: return "网易云"
+        case .apple: return "Apple Music"
+        }
     }
 }
