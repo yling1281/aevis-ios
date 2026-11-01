@@ -8,6 +8,11 @@ import SwiftUI
 struct WxBotCard: View {
     @ObservedObject private var personaStore = PersonaStore.shared
     @State private var phase: String = ""
+    /// 二维码地址。**必须带时间戳**：图片是服务端每次现画的，
+    /// 但 AsyncImage 会缓存同一个 URL —— 不换 URL 就会一直是旧码
+    ///（用户 2026-11-01：「二维码居然是固定的」）。
+    @State private var qrURL: URL?
+    @State private var refreshing = false
     @State private var accountId: String = ""
     @State private var message: String = ""
     @State private var loading = true
@@ -51,7 +56,7 @@ struct WxBotCard: View {
             }
 
             // 登录二维码：微信扫一扫 → 把这台微信接进 Bot
-            AsyncImage(url: URL(string: "https://aevis.cn/wxbot/qr.png")) { img in
+            AsyncImage(url: qrURL) { img in
                 img.resizable().interpolation(.none)
             } placeholder: {
                 ZStack {
@@ -71,7 +76,21 @@ struct WxBotCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .frame(maxWidth: .infinity)
 
-            Text("用你的微信扫上面的码，扫码后这台微信就成了你的个人 Bot —— 每个用户独立会话、独立记忆。")
+            Button {
+                Task { await refreshQR() }
+            } label: {
+                HStack(spacing: 6) {
+                    if refreshing { ProgressView().controlSize(.small) }
+                    Text(refreshing ? "正在刷新…" : "刷新二维码")
+                        .font(.aevis(13, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+            }
+            .buttonStyle(.bordered)
+            .disabled(refreshing)
+
+            Text("用你的微信扫上面的码，扫码后这台微信就成了你的个人 Bot —— 每个用户独立会话、独立记忆。码会过期，扫不出来就点上面刷新。")
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -123,6 +142,12 @@ struct WxBotCard: View {
         .task {
             await load()
             loadMyBind()
+            // 每 5 秒看一次状态 —— 用户扫完不用手动刷新，界面自己变「已连接」。
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                if phase == "connected" { continue }
+                await load()
+            }
         }
         .refreshable {
             await load()
@@ -131,18 +156,39 @@ struct WxBotCard: View {
     }
 
     private func load() async {
-        loading = true
+        loading = qrURL == nil
         defer { loading = false }
-        do {
-            let (data, _) = try await URLSession.shared.data(
-                from: URL(string: "https://aevis.cn/wxbot/status")!)
-            let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            phase = obj["phase"] as? String ?? ""
-            accountId = obj["accountId"] as? String ?? ""
-            message = obj["message"] as? String ?? ""
-        } catch {
-            phase = ""
+        // 走业务后端：它会拼好 `?t=<毫秒>`，天然绕开缓存
+        guard let url = URL(string: AevisHosts.accountBase + "/v1/wxbot/qr"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = obj["data"] as? [String: Any] else {
+            phase = "unknown"
+            return
         }
+        phase = d["phase"] as? String ?? ""
+        accountId = d["accountId"] as? String ?? ""
+        message = d["message"] as? String ?? ""
+        if let q = d["qr"] as? String { qrURL = URL(string: q) }
+    }
+
+    /// 刷新二维码：让服务端重开登录流程，出一张全新的码。
+    private func refreshQR() async {
+        refreshing = true
+        defer { refreshing = false }
+        guard let url = URL(string: AevisHosts.accountBase + "/v1/wxbot/refresh") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data("{}".utf8)
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = obj["data"] as? [String: Any] else {
+            message = "刷新失败，稍后再试"
+            return
+        }
+        phase = d["phase"] as? String ?? phase
+        if let q = d["qr"] as? String { qrURL = URL(string: q) }
     }
 
     /// 已有绑定先回显（换绑时能看见现在绑的是谁）。
