@@ -62,6 +62,9 @@ struct LoginView: View {
     ///    所以旧的那几条路默认**收起**（`false`），放进「其它登录方式」里备用。
     @State private var showNative = false
 
+    /// 微信登录（扫码走我们自己的小程序）。2026-11-02 加。
+    @State private var showWXLogin = false
+
     /// 这台设备是不是 iPad。
     ///
     /// 老板原话：「如果检测到登录的设备是 iPad，支持手机扫码登录」——
@@ -98,12 +101,12 @@ struct LoginView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    thirdPartyCard
                     browserCard
                     if showNative {
                         if isPad { scanCallout }
                         switcher
                         card
-                        qqButton
                         if !isPad { scanButton }
                     }
 
@@ -122,6 +125,11 @@ struct LoginView: View {
                 .padding(.bottom, 40)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+        .sheet(isPresented: $showWXLogin) {
+            WXLoginSheet {
+                showWXLogin = false
+            }
         }
         .sheet(isPresented: $showScan) {
             ScanLoginView {
@@ -217,6 +225,84 @@ struct LoginView: View {
         #if canImport(UIKit)
         UIApplication.shared.open(url)
         #endif
+    }
+
+    // MARK: - 第三方登录（2026-11-02）
+    //
+    // 用户要求：「弄好就在 app 开微信和 QQ 登录」。
+    //   · 微信：走我们自己的小程序扫码（见 `WXLoginSheet` 顶部那段说明）；
+    //   · QQ：跳 QQ 互联授权，服务端换完登录态再 302 回 `aevis://login?token=…`。
+    // 两条路都放在**第一屏**，不再藏在「其它登录方式」里。
+    private var thirdPartyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("快速登录")
+                .font(.aevis(12))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 0) {
+                Button {
+                    showWXLogin = true
+                } label: {
+                    thirdRow("微信登录", "扫一下码，回来就登上了",
+                             color: Color(red: 0.29, green: 0.72, blue: 0.36),
+                             symbol: "qrcode")
+                }
+                .buttonStyle(.plain)
+                .disabled(working)
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.07))
+                    .frame(height: 0.5)
+                    .padding(.leading, 56)
+
+                Button {
+                    loginWithQQ()
+                } label: {
+                    thirdRow("QQ 登录", "跳 QQ 授权页，回来就登上了",
+                             color: Color(red: 0.26, green: 0.55, blue: 0.93),
+                             symbol: "bubble.left.and.bubble.right.fill")
+                }
+                .buttonStyle(.plain)
+                .disabled(working)
+            }
+            .padding(.vertical, 4)
+            .aevisGlass(cornerRadius: 18)
+        }
+    }
+
+    private func thirdRow(_ title: String, _ detail: String,
+                          color: Color, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.aevis(15, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(color.opacity(0.13)))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.aevis(15.5, weight: .medium))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if working {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.aevis(12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 
     // MARK: - 三条路的切换
@@ -427,24 +513,8 @@ struct LoginView: View {
         .disabled(working)
     }
 
-    private var qqButton: some View {
-        Button {
-            loginWithQQ()
-        } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.aevis(15))
-                Text("用 QQ 登录")
-                    .font(.aevis(15, weight: .medium))
-            }
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .aevisGlass(cornerRadius: 16)
-        }
-        .buttonStyle(.plain)
-        .disabled(working)
-    }
+    // 2026-11-02：原来的 `qqButton` 删了 —— QQ 已经挪进「快速登录」那张卡，
+    // 再留一份就是两个一模一样的入口。
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
