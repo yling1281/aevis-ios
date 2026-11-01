@@ -26,8 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show toolchain & runtimes
+      - name: Pick Xcode 26 & show runtimes
         run: |
+          # ⚠️ 主 App 用了 iOS 26 才有的 `glassEffect`，**必须用 Xcode 26 编**
+          #    （用 16.4 编会直接报 "value of type 'Self' has no member 'glassEffect'"）。
+          #    但模拟器要用 **iOS 18 的 runtime** 跑 —— 这才是用户那台机器的系统。
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then
+            echo "切到 $XC"
+            sudo xcode-select -s "$XC"
+          else
+            echo "!! 没找到 Xcode 26，回落到默认"
+          fi
           xcodebuild -version
           echo '--- runtimes ---'
           xcrun simctl list runtimes
