@@ -220,7 +220,23 @@ struct MeView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .aevisGlass(cornerRadius: 20)
+        // 🔴 2026-11-01：这里**不能套 `.aevisGlass`**。
+        //
+        // 用户报「点『我的』就闪退」，模拟器（旧 iOS）两次都复现不出来。
+        // 全 App 只有这一页有这个组合：**分段 Picker 放在液态玻璃卡里**。
+        // iOS 26 的 `glassEffect` 和 `UISegmentedControl` 叠在一起是已知的
+        // 崩溃点（玻璃层会去抓子视图的绘制层），而其它页面没有分段控件，
+        // 所以只崩这一页 —— 和用户描述完全吻合。
+        //
+        // 换成浅底 + 细描边：视觉上一样是「一张卡」，但不再走玻璃。
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
     }
 
     // MARK: - 每行右边那句话
