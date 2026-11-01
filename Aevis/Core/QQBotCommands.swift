@@ -27,13 +27,36 @@ enum QQBotCommands {
 
     /// 全部指令。顺序有意义：先匹配到的先返回，
     /// 所以「掉签」要排在「签」前面、「注册码」要排在「注册」前面。
+    ///
+    /// ## 🔴 2026-11-02：这里原来是个**互相递归**，真机一点图标就闪退
+    ///
+    /// 崩溃报告（`Aevis-2026-09-30-142401.ips`，iOS 18.7.8 / 0.0.85）里栈长这样：
+    ///
+    ///     static QQBotCommands.all.getter
+    ///     static QQBotCommands.help.getter
+    ///     static QQBotCommands.all.getter
+    ///     … 一直循环到栈溢出（EXC_BAD_ACCESS / KERN_PROTECTION_FAILURE）
+    ///
+    /// 原因：`all` 的第一条指令 `body` 写的是 `help`，而 `help` 又 `for … in all`。
+    /// 两个 `static var` 都是懒加载，第一次取值就转不停。
+    /// ⚠️ 模拟器不复现：只有真机上走 QQ 机器人那条路（QQCodeGate）才会碰到它。
+    ///
+    /// 修法：**把数据挪进 `entries`（`static let`，不含「看指令」那条）**，
+    /// `all` 只在它前面拼一条帮助，`help` 只读 `entries` —— 这样就没有环了。
     static var all: [Command] {
         [
             Command(
                 keys: ["帮助", "指令", "菜单", "怎么用", "有什么用", "你会啥", "能干啥", "?"],
                 title: "看指令",
                 body: help
-            ),
+            )
+        ] + entries
+    }
+
+    /// 除「看指令」以外的全部指令。
+    ///
+    /// ⚠️ 必须是 `let`、而且**不许引用 `help` / `all`** —— 这是拆环的那一刀。
+    static let entries: [Command] = [
             Command(
                 keys: ["掉签", "闪退", "打不开", "用不了", "进不去", "白屏", "崩了", "打开就退"],
                 title: "打不开 / 掉签",
@@ -155,15 +178,16 @@ enum QQBotCommands {
                 """
             )
         ]
-    }
 
     /// 「帮助」的内容 —— 指令列表。
     ///
     /// 用户明确要：@ 它但说的指令不对，就把这一坨发出来。
     /// 所以它得短、一眼扫得完。
+    ///
+    /// ⚠️ 只读 `entries`，**绝对不能读 `all`** —— 读了就又成环（见上面那段事故）。
     static var help: String {
         var lines = ["我是 Aevis 的客服机器人，回下面这些词就行：", ""]
-        for command in all where command.title != "看指令" {
+        for command in entries {
             lines.append("· " + command.keys.prefix(2).joined(separator: " / "))
         }
         lines.append("")
