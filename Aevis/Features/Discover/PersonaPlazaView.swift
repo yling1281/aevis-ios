@@ -524,7 +524,7 @@ struct PersonaPublishView: View {
                     Section { Text(error).font(.aevis(12.5)).foregroundStyle(.red) }
                 }
                 Section {
-                    Text("提交后先由 AI 审一遍，通过就会出现在广场；工作室会再人工看一次。违规内容会被下架。")
+                    Text("提交后先由 AI 审一遍：过了就会出现在广场，但先不进推荐位；工作室人工复核通过后才会推到前排。违规内容会被下架。")
                         .font(.aevis(11.5)).foregroundStyle(.secondary)
                 }
             }
