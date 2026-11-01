@@ -1,0 +1,121 @@
+name: iOS18 Probe
+
+# 2026-11-02：用户报「iOS 18 上点图标就退回桌面」。
+#
+# 主流程的自检用的是机器上**最新**的模拟器（iOS 26），26 上跑得好好的 ——
+# 真机崩、新模拟器不崩的那类问题，只有拿 18 的 runtime 才复现得出来。
+#
+# 这个 workflow 只做一件事：在 iOS 18 的模拟器上装同一个 .app、冷启动、
+# 看进程活不活，并把崩溃栈打出来。不出包、不发 release。
+#
+# 触发：推这个文件、或者在 Actions 里手动 Run workflow。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/ios18-probe.yml'
+
+jobs:
+  probe:
+    name: Boot on iOS 18
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain & runtimes
+        run: |
+          xcodebuild -version
+          echo '--- runtimes ---'
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch iSH vendor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG=ish-vendor
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || {
+            TAG=$(gh release list --repo "${{ github.repository }}" --limit 300 \
+                  | grep -oE 'ish-sandbox-macos-[0-9]+' | head -1)
+          }
+          mkdir -p vendor/ish
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+             --pattern '*' --dir vendor/ish || true
+          ls -la vendor/ish | head -20
+
+      - name: Generate project
+        run: |
+          xcodegen generate
+          ls -d Aevis.xcodeproj
+
+      - name: Build for simulator
+        run: |
+          set -e
+          xcodebuild \
+            -project Aevis.xcodeproj \
+            -target Aevis \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            SYMROOT="$PWD/build-sim" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            > sim-build.log 2>&1 || { tail -n 120 sim-build.log; exit 1; }
+          ls -d build-sim/Debug-iphonesimulator/*.app
+
+      - name: Probe on iOS 18
+        run: |
+          set -e
+          RT=$(xcrun simctl list runtimes \
+                 | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-18-[0-9]+' | head -1)
+          if [ -z "$RT" ]; then
+            echo "::warning::机器上没有 iOS 18 的 runtime，这次探针不算数"
+            exit 0
+          fi
+          echo "runtime: $RT"
+
+          DT=$(xcrun simctl list devicetypes | grep -m1 -oE 'com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9-]+')
+          UDID=$(xcrun simctl create "Aevis18" "$DT" "$RT")
+          echo "device: $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b || true
+
+          APP=$(ls -d build-sim/Debug-iphonesimulator/*.app | head -1)
+          xcrun simctl install "$UDID" "$APP"
+
+          echo '--- 冷启动 ---'
+          xcrun simctl launch "$UDID" com.aevis.ios || true
+          sleep 12
+          xcrun simctl io "$UDID" screenshot shot18.png || true
+
+          if xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -qi "com.aevis.ios"; then
+            echo "✅ 进程还活着"
+          else
+            echo "❌ 进程已退出（复现了）"
+          fi
+
+          echo '--- 崩溃报告 ---'
+          CR=$(ls -t ~/Library/Logs/DiagnosticReports/Aevis-* 2>/dev/null | head -1)
+          if [ -n "$CR" ]; then
+            echo "报告: $CR"
+            grep -E "Exception Type|Exception Subtype|Termination Reason|Application Specific" "$CR" | head -10 || true
+            awk '/^Thread [0-9]+ Crashed/{f=1} f{print} f&&/^Thread /&&!/Crashed/{exit}' "$CR" | head -50 || true
+          else
+            echo "无崩溃报告"
+          fi
+
+          echo '--- 日志 ---'
+          xcrun simctl spawn "$UDID" log show --last 90s \
+            --predicate 'processImagePath CONTAINS "Aevis"' --style compact 2>/dev/null | tail -60 || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios18-probe
+          path: |
+            shot18.png
+            sim-build.log
+          if-no-files-found: warn

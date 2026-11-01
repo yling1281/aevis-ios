@@ -300,13 +300,71 @@ final class AccountService: ObservableObject {
     ///    等后台把 QQ 互联的 AppID/AppKey 配上，这个入口自动就通了。
     func qqLoginURL() async -> URL? {
         do {
-            let json = try await post("/v1/auth/qq/url", ["redirect_uri": "aevis://login"])
+            // 🔴 2026-11-02：**故意传空**。
+            //    QQ 互联只接受 http(s) 的域名回调，不认 `aevis://` ——
+            //    以前这里传 `aevis://login`，QQ 那一步会直接报"回调地址不合法"。
+            //    现在让服务端用它自己的 `/v1/auth/qq/callback`，
+            //    由服务端换完登录态再 302 回 `aevis://login?token=…`（见 aevis_auth.py）。
+            let json = try await post("/v1/auth/qq/url", ["redirect_uri": ""])
             guard let raw = json["auth_url"] as? String, !raw.isEmpty,
                   let url = URL(string: raw) else { return nil }
             return url
         } catch {
             return nil
         }
+    }
+
+    // MARK: - 微信登录（扫码走我们自己的小程序，2026-11-02）
+    //
+    // 为什么是「扫码」而不是 App 内一键授权：微信开放平台的**移动应用登录**
+    // 需要审核通过的应用 + SDK + Universal Links，我们这边没有。
+    // 但小程序那条路是通的 —— 后端 `/v1/auth/wx/qr/*` 早就做好了：
+    //   ① create 出一张**带 ticket 的小程序码**（App 只显示图，拿不到 ticket 明文）
+    //   ② 用户用微信扫码 → 进 `pages/wxauth` 完成授权 → 小程序把登录态写回 ticket
+    //   ③ App 每 2 秒 poll 一次，拿到 token 就登录
+
+    struct WXLoginTicket {
+        /// 轮询用的一次性票据。
+        let ticket: String
+        /// 要显示给用户扫的那张小程序码（**已经带好域名**）。
+        let imageURL: URL?
+        /// 有效期（秒）。
+        let expiresIn: Int
+    }
+
+    enum WXLoginStatus {
+        case pending
+        case done
+    }
+
+    /// ① 要一张小程序码。
+    @MainActor
+    func wxLoginTicket() async throws -> WXLoginTicket {
+        let json = try await post("/v1/auth/wx/qr/create",
+                                  ["device_id": DeviceIdentity.wireCode])
+        guard let ticket = json["ticket"] as? String, !ticket.isEmpty else {
+            throw AccountError.server("服务器没有返回登录票据，稍后再试。")
+        }
+        let raw = (json["image_url"] as? String) ?? ""
+        var image: URL?
+        if !raw.isEmpty {
+            image = URL(string: raw.hasPrefix("http") ? raw : base + raw)
+        }
+        let ttl = (json["expires_in"] as? Int) ?? 180
+        return WXLoginTicket(ticket: ticket, imageURL: image, expiresIn: ttl)
+    }
+
+    /// ② 问一句「小程序那边确认了吗」。拿到 token 就当场登录。
+    @MainActor
+    func pollWXLogin(ticket: String) async throws -> WXLoginStatus {
+        let json = try await post("/v1/auth/wx/qr/poll", ["ticket": ticket])
+        let status = (json["status"] as? String) ?? ""
+        if status == "pending" { return .pending }
+        if let token = json["token"] as? String, !token.isEmpty {
+            try await adoptWebToken(token)
+            return .done
+        }
+        return .pending
     }
 
     /// App 里点「登录 / 注册」时要打开的那一页（**系统浏览器 Safari**）。
