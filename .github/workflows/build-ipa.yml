@@ -404,6 +404,59 @@ jobs:
 
           ls -lh shots/ || true
 
+      - name: Me tab crash probe
+        if: success() && steps.decide.outputs.should != 'yes'
+        continue-on-error: true
+        run: |
+          # 2026-11-01 用户报「点『我的』就闪退」。tag 出包会跳过自检，
+          # 所以真机上崩了 CI 看不见 —— 这个探针专门在模拟器里复现：
+          # 直进「我的」Tab → 看进程是否存活 → 抓崩溃报告的关键栈。
+          UDID=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          test -n "$UDID" || { echo "无模拟器"; exit 0; }
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b || true
+          APP=$(ls -d build-sim/Debug-iphonesimulator/*.app | head -1)
+          xcrun simctl install "$UDID" "$APP"
+
+          echo "--- 启动（直进「我的」Tab）---"
+          xcrun simctl launch "$UDID" com.aevis.ios -aevisSkipGate -aevisDemo -aevisOpenTab=me || true
+          sleep 10
+
+          echo "--- 进程存活检查 ---"
+          if xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -qi "com.aevis.ios"; then
+            echo "✅ 进程还活着 —— 模拟器里没复现"
+          else
+            echo "❌ 进程已退出 —— 闪退实锤"
+          fi
+
+          echo "--- 崩溃报告（关键栈）---"
+          CR=$(ls -t ~/Library/Logs/DiagnosticReports/Aevis-* 2>/dev/null | head -1)
+          if [ -n "$CR" ]; then
+            echo "报告: $CR"
+            grep -E "Exception Type|Exception Subtype|Exception Codes|Termination Reason|Application Specific" "$CR" | head -10 || true
+            echo "--- 崩溃线程栈 ---"
+            awk '/^Thread [0-9]+ Crashed/{f=1} f{print} f&&/^Thread /&&!/Crashed/{exit}' "$CR" | head -30 || true
+            mkdir -p crash-report
+            cp "$CR" crash-report/
+          else
+            echo "无崩溃报告"
+            mkdir -p crash-report
+            echo "no crash report" > crash-report/none.txt
+          fi
+
+          echo "--- 系统日志（Aevis 相关尾部）---"
+          xcrun simctl spawn "$UDID" log show --last 90s \
+            --predicate 'processImagePath CONTAINS "Aevis"' \
+            --style compact 2>/dev/null | tail -40 || true
+
+      - name: Upload crash report
+        if: success() && steps.decide.outputs.should != 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: me-tab-crash-report
+          path: crash-report/
+          if-no-files-found: ignore
+
       - name: Ensure logs exist
         if: always()
         run: |
