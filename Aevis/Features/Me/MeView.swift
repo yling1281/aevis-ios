@@ -94,7 +94,7 @@ struct MeView: View {
                                   action: { route = SettingsRoute(focus: "device") })
                         }
 
-                        V2SectionTitle("她")
+                        V2SectionTitle("陪伴")
                         V2Card {
                             V2Row(symbol: "bolt.horizontal",
                                   title: "模型接入",

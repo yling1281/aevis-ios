@@ -130,13 +130,15 @@ struct PlazaAvatar: View {
         return abs(h)
     }
 
+    /// 2026-11-01：换成**淡**一档的配色（原来的青绿/正红在奶油底上太扎眼），
+    /// 跟 v2 的淡紫主色摆在一起才不打架。
     private var colors: [Color] {
         let palettes: [[Color]] = [
-            [Color(red: 0.36, green: 0.71, blue: 0.66), Color(red: 0.20, green: 0.49, blue: 0.55)],
-            [Color(red: 0.95, green: 0.62, blue: 0.50), Color(red: 0.84, green: 0.38, blue: 0.42)],
-            [Color(red: 0.55, green: 0.60, blue: 0.88), Color(red: 0.36, green: 0.40, blue: 0.72)],
-            [Color(red: 0.96, green: 0.78, blue: 0.45), Color(red: 0.87, green: 0.55, blue: 0.28)],
-            [Color(red: 0.62, green: 0.80, blue: 0.55), Color(red: 0.35, green: 0.62, blue: 0.44)],
+            [Color(red: 0.71, green: 0.66, blue: 0.96), Color(red: 0.55, green: 0.49, blue: 0.89)],  // 淡紫
+            [Color(red: 0.62, green: 0.76, blue: 0.94), Color(red: 0.44, green: 0.60, blue: 0.86)],  // 淡蓝
+            [Color(red: 0.95, green: 0.72, blue: 0.76), Color(red: 0.86, green: 0.55, blue: 0.62)],  // 淡粉
+            [Color(red: 0.96, green: 0.82, blue: 0.65), Color(red: 0.88, green: 0.68, blue: 0.47)],  // 淡杏
+            [Color(red: 0.72, green: 0.87, blue: 0.72), Color(red: 0.52, green: 0.72, blue: 0.56)],  // 淡绿
         ]
         return palettes[seed % palettes.count]
     }
@@ -161,7 +163,7 @@ struct PlazaAvatar: View {
         ZStack {
             LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
             Text(String(name.prefix(1)))
-                .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+                .font(.aevis(size * 0.42, weight: .semibold))
                 .foregroundStyle(.white)
         }
     }

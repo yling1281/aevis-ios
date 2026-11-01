@@ -343,8 +343,8 @@ settings:
     #   ④ 出厂落在**通讯录**（`sanitizeTab` 兜底从 chats 改成 contacts）——
     #      跟设置页写的「出厂是通讯录」对齐。
     #   ⑤ 站内信 / 积分 / 人设广场的卡片跟着换底色；底栏选中色跟着主题色走。
-    MARKETING_VERSION: "0.0.125"
-    CURRENT_PROJECT_VERSION: "125"
+    MARKETING_VERSION: "0.0.126"
+    CURRENT_PROJECT_VERSION: "126"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"
