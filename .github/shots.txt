@@ -145,3 +145,9 @@
 #       但直达模式下**只显示 focus 指定的那一张**（SettingsView.swift:50-53）。
 #       所以在这条之前，`devicelist` 这张卡**从来没有被截过图**。
 52-devicelist       -aevisDemo -aevisOpenSettings -aevisSettingsFocus=devicelist
+
+# ⭐ 2026-11-01：用户报「点『我的』就闪退」。这两条专门盯这一层：
+#    25-tab-me 带 -aevisDemo（假数据），这里再来一张「干净态」的，
+#    以及站内信那一层（sheet 不打开就截不到，必须 -aevisOpenInbox）。
+52-clean-me   -aevisSkipGate -aevisOpenTab=me
+53-inbox      -aevisDemo -aevisOpenTab=me -aevisOpenInbox

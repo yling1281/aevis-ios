@@ -122,7 +122,16 @@ struct MeView: View {
             // 昵称和头像是在**网页**的「我的账号」里改的 —— 不主动拉的话，
             // 用户换完头像回到 App 看到的还是旧的（得自己去点一下「刷新资料」）。
             // 没登录时这个方法直接返回，不发请求。
-            .task { await account.refreshProfile() }
+            .task {
+                await account.refreshProfile()
+                #if DEBUG
+                // 自检直达：-aevisOpenInbox 直接开站内信（用户报「我的」闪退，
+                // 要让 CI 把这一层也渲染一遍，不能只截 Tab）。
+                if ProcessInfo.processInfo.arguments.contains("-aevisOpenInbox") {
+                    showInbox = true
+                }
+                #endif
+            }
             .navigationTitle("我")
             .navigationBarTitleDisplayMode(.inline)
             // ⚠️ 右上角那个齿轮**已经去掉了**（用户 2026-09-26 原话：
