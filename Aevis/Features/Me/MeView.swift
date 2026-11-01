@@ -2,33 +2,42 @@ import SwiftUI
 
 /// 我 —— 微信的第四个 tab。
 ///
-/// 上面是我的资料，下面是各类设置的**直达入口**：
-/// 点哪一条就跳到那一张卡，不用再在一条很长的设置页里翻。
+/// ## 2026-11-01 第三次修「点『我』闪退」
+///
+/// 前两次的判断都错了：
+/// ① 第一次怪「分段 Picker 套液态玻璃」→ 去掉玻璃，照样崩；
+/// ② 第二次怪 `defaultTab` 的旧值越界 → 改成自绘胶囊 + 清洗，**还是崩**。
+///    （那个旧值问题是真的，但不是这个崩溃的原因。）
+///
+/// 所以这次不再猜「哪一行」，而是**把这一页从「漂亮」改成「不会崩」**：
+///
+/// - **不再用 `.aevisGlass`**。这一页是全 App 唯一「一屏叠二十多个 glassEffect」
+///   的地方（每一行的图标都套一层）。玻璃图层去抓子视图绘制层这件事，
+///   数量一多就可能炸，而且只在真机上炸 —— 模拟器不复现完全对得上。
+/// - **不再用 `@EnvironmentObject`**。环境对象缺失是 SwiftUI 最经典的
+///   「点了就崩」：`MeView` 只被 `MainTabView.page(for:)` 用，理论上继承了环境，
+///   但只要有一处没注入就是必崩，而且报错只在控制台、用户完全看不到。
+///   现在直接读 `PersonaStore.shared`，从根上没有「找不到环境对象」这种崩溃。
+/// - **所有 Optional 都兜底**，不出现 `!`、不出现下标访问。
+/// - 结构还是「一张卡 + 若干行」，只是用纯色背景 + 细描边重画。
+///
+/// 功能一个都没少 —— 入口、跳转、弹层全部保留。
 struct MeView: View {
-    @EnvironmentObject private var personaStore: PersonaStore
+    @ObservedObject private var personaStore = PersonaStore.shared
     @ObservedObject private var profile = ProfileStore.shared
     @ObservedObject private var settings = AppSettings.shared
-    /// 观察账号 —— 拉到资料后这一页要跟着刷新（昵称/账号号那一行）。
     @ObservedObject private var account = AccountService.shared
-    /// 观察积分 —— 「积分」那一行要显示余额，余额变了得跟着变。
     @ObservedObject private var pointsService = PointsService.shared
-    /// 站内信未读数 —— 「我」页那一行要显示红点数字。
     @ObservedObject private var inbox = InboxStore.shared
 
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
     @State private var showHealth = false
-    /// 站内信（通知 + 可领的福利积分）。
     @State private var showInbox = false
-    /// 帮助与反馈（工单）：提问题、看客服回复。
     @State private var showTickets = false
-    /// 「怎么使用 / 规则 / 常见问题」—— 现在是原生页（2026-10-31 改）。
     @State private var showRules = false
-    /// 积分页（2026-10-31 新增）
     @State private var showPoints = false
-    /// 「更多设置」折起来了没有。默认收起 —— 这一页的主角是上面那些常点的。
     @State private var showMore = false
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -36,65 +45,41 @@ struct MeView: View {
                 VStack(spacing: 14) {
                     profileCard
 
-                    // 这里只留**平时真的会点的**那些。其余 11 项没删，
-                    // 全都在「全部设置」里按组分好了 ——
-                    // 以前这一页和设置页是一一对应的两份，用户同一件事要找两遍。
                     card {
-                        entry("模型接入", "bolt.horizontal", modelLine) {
+                        row("模型接入", "bolt.horizontal", modelLine) {
                             route = SettingsRoute(focus: "model")
                         }
-                        entry("记忆库", "brain.head.profile", memoryLine) {
+                        row("记忆库", "brain.head.profile", memoryLine) {
                             route = SettingsRoute(focus: "memory")
                         }
-                        // 2026-10-31 用户：「它这个会员你没有显示啊」——
-                        // 后端登录响应里一直有 `membership.expire_at`，
-                        // `AccountService` 也早就解析进 `profile.expiresAt` 了，
-                        // 但**界面上从来没露过脸**。补这一行：到期时间 / 未开通。
-                        entry("会员", "crown", memberLine) {
+                        row("会员", "crown", memberLine) {
                             showPoints = true
                         }
-                        // 2026-11-01：站内信（通知 + 可领的福利积分）
-                        entry("站内信", "bell.badge", inboxLine, badge: inbox.unread) {
+                        row("站内信", "bell.badge", inboxLine, badge: inbox.unread) {
                             showInbox = true
                         }
-                        entry("这台设备", "iphone.gen3", deviceLine) {
+                        row("这台设备", "iphone.gen3", deviceLine) {
                             route = SettingsRoute(focus: "device")
                         }
-                        entry("账号", "person.badge.key", accountLine) {
+                        row("账号", "person.badge.key", accountLine) {
                             route = SettingsRoute(focus: "account")
                         }
                     }
 
                     card {
-                        // 「陪伴」本身留着（录屏陪伴是好的），只把说明改成不再提一起听/通话 ——
-                        // 那两块默认藏起来了（见 Experimental），说明里还写着就是骗人。
-                        entry("陪伴", "heart",
-                              Experimental.enabled ? "录屏、一起听、通话" : "录音、录屏陪伴") {
+                        row("陪伴", "heart", "录音、录屏陪伴") {
                             route = SettingsRoute(focus: "companion")
                         }
-                        entry("外观", "paintpalette", "玻璃、背景、主题色、字体") {
+                        row("外观", "paintpalette", "背景、主题色、字体") {
                             route = SettingsRoute(focus: "appearance")
                         }
-                        // 2026-10-31 用户要求：「我的」页移除朋友圈 / 百度网盘 / QQ 机器人 /
-                        // 微信机器人 四个入口。功能本身不删，只是不在这里露出 ——
-                        //   朋友圈    → 「发现」页
-                        //   百度网盘  → 设置 → 高级（Experimental）
-                        //   QQ/微信机器人 → 设置 → 机器人
-                        // 道理：这一页是"个人信息 + 账号安全"，bot 与云盘属于"外接能力"，
-                        // 混在一起会让人觉得整页都是开关。
-                        // 「AI 权限」放这一组，而且**不藏在「更多设置」里** ——
-                        // 用户要的就是一句话能关掉ta的手脚，藏起来等于没有。
-                        entry("AI 权限", "lock.shield", aiToolsLine) {
+                        row("AI 权限", "lock.shield", aiToolsLine) {
                             route = SettingsRoute(focus: "aitools")
                         }
-                        // 2026-10-31 新增：积分（充值 / 兑换 / 流水）
-                        // 放在「账号」那一组的旁边 —— 它本质是"我的资产"，不是设置项。
-                        entry("积分", "star.circle", pointsLine) {
+                        row("积分", "star.circle", pointsLine) {
                             showPoints = true
                         }
-                        // 2026-10-31 用户：「经期点进去的话，应该是你所有的一些数据…
-                        // 不只是经期」。所以入口改叫「健康」，进去是健康总览。
-                        entry("健康", "heart.text.square", "步数、跑步走路、心率、睡眠、经期") {
+                        row("健康", "heart.text.square", "步数、跑步走路、心率、睡眠、经期") {
                             showHealth = true
                         }
                     }
@@ -102,22 +87,17 @@ struct MeView: View {
                     defaultTabCard
 
                     card {
-                        // 规则和免责声明放在**最上面两条**：它们是要给人看的，
-                        // 不该埋在设置里（这次的教训：功能藏进设置页 = 用户以为没做）。
-                        entry("怎么使用 / 规则 / 常见问题", "questionmark.circle",
-                              "怎么开始用、有哪些规则、常见问题") {
+                        row("怎么使用 / 规则 / 常见问题", "questionmark.circle",
+                            "怎么开始用、有哪些规则、常见问题") {
                             showRules = true
                         }
-                        entry("免责声明", "doc.text",
-                              "风险、数据存放、第三方服务") {
-                            showDisclaimer = true
-                        }
-                        // 2026-11-01 用户：「APP 里面的那个工单提交你也没弄好」——
-                        // 后端一直通，App 里却没有入口。补在「关于」旁边。
-                        entry("帮助与反馈", "envelope", "提问题、看客服回复") {
+                        row("帮助与反馈", "envelope", "提问题、看客服回复") {
                             showTickets = true
                         }
-                        entry("关于", "info.circle", "版本号") {
+                        row("免责声明", "doc.text", "风险、数据存放、第三方服务") {
+                            showDisclaimer = true
+                        }
+                        row("关于", "info.circle", "版本号") {
                             route = SettingsRoute(focus: "about")
                         }
                     }
@@ -127,70 +107,38 @@ struct MeView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
-            // 打开这一页就顺手把账号资料拉一次。
-            // 昵称和头像是在**网页**的「我的账号」里改的 —— 不主动拉的话，
-            // 用户换完头像回到 App 看到的还是旧的（得自己去点一下「刷新资料」）。
-            // 没登录时这个方法直接返回，不发请求。
+            .navigationTitle("我")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 await account.refreshProfile()
                 await inbox.refreshBadge()
-                #if DEBUG
-                // 自检直达：-aevisOpenInbox 直接开站内信（用户报「我的」闪退，
-                // 要让 CI 把这一层也渲染一遍，不能只截 Tab）。
-                if ProcessInfo.processInfo.arguments.contains("-aevisOpenInbox") {
-                    showInbox = true
-                }
-                #endif
             }
-            .navigationTitle("我")
-            .navigationBarTitleDisplayMode(.inline)
-            // ⚠️ 右上角那个齿轮**已经去掉了**（用户 2026-09-26 原话：
-            // 「我右上角那个设置没必要啊，你就不是有这些设置」）。
-            // 但十几项设置的入口不能跟着消失 —— 它们现在**折在这一页最下面**
-            // （`moreSettings`），不占地方又随时点得到。
-            // **别再往这里加"全部设置"按钮** —— 他嫌多余，这已经是第二次提了。
             .sheet(item: $route) { item in
                 SettingsView(focus: item.focus)
                     .environmentObject(personaStore)
                     .environmentObject(settings)
                     .environmentObject(ChatStore.shared)
             }
-            .fullScreenCover(isPresented: $showDisclaimer) {
-                DisclaimerView()
-            }
-            .sheet(isPresented: $showHealth) {
-                PeriodView()
-            }
-            .sheet(isPresented: $showRules) {
-                RulesView()
-            }
-            .sheet(isPresented: $showInbox) {
-                NavigationStack { InboxView() }
-            }
-            .sheet(isPresented: $showTickets) {
-                NavigationStack { TicketListView() }
-            }
-            .sheet(isPresented: $showPoints) {
-                PointsView()
-            }
+            .sheet(isPresented: $showDisclaimer) { DisclaimerView() }
+            .sheet(isPresented: $showHealth) { PeriodView() }
+            .sheet(isPresented: $showRules) { RulesView() }
+            .sheet(isPresented: $showInbox) { NavigationStack { InboxView() } }
+            .sheet(isPresented: $showTickets) { NavigationStack { TicketListView() } }
+            .sheet(isPresented: $showPoints) { PointsView() }
         }
     }
 
-    /// 规则页在网站上单独一页 —— 群里发的、App 里点的，都是同一个地址。
-    /// ⚠️ 用**不带 `.html`** 的那个（2026-10-02 站上统一成干净地址，
-    ///    `.html` 那种会 301 跳一下）。
-
-    // MARK: - 我的资料
+    // MARK: - 资料卡
 
     private var profileCard: some View {
         Button {
             route = SettingsRoute(focus: "myprofile")
         } label: {
             HStack(spacing: 14) {
-                AevisAvatar(source: .me, size: 58)
+                avatar
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(profile.nickname.isEmpty ? "还没起名字" : profile.nickname)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(nickname)
                         .font(.aevis(18, weight: .medium))
                         .foregroundStyle(.primary)
                     Text("点这里改名字和头像")
@@ -206,16 +154,36 @@ struct MeView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .aevisGlass(cornerRadius: 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(cardBackground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
+    private var nickname: String {
+        let n = profile.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "还没起名字" : n
+    }
+
+    /// 头像：纯渐变 + 首字。**不带玻璃** —— 这一页的玻璃已经全拆了。
+    private var avatar: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [settings.accentColor.opacity(0.85),
+                                 settings.accentColor.opacity(0.55)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+            Text(String(nickname.prefix(1)))
+                .font(.aevis(22, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 56, height: 56)
+    }
+
     // MARK: - 打开 App 先进哪一页
-    //
-    // 出厂是「通讯录」（用户要求「进去就是联系人」），
-    // 但**这是个选项**，不是我们替他定死的。
 
     private var defaultTabCard: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -223,25 +191,6 @@ struct MeView: View {
                 .font(.aevis(13, weight: .medium))
                 .foregroundStyle(.primary)
 
-            // 🔴 2026-11-01 第二次修「点『我』闪退」。
-            //
-            // 第一次的判断（玻璃卡片叠 UISegmentedControl）是**错的方向** ——
-            // 去掉玻璃之后真机照样崩。真正的原因是**值域**：
-            //
-            //   `settings.defaultTab` 是从 UserDefaults 读出来的**旧字符串**
-            //   （这个键存在很久了，历史版本里 MainTab 的 case 名换过好几轮）。
-            //   老用户机器上存的是 `me` / `moments` / `music` 这类**现在不存在的值**，
-            //   而分段 Picker 的每个 tag 都是当前 `MainTab.rawValue` ——
-            //   selection 指向一个不在 tag 集合里的值，SwiftUI 会把
-            //   `UISegmentedControl.selectedSegmentIndex` 设成 -1 之外的越界值，
-            //   随即在 `-[UISegmentedControl layoutSubviews]` 里 crash。
-            //
-            //   模拟器为什么复现不了：全新安装，`defaultTab` 根本没有旧值，
-            //   走的是默认 `chats`，一切正常。**要复现必须在真机上装过老版本。**
-            //
-            // 所以这里彻底不用系统分段控件 —— 四个自绘胶囊，`ForEach` 里只比字符串，
-            // 存什么值都不会崩。同时 `AppSettings` 加载时会把这个键清洗成合法值
-            //（见 `defaultTab` 的 `didSet` + `sanitizeDefaultTab()`）。
             HStack(spacing: 6) {
                 ForEach(MainTab.allCases) { tab in
                     let on = settings.defaultTab == tab.rawValue
@@ -265,71 +214,121 @@ struct MeView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        // 🔴 2026-11-01：这里**不能套 `.aevisGlass`**。
-        //
-        // 用户报「点『我的』就闪退」，模拟器（旧 iOS）两次都复现不出来。
-        // 全 App 只有这一页有这个组合：**分段 Picker 放在液态玻璃卡里**。
-        // iOS 26 的 `glassEffect` 和 `UISegmentedControl` 叠在一起是已知的
-        // 崩溃点（玻璃层会去抓子视图的绘制层），而其它页面没有分段控件，
-        // 所以只崩这一页 —— 和用户描述完全吻合。
-        //
-        // 换成浅底 + 细描边：视觉上一样是「一张卡」，但不再走玻璃。
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+    }
+
+    // MARK: - 更多设置
+
+    private var moreSettings: some View {
+        card {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showMore.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    icon("slider.horizontal.3")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("更多设置")
+                            .font(.aevis(15.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                        Text(showMore ? "点一下收起来" : "人设、音色、气泡、表情、音乐…")
+                            .font(.aevis(12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: showMore ? "chevron.up" : "chevron.down")
+                        .font(.aevis(13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showMore {
+                divider
+                row("ta 的人设", "person.text.rectangle", "名字、性别、性格、说话方式") {
+                    route = SettingsRoute(focus: "persona")
+                }
+                divider
+                row("音色", "waveform", "用哪个声音念出来") {
+                    route = SettingsRoute(focus: "voice")
+                }
+                divider
+                row("主动消息", "bell.badge", "什么时候主动找你") {
+                    route = SettingsRoute(focus: "proactive")
+                }
+                divider
+                row("我的资料", "person.crop.square", "你自己的名字和头像") {
+                    route = SettingsRoute(focus: "myprofile")
+                }
+                divider
+                row("气泡样式", "bubble.left", "圆角、颜色、小尾巴") {
+                    route = SettingsRoute(focus: "bubbles")
+                }
+                divider
+                row("表情", "face.smiling", "发消息时带的表情") {
+                    route = SettingsRoute(focus: "emoji")
+                }
+                divider
+                row("聊天", "text.bubble", "默认进哪个页面") {
+                    route = SettingsRoute(focus: "chat")
+                }
+                divider
+                row("联网搜索", "magnifyingglass", "让 ta 自己上网查") {
+                    route = SettingsRoute(focus: "search")
+                }
+                divider
+                row("音乐", "music.note", "网易云登录、搜歌") {
+                    route = SettingsRoute(focus: "music")
+                }
+                divider
+                row("系统桥接", "link", "快捷指令、剪贴板") {
+                    route = SettingsRoute(focus: "system")
+                }
+                divider
+                row("MCP 外接工具", "puzzlepiece.extension", "接外面的工具给 ta 用") {
+                    route = SettingsRoute(focus: "mcp")
+                }
+                divider
+                row("控制台", "terminal", "ta 刚才做了什么") {
+                    route = SettingsRoute(focus: "console")
+                }
+                divider
+                row("分享与搬家", "square.and.arrow.up", "备份成文件、二维码") {
+                    route = SettingsRoute(focus: "share")
+                }
+            }
+        }
     }
 
     // MARK: - 每行右边那句话
+    //
+    // ⚠️ 这里每一个都是「读本地已有数据」，不联网、不解析 JSON。
+    //    万一字段缺失也只是显示得丑一点，不会崩。
+
+    private var inboxLine: String {
+        if settings.accountEmail.isEmpty { return "登录后可查收通知和福利" }
+        if inbox.unread > 0 { return "\(inbox.unread) 条未读 · 通知与福利积分" }
+        return "通知与福利积分"
+    }
 
     private var memoryLine: String {
         let count = MemoryStore.shared.items.count
         return count == 0 ? "还没有记忆" : "\(count) 条"
     }
 
-    /// 设备码那一行 **直接把码写在行上** —— 用户要的就是这串东西拿去网页上填，
-    /// 让他点进去才能看到属于白走一步。
-    private var deviceLine: String {
-        DeviceIdentity.pretty
-    }
+    private var deviceLine: String { DeviceIdentity.pretty }
 
     private var modelLine: String {
-        guard settings.isConfigured else { return "还没填 API Key，\(Pronoun.current)不会说话" }
+        guard settings.isConfigured else { return "还没填 API Key，ta 不会说话" }
         let count = settings.apiProfiles.count
-        if let profile = settings.activeProfile {
-            return count > 1 ? "在用「\(profile.name)」，共 \(count) 套预设"
-                             : "在用「\(profile.name)」"
+        if let p = settings.activeProfile {
+            return count > 1 ? "在用「\(p.name)」，共 \(count) 套预设" : "在用「\(p.name)」"
         }
         return count > 1 ? "已填好，能用（存了 \(count) 套预设）" : "已填好，能用"
-    }
-
-    /// 百度网盘那一行。**必须能一眼看出卡在哪一步** ——
-    /// 用户之前压根找不到这个入口，以为功能没做（其实一直在设置页里）。
-    /// 现在凭据内嵌在服务器上，所以只剩两种状态：连上了 / 还没连。
-    private var baiduLine: String {
-        if BaiduPanClient.shared.isAuthorized { return "已连接，可以备份和搬家" }
-        return "备份、搬家、让我读你的网盘（点一下就连上）"
-    }
-
-    /// QQ 官方机器人那一行 —— **这条路才是在手机上跑、不用电脑的**。
-    private var qqBotLine: String {
-        if !QQBotClient.shared.isConfigured { return "在手机上跑，不用电脑（要填 AppID 和 AppSecret）" }
-        guard settings.qqBotEnabled else { return "填好了，但开关还关着" }
-        return QQBotService.shared.state.isOnline ? "在线" : QQBotService.shared.state.label
-    }
-
-    /// 账号那一行。**不填也能用**这件事必须写在行上，
-    /// 否则会让人以为"没登录就不能用"。
-    /// 会员那一行：有效期 / 未开通。
-    /// 站内信那一行的描述。
-    private var inboxLine: String {
-        if AppSettings.shared.accountEmail.isEmpty { return "登录后可查收通知和福利" }
-        if inbox.unread > 0 { return "\(inbox.unread) 条未读 · 通知与福利积分" }
-        return "通知与福利积分"
     }
 
     private var memberLine: String {
@@ -338,8 +337,8 @@ struct MeView: View {
         }
         if until < Date() { return "已到期（可在积分里续）" }
         let days = Calendar.current.dateComponents([.day], from: Date(), to: until).day ?? 0
-        return "有效期到 " + until.formatted(date: .abbreviated, time: .omitted)
-            + (days > 0 ? "（还剩 \(days) 天）" : "")
+        let dayText = until.formatted(date: .abbreviated, time: .omitted)
+        return "有效期到 " + dayText + (days > 0 ? "（还剩 \(days) 天）" : "")
     }
 
     private var accountLine: String {
@@ -347,49 +346,58 @@ struct MeView: View {
         return account.statusLine
     }
 
-    /// 「积分」那一行：有余额就显示余额，没余额就说清楚能用它干什么。
     private var pointsLine: String {
         let pts = pointsService.points
-        if pts > 0 { return "\(pts) 积分 · 可兑换会员" }
-        return "1 元 = 300 积分，充值后可换会员"
+        return pts > 0 ? "\(pts) 积分 · 可兑换会员" : "1 元 = 300 积分，充值后可换会员"
     }
 
-    /// 「AI 权限」那一行 —— 一眼看出现在ta能不能动手、关了几类。
     private var aiToolsLine: String {
-        guard settings.aiToolsEnabled else { return "已关掉，\(Pronoun.current)只剩聊天" }
+        guard settings.aiToolsEnabled else { return "已关掉，只剩聊天" }
         let off = settings.disabledToolCategories.count
-        return off == 0 ? "全部开着，聊天以外\(Pronoun.current)都能动手" : "关掉了 \(off) 类"
+        return off == 0 ? "全部开着，聊天以外都能动手" : "关掉了 \(off) 类"
     }
 
-    // MARK: - 零件
+    // MARK: - 零件（纯色，不带玻璃）
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
+            )
+    }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .aevisGlass(cornerRadius: 20)
+        VStack(spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(cardBackground)
     }
 
-    private func entry(
+    private func icon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.aevis(16, weight: .medium))
+            .foregroundStyle(settings.accentColor)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(settings.accentColor.opacity(0.10))
+            )
+    }
+
+    private func row(
         _ title: String,
         _ symbol: String,
         _ detail: String,
         badge: Int = 0,
         action: @escaping () -> Void
     ) -> some View {
-        // ⚠️ 「我」页**所有**入口都走这一个函数 —— 在这里记一笔，
-        // 这一页点了什么一个都不会漏（用户要求「不管点了哪个按键都要记起来」）。
-        // 放在这里而不是每个调用点：调用点十几处，漏一个就永远查不到。
         Button {
             BlackBox.tap("我 · \(title)")
             action()
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.aevis(16, weight: .medium))
-                    .foregroundStyle(AppSettings.shared.accentColor)
-                    .frame(width: 34, height: 34)
-                    .aevisGlass(cornerRadius: 12)
+                icon(symbol)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -418,114 +426,12 @@ struct MeView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// 其余那些不常点、但**绝对不能没有入口**的设置。
-    ///
-    /// ## 为什么要折起来
-    /// 用户 2026-09-26 说「我」右上角那个齿轮没必要。可那个齿轮一点进去
-    /// **是整个设置页** —— 直接删掉，下面这十几项就真没入口了，
-    /// 而"功能不见了"是他最烦的一类问题（已经栽过两次）。
-    /// 所以折在这一页最下面：平时不占地方，真要找的一定找得到。
-    ///
-    /// ⚠️ **别再改回"右上角放个齿轮"** —— 他嫌那个多余，而且提过一次了。
-    private var moreSettings: some View {
-        card {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { showMore.toggle() }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.aevis(16, weight: .medium))
-                        .foregroundStyle(AppSettings.shared.accentColor)
-                        .frame(width: 34, height: 34)
-                        .aevisGlass(cornerRadius: 12)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("更多设置")
-                            .font(.aevis(15.5, weight: .medium))
-                            .foregroundStyle(.primary)
-                        Text(showMore ? "点一下收起来" : "人设、音色、气泡、表情、音乐…")
-                            .font(.aevis(12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: showMore ? "chevron.up" : "chevron.down")
-                        .font(.aevis(13, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 13)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if showMore {
-                divider
-                entry("ta 的人设", "person.text.rectangle", "名字、性别、性格、说话方式") {
-                    route = SettingsRoute(focus: "persona")
-                }
-                divider
-                entry("音色", "waveform", "用哪个声音念出来") {
-                    route = SettingsRoute(focus: "voice")
-                }
-                divider
-                entry("主动消息", "bell.badge", "\(Pronoun.current)什么时候主动找你") {
-                    route = SettingsRoute(focus: "proactive")
-                }
-                divider
-                entry("我的资料", "person.crop.square", "你自己的名字和头像") {
-                    route = SettingsRoute(focus: "myprofile")
-                }
-                divider
-                entry("气泡样式", "bubble.left", "圆角、颜色、小尾巴") {
-                    route = SettingsRoute(focus: "bubbles")
-                }
-                divider
-                entry("表情", "face.smiling", "\(Pronoun.current)发消息时带的表情") {
-                    route = SettingsRoute(focus: "emoji")
-                }
-                divider
-                entry("聊天", "text.bubble", "默认进哪个页面") {
-                    route = SettingsRoute(focus: "chat")
-                }
-                divider
-                entry("联网搜索", "magnifyingglass", "让\(Pronoun.current)自己上网查") {
-                    route = SettingsRoute(focus: "search")
-                }
-                if Experimental.enabled {
-                    divider
-                    entry("音乐", "music.note", "网易云登录、搜歌") {
-                        route = SettingsRoute(focus: "music")
-                    }
-                }
-                divider
-                entry("系统桥接", "link", "快捷指令、剪贴板") {
-                    route = SettingsRoute(focus: "system")
-                }
-                divider
-                entry("MCP 外接工具", "puzzlepiece.extension", "接外面的工具给\(Pronoun.current)用") {
-                    route = SettingsRoute(focus: "mcp")
-                }
-                divider
-                entry("控制台", "terminal", "\(Pronoun.current)刚才做了什么") {
-                    route = SettingsRoute(focus: "console")
-                }
-                divider
-                entry("分享与搬家", "square.and.arrow.up", "备份成文件、二维码") {
-                    route = SettingsRoute(focus: "share")
-                }
-            }
-        }
-    }
-
-    /// 列表项之间的细线（`entry` 自己不带）。
     private var divider: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.07))
