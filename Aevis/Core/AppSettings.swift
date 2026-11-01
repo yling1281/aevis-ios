@@ -523,16 +523,20 @@ final class AppSettings: ObservableObject {
     }
 
     /// 主题色候选。用户挑一个，界面里所有强调色跟着变。
+    /// 主题色候选。
+    ///
+    /// 2026-11-01 换血：前两个改成**淡紫 / 淡蓝**（跟安卓 v2 用同一份取色），
+    /// 出厂默认就是淡紫。后面四个留着 —— 有用户就爱玫红，别夺走。
     static let accentPalette: [Color] = [
-        Color(red: 0.42, green: 0.35, blue: 0.95),
-        Color(red: 0.20, green: 0.48, blue: 0.96),
-        Color(red: 0.13, green: 0.64, blue: 0.58),
-        Color(red: 0.88, green: 0.32, blue: 0.52),
-        Color(red: 0.92, green: 0.55, blue: 0.18),
-        Color(red: 0.40, green: 0.62, blue: 0.20)
+        Color(red: 0.608, green: 0.541, blue: 0.941),   // 淡紫 #9B8AF0
+        Color(red: 0.435, green: 0.659, blue: 0.910),   // 淡蓝 #6FA8E8
+        Color(red: 0.13, green: 0.64, blue: 0.58),      // 青
+        Color(red: 0.88, green: 0.32, blue: 0.52),      // 玫红
+        Color(red: 0.92, green: 0.55, blue: 0.18),      // 橙
+        Color(red: 0.40, green: 0.62, blue: 0.20)       // 绿
     ]
 
-    static let accentNames = ["紫", "蓝", "青", "玫红", "橙", "绿"]
+    static let accentNames = ["淡紫", "淡蓝", "青", "玫红", "橙", "绿"]
 
     /// 文字颜色候选。第一个是「跟随系统」。
     static let fontColorPalette: [Color] = [
@@ -1272,8 +1276,11 @@ final class AppSettings: ObservableObject {
     static let validTabs = ["chats", "contacts", "discover", "me"]
 
     static func sanitizeTab(_ raw: String?) -> String {
+        // 出厂进的是**通讯录**，不是聊天 —— 用户 2026-11-01 明确要求
+        // 「首页不要聊天」。以前这里兜底成 "chats"，跟设置页写的「出厂是通讯录」
+        // 是两套说法，第一次装完点进去会落在聊天列表。
         guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
-              validTabs.contains(raw) else { return "chats" }
+              validTabs.contains(raw) else { return "contacts" }
         return raw
     }
 

@@ -251,6 +251,8 @@ struct MainTabView: View {
                 .tabItem { Label(MainTab.me.title, systemImage: MainTab.me.symbol) }
                 .tag(MainTab.me)
         }
+        // 底栏选中色跟着主题色走（2026-11-01 v2：淡紫）。
+        .tint(settings.accentColor)
     }
 
     /// iPad：左边一列导航、右边是选中的那一页。

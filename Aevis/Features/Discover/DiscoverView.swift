@@ -29,78 +29,112 @@ struct DiscoverView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    // 人设广场：发现页第一屏就能横着刷。
-                    // 用户 2026-11-01：「人社广场你要在发现页那里做一个人可以在那里刷，
-                    // 然后的话呢也能在那里自己写一个上传」。
-                    PersonaPlazaStrip(
-                        onOpenAll: { showPlaza = true },
-                        onUpload: { showPublishPersona = true }
-                    )
+            VStack(spacing: 0) {
+                V2TopBar(title: "发现", subtitle: "广场、朋友圈、音乐")
+                ScrollView {
+                    VStack(spacing: 14) {
+                        // 人设广场：发现页第一屏就能横着刷。
+                        // 用户 2026-11-01：「人社广场你要在发现页那里做一个人可以在那里刷，
+                        // 然后的话呢也能在那里自己写一个上传」。
+                        PersonaPlazaStrip(
+                            onOpenAll: { showPlaza = true },
+                            onUpload: { showPublishPersona = true }
+                        )
 
-                    card {
-                        entry("朋友圈", "photo.on.rectangle.angled", momentsLine) {
-                            router.showMoments = true
+                        VStack(spacing: 8) {
+                            V2SectionTitle("刷一刷", trailing: "全部人设", onTrailing: { showPlaza = true })
+                            V2Card {
+                                V2Row(symbol: "person.2.badge.plus",
+                                      title: "人设广场",
+                                      detail: plazaLine,
+                                      action: { showPlaza = true })
+                                V2Divider()
+                                V2Row(symbol: "square.and.pencil",
+                                      title: "写一个人设传上去",
+                                      detail: "自己写的也能被别人的通讯录取走",
+                                      action: { showPublishPersona = true })
+                            }
                         }
-                        // ⭐ 2026-10-01 新加。用户点名要过（2026-09-27 就答应了），
-                        //    跟钱包 / 音乐不一样 —— **不挂内测开关**，
-                        //    这是他明确要的产品功能，不是试验品。
-                        entry("情侣空间", "heart.text.square", coupleLine) {
-                            showCouple = true
+
+                        VStack(spacing: 8) {
+                            V2SectionTitle("一起玩")
+                            V2Card {
+                                V2Row(symbol: "photo.on.rectangle.angled",
+                                      title: "朋友圈",
+                                      detail: momentsLine,
+                                      action: { router.showMoments = true })
+                                V2Divider()
+                                // ⭐ 2026-10-01 新加。用户点名要过（2026-09-27 就答应了），
+                                //    跟钱包 / 音乐不一样 —— **不挂内测开关**，
+                                //    这是他明确要的产品功能，不是试验品。
+                                V2Row(symbol: "heart.text.square",
+                                      title: "情侣空间",
+                                      detail: coupleLine,
+                                      action: { showCouple = true })
+                                V2Divider()
+                                V2Row(symbol: "book.closed",
+                                      title: "日记",
+                                      detail: diaryLine,
+                                      action: { showDiary = true })
+                                V2Divider()
+                                V2Row(symbol: "checklist",
+                                      title: "一起做的事",
+                                      detail: todoLine,
+                                      action: { showTodo = true })
+                            }
                         }
-                        // ⭐ 2026-10-31 用户要求：音乐与「一起听」合并成「网易云音乐」。
-                        //
-                        // 🔴 2026-10-31 晚修正：之前这里直接 `router.showPlayer = true`
-                        //    —— 打开的是**全屏播放器**，用户点进去看到的还是"以前那个播放器"，
-                        //    新做的「推荐 / 排行榜 / 我的」三页根本没机会出现。
-                        //    用户反馈「网易云音乐还是以前那样子的」就是这个原因。
-                        //
-                        //    现在开 **MusicView**（三 Tab）。播放器从底下那条播放条进 ——
-                        //    点歌只开始播，点播放条才进全屏，这才是网易云的手感。
-                        entry("网易云音乐", "music.note", musicLine) {
-                            showMusic = true
+
+                        VStack(spacing: 8) {
+                            V2SectionTitle("听点东西")
+                            V2Card {
+                                // ⭐ 2026-10-31 用户要求：音乐与「一起听」合并成「网易云音乐」。
+                                //
+                                // 🔴 2026-10-31 晚修正：之前这里直接 `router.showPlayer = true`
+                                //    —— 打开的是**全屏播放器**，用户点进去看到的还是"以前那个播放器"，
+                                //    新做的「推荐 / 排行榜 / 我的」三页根本没机会出现。
+                                //    用户反馈「网易云音乐还是以前那样子的」就是这个原因。
+                                //
+                                //    现在开 **MusicView**（三 Tab）。播放器从底下那条播放条进 ——
+                                //    点歌只开始播，点播放条才进全屏，这才是网易云的手感。
+                                V2Row(symbol: "music.note",
+                                      title: "网易云音乐",
+                                      detail: musicLine,
+                                      action: { showMusic = true })
+                                V2Divider()
+                                V2Row(symbol: "music.note.house",
+                                      title: "苹果音乐",
+                                      detail: "用系统 MusicKit 搜歌、播放（需 Apple Music 订阅）",
+                                      action: { showAppleMusic = true })
+                            }
                         }
-                        entry("苹果音乐", "music.note.house", "用系统 MusicKit 搜歌、播放（需 Apple Music 订阅）") {
-                            showAppleMusic = true
-                        }
-                        // ⭐ 2026-10-06：内置浏览器 —— 页内能上网，看到好的点右上角
-                        //    「纸飞机」就发给 ta。入口放在发现页第一张卡。
-                        entry("浏览器", "safari", "打开网页，看到好的就发给\(Pronoun.current)") {
-                            showBrowser = true
-                        }
-                        // 完整广场：横滑条只是「逛」，要找全量、看详情、加为好友进这里。
-                        entry("人设广场", "person.2.badge.plus", plazaLine) {
-                            showPlaza = true
+
+                        VStack(spacing: 8) {
+                            V2SectionTitle("其它")
+                            V2Card {
+                                // ⭐ 2026-10-06：内置浏览器 —— 页内能上网，看到好的点右上角
+                                //    「纸飞机」就发给 ta。入口放在发现页第一张卡。
+                                V2Row(symbol: "safari",
+                                      title: "浏览器",
+                                      detail: "打开网页，看到好的就发给\(Pronoun.current)",
+                                      action: { showBrowser = true })
+                                V2Divider()
+                                // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
+                                //（现在恒为 true），所以它一直都在。用户 2026-10-01 要
+                                //「让他真的能动起来」→ 这一条也从「更多」面板里提出来了，
+                                // 现在发现页、聊天页右上角、陪伴卡三处都能直接开。
+                                V2Row(symbol: "phone.arrow.up.right",
+                                      title: "实时通话",
+                                      detail: "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来",
+                                      action: { router.startCall() })
+                            }
                         }
                     }
-                    card {
-                        // ⚠️ 2026-10-31 下线三样（用户：「所有的口都取消掉」）：
-                        //    「虚拟银行」（钱包/银行）、「真实生活」（点外卖/买东西）、
-                        //    「ta 的小手机」。这一整张卡原来就是这三样 + 日记 + 一起做，
-                        //    现在只剩后两个 —— 卡片本身留着，不然日记和清单也会跟着消失。
-                        entry("日记", "book.closed", diaryLine) {
-                            showDiary = true
-                        }
-                        entry("一起做的事", "checklist", todoLine) {
-                            showTodo = true
-                        }
-                    }
-                    // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
-                    //（现在恒为 true），所以它一直都在。用户 2026-10-01 要
-                    //「让他真的能动起来」→ 这一条也从「更多」面板里提出来了，
-                    // 现在发现页、聊天页右上角、陪伴卡三处都能直接开。
-                    card {
-                        entry("实时通话", "phone.arrow.up.right", "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来") {
-                            router.startCall()
-                        }
-                    }
+                    .padding(.horizontal, V2.gutter)
+                    .padding(.bottom, 18)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
             }
-            .navigationTitle("发现")
-            .navigationBarTitleDisplayMode(.inline)
+            .v2Page()
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showMusic) {
                 // MusicView 自己没有导航壳，这里给它一个
                 NavigationStack { MusicView() }
@@ -199,48 +233,7 @@ struct DiscoverView: View {
     }
 
     // MARK: - 零件
-
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .aevisGlass(cornerRadius: 20)
-    }
-
-    private func entry(
-        _ title: String,
-        _ symbol: String,
-        _ detail: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.aevis(16, weight: .medium))
-                    .foregroundStyle(AppSettings.shared.accentColor)
-                    .frame(width: 34, height: 34)
-                    .aevisGlass(cornerRadius: 12)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.aevis(15.5, weight: .medium))
-                        .foregroundStyle(.primary)
-                    Text(detail)
-                        .font(.aevis(12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.aevis(13, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
+    //
+    // 2026-11-01：原来那一对 `card` / `entry` 已经删了 —— 现在整页改用 v2 的
+    // `V2Card` + `V2Row`（圆 22、细边、圆形淡底图标），再留一份就是两套长相。
 }

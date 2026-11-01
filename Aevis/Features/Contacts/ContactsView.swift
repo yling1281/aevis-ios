@@ -15,18 +15,44 @@ struct ContactsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(spacing: 10) {
-                    ForEach(personaStore.contacts) { contact in
-                        row(contact)
+            VStack(spacing: 0) {
+                V2TopBar(title: "通讯录", subtitle: subtitle) {
+                    Button {
+                        adding = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.aevis(15, weight: .semibold))
+                            .foregroundStyle(V2.accent)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(V2.soft(0.13)))
                     }
-                    addRow
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+
+                ScrollView {
+                    VStack(spacing: 14) {
+                        if personaStore.contacts.isEmpty {
+                            V2Empty("通讯录里还没有人", hint: "点右上角 + 建一个，或者去「发现 · 人设广场」挑一个")
+                        } else {
+                            V2Card {
+                                ForEach(personaStore.contacts.indices, id: \.self) { i in
+                                    let contact = personaStore.contacts[i]
+                                    row(contact)
+                                    if i < personaStore.contacts.count - 1 {
+                                        V2Divider(leading: 76)
+                                    }
+                                }
+                            }
+                        }
+
+                        addRow
+                    }
+                    .padding(.horizontal, V2.gutter)
+                    .padding(.bottom, 18)
+                }
             }
-            .navigationTitle("通讯录")
-            .navigationBarTitleDisplayMode(.inline)
+            .v2Page()
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: UUID.self) { _ in
                 ChatView()
             }
@@ -55,10 +81,15 @@ struct ContactsView: View {
         }
     }
 
+    private var subtitle: String {
+        let n = personaStore.contacts.count
+        return n == 0 ? "还没加人" : "\(n) 个人"
+    }
+
     // MARK: - 一行
 
     private func row(_ contact: Contact) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Button {
                 open(contact)
             } label: {
@@ -74,7 +105,7 @@ struct ContactsView: View {
                             .foregroundStyle(.primary)
                         Text(detail(contact))
                             .font(.aevis(12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(V2.dim(0.45))
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
@@ -97,14 +128,13 @@ struct ContactsView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.aevis(15, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(V2.dim(0.4))
                     .frame(width: 36, height: 36)
                     .contentShape(Rectangle())
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .aevisGlass(cornerRadius: 18)
+        .padding(.horizontal, V2.gutter)
+        .padding(.vertical, 12)
     }
 
     /// 第二行那点信息：性别 · 关系 · 性格，有个大概就够。
@@ -126,20 +156,28 @@ struct ContactsView: View {
         Button {
             adding = true
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "plus")
-                    .font(.aevis(17, weight: .medium))
-                    .foregroundStyle(settings.accentColor)
-                    .frame(width: 46, height: 46)
-                    .aevisGlass(cornerRadius: 16)
+            HStack(spacing: 13) {
+                V2IconBox("plus")
                 Text("添加联系人")
-                    .font(.aevis(15.5, weight: .medium))
+                    .font(.aevis(V2.body, weight: .medium))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.aevis(12, weight: .semibold))
+                    .foregroundStyle(V2.dim(0.22))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .aevisGlass(cornerRadius: 18)
+            .padding(.horizontal, V2.gutter)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: V2.cardRadius, style: .continuous)
+                    .fill(V2.accent.opacity(0.07))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: V2.cardRadius, style: .continuous)
+                    .strokeBorder(V2.accent.opacity(0.14), lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

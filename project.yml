@@ -332,8 +332,19 @@ settings:
     #   ⑤ 新增积分页（「我的」→ 积分）：1 元 = 200 积分，充值走易支付收银台，
     #      兑换会员 / 看流水；退款按用户要求**只能人工**（后台标记 + 扣回积分）。
     #   ⑥ 热更新弹窗的主题入口修正（`@Environment(\.theme)` 项目里不存在，会编译失败）。
-    MARKETING_VERSION: "0.0.124"
-    CURRENT_PROJECT_VERSION: "124"
+    # ⭐ 0.0.125（2026-11-01 晚）：**iOS 界面整体换成 v2**（跟安卓同一套长相）。
+    #   ① 新设计系统 `Aevis/DesignSystem/V2.swift`：奶油底（#F7F6FB / #14131A）、
+    #      22 圆角白卡 + 0.5pt 细边、圆形淡底图标、手绘小猫吉祥物、大标题栏。
+    #      **全程不用 `.aevisGlass`** —— 沿用「我」页那次闪退后定下的规矩。
+    #   ② 四个主页面（聊天 / 通讯录 / 发现 / 我）全部重画；发现页按「刷一刷 / 一起玩 /
+    #      听点东西 / 其它」分组，人设广场横滑条改成 v2 卡。
+    #   ③ 主题色前两档换成**淡紫 #9B8AF0 / 淡蓝 #6FA8E8**（出厂淡紫），
+    #      背景光晕的第二团从青绿改成淡蓝。
+    #   ④ 出厂落在**通讯录**（`sanitizeTab` 兜底从 chats 改成 contacts）——
+    #      跟设置页写的「出厂是通讯录」对齐。
+    #   ⑤ 站内信 / 积分 / 人设广场的卡片跟着换底色；底栏选中色跟着主题色走。
+    MARKETING_VERSION: "0.0.125"
+    CURRENT_PROJECT_VERSION: "125"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

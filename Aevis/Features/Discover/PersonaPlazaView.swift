@@ -180,37 +180,49 @@ struct PersonaPlazaStrip: View {
     @ObservedObject private var store = PersonaPlazaStore.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        V2Card {
+            HStack(spacing: 8) {
+                V2IconBox("person.2.badge.plus", size: 32)
                 Text("人设广场")
-                    .font(.aevis(15, weight: .semibold))
-                Spacer()
+                    .font(.aevis(V2.body, weight: .semibold))
+                Spacer(minLength: 6)
                 Button {
                     onUpload()
                 } label: {
-                    Label("写一个", systemImage: "square.and.pencil")
-                        .font(.aevis(12))
+                    Text("写一个")
+                        .font(.aevis(V2.tiny, weight: .medium))
+                        .foregroundStyle(V2.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(V2.soft(0.12)))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(AppSettings.shared.accentColor)
 
-                Button("全部") { onOpenAll() }
-                    .font(.aevis(12))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 8)
+                Button {
+                    onOpenAll()
+                } label: {
+                    Text("全部")
+                        .font(.aevis(V2.tiny))
+                        .foregroundStyle(V2.dim(0.42))
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, V2.gutter)
             .padding(.top, 14)
+            .padding(.bottom, 10)
 
             if store.rows.isEmpty {
                 HStack(spacing: 8) {
-                    if store.loading { ProgressView().controlSize(.small) }
+                    if store.loading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        V2CatFace(size: 30, tint: V2.dim(0.22))
+                    }
                     Text(store.loading ? "正在加载广场…" : "广场还空着，来当第一个")
                         .font(.aevis(12.5))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(V2.dim(0.42))
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, V2.gutter)
                 .padding(.bottom, 16)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -222,20 +234,11 @@ struct PersonaPlazaStrip: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, V2.gutter)
                 }
                 .padding(.bottom, 16)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-        )
         .task { if store.rows.isEmpty { await store.load() } }
     }
 
@@ -248,7 +251,7 @@ struct PersonaPlazaStrip: View {
                 .foregroundStyle(.primary)
             Text(p.tagline.isEmpty ? p.subtitle : p.tagline)
                 .font(.aevis(11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(V2.dim(0.45))
                 .lineLimit(2)
                 .frame(height: 28, alignment: .top)
                 .fixedSize(horizontal: false, vertical: true)
@@ -293,6 +296,7 @@ struct PersonaPlazaView: View {
                 }
             }
             .refreshable { await store.load() }
+            .background(V2.background.ignoresSafeArea())
             .navigationTitle("人设广场")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -364,11 +368,12 @@ struct PersonaPlazaView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(13)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(V2.card)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(V2.stroke, lineWidth: 0.5)
+                .allowsHitTesting(false)
         )
     }
 }

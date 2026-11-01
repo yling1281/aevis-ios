@@ -59,6 +59,7 @@ struct PointsView: View {
                 }
                 .padding(16)
             }
+            .background(V2.background.ignoresSafeArea())
             .navigationTitle("积分")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -92,7 +93,15 @@ struct PointsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .aevisGlass(cornerRadius: 18)
+        .background(
+            RoundedRectangle(cornerRadius: V2.cardRadius, style: .continuous)
+                .fill(V2.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: V2.cardRadius, style: .continuous)
+                .strokeBorder(V2.stroke, lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
     }
 
     // MARK: - 待支付

@@ -18,14 +18,9 @@ struct InboxView: View {
                     Spacer()
                 }
             } else if store.rows.isEmpty {
-                VStack(spacing: 10) {
+                VStack {
                     Spacer()
-                    Image(systemName: "tray")
-                        .font(.aevis(30))
-                        .foregroundStyle(.tertiary)
-                    Text("还没有站内信").font(.aevis(13.5)).foregroundStyle(.secondary)
-                    Text("有通知和福利会出现在这里")
-                        .font(.aevis(12)).foregroundStyle(.tertiary)
+                    V2Empty("还没有站内信", hint: "有通知和福利会出现在这里")
                     Spacer()
                 }
             } else {
@@ -42,6 +37,7 @@ struct InboxView: View {
                 }
             }
         }
+        .background(V2.background.ignoresSafeArea())
         .navigationTitle("站内信")
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .bottom) {
@@ -129,8 +125,15 @@ private struct InboxRow: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: V2.rowRadius, style: .continuous)
+                .fill(V2.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: V2.rowRadius, style: .continuous)
+                .strokeBorder(V2.stroke, lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
     }
 
     private func claim() async {

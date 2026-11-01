@@ -21,44 +21,19 @@ struct ChatListView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
+            VStack(spacing: 0) {
+                V2TopBar(title: "聊天", subtitle: "点一个人就进对话") {
+                    addMenu
+                }
+
                 if personaStore.isEmpty {
-                    emptyState
+                    ScrollView { emptyState }
                 } else {
                     list
                 }
             }
-            .navigationTitle("聊天")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    // 加号从「直接建联系人」变成**菜单** —— 跟微信同一个位置、
-                    // 同一个手感（老板 2026-10-02 要求的「移动端加号扫码登录」）。
-                    Menu {
-                        Button {
-                            pairing = true
-                        } label: {
-                            Label("扫一扫 · 配对电脑版", systemImage: "qrcode.viewfinder")
-                        }
-                        .disabled(!QRScannerView.isAvailable)
-
-                        Button {
-                            adding = true
-                        } label: {
-                            Label("新建联系人", systemImage: "person.badge.plus")
-                        }
-
-                        Button {
-                            creatingGroup = true
-                        } label: {
-                            Label("新建群聊", systemImage: "person.2.badge.plus")
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.aevis(16, weight: .semibold))
-                    }
-                }
-            }
+            .v2Page()
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: UUID.self) { _ in
                 ChatView()
                     .aevisScreen("聊天")
@@ -98,29 +73,74 @@ struct ChatListView: View {
         }
     }
 
+    /// 右上角那颗加号（2026-11-01 重画：从工具栏搬进大标题栏，v2 的页面不再用系统导航栏）。
+    private var addMenu: some View {
+        Menu {
+            Button {
+                pairing = true
+            } label: {
+                Label("扫一扫 · 配对电脑版", systemImage: "qrcode.viewfinder")
+            }
+            .disabled(!QRScannerView.isAvailable)
+
+            Button {
+                adding = true
+            } label: {
+                Label("新建联系人", systemImage: "person.badge.plus")
+            }
+
+            Button {
+                creatingGroup = true
+            } label: {
+                Label("新建群聊", systemImage: "person.2.badge.plus")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.aevis(15, weight: .semibold))
+                .foregroundStyle(V2.accent)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(V2.soft(0.13)))
+        }
+    }
+
     private var list: some View {
         ScrollView {
-            VStack(spacing: 10) {
+            VStack(spacing: 14) {
                 // ⭐ 群聊排在最上面（跟微信一致）。
-                ForEach(groups.groups) { group in
-                    Button {
-                        open(group)
-                    } label: {
-                        groupRow(group)
+                if !groups.groups.isEmpty {
+                    V2Card {
+                        ForEach(groups.groups.indices, id: \.self) { i in
+                            let group = groups.groups[i]
+                            Button {
+                                open(group)
+                            } label: {
+                                groupRow(group)
+                            }
+                            .buttonStyle(.plain)
+                            if i < groups.groups.count - 1 {
+                                V2Divider(leading: 74)
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
-                ForEach(personaStore.contacts) { contact in
-                    Button {
-                        open(contact)
-                    } label: {
-                        row(contact)
+
+                V2Card {
+                    ForEach(personaStore.contacts.indices, id: \.self) { i in
+                        let contact = personaStore.contacts[i]
+                        Button {
+                            open(contact)
+                        } label: {
+                            row(contact)
+                        }
+                        .buttonStyle(.plain)
+                        if i < personaStore.contacts.count - 1 {
+                            V2Divider(leading: 74)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, V2.gutter)
+            .padding(.bottom, 18)
         }
     }
 
@@ -148,7 +168,7 @@ struct ChatListView: View {
                     .foregroundStyle(.primary)
                 Text(groupPreview(group))
                     .font(.aevis(13))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(V2.dim(0.45))
                     .lineLimit(1)
             }
 
@@ -156,11 +176,10 @@ struct ChatListView: View {
 
             Text(groupStamp(group))
                 .font(.aevis(11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(V2.dim(0.28))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11 * CGFloat(settings.densityScale))
-        .aevisGlass(cornerRadius: 18)
+        .padding(.horizontal, V2.gutter)
+        .padding(.vertical, 12 * CGFloat(settings.densityScale))
         .contentShape(Rectangle())
     }
 
@@ -195,7 +214,7 @@ struct ChatListView: View {
                     .foregroundStyle(.primary)
                 Text(preview(contact))
                     .font(.aevis(13))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(V2.dim(0.45))
                     .lineLimit(1)
             }
 
@@ -203,12 +222,11 @@ struct ChatListView: View {
 
             Text(stamp(contact))
                 .font(.aevis(11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(V2.dim(0.28))
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, V2.gutter)
         // 行高跟着界面密度走（紧凑 / 标准 / 宽松）
-        .padding(.vertical, 11 * CGFloat(settings.densityScale))
-        .aevisGlass(cornerRadius: 18)
+        .padding(.vertical, 12 * CGFloat(settings.densityScale))
         .contentShape(Rectangle())
     }
 
@@ -227,18 +245,8 @@ struct ChatListView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            AevisOrb()
-                .scaleEffect(0.72)
-            Text("还没有联系人")
-                .font(.aevis(17, weight: .medium))
-                .foregroundStyle(.primary)
-            Text("去「通讯录」加一个，再回来聊。")
-                .font(.aevis(13.5))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.top, 40)
-        .frame(maxWidth: .infinity)
+        V2Empty("还没有联系人", hint: "去「通讯录」加一个，再回来聊。")
+            .padding(.top, 40)
     }
 }
 

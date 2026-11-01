@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 我 —— 微信的第四个 tab。
+/// 我 —— 第四个 tab。
 ///
 /// ## 2026-11-01 第三次修「点『我』闪退」
 ///
@@ -20,6 +20,12 @@ import SwiftUI
 ///   现在直接读 `PersonaStore.shared`，从根上没有「找不到环境对象」这种崩溃。
 /// - **所有 Optional 都兜底**，不出现 `!`、不出现下标访问。
 /// - 结构还是「一张卡 + 若干行」，只是用纯色背景 + 细描边重画。
+///
+/// ## 2026-11-01 晚：换成 v2 那套长相
+///
+/// 上面那三条**一条都没放宽** —— v2 的 `V2Card` 本身就是纯色 + 0.5pt 细边、
+/// 不带任何玻璃，正好是这一页能用的东西。改的只是观感：
+/// 奶油底、22 圆角、圆形淡底图标、大标题栏（不再用系统导航栏）。
 ///
 /// 功能一个都没少 —— 入口、跳转、弹层全部保留。
 struct MeView: View {
@@ -41,74 +47,152 @@ struct MeView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    profileCard
-
-                    card {
-                        row("模型接入", "bolt.horizontal", modelLine) {
-                            route = SettingsRoute(focus: "model")
-                        }
-                        row("记忆库", "brain.head.profile", memoryLine) {
-                            route = SettingsRoute(focus: "memory")
-                        }
-                        row("会员", "crown", memberLine) {
-                            showPoints = true
-                        }
-                        row("站内信", "bell.badge", inboxLine, badge: inbox.unread) {
-                            showInbox = true
-                        }
-                        row("这台设备", "iphone.gen3", deviceLine) {
-                            route = SettingsRoute(focus: "device")
-                        }
-                        row("账号", "person.badge.key", accountLine) {
-                            route = SettingsRoute(focus: "account")
-                        }
+            VStack(spacing: 0) {
+                V2TopBar(title: "我", subtitle: statusLine) {
+                    Button {
+                        route = SettingsRoute(focus: nil)
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.aevis(15, weight: .medium))
+                            .foregroundStyle(V2.accent)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(V2.soft(0.13)))
                     }
-
-                    card {
-                        row("陪伴", "heart", "录音、录屏陪伴") {
-                            route = SettingsRoute(focus: "companion")
-                        }
-                        row("外观", "paintpalette", "背景、主题色、字体") {
-                            route = SettingsRoute(focus: "appearance")
-                        }
-                        row("AI 权限", "lock.shield", aiToolsLine) {
-                            route = SettingsRoute(focus: "aitools")
-                        }
-                        row("积分", "star.circle", pointsLine) {
-                            showPoints = true
-                        }
-                        row("健康", "heart.text.square", "步数、跑步走路、心率、睡眠、经期") {
-                            showHealth = true
-                        }
-                    }
-
-                    defaultTabCard
-
-                    card {
-                        row("怎么使用 / 规则 / 常见问题", "questionmark.circle",
-                            "怎么开始用、有哪些规则、常见问题") {
-                            showRules = true
-                        }
-                        row("帮助与反馈", "envelope", "提问题、看客服回复") {
-                            showTickets = true
-                        }
-                        row("免责声明", "doc.text", "风险、数据存放、第三方服务") {
-                            showDisclaimer = true
-                        }
-                        row("关于", "info.circle", "版本号") {
-                            route = SettingsRoute(focus: "about")
-                        }
-                    }
-
-                    moreSettings
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+
+                ScrollView {
+                    VStack(spacing: 14) {
+                        profileCard
+
+                        V2SectionTitle("账号")
+                        V2Card {
+                            V2Row(symbol: "crown",
+                                  title: "会员",
+                                  detail: memberLine,
+                                  action: { showPoints = true })
+                            V2Divider()
+                            V2Row(symbol: "star.circle",
+                                  title: "积分",
+                                  detail: pointsLine,
+                                  action: { showPoints = true })
+                            V2Divider()
+                            V2Row(symbol: "bell.badge",
+                                  title: "站内信",
+                                  detail: inboxLine,
+                                  badge: inbox.unread,
+                                  action: { showInbox = true })
+                            V2Divider()
+                            V2Row(symbol: "person.badge.key",
+                                  title: "账号",
+                                  detail: accountLine,
+                                  action: { route = SettingsRoute(focus: "account") })
+                            V2Divider()
+                            V2Row(symbol: "iphone.gen3",
+                                  title: "这台设备",
+                                  detail: deviceLine,
+                                  action: { route = SettingsRoute(focus: "device") })
+                        }
+
+                        V2SectionTitle("她")
+                        V2Card {
+                            V2Row(symbol: "bolt.horizontal",
+                                  title: "模型接入",
+                                  detail: modelLine,
+                                  action: { route = SettingsRoute(focus: "model") })
+                            V2Divider()
+                            V2Row(symbol: "brain.head.profile",
+                                  title: "记忆库",
+                                  detail: memoryLine,
+                                  action: { route = SettingsRoute(focus: "memory") })
+                            V2Divider()
+                            V2Row(symbol: "heart",
+                                  title: "陪伴",
+                                  detail: "录音、录屏陪伴",
+                                  action: { route = SettingsRoute(focus: "companion") })
+                            V2Divider()
+                            V2Row(symbol: "lock.shield",
+                                  title: "AI 权限",
+                                  detail: aiToolsLine,
+                                  action: { route = SettingsRoute(focus: "aitools") })
+                            V2Divider()
+                            V2Row(symbol: "heart.text.square",
+                                  title: "健康",
+                                  detail: "步数、跑步走路、心率、睡眠、经期",
+                                  action: { showHealth = true })
+                        }
+
+                        V2SectionTitle("外观")
+                        V2Card {
+                            V2Row(symbol: "paintpalette",
+                                  title: "外观",
+                                  detail: "背景、主题色、字体",
+                                  action: { route = SettingsRoute(focus: "appearance") })
+                            V2Divider()
+                            V2Row(symbol: "bubble.left",
+                                  title: "气泡样式",
+                                  detail: "圆角、颜色、小尾巴",
+                                  action: { route = SettingsRoute(focus: "bubbles") })
+                            V2Divider()
+                            V2Row(symbol: "waveform",
+                                  title: "音色",
+                                  detail: "用哪个声音念出来",
+                                  action: { route = SettingsRoute(focus: "voice") })
+                        }
+
+                        defaultTabCard
+
+                        V2SectionTitle("帮助")
+                        V2Card {
+                            V2Row(symbol: "questionmark.circle",
+                                  title: "怎么使用 / 规则 / 常见问题",
+                                  detail: "怎么开始用、有哪些规则、常见问题",
+                                  action: { showRules = true })
+                            V2Divider()
+                            V2Row(symbol: "envelope",
+                                  title: "帮助与反馈",
+                                  detail: "提问题、看客服回复",
+                                  action: { showTickets = true })
+                            V2Divider()
+                            V2Row(symbol: "doc.text",
+                                  title: "免责声明",
+                                  detail: "风险、数据存放、第三方服务",
+                                  action: { showDisclaimer = true })
+                            V2Divider()
+                            V2Row(symbol: "info.circle",
+                                  title: "关于",
+                                  detail: "版本号",
+                                  action: { route = SettingsRoute(focus: "about") })
+                        }
+
+                        moreSettings
+
+                        // 退出登录单独摆一张卡，离开最远 —— 免得手滑。
+                        V2Card {
+                            V2Row(symbol: "rectangle.portrait.and.arrow.right",
+                                  title: "退出登录",
+                                  detail: account.isSignedIn ? "退出后要重新登录才能用" : "还没登录",
+                                  tint: V2.alert,
+                                  showsChevron: false,
+                                  action: {
+                                      BlackBox.tap("我 · 退出登录")
+                                      account.signOut()
+                                  })
+                        }
+                        .opacity(account.isSignedIn ? 1 : 0.5)
+                        .disabled(!account.isSignedIn)
+
+                        Text("Aevis · 个人开发者在做的小东西")
+                            .font(.aevis(V2.micro))
+                            .foregroundStyle(V2.dim(0.28))
+                            .padding(.top, 4)
+                    }
+                    .padding(.horizontal, V2.gutter)
+                    .padding(.bottom, 26)
+                }
             }
-            .navigationTitle("我")
-            .navigationBarTitleDisplayMode(.inline)
+            .v2Page()
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await account.refreshProfile()
                 await inbox.refreshBadge()
@@ -137,25 +221,37 @@ struct MeView: View {
             HStack(spacing: 14) {
                 avatar
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(nickname)
-                        .font(.aevis(18, weight: .medium))
+                        .font(.aevis(18, weight: .semibold))
                         .foregroundStyle(.primary)
-                    Text("点这里改名字和头像")
-                        .font(.aevis(12))
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        V2Pill(memberPillText)
+                        Text("点这里改名字和头像")
+                            .font(.aevis(V2.tiny))
+                            .foregroundStyle(V2.dim(0.42))
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer(minLength: 8)
 
                 Image(systemName: "chevron.right")
-                    .font(.aevis(13, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .font(.aevis(12, weight: .semibold))
+                    .foregroundStyle(V2.dim(0.22))
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, V2.gutter)
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
+            .background(
+                RoundedRectangle(cornerRadius: V2.cardRadius, style: .continuous)
+                    .fill(V2.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: V2.cardRadius, style: .continuous)
+                    .strokeBorder(V2.stroke, lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -166,19 +262,13 @@ struct MeView: View {
         return n.isEmpty ? "还没起名字" : n
     }
 
-    /// 头像：纯渐变 + 首字。**不带玻璃** —— 这一页的玻璃已经全拆了。
+    /// 头像：圆形柔底 + 首字。**不带玻璃** —— 这一页的玻璃已经全拆了。
     private var avatar: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [settings.accentColor.opacity(0.85),
-                                 settings.accentColor.opacity(0.55)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
+            Circle().fill(V2.soft(0.16))
             Text(String(nickname.prefix(1)))
-                .font(.aevis(22, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.aevis(21, weight: .semibold))
+                .foregroundStyle(V2.accent)
         }
         .frame(width: 56, height: 56)
     }
@@ -186,128 +276,140 @@ struct MeView: View {
     // MARK: - 打开 App 先进哪一页
 
     private var defaultTabCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("打开 App 先进哪一页")
-                .font(.aevis(13, weight: .medium))
-                .foregroundStyle(.primary)
+        V2Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("打开 App 先进哪一页")
+                    .font(.aevis(V2.sub, weight: .medium))
+                    .foregroundStyle(.primary)
 
-            HStack(spacing: 6) {
-                ForEach(MainTab.allCases) { tab in
-                    let on = settings.defaultTab == tab.rawValue
-                    Button {
-                        settings.defaultTab = tab.rawValue
-                    } label: {
-                        Text(tab.title)
-                            .font(.aevis(12.5, weight: on ? .semibold : .regular))
-                            .foregroundStyle(on ? Color.white : Color.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(on ? settings.accentColor
-                                             : Color.primary.opacity(0.06))
-                            )
+                HStack(spacing: 6) {
+                    ForEach(MainTab.allCases) { tab in
+                        let on = settings.defaultTab == tab.rawValue
+                        Button {
+                            settings.defaultTab = tab.rawValue
+                        } label: {
+                            Text(tab.title)
+                                .font(.aevis(12.5, weight: on ? .semibold : .regular))
+                                .foregroundStyle(on ? Color.white : Color.primary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule().fill(on ? V2.accent : V2.well)
+                                )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, V2.gutter)
+            .padding(.vertical, 14)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBackground)
     }
 
     // MARK: - 更多设置
 
     private var moreSettings: some View {
-        card {
+        V2Card {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { showMore.toggle() }
             } label: {
-                HStack(spacing: 12) {
-                    icon("slider.horizontal.3")
+                HStack(spacing: 13) {
+                    V2IconBox("slider.horizontal.3")
                     VStack(alignment: .leading, spacing: 2) {
                         Text("更多设置")
-                            .font(.aevis(15.5, weight: .medium))
+                            .font(.aevis(V2.body, weight: .medium))
                             .foregroundStyle(.primary)
-                        Text(showMore ? "点一下收起来" : "人设、音色、气泡、表情、音乐…")
-                            .font(.aevis(12))
-                            .foregroundStyle(.secondary)
+                        Text(showMore ? "点一下收起来" : "人设、表情、音乐、外接工具…")
+                            .font(.aevis(V2.tiny))
+                            .foregroundStyle(V2.dim(0.45))
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
                     Image(systemName: showMore ? "chevron.up" : "chevron.down")
-                        .font(.aevis(13, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                        .font(.aevis(12, weight: .semibold))
+                        .foregroundStyle(V2.dim(0.22))
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, V2.gutter)
                 .padding(.vertical, 13)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if showMore {
-                divider
-                row("ta 的人设", "person.text.rectangle", "名字、性别、性格、说话方式") {
-                    route = SettingsRoute(focus: "persona")
-                }
-                divider
-                row("音色", "waveform", "用哪个声音念出来") {
-                    route = SettingsRoute(focus: "voice")
-                }
-                divider
-                row("主动消息", "bell.badge", "什么时候主动找你") {
-                    route = SettingsRoute(focus: "proactive")
-                }
-                divider
-                row("我的资料", "person.crop.square", "你自己的名字和头像") {
-                    route = SettingsRoute(focus: "myprofile")
-                }
-                divider
-                row("气泡样式", "bubble.left", "圆角、颜色、小尾巴") {
-                    route = SettingsRoute(focus: "bubbles")
-                }
-                divider
-                row("表情", "face.smiling", "发消息时带的表情") {
-                    route = SettingsRoute(focus: "emoji")
-                }
-                divider
-                row("聊天", "text.bubble", "默认进哪个页面") {
-                    route = SettingsRoute(focus: "chat")
-                }
-                divider
-                row("联网搜索", "magnifyingglass", "让 ta 自己上网查") {
-                    route = SettingsRoute(focus: "search")
-                }
-                divider
-                row("音乐", "music.note", "网易云登录、搜歌") {
-                    route = SettingsRoute(focus: "music")
-                }
-                divider
-                row("系统桥接", "link", "快捷指令、剪贴板") {
-                    route = SettingsRoute(focus: "system")
-                }
-                divider
-                row("MCP 外接工具", "puzzlepiece.extension", "接外面的工具给 ta 用") {
-                    route = SettingsRoute(focus: "mcp")
-                }
-                divider
-                row("控制台", "terminal", "ta 刚才做了什么") {
-                    route = SettingsRoute(focus: "console")
-                }
-                divider
-                row("分享与搬家", "square.and.arrow.up", "备份成文件、二维码") {
-                    route = SettingsRoute(focus: "share")
-                }
+                V2Divider()
+                V2Row(symbol: "person.text.rectangle",
+                      title: "ta 的人设",
+                      detail: "名字、性别、性格、说话方式",
+                      action: { route = SettingsRoute(focus: "persona") })
+                V2Divider()
+                V2Row(symbol: "bell.badge",
+                      title: "主动消息",
+                      detail: "什么时候主动找你",
+                      action: { route = SettingsRoute(focus: "proactive") })
+                V2Divider()
+                V2Row(symbol: "person.crop.square",
+                      title: "我的资料",
+                      detail: "你自己的名字和头像",
+                      action: { route = SettingsRoute(focus: "myprofile") })
+                V2Divider()
+                V2Row(symbol: "face.smiling",
+                      title: "表情",
+                      detail: "发消息时带的表情",
+                      action: { route = SettingsRoute(focus: "emoji") })
+                V2Divider()
+                V2Row(symbol: "text.bubble",
+                      title: "聊天",
+                      detail: "默认进哪个页面",
+                      action: { route = SettingsRoute(focus: "chat") })
+                V2Divider()
+                V2Row(symbol: "magnifyingglass",
+                      title: "联网搜索",
+                      detail: "让 ta 自己上网查",
+                      action: { route = SettingsRoute(focus: "search") })
+                V2Divider()
+                V2Row(symbol: "music.note",
+                      title: "音乐",
+                      detail: "网易云登录、搜歌",
+                      action: { route = SettingsRoute(focus: "music") })
+                V2Divider()
+                V2Row(symbol: "link",
+                      title: "系统桥接",
+                      detail: "快捷指令、剪贴板",
+                      action: { route = SettingsRoute(focus: "system") })
+                V2Divider()
+                V2Row(symbol: "puzzlepiece.extension",
+                      title: "MCP 外接工具",
+                      detail: "接外面的工具给 ta 用",
+                      action: { route = SettingsRoute(focus: "mcp") })
+                V2Divider()
+                V2Row(symbol: "terminal",
+                      title: "控制台",
+                      detail: "ta 刚才做了什么",
+                      action: { route = SettingsRoute(focus: "console") })
+                V2Divider()
+                V2Row(symbol: "square.and.arrow.up",
+                      title: "分享与搬家",
+                      detail: "备份成文件、二维码",
+                      action: { route = SettingsRoute(focus: "share") })
             }
         }
     }
 
-    // MARK: - 每行右边那句话
+    // MARK: - 顶部/卡片上那几句
     //
     // ⚠️ 这里每一个都是「读本地已有数据」，不联网、不解析 JSON。
     //    万一字段缺失也只是显示得丑一点，不会崩。
+
+    private var statusLine: String {
+        if !account.isSignedIn { return "还没登录" }
+        let pts = pointsService.points
+        return pts > 0 ? "\(pts) 积分" : "已登录"
+    }
+
+    private var memberPillText: String {
+        guard let until = account.profile?.expiresAt else { return "未开通" }
+        return until < Date() ? "已到期" : "会员"
+    }
 
     private var inboxLine: String {
         if settings.accountEmail.isEmpty { return "登录后可查收通知和福利" }
@@ -355,88 +457,6 @@ struct MeView: View {
         guard settings.aiToolsEnabled else { return "已关掉，只剩聊天" }
         let off = settings.disabledToolCategories.count
         return off == 0 ? "全部开着，聊天以外都能动手" : "关掉了 \(off) 类"
-    }
-
-    // MARK: - 零件（纯色，不带玻璃）
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .fill(Color(.secondarySystemGroupedBackground))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
-            )
-    }
-
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) { content() }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardBackground)
-    }
-
-    private func icon(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.aevis(16, weight: .medium))
-            .foregroundStyle(settings.accentColor)
-            .frame(width: 34, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(settings.accentColor.opacity(0.10))
-            )
-    }
-
-    private func row(
-        _ title: String,
-        _ symbol: String,
-        _ detail: String,
-        badge: Int = 0,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            BlackBox.tap("我 · \(title)")
-            action()
-        } label: {
-            HStack(spacing: 12) {
-                icon(symbol)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.aevis(15.5, weight: .medium))
-                        .foregroundStyle(.primary)
-                    Text(detail)
-                        .font(.aevis(12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                if badge > 0 {
-                    Text(badge > 99 ? "99+" : "\(badge)")
-                        .font(.aevis(11, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.red))
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.aevis(13, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.07))
-            .frame(height: 0.5)
-            .padding(.leading, 62)
     }
 }
 
