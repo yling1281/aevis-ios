@@ -404,6 +404,72 @@ jobs:
 
           ls -lh shots/ || true
 
+      # 2026-11-02：用户报「iOS 18 上点图标就退回桌面」。
+      #
+      # 为什么单开一步：自检用的是**机器上最新的**模拟器（现在是 iOS 26），
+      # 而那个包在 26 上跑得好好的 —— 但用户手机是 18。真机崩、模拟器不崩的
+      # 那种问题，只能拿 18 的 runtime 复现。
+      #
+      # 这一步会：找一个 iOS 18.x 的 runtime（没有就跳过）→ 建一台临时模拟器 →
+      # 装同一个 .app → 冷启动 → 看进程还在不在 → 打印崩溃报告第一条。
+      # ⚠️ `continue-on-error`：探针失败不能连累出包。
+      - name: iOS 18 launch probe
+        if: success() && steps.decide.outputs.should != 'yes'
+        continue-on-error: true
+        run: |
+          echo "--- 机器上有哪些 runtime ---"
+          xcrun simctl list runtimes | sed -n '1,40p'
+
+          RT=$(xcrun simctl list runtimes \
+                 | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-18-[0-9]+' | head -1)
+          if [ -z "$RT" ]; then
+            echo "没有 iOS 18 的 runtime，跳过（这次探针不算数）"
+            exit 0
+          fi
+          echo "用 runtime: $RT"
+
+          DT=$(xcrun simctl list devicetypes | grep -m1 -oE 'com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9-]+')
+          echo "设备类型: $DT"
+          UDID=$(xcrun simctl create "Aevis18" "$DT" "$RT")
+          echo "临时设备: $UDID"
+
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b || true
+
+          APP=$(ls -d build-sim/Debug-iphonesimulator/*.app | head -1)
+          test -n "$APP" || { echo "没有模拟器 .app，跳过"; exit 0; }
+          xcrun simctl install "$UDID" "$APP"
+
+          mkdir -p shots18
+          echo "--- 冷启动（默认参数）---"
+          xcrun simctl launch "$UDID" com.aevis.ios || true
+          sleep 10
+          xcrun simctl io "$UDID" screenshot "shots18/01-launch.png" || true
+
+          if xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -qi "com.aevis.ios"; then
+            echo "✅ iOS 18 上进程还活着 —— 这一版没复现"
+          else
+            echo "❌ iOS 18 上进程已退出 —— 复现了"
+          fi
+
+          echo "--- 崩溃报告 ---"
+          CR=$(ls -t ~/Library/Logs/DiagnosticReports/Aevis-* 2>/dev/null | head -1)
+          if [ -n "$CR" ]; then
+            echo "报告: $CR"
+            grep -E "Exception Type|Exception Subtype|Termination Reason|Application Specific" "$CR" | head -10 || true
+            echo "--- 崩溃线程 ---"
+            awk '/^Thread [0-9]+ Crashed/{f=1} f{print} f&&/^Thread /&&!/Crashed/{exit}' "$CR" | head -40 || true
+          else
+            echo "无崩溃报告"
+          fi
+
+          echo "--- 系统日志尾部 ---"
+          xcrun simctl spawn "$UDID" log show --last 60s \
+            --predicate 'processImagePath CONTAINS "Aevis"' \
+            --style compact 2>/dev/null | tail -40 || true
+
+          xcrun simctl delete "$UDID" || true
+
       - name: Me tab crash probe
         if: success() && steps.decide.outputs.should != 'yes'
         continue-on-error: true
@@ -570,6 +636,7 @@ jobs:
             - 内容：模拟器启动截图 + 构建日志
           files: |
             shots/*.png
+            shots18/*.png
             build.log
             sim-build.log
 
