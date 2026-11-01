@@ -23,11 +23,22 @@ struct DiscoverView: View {
     @State private var showMC = false
     @State private var showBrowser = false
     @State private var showAppleMusic = false
+    /// 人设广场（2026-11-01 用户要求：在发现页就能刷，也能自己写一个上传）。
+    @State private var showPlaza = false
+    @State private var showPublishPersona = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    // 人设广场：发现页第一屏就能横着刷。
+                    // 用户 2026-11-01：「人社广场你要在发现页那里做一个人可以在那里刷，
+                    // 然后的话呢也能在那里自己写一个上传」。
+                    PersonaPlazaStrip(
+                        onOpenAll: { showPlaza = true },
+                        onUpload: { showPublishPersona = true }
+                    )
+
                     card {
                         entry("朋友圈", "photo.on.rectangle.angled", momentsLine) {
                             router.showMoments = true
@@ -57,6 +68,10 @@ struct DiscoverView: View {
                         //    「纸飞机」就发给 ta。入口放在发现页第一张卡。
                         entry("浏览器", "safari", "打开网页，看到好的就发给\(Pronoun.current)") {
                             showBrowser = true
+                        }
+                        // 完整广场：横滑条只是「逛」，要找全量、看详情、加为好友进这里。
+                        entry("人设广场", "person.2.badge.plus", plazaLine) {
+                            showPlaza = true
                         }
                     }
                     card {
@@ -123,6 +138,12 @@ struct DiscoverView: View {
             .sheet(isPresented: $showAppleMusic) {
                 AppleMusicView()
             }
+            .sheet(isPresented: $showPlaza) {
+                PersonaPlazaView()
+            }
+            .sheet(isPresented: $showPublishPersona) {
+                PersonaPublishView { _ in }
+            }
             .onAppear {
                 applyLaunchOptions()
             }
@@ -148,6 +169,12 @@ struct DiscoverView: View {
 
     private var togetherLine: String {
         together.active ? "进行中 · \(together.currentTrackTitle)" : "两个人同步听同一首歌"
+    }
+
+    /// 人设广场那一行：有多少个可刷的。
+    private var plazaLine: String {
+        let n = PersonaPlazaStore.shared.rows.count
+        return n == 0 ? "别人写的人设，也能传自己的" : "\(n) 个人设可以刷"
     }
 
     private var musicLine: String {

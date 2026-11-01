@@ -1250,8 +1250,31 @@ final class AppSettings: ObservableObject {
 
     /// 打开 App 先进哪个 tab。存的是 `MainTab` 的 rawValue。
     /// 出厂是「通讯录」—— 用户要求「进去就是联系人」。
+    ///
+    /// 🔴 2026-11-01 修「点『我』闪退」的真正根因：
+    /// 这个键在 UserDefaults 里**存在很久了**，历史版本 `MainTab` 的 case 名换过
+    /// （`me` / `moments` / `music` / `calls` …）。老用户机器上躺着的是**非法旧值**。
+    /// 「我」页那个分段选择器把 `defaultTab` 直接当 selection、把当前 case 当 tag ——
+    /// selection 不在 tag 集合里时，`UISegmentedControl` 会拿到越界的
+    /// `selectedSegmentIndex`，在 `layoutSubviews` 里直接 crash。
+    /// 模拟器是全新安装、没有旧值，所以永远复现不出来。
+    ///
+    /// 两道保险：① 读的时候清洗；② 写的时候也清洗（`didSet` 只写入合法值）。
     @Published var defaultTab: String {
-        didSet { UserDefaults.standard.set(defaultTab, forKey: Key.defaultTab) }
+        didSet {
+            let safe = AppSettings.sanitizeTab(defaultTab)
+            UserDefaults.standard.set(safe, forKey: Key.defaultTab)
+        }
+    }
+
+    /// tab 的合法值表。**不要**在 Core 层 import `MainTab`（那在 App 层），
+    /// 这里用字符串副本；`MainTab.named()` 另有兜底。
+    static let validTabs = ["chats", "contacts", "discover", "me"]
+
+    static func sanitizeTab(_ raw: String?) -> String {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              validTabs.contains(raw) else { return "chats" }
+        return raw
     }
 
     /// 「屏幕使用时间」快捷指令的名字 —— 数据靠它跑完用 aevis:// 发回来。
@@ -1746,7 +1769,7 @@ final class AppSettings: ObservableObject {
         disabledToolCategories = defaults.stringArray(forKey: Key.aiToolsDisabled) ?? []
         companionEnabled = defaults.object(forKey: Key.companionEnabled) as? Bool ?? false
         companionInterval = defaults.object(forKey: Key.companionInterval) as? Double ?? 20
-        defaultTab = defaults.string(forKey: Key.defaultTab) ?? "chats"   // 2026-10-31：启动默认进聊天页
+        defaultTab = AppSettings.sanitizeTab(defaults.string(forKey: Key.defaultTab))
         lockShortcutName = defaults.string(forKey: Key.lockShortcutName) ?? ""
         screenTimeShortcutName = defaults.string(forKey: Key.screenTimeShortcutName) ?? ""
         // ⚠️ 必须用 object(forKey:) 判「有没有设过」。

@@ -22,12 +22,36 @@ struct WxBotCard: View {
     @State private var binding = false
     @State private var boundPersona: String = ""
     @State private var bindError: String = ""
+    /// 绑定成功的那一条（用户要求「绑定成功的话记得写一个绑定成功」）。
+    @State private var bindOK = false
+    /// 对话余额 —— 绑定的人设用的是这个账号的积分，绑的时候一并显示。
+    @State private var balance: Int?
 
     /// 当前选中的人设名（给后端存的是人设名，跨端可读）。
     private var selectedPersonaName: String {
         personaStore.contacts
             .first { $0.id == selectedContactID }?
             .persona.name ?? ""
+    }
+
+    private var accountLabel: String {
+        let e = AppSettings.shared.accountEmail
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return e.isEmpty ? "（未登录）" : e
+    }
+
+    private var balanceText: String {
+        guard let b = balance else { return "" }
+        return "，余 \(b) 积分"
+    }
+
+    private var bindButtonTitle: String {
+        if boundPersona.isEmpty { return "绑定这个人设" }
+        if let n = personaStore.contacts.first(where: { $0.id == selectedContactID })?.persona.name,
+           n == boundPersona {
+            return "已绑定：\(n)"
+        }
+        return "换绑成这个人设"
     }
 
     var body: some View {
@@ -96,40 +120,74 @@ struct WxBotCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             // ---- 选人设 + 绑定（2026-11-01 用户要求） ----
-            if phase == "connected" {
-                if personaStore.contacts.isEmpty {
-                    Text("先在 App 里创建一个人设，再回来绑定。")
-                        .font(.aevis(12.5))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker("用哪个人设", selection: $selectedContactID) {
-                        Text("选一个人设…").tag(UUID?.none)
-                        ForEach(personaStore.contacts) { c in
-                            Text(c.displayName).tag(UUID?.some(c.id))
-                        }
-                    }
-                    .font(.aevis(13.5))
-
-                    Button {
-                        Task { await bind() }
-                    } label: {
-                        HStack {
-                            if binding { ProgressView().controlSize(.small) }
-                            Text(boundPersona.isEmpty ? "绑定这个人设" : "已绑定：\(boundPersona)（点此换绑）")
-                                .font(.aevis(13.5, weight: .medium))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(selectedContactID == nil || binding)
-
-                    if !bindError.isEmpty {
-                        Text(bindError)
-                            .font(.aevis(12))
-                            .foregroundStyle(.red)
+            //
+            // 🔴 2026-11-01 修「微信个人 Bot 绑不了人设」：
+            //    原来这一整块写在 `if phase == "connected"` 里面 ——
+            //    Bot 一旦没连上（服务重启、码过期、隧道抖一下），**人设选择器整个消失**，
+            //    用户看到的就是「绑不了人设」，连按钮都没有。
+            //    现在：选择器始终在（只要 App 里有人设），
+            //    只有未连接时才在按钮上提示「先扫码连上」。
+            if personaStore.contacts.isEmpty {
+                Text("先在 App 里创建一个人设，再回来绑定。")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("用哪个人设", selection: $selectedContactID) {
+                    Text("选一个人设…").tag(UUID?.none)
+                    ForEach(personaStore.contacts) { c in
+                        Text(c.displayName).tag(UUID?.some(c.id))
                     }
                 }
+                .font(.aevis(13.5))
+
+                Button {
+                    Task { await bind() }
+                } label: {
+                    HStack {
+                        if binding { ProgressView().controlSize(.small) }
+                        Text(bindButtonTitle)
+                            .font(.aevis(13.5, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedContactID == nil || binding)
+
+                // 绑定成功：绿色一条，写明「人设 + 余额跟着哪个账号走」。
+                // 用户 2026-11-01：「绑定成功的话记得在这里面写一个绑定成功」。
+                if bindOK {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("绑定成功：\(boundPersona)", systemImage: "checkmark.circle.fill")
+                            .font(.aevis(12.5, weight: .medium))
+                            .foregroundStyle(.green)
+                        Text("对话余额已绑定到账号 \(accountLabel)\(balanceText)")
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.green.opacity(0.10))
+                    )
+                } else if !boundPersona.isEmpty {
+                    Text("当前绑定：\(boundPersona)")
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                }
+
+                if !bindError.isEmpty {
+                    Text(bindError)
+                        .font(.aevis(12))
+                        .foregroundStyle(.red)
+                }
+
+                // 余额不够是会真的挡住对话的，所以提前把话说明白。
+                Text("\(Pronoun.current)在微信里每聊一句都从你的积分里扣；积分不够时会直接回你一句「积分不够」。")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if !message.isEmpty {
@@ -142,6 +200,7 @@ struct WxBotCard: View {
         .task {
             await load()
             loadMyBind()
+            await loadBalance()
             // 每 5 秒看一次状态 —— 用户扫完不用手动刷新，界面自己变「已连接」。
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
@@ -209,9 +268,15 @@ struct WxBotCard: View {
     }
 
     private func bind() async {
-        guard let contact = personaStore.contacts.first(where: { $0.id == selectedContactID }) else { return }
+        guard let contact = personaStore.contacts.first(where: { $0.id == selectedContactID }) else {
+            // 原来这里直接 return —— 选了人但匹配不上时按钮**一点反应都没有**，
+            // 看着就像「绑不了」。现在至少给一句话。
+            bindError = "没找到选中的这个人设，换一个再试"
+            return
+        }
         binding = true
         bindError = ""
+        bindOK = false
         defer { binding = false }
 
         let account = AppSettings.shared.accountEmail
@@ -225,8 +290,11 @@ struct WxBotCard: View {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(account, forHTTPHeaderField: "X-Account")
+        // ⚠️ `bot_account` 不能拿空的 accountId 硬填 —— 未连接时它本来就是空的。
+        //    这里统一用绑定账号本身做 key，服务端按「一个微信用户一份绑定」记，
+        //    余额也就跟着这个账号走（用户 2026-11-01：「每个的余额记得也要绑定」）。
         let body: [String: String] = [
-            "bot_account": accountId.isEmpty ? "default" : accountId,
+            "bot_account": accountId.isEmpty ? account : accountId,
             "persona": contact.persona.name,
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -236,11 +304,28 @@ struct WxBotCard: View {
             let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             if (obj["code"] as? Int) == 0 {
                 boundPersona = contact.persona.name
+                bindOK = true
+                await loadBalance()
             } else {
                 bindError = (obj["msg"] as? String) ?? "绑定失败"
             }
         } catch {
             bindError = "网络异常：\(error.localizedDescription)"
+        }
+    }
+
+    /// 拉一次积分余额（对话扣的就是它）。走 Bearer，不走 X-Account。
+    private func loadBalance() async {
+        let token = AppSettings.shared.accountToken
+        guard !token.isEmpty,
+              let url = URL(string: AevisHosts.accountBase + "/v1/points") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = obj["data"] as? [String: Any] else { return }
+        if let p = d["points"] as? Int {
+            balance = p
         }
     }
 }

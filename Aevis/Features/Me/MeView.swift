@@ -12,12 +12,16 @@ struct MeView: View {
     @ObservedObject private var account = AccountService.shared
     /// 观察积分 —— 「积分」那一行要显示余额，余额变了得跟着变。
     @ObservedObject private var pointsService = PointsService.shared
+    /// 站内信未读数 —— 「我」页那一行要显示红点数字。
+    @ObservedObject private var inbox = InboxStore.shared
 
     @State private var route: SettingsRoute?
     @State private var showDisclaimer = false
     @State private var showHealth = false
     /// 站内信（通知 + 可领的福利积分）。
     @State private var showInbox = false
+    /// 帮助与反馈（工单）：提问题、看客服回复。
+    @State private var showTickets = false
     /// 「怎么使用 / 规则 / 常见问题」—— 现在是原生页（2026-10-31 改）。
     @State private var showRules = false
     /// 积分页（2026-10-31 新增）
@@ -50,7 +54,7 @@ struct MeView: View {
                             showPoints = true
                         }
                         // 2026-11-01：站内信（通知 + 可领的福利积分）
-                        entry("站内信", "bell.badge", inboxLine) {
+                        entry("站内信", "bell.badge", inboxLine, badge: inbox.unread) {
                             showInbox = true
                         }
                         entry("这台设备", "iphone.gen3", deviceLine) {
@@ -108,6 +112,11 @@ struct MeView: View {
                               "风险、数据存放、第三方服务") {
                             showDisclaimer = true
                         }
+                        // 2026-11-01 用户：「APP 里面的那个工单提交你也没弄好」——
+                        // 后端一直通，App 里却没有入口。补在「关于」旁边。
+                        entry("帮助与反馈", "envelope", "提问题、看客服回复") {
+                            showTickets = true
+                        }
                         entry("关于", "info.circle", "版本号") {
                             route = SettingsRoute(focus: "about")
                         }
@@ -124,6 +133,7 @@ struct MeView: View {
             // 没登录时这个方法直接返回，不发请求。
             .task {
                 await account.refreshProfile()
+                await inbox.refreshBadge()
                 #if DEBUG
                 // 自检直达：-aevisOpenInbox 直接开站内信（用户报「我的」闪退，
                 // 要让 CI 把这一层也渲染一遍，不能只截 Tab）。
@@ -156,6 +166,9 @@ struct MeView: View {
             }
             .sheet(isPresented: $showInbox) {
                 NavigationStack { InboxView() }
+            }
+            .sheet(isPresented: $showTickets) {
+                NavigationStack { TicketListView() }
             }
             .sheet(isPresented: $showPoints) {
                 PointsView()
@@ -210,13 +223,45 @@ struct MeView: View {
                 .font(.aevis(13, weight: .medium))
                 .foregroundStyle(.primary)
 
-            Picker("", selection: $settings.defaultTab) {
+            // 🔴 2026-11-01 第二次修「点『我』闪退」。
+            //
+            // 第一次的判断（玻璃卡片叠 UISegmentedControl）是**错的方向** ——
+            // 去掉玻璃之后真机照样崩。真正的原因是**值域**：
+            //
+            //   `settings.defaultTab` 是从 UserDefaults 读出来的**旧字符串**
+            //   （这个键存在很久了，历史版本里 MainTab 的 case 名换过好几轮）。
+            //   老用户机器上存的是 `me` / `moments` / `music` 这类**现在不存在的值**，
+            //   而分段 Picker 的每个 tag 都是当前 `MainTab.rawValue` ——
+            //   selection 指向一个不在 tag 集合里的值，SwiftUI 会把
+            //   `UISegmentedControl.selectedSegmentIndex` 设成 -1 之外的越界值，
+            //   随即在 `-[UISegmentedControl layoutSubviews]` 里 crash。
+            //
+            //   模拟器为什么复现不了：全新安装，`defaultTab` 根本没有旧值，
+            //   走的是默认 `chats`，一切正常。**要复现必须在真机上装过老版本。**
+            //
+            // 所以这里彻底不用系统分段控件 —— 四个自绘胶囊，`ForEach` 里只比字符串，
+            // 存什么值都不会崩。同时 `AppSettings` 加载时会把这个键清洗成合法值
+            //（见 `defaultTab` 的 `didSet` + `sanitizeDefaultTab()`）。
+            HStack(spacing: 6) {
                 ForEach(MainTab.allCases) { tab in
-                    Text(tab.title).tag(tab.rawValue)
+                    let on = settings.defaultTab == tab.rawValue
+                    Button {
+                        settings.defaultTab = tab.rawValue
+                    } label: {
+                        Text(tab.title)
+                            .font(.aevis(12.5, weight: on ? .semibold : .regular))
+                            .foregroundStyle(on ? Color.white : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(on ? settings.accentColor
+                                             : Color.primary.opacity(0.06))
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -282,7 +327,9 @@ struct MeView: View {
     /// 会员那一行：有效期 / 未开通。
     /// 站内信那一行的描述。
     private var inboxLine: String {
-        AppSettings.shared.accountEmail.isEmpty ? "登录后可查收通知和福利" : "通知与福利积分"
+        if AppSettings.shared.accountEmail.isEmpty { return "登录后可查收通知和福利" }
+        if inbox.unread > 0 { return "\(inbox.unread) 条未读 · 通知与福利积分" }
+        return "通知与福利积分"
     }
 
     private var memberLine: String {
@@ -327,6 +374,7 @@ struct MeView: View {
         _ title: String,
         _ symbol: String,
         _ detail: String,
+        badge: Int = 0,
         action: @escaping () -> Void
     ) -> some View {
         // ⚠️ 「我」页**所有**入口都走这一个函数 —— 在这里记一笔，
@@ -354,6 +402,15 @@ struct MeView: View {
                 }
 
                 Spacer(minLength: 8)
+
+                if badge > 0 {
+                    Text(badge > 99 ? "99+" : "\(badge)")
+                        .font(.aevis(11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.red))
+                }
 
                 Image(systemName: "chevron.right")
                     .font(.aevis(13, weight: .semibold))
