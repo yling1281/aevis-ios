@@ -16,6 +16,9 @@ on:
     paths:
       - '.github/workflows/ios18-probe.yml'
 
+permissions:
+  contents: write
+
 jobs:
   probe:
     name: Boot on iOS 18
@@ -60,6 +63,8 @@ jobs:
           ls -d Aevis.xcodeproj
 
       - name: Build for simulator
+        env:
+          AEVIS_COMMIT: ${{ github.sha }}
         run: |
           set -e
           xcodebuild \
@@ -126,3 +131,16 @@ jobs:
             shot18.png
             sim-build.log
           if-no-files-found: warn
+
+      - name: Publish failure log to branch
+        if: failure()
+        run: |
+          set -e
+          grep -E "error:|Undefined symbol|No such file|failed" sim-build.log | head -120 > probe-log.txt || true
+          tail -n 60 sim-build.log >> probe-log.txt
+          git config user.name "aevis-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -B probe-log
+          git add -f probe-log.txt
+          git commit -m "probe log [skip ci]" || true
+          git push -f origin probe-log || true
