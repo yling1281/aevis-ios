@@ -1,0 +1,5 @@
+# 二进制别让 git 做换行转换（xcframework 里是 Mach-O 动态库）
+*.xcframework/** -text
+*.framework/** -text
+*.a -text
+*.dylib -text
