@@ -28,6 +28,12 @@ final class FusionPhoneAuth: NSObject {
     /// SDK 内置模板：一键登录。短信是 100002、图形是 100004。
     static let templateOneKey = "100001"
 
+    /// 融合认证方案 Code（iOS）。2026-11-02 控制台创建。
+    ///
+    /// ⚠️ 别跟另外两套混了：FA = 融合认证（我们用这个）、
+    ///    FC = 号码认证、FG = 图形认证。
+    static let schemeCode = "FA000000009767884275"
+
     private var handler: AlicomFusionAuthHandler?
     private var scheme = ""
     private var token: AlicomFusionAuthToken?

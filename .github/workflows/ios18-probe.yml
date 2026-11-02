@@ -44,32 +44,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Fetch iSH vendor
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          TAG=ish-vendor
-          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || {
-            TAG=$(gh release list --repo "${{ github.repository }}" --limit 300 \
-                  | grep -oE 'ish-sandbox-macos-[0-9]+' | head -1)
-          }
-          DEST="$RUNNER_TEMP/vendor-dl"; mkdir -p "$DEST"
-          gh release download "$TAG" --repo "${{ github.repository }}" \
-             --pattern 'ish-vendor.tar.gz' --pattern 'alpine-rootfs.zip' \
-             --dir "$DEST" --clobber
-
-          rm -rf vendor/ish; mkdir -p vendor/ish
-          tar xzf "$DEST/ish-vendor.tar.gz" -C vendor/ish
-
-          # ⚠️ `ish-rootfs` 是**仓库根目录**下的资源目录，主 target 直接引它。
-          #    只下 vendor 不解 rootfs，Xcode 会当场报
-          #    "The file 'ish-rootfs' couldn't be opened"。
-          #    （2026-11-02 探针连挂三次就是这原因。）
-          rm -rf ish-rootfs; mkdir -p ish-rootfs
-          unzip -q "$DEST/alpine-rootfs.zip" -d ish-rootfs
-          ls vendor/ish | head -10
-          ls ish-rootfs | head -10
+      # 2026-11-02：内置 Linux 取消，原来这里要下来 libaevisish.a + 200MB rootfs。
+      # 探针连挂三次就是卡在「只下了 vendor、没解 ish-rootfs」—— 现在整段没了，
+      # 这个坑也跟着消失。
 
       - name: Inject built-in credentials
         env:

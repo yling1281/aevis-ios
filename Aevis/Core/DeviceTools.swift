@@ -186,9 +186,12 @@ enum DeviceTools {
             // ⚠️ 2026-10-31 下线：`.pan`（百度网盘）、`.qq`（QQ 桥接）、`.wallet`（钱包）
             //    三组从这里摘掉 —— 这就是"AI 也调不到"的那一刀。
             //    详见 `ToolCategory.isRetired`。
-            // 系统动作 + `shellTool`（命令行）+ `ttsTool`（文字转语音）放一类 ——
-            // 这一类都跟"能不能替我操作这台手机"捆在一起。
-            (.system, systemTools + [shellTool, ttsTool]),
+            // 系统动作 + `ttsTool`（文字转语音）。
+            // ⚠️ 2026-11-02：`shellTool`（App 内置 Linux 的 run_command）已下线 ——
+            //    老板：「Linux 现在取消」。它原来独占 200MB rootfs、崩了只能重启 App，
+            //    而最常被用来干的事就是抓网页，那件事 `.web` 那组（search_web /
+            //    open_web_page）已经做得更好，所以整个 Alpine 一起摘掉了。
+            (.system, systemTools + [ttsTool]),
             (.couple, CoupleTools.coupleTools),
             // ta**主动申请**做的事（打电话 / 看屏幕 / 一起听）。
             // 跟别的不一样的地方：这几个只是"提出来"，真正开始还要用户点头。

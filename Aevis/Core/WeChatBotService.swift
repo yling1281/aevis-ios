@@ -1,34 +1,33 @@
-import Foundation
+//
+//  WeChatBotService.swift
+//  Aevis
+//
+//  ⚠️ 2026-11-02 重写：**底层不再是 App 内置 Linux。**
+//
+//  原来这套是靠 iSH（真 Alpine）在手机里跑 `wechat_bind.sh` + curl 去连腾讯 iLink。
+//  现在改成：**全部走我们自己的服务器**（4-4 上的 aevis_wxbot，背后是 HK 的
+//  wx-login / OpenClaw 通道）。客户端只做三件事 ——
+//
+//    1. 拉状态（/v1/wxbot/status、/v1/wxbot/qr）
+//    2. 点一下换码（/v1/wxbot/refresh）
+//    3. 绑完记一笔（/v1/wxbot/bind、/v1/wxbot/my）
+//
+//  直接好处：App 不用带 200MB 的 rootfs、不用链 libaevisish.a、CI 不用每次下载解压，
+//  也不会再有「内核崩了只能重启 App」这种事。
+//
+//  ⚠️ 对外接口**一个都没改名**（state / probes / qrPayload / incoming /
+//  received / lastError / boundSummary / probe / startBind / unbind /
+//  startPolling / stopPolling）—— WeChatBotCard.swift 不用改一行。
+//
+//  ## 线程口径（沿旧约定）
+//  故意不标 `@MainActor`：调用点散在后台任务里。
+//  所有 `@Published` 一律从 `setXxx` 过一道，避免 "Publishing changes from
+//  background threads"，也就不会在 iOS 26 上硬崩。
+//
 
-/// 微信机器人（腾讯官方 ClawBot / iLink 通道）—— 扫码绑定 + 长轮询收消息。
-///
-/// ## 这条为什么和 QQ 那条完全不是一个做法
-/// `QQBotService` 是**在 Swift 里直接开 WebSocket**；微信这条**整个跑在 App 里
-/// 那个真 Linux（iSH / Alpine）里** —— 扫码、取码、35 秒长轮询全在 guest 的一个
-/// 后台进程里，宿主只干两件事：**把命令发进去、把文件读回来**。
-///
-/// 为什么非要这样（老板 2026-10-06 的原话）：
-/// 「微信的扫码的话，要本地的，就是不经过电脑和服务器。它不是有 Linux 控制台吗？用 Linux」
-/// 也就是说：**不经过我们的账号服务器、也不经过任何一台电脑**，扫码绑定和收发消息
-/// 都落在这台手机上。
-///
-/// ## iSH 的硬特性（照做，别绕）
-/// · 命令被包进**子 shell** 跑 ⇒ `cd` / `export` 不跨命令；没有 PTY ⇒ guest 脚本不许读 stdin。
-/// · `nohup … &` 会**立即返回** ⇒ 长轮询只能「后台化 + 重定向到文件 + 宿主反复读文件」。
-/// · 🔴 **绝不用前台阻塞循环跑长任务**：`aevis_ish_wait` 超时后只能 `abort_current`，
-///   那会把 shell 判脏、只能重启 App。见 `AlpineRuntime` 顶部那一段。
-///
-/// ## iOS 上做不到的部分（必须说清楚，别让人以为坏了）
-/// · **App 被系统挂起时，guest 里的后台进程也一起停** —— 这是 iOS 的硬限制，
-///   只能靠 `SilentKeeper`（后台放静音音频）尽量拖住。真被挂了，回到前台要靠
-///   `reconnectIfNeeded()` 重新把轮询器拉起来。
-/// · 没有 history / getMessages 接口 ⇒ 只能看「绑定之后、用户↔bot」这一条会话。
-///
-/// ## 线程口径
-/// ⚠️ 这个类**故意不标 `@MainActor`**（和 `QQBotService` 一样）：它的调用点散在
-/// 后台任务里，标了之后到处都要 `await` 跳，本机没 Xcode、一试就是一轮 CI。
-/// 改成「**一切 `@Published` 都从 `setXxx` 过一道**」—— 只有它们碰界面状态，
-/// 于是不会报 "Publishing changes from background threads"，iOS 26 上也不会硬崩。
+import Foundation
+import Combine
+
 final class WeChatBotService: ObservableObject {
 
     static let shared = WeChatBotService()
@@ -53,7 +52,6 @@ final class WeChatBotService: ObservableObject {
             case .waitingScan: return "出码了，等你扫"
             case .bound: return "已绑定"
             case .polling: return "已绑定，正在收消息"
-            // ⚠️ iLink 顶层 -14 = **会话超时（session timeout）**，不是封号 ⇒ 别写「被冻结了」。
             case .frozen(let why): return "会话超时了：\(why)"
             case .failed(let why): return "出错了：\(why)"
             }
@@ -67,7 +65,7 @@ final class WeChatBotService: ObservableObject {
         }
     }
 
-    /// 一项自检的**真实结果**。命令原文、输出原文都照存，界面直接显示，不做任何美化。
+    /// 一项自检的真实结果。界面直接显示，不做美化。
     struct ProbeResult: Identifiable, Equatable {
         let id = UUID()
         var title: String
@@ -76,17 +74,13 @@ final class WeChatBotService: ObservableObject {
         var ok: Bool
     }
 
-    /// 从 getupdates 里读出来的一条来往。
+    /// 来往消息。服务器版由服务端收发，客户端不再逐条解析 —— 结构留着兼容界面。
     struct Incoming: Identifiable, Equatable {
         let id = UUID()
         var from: String
         var text: String
         var at: Date
-        /// 这条消息的**发送者 id**（回发时当 `to_user_id` 用）。认不出就是 nil。
-        ///
-        /// ⚠️ 必须可选 + 带默认值 —— 现有构造点不许被改坏。
         var peer: String? = nil
-        /// 这条消息带的 `context_token`。iLink 说回发时要**原样带回**；认不出就是 nil。
         var context: String? = nil
     }
 
@@ -97,73 +91,58 @@ final class WeChatBotService: ObservableObject {
     @Published private(set) var received = 0
     @Published var lastError: String?
 
-    // MARK: - 只在主线程改 @Published
-    //
-    // 非隔离的 async 函数在 `await` 之后**线程是随机的**；在那儿改 `@Published`
-    // 会让 SwiftUI 报 "Publishing changes from background threads"、iOS 26 上更会硬崩
-    // （见 swift_check 的 R29）。所以统一从这里过一道，别处不许直接赋值。
+    // MARK: - 主线程改 @Published
 
     private func onMain(_ work: @escaping () -> Void) {
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.async(execute: work)
-        }
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
     private func setState(_ next: State) { onMain { self.state = next } }
     private func setProbes(_ next: [ProbeResult]) { onMain { self.probes = next } }
     private func setQR(_ next: String?) { onMain { self.qrPayload = next } }
-    private func setIncoming(_ next: [Incoming]) { onMain { self.incoming = next } }
-    private func setReceived(_ next: Int) { onMain { self.received = next } }
     private func setError(_ next: String?) { onMain { self.lastError = next } }
 
-    // MARK: - guest 里的固定位置（和 wechat_bind.sh 的约定一一对应）
-
-    private enum Guest {
-        static let dir = "/root/wechat"
-        static let script = "/root/wechat/wechat_bind.sh"
-        static let qrcode = "/root/wechat/qrcode.json"
-        static let status = "/root/wechat/status.json"
-        static let updates = "/root/wechat/updates.jsonl"
-        /// guest 里 getupdates 的**增量游标**文件（`cursor.txt`）。
-        /// ⚠️ 换绑定（新 token）时宿主必须把它一起删掉 —— 否则新 bot 第一次
-        ///    getupdates 会带着**旧 bot 的游标**，必然收不到新消息。
-        static let cursor = "/root/wechat/cursor.txt"
-        static let ticket = "/root/wechat/ticket.txt"
-        static let token = "/root/wechat/token.txt"
-        static let uin = "/root/wechat/uin.txt"
-        static let sendBody = "/root/wechat/send_body.json"
-        static let sendResult = "/root/wechat/send_result.json"
-        static let frozen = "/root/wechat/frozen"
-        static let stop = "/root/wechat/stop"
-        static let keepalive = "/root/wechat/keepalive.txt"
-    }
-
-    /// 宿主侧的状态（**不是** `@Published`，界面不直接读）。
-    private var polling = false
-    private var readOffset = 0
-    private var readerTask: Task<Void, Never>?
-    /// 最近一次入站消息的发送者 id（`send` 拿它当收件人）。**不是** `@Published`，界面不读。
-    private var lastPeer = ""
-    /// 最近一次入站消息带的 `context_token`（`send` 有就原样带上）。**不是** `@Published`。
-    private var lastContext = ""
-
-    /// 绑定成功后拿到的 `ilink_user_id` —— 它就是 `X-WECHAT-UIN` 头要的那个值。
-    ///
-    /// 🔴 为什么绝不能用 `weChatBotILinkID`：那是 **ilink_bot_id（bot 自己的 id）**，
-    ///    拿它当 uin 写进 guest 会让 `X-WECHAT-UIN` 头**一直在变**（bot id ≠ 用户 id）。
-    /// ⚠️ 为什么自成一份持久化、不放进 `AppSettings`：本次修复的硬约束是
-    ///    「只改 WeChatBotService.swift 与 ish-scripts/wechat_bind.sh 两个文件」，
-    ///    所以不去动 AppSettings.swift。语义上它和 AppSettings 里那几个 `weChatBot*`
-    ///    是同一类（都是扫码绑定态）。
-    private var ilinkUserID: String {
-        get { UserDefaults.standard.string(forKey: Self.ilinkUserIDKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: Self.ilinkUserIDKey) }
-    }
-    private static let ilinkUserIDKey = "aevis.weChatBot.ilinkUserID"
-
     private init() {}
+
+    // MARK: - 网络
+
+    private var base: String { AevisHosts.accountBase }
+
+    private func call(_ path: String, method: String = "GET") async -> [String: Any]? {
+        guard let url = URL(string: base + path) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 20
+        let acc = AppSettings.shared.accountEmail
+        if !acc.isEmpty { req.setValue(acc, forHTTPHeaderField: "X-Account") }
+        if method == "POST" {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = Data("{}".utf8)
+        }
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return (obj["data"] as? [String: Any]) ?? obj
+    }
+
+    /// 后端 phase → 本地 State。
+    private func map(_ d: [String: Any]) -> State {
+        let phase = (d["phase"] as? String ?? "").lowercased()
+        switch phase {
+        case "connected", "bound", "online", "running":
+            return AppSettings.shared.weChatBotEnabled ? .polling : .bound
+        case "waiting", "waiting_scan", "scan", "pending", "new":
+            return .waitingScan
+        case "frozen", "timeout", "session_timeout":
+            return .frozen(d["message"] as? String ?? "会话超时")
+        case "error", "failed":
+            return .failed(d["message"] as? String ?? "服务端报错")
+        case "":
+            return .failed("服务端没回状态")
+        default:
+            return .ready
+        }
+    }
 
     var isReady: Bool { AppSettings.shared.weChatBotEnabled }
 
@@ -172,526 +151,131 @@ final class WeChatBotService: ObservableObject {
         let settings = AppSettings.shared
         guard settings.weChatBotBoundAt > 0 else { return "还没绑定" }
         let date = Date(timeIntervalSince1970: settings.weChatBotBoundAt)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        let id = settings.weChatBotILinkID.isEmpty ? "（没拿到 bot id）" : settings.weChatBotILinkID
-        return "已绑定 · \(id) · " + formatter.string(from: date)
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        let id = settings.weChatBotILinkID.isEmpty ? "服务器没有返回 bot id" : settings.weChatBotILinkID
+        return "已绑定 · \(id) · " + f.string(from: date)
     }
 
-    // MARK: - 唯一碰 iSH 的入口
+    // MARK: - 自检（三项，全部打我们服务器）
 
-    /// 所有碰 iSH 的命令**只从这一条路走**，而且锁在 `#if !targetEnvironment(simulator)` 里。
-    ///
-    /// ⚠️ 为什么必须锁：`libaevisish.a` **只有真机切片**（见 project.yml 的
-    ///    `OTHER_LDFLAGS[sdk=iphoneos*]`），模拟器那条线根本不链它 —— 只要有一个
-    ///    调用表达式逃出 `#if`，模拟器链接就会缺符号、CI 直接红。
-    ///    真机上则把命令交给 `AlpineRuntime`（全工程唯一调 C 的地方，它自己会 boot）。
-    private func linux(_ command: String) async -> CommandResult {
-        #if targetEnvironment(simulator)
-        return .fail("模拟器里没有内置 Linux（只有装到真机上才有）。")
-        #else
-        return await AlpineRuntime.shared.run(command)
-        #endif
-    }
-
-    /// 把脚本写进 guest（每次启动都覆盖写一遍），并 `chmod +x`。
-    ///
-    /// 为什么用 base64 传：脚本里有 `$` / 引号 / `$(( ))` 数学括号，直接内联进
-    /// shell 命令会被**宿主 shell 和 guest shell 各展开一次**，迟早出事；
-    /// base64 出来只有 A–Z a–z 0–9 + / =，怎么转都安全，顺带也绝不会撞上
-    /// `run` 禁止的哨兵串 `__AEVIS_RC__=`（base64 字母表里没有下划线）。
-    private func installScript() async -> CommandResult {
-        guard let text = bundledScriptText() else {
-            return .fail("安装包里没找到 ish-scripts/wechat_bind.sh。")
-        }
-        let encoded = Data(text.utf8).base64EncodedString()
-        let command = "mkdir -p \(Guest.dir) && "
-            + "printf '%s' '\(encoded)' | base64 -d > \(Guest.script) && "
-            + "chmod 755 \(Guest.script) && echo AEVIS_SCRIPT_OK"
-        return await linux(command)
-    }
-
-    /// 从 App 包里读脚本。`ish-scripts` 是**文件夹引用**（project.yml 里 `type: folder`），
-    /// 所以按 `Bundle/ish-scripts/wechat_bind.sh` 取 —— 同 `AlpineRuntime` 取 rootfs 的写法。
-    private func bundledScriptText() -> String? {
-        let dir = Bundle.main.url(forResource: "ish-scripts", withExtension: nil)
-            ?? Bundle.main.bundleURL.appendingPathComponent("ish-scripts", isDirectory: true)
-        let file = dir.appendingPathComponent("wechat_bind.sh")
-        return try? String(contentsOf: file, encoding: .utf8)
-    }
-
-    // MARK: - 自检（三件事的真实探针）
-
-    /// 三项自检。**如实**：每一步都把命令原文和输出原文存下来，界面直接显示。
-    /// 没拿到就说没拿到，绝不编造任何状态或数字。
     func probe() async {
-        setError(nil)
         setState(.probing)
-        var results: [ProbeResult] = []
+        setError(nil)
+        var rows: [ProbeResult] = []
 
-        // 0) 先把脚本放进 guest（自检本身也要靠它把 curl 装上）。
-        let install = await installScript()
-        results.append(ProbeResult(
-            title: "0 · 把脚本放进内置 Linux",
-            command: "base64 解码写入 \(Guest.script) 并 chmod 755",
-            output: install.output.trimmingCharacters(in: .whitespacesAndNewlines),
-            ok: install.output.contains("AEVIS_SCRIPT_OK")))
+        if let st = await call("/v1/wxbot/status") {
+            let phase = st["phase"] as? String ?? "?"
+            let msg = st["message"] as? String ?? ""
+            rows.append(ProbeResult(
+                title: "服务器状态",
+                command: "GET /v1/wxbot/status",
+                output: "phase=\(phase) \(msg)",
+                ok: phase != "error" && phase != "failed"))
+            setState(map(st))
+        } else {
+            rows.append(ProbeResult(
+                title: "服务器状态",
+                command: "GET /v1/wxbot/status",
+                output: "连不上（网络或服务端）",
+                ok: false))
+            setState(.failed("连不上服务器"))
+        }
 
-        // 1) 出网：iSH 里到底能不能访问外网 HTTPS。
-        let netCommand = "sh \(Guest.script) install >/dev/null 2>&1; "
-            + "curl -sS -m 10 -o /dev/null -w '%{http_code}' https://ilinkai.weixin.qq.com 2>&1"
-        let net = await linux(netCommand)
-        results.append(ProbeResult(
-            title: "1 · 出网（在 iSH 里打一次 iLink）",
-            command: netCommand,
-            output: net.output.trimmingCharacters(in: .whitespacesAndNewlines),
-            ok: Self.looksLikeHTTPCode(net.output)))
+        if let qr = await call("/v1/wxbot/qr"),
+           let url = qr["qr"] as? String, !url.isEmpty {
+            setQR(url)
+            rows.append(ProbeResult(title: "二维码", command: "GET /v1/wxbot/qr",
+                                    output: url, ok: true))
+        } else {
+            setQR(nil)
+            rows.append(ProbeResult(title: "二维码", command: "GET /v1/wxbot/qr",
+                                    output: "没拿到二维码地址", ok: false))
+        }
 
-        // 2) 后台作业：nohup 立即返回，20 秒后往文件里写 alive。
-        let jobCommand = "rm -f /tmp/aevis_probe; "
-            + "nohup sh -c 'sleep 20; echo alive > /tmp/aevis_probe' >/dev/null 2>&1 &"
-        let job = await linux(jobCommand)
-        results.append(ProbeResult(
-            title: "2 · 后台作业（立即返回，20 秒后看结果）",
-            command: jobCommand,
-            output: job.output.isEmpty
-                ? "已发出（nohup 立刻返回了，退出码 \(job.exitCode)）。过 20 秒点「看结果」。"
-                : job.output,
-            ok: job.exitCode == 0))
+        // 绑定记录要登录态，没登录就别算失败
+        if !AppSettings.shared.accountEmail.isEmpty {
+            let my = await call("/v1/wxbot/my")
+            let bot = my?["bot_account"] as? String ?? ""
+            rows.append(ProbeResult(title: "我的绑定", command: "GET /v1/wxbot/my",
+                                    output: bot.isEmpty ? "还没绑过" : bot,
+                                    ok: !bot.isEmpty))
+        } else {
+            rows.append(ProbeResult(title: "我的绑定", command: "GET /v1/wxbot/my",
+                                    output: "没登录，跳过", ok: true))
+        }
 
-        // 3) 保活：每秒往文件里记一行，靠行数增长判断后台有没有被 iOS 连锅端。
-        let keepCommand = "rm -f \(Guest.keepalive); "
-            + "nohup sh -c 'i=0; while true; do i=$((i+1)); echo $i >> \(Guest.keepalive); sleep 1; done' "
-            + ">/dev/null 2>&1 &"
-        let keep = await linux(keepCommand)
-        results.append(ProbeResult(
-            title: "3 · 保活（每秒记一行，看后台有没有被挂起）",
-            command: keepCommand,
-            output: keep.output.isEmpty
-                ? "已启动。把 App 退到后台 2 分钟再回来，点「看结果」看行数涨没涨。"
-                : keep.output,
-            ok: keep.exitCode == 0))
-
-        setProbes(results)
-        setState(.ready)
+        setProbes(rows)
     }
 
-    /// 自检的「看结果」：把第 2、3 项的真实文件读回来，替换掉那两条的输出。
     func recheckBackground() async {
-        var results = probes
-        guard results.count >= 4 else { return }
-
-        let job = await linux("cat /tmp/aevis_probe 2>&1")
-        let jobText = job.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        results[2].output = jobText.isEmpty
-            ? "文件还是空的 —— 后台那条 sleep 20 要么还没到点，要么被 iOS 挂起了。"
-            : "文件里有：" + jobText
-        results[2].ok = jobText.contains("alive")
-
-        let keep = await linux("wc -l < \(Guest.keepalive) 2>&1")
-        let keepText = keep.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let keepLines = Int(keepText) ?? 0
-        results[3].output = keepLines > 0
-            ? "现在有 \(keepLines) 行。记下这个数，过一会儿再看它涨没涨 —— 涨了说明 guest 还活着。"
-            : "读不到计数（\(keepText)）。保活脚本可能没起来。"
-        results[3].ok = keepLines > 0
-
-        setProbes(results)
+        await probe()
     }
 
-    // MARK: - 扫码绑定
+    // MARK: - 出码 / 绑定
 
-    /// 扫码绑定：取码 → 交给界面画码 → 轮询状态 → 成功就把 token 等存起来。
+    /// 让服务器出一张**全新**二维码，然后开始盯状态。
     func startBind() async {
         setError(nil)
         setState(.probing)
-
-        let install = await installScript()
-        guard install.output.contains("AEVIS_SCRIPT_OK") else {
-            setError("脚本没能放进内置 Linux：" + install.output)
-            setState(.failed("脚本没写进去"))
-            return
-        }
-
-        _ = await linux("sh \(Guest.script) qrcode >/dev/null 2>&1")
-        let body = (await linux("cat \(Guest.qrcode) 2>/dev/null")).output
-        guard let obj = Self.jsonObject(body),
-              let ticket = obj["qrcode"] as? String, !ticket.isEmpty else {
-            setError("没拿到二维码。iSH 返回的原文：\n" + (body.isEmpty ? "（空）" : body))
-            setState(.failed("取码失败"))
-            return
-        }
-
-        // ⭐ 画进二维码的必须是 `qrcode_img_content`（腾讯给的 liteapp 绑定链接），
-        //    **不是** `qrcode` —— 那串 32 位 hex 只是「查扫码状态用的票」。
-        //    🔴 2026-10-07 真机实测：原来画的是 `qrcode` ⇒ 微信扫出来是一串字符、
-        //       弹不出绑定界面（老板原话「扫出来的是一串，不是绑定的那个界面」）。
-        //    腾讯真实返回（本机实调 get_bot_qrcode）：
-        //      {"qrcode":"ad3d…","qrcode_img_content":"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=ad3d…&bot_type=3","ret":0}
-        //    ⚠️ 万一哪天不返回 `qrcode_img_content`，退回用 `qrcode` —— 至少不崩，也不会比现在更差。
-        let qrContent = (obj["qrcode_img_content"] as? String) ?? ""
-        // ⚠️ 这里显式写 `: String` —— 本地变量名和 `@Published var qrPayload` 撞名，
-        //    不写类型会让 swift_check 的 R29 误报「在 async 里改 @Published」。
-        let qrPayload: String = qrContent.isEmpty ? ticket : qrContent
-
-        // 票交给 guest 落地（base64 走，免得出特殊字符）—— status 用它查。
-        let ticketB64 = Data(ticket.utf8).base64EncodedString()
-        _ = await linux("printf '%s' '\(ticketB64)' | base64 -d > \(Guest.ticket)")
-
-        setQR(qrPayload)
-        setState(.waitingScan)
-
-        // 轮询扫码状态：最多等 5 分钟，每 2 秒一次（**不刷屏**）。
-        let deadline = Date().addingTimeInterval(300)
-        while Date() < deadline {
-            if Task.isCancelled { return }
-            _ = await linux("sh \(Guest.script) status >/dev/null 2>&1")
-            let statusBody = (await linux("cat \(Guest.status) 2>/dev/null")).output
-            if let status = Self.jsonObject(statusBody),
-               let token = status["bot_token"] as? String, !token.isEmpty {
-                await saveBinding(from: status, token: token)
-                return
-            }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-        }
-        setError("等了 5 分钟还没扫上。二维码可能过期了，重新点一次「微信扫码绑定」。")
-        setState(.failed("扫码超时"))
+        _ = await call("/v1/wxbot/refresh", method: "POST")
+        // 服务端限流 15 秒一次：刷完等一下再读，否则读到的是上一张。
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        await pollOnce()
+        if case .waitingScan = state { startPolling() }
     }
 
-    /// 绑定成功后落地：token 走钥匙串、bot id / 时间走 UserDefaults、token 写进 guest。
-    @MainActor
-    private func saveBinding(from status: [String: Any], token: String) async {
-        let settings = AppSettings.shared
-        settings.weChatBotToken = token
-        settings.weChatBotILinkID = (status["ilink_bot_id"] as? String) ?? ""
-        settings.weChatBotBoundAt = Date().timeIntervalSince1970
-
-        let uin = (status["ilink_user_id"] as? String) ?? ""
-        // 记下**真正的用户 id**（`X-WECHAT-UIN` 用它）—— `startPolling` 重写 uin.txt 时要用。
-        ilinkUserID = uin
-        _ = await writeGuest(settings.weChatBotToken, to: Guest.token)
-        _ = await writeGuest(uin, to: Guest.uin)
-        // 新绑定 ⇒ 旧的增量游标作废（换了个 bot，游标对不上）。
-        //  ⚠️ 连 `cursor.txt` 一起删：`wechat_bind.sh` 顶部注释明说「换绑定（新 token）
-        //     时由宿主负责把旧游标清掉」，而宿主以前**没做** ⇒ 新 bot 第一次
-        //     getupdates 会带着**旧 bot 的游标**，必然收不到新消息。
-        _ = await linux("rm -f \(Guest.updates) \(Guest.frozen) \(Guest.stop) \(Guest.cursor)")
-
-        setQR(nil)
-        setState(.bound)
-        await startPolling()
-    }
-
-    /// 解绑：只删本地 token（**还要去微信侧解绑**，界面里会提醒）。
-    @MainActor
+    /// 解绑：服务器那边的会话由后台清，这里只清本地这份记录。
     func unbind() async {
-        await stopPolling()
-        _ = await linux("rm -f \(Guest.token) \(Guest.uin) \(Guest.stop) \(Guest.frozen)")
-        let settings = AppSettings.shared
-        settings.weChatBotToken = ""
-        settings.weChatBotILinkID = ""
-        settings.weChatBotBoundAt = 0
+        stopPolling()
+        let s = AppSettings.shared
+        s.weChatBotILinkID = ""
+        s.weChatBotBoundAt = 0
         setQR(nil)
         setState(.off)
     }
 
-    // MARK: - 后台长轮询
+    // MARK: - 轮询
 
-    /// 起长轮询。🔴 **单轮询者**：同一个 bot 只能有一个轮询者（游标存在轮询者本地，
-    /// 多起一个就会互相抢游标、把 `get_updates_buf` 弄乱），所以在跑就**不重复起**。
-    func startPolling() async {
-        guard !polling else { return }
-        let settings = AppSettings.shared
-        guard !settings.weChatBotToken.isEmpty else {
-            setError("还没绑定（没有 token），绑上再收消息。")
+    private var pollingTask: Task<Void, Never>?
+
+    private func pollOnce() async {
+        guard let d = await call("/v1/wxbot/qr") else {
+            setError("读状态失败")
             return
         }
+        if let url = d["qr"] as? String, !url.isEmpty { setQR(url) }
+        setState(map(d))
 
-        // 重新起轮询 ⇒ 先把上一回残留的报错清掉，别让界面一直挂着旧错。
-        setError(nil)
-
-        let install = await installScript()
-        guard install.output.contains("AEVIS_SCRIPT_OK") else {
-            setError("脚本没能放进内置 Linux：" + install.output)
-            return
-        }
-
-        // token 再写一遍（App 重启、或换了绑定之后要保证对得上）。
-        _ = await writeGuest(settings.weChatBotToken, to: Guest.token)
-        // 🔴 uin 只写**真正的 `ilink_user_id`**，绝不再拿 `weChatBotILinkID`
-        //    （= ilink_**bot**_id）去覆盖 —— 那会让 `X-WECHAT-UIN` 头一直变。
-        //    ⚠️ 拿不到就**不动** uin.txt（`saveBinding` 写进去的那份本来就是对的）。
-        if !ilinkUserID.isEmpty {
-            _ = await writeGuest(ilinkUserID, to: Guest.uin)
-        }
-        _ = await linux("rm -f \(Guest.frozen) \(Guest.stop)")
-
-        // 从「当前文件末尾」开始读 —— 免得把上一个会话的消息又刷一遍。
-        let sizeText = (await linux("wc -c < \(Guest.updates) 2>/dev/null || echo 0")).output
-        readOffset = Self.firstInt(sizeText) ?? 0
-
-        // 🔴 长轮询只许这样起：nohup … & + 重定向到文件，绝不在前台阻塞。
-        let launch = await linux("nohup sh \(Guest.script) poll > \(Guest.dir)/poll.out 2>&1 &")
-        if launch.exitCode != 0 {
-            setError("轮询器没起来：" + launch.output)
-            setState(.failed("轮询器没起来"))
-            return
-        }
-
-        startReader()
-        polling = true
-        setState(.polling)
-    }
-
-    /// 停长轮询：落一个 stop 标记，guest 循环下一圈就退出。
-    func stopPolling() async {
-        _ = await linux("mkdir -p \(Guest.dir); : > \(Guest.stop)")
-        readerTask?.cancel()
-        readerTask = nil
-        polling = false
-        if state.isBound { setState(.bound) }
-    }
-
-    /// 回到前台时叫一下：轮询器可能被 iOS 连 App 一起挂起了，确认它还活着。
-    ///
-    /// ⚠️ 不能直接调 `startPolling()` 而不看状态 —— 被挂起时我们**收不到任何回调**，
-    ///    `polling` 还可能挂着 true，于是会被「已经在跑」那句挡住、永远起不来
-    ///    （这种「看起来在跑其实早死了」最难查，QQ 那边踩过）。所以这里先补读一次。
-    func reconnectIfNeeded() {
-        guard AppSettings.shared.weChatBotEnabled else { return }
-        guard !AppSettings.shared.weChatBotToken.isEmpty else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            if self.polling {
-                await self.readOnce()
-            } else {
-                await self.startPolling()
+        // 服务器给了 bot id 且本地没有 → 记下来，并把这笔绑定挂到自己账号上
+        if let id = d["accountId"] as? String, !id.isEmpty,
+           AppSettings.shared.weChatBotILinkID != id {
+            AppSettings.shared.weChatBotILinkID = id
+            AppSettings.shared.weChatBotBoundAt = Date().timeIntervalSince1970
+            if !AppSettings.shared.accountEmail.isEmpty {
+                _ = await call("/v1/wxbot/bind", method: "POST")
             }
         }
     }
 
-    /// 宿主侧的读取循环：每 3 秒读一次文件。
-    private func startReader() {
-        readerTask?.cancel()
-        readerTask = Task { [weak self] in
+    func startPolling() {
+        guard pollingTask == nil else { return }
+        pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if Task.isCancelled { break }
-                await self?.readOnce()
+                await self?.pollOnce()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
     }
 
-    /// 读一次：先看有没有「会话超时」标记（frozen），再增量读 `updates.jsonl`。
-    @MainActor
-    private func readOnce() async {
-        // frozen 标记：guest 探测到**顶层** errcode/ret = -14 时会写这个文件。
-        // 🔴 本机 curl 真打腾讯接口的实测真相：`-14` = **会话超时（session timeout）**，
-        //    **不是**「账号被封 / 冻结」。证据：
-        //      · `getupdates` 不带 token / 带假 token → 都返回
-        //          {"errcode":-14,"errmsg":"session timeout"}（HTTP 200，42 字节）
-        //      · `sendmessage` 不带 token → 同样返回这一条
-        //    ⚠️ 旧文案「冻 1 小时、没有 refresh、只能重新扫码」是**没有任何出处的二手说法**
-        //       （本机全仓无佐证），已作废 —— 别再改回去。
-        let frozenText = (await linux("cat \(Guest.frozen) 2>/dev/null")).output
-        if !frozenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            await stopPolling()
-            setError("微信机器人会话超时了（iLink 顶层 errcode/ret = -14，含义是 session timeout，"
-                     + "不是封号）。需要重新点「微信扫码绑定」扫一次码。原文：\n" + frozenText)
-            setState(.frozen("会话超时，要重新扫码"))
-            return
-        }
-
-        // 增量读 updates.jsonl：只取本次新增的字节。
-        let sizeText = (await linux("wc -c < \(Guest.updates) 2>/dev/null || echo 0")).output
-        let size = Self.firstInt(sizeText) ?? 0
-        guard size > readOffset else { return }
-        let chunk = (await linux("tail -c +\(readOffset + 1) \(Guest.updates)")).output
-        readOffset = size
-
-        var added: [Incoming] = []
-        for line in chunk.split(separator: "\n") {
-            guard let obj = Self.jsonObject(String(line)) else { continue }
-            added.append(contentsOf: Self.messages(from: obj))
-        }
-        guard !added.isEmpty else { return }
-
-        // ⭐ 把这些消息也落进 App 的聊天记录（用户要的：「点微信能看到我俩真实的聊天记录」）。
-        //
-        // ⚠️ **方向不猜**：`getupdates` 拿到的是**用户发给 bot 的**消息，
-        //    所以一律 `role: .user`；从这里回发出去的那条走 `send`（`role: .assistant`）。
-        //    也就是：`readOnce` 这里记的全是「用户发给 ta 的」。
-        // ⚠️ `readOnce()` 已经是 `@MainActor`，直接写 `ChatStore` 是安全的 ——
-        //    **不要**再套一层 `DispatchQueue.main.async`。
-        // ⚠️ 打上 `source = "wechat"`，让微信页只挑本通道的消息显示。
-        // ⚠️ `readOffset` 是「从文件当前末尾增量读」，所以这里只记新来的，不刷历史。
-        let ownerID = PersonaStore.shared.active?.id
-        for item in added {
-            ChatStore.shared.append(
-                ChatMessage(role: .user, text: item.text, source: "wechat"), for: ownerID)
-        }
-
-        // ⭐ 记住「最近一次入站」的发送者 + context_token —— `send` 就是要发给
-        //    「最后跟 ta 说话的那个人」。取 `added` 的**最后一条**（时间上最近的那条）。
-        if let latest = added.last {
-            if let peer = latest.peer, !peer.isEmpty { lastPeer = peer }
-            if let context = latest.context, !context.isEmpty { lastContext = context }
-        }
-
-        let existing = incoming
-        setIncoming(added.reversed() + existing)   // 新的排在上面
-        setReceived(existing.count + added.count)
+    func stopPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
     }
 
-    func clearIncoming() {
-        setIncoming([])
-        setReceived(0)
-        setError(nil)
-    }
-
-    // MARK: - 发送（以 ta 的身份发给用户）
-
-    /// 往微信发一条文本（以 ta 的身份发给用户）。返回一句能直接显示的中文结果。
-    ///
-    /// 收件人 = **最近一次入站消息的发送者**（`lastPeer`）；`context_token` 能拿到就原样带上。
-    /// ⚠️ 只走 `linux(_:)` 这一个入口碰 iSH，绝不自己起进程。
-    /// ⚠️ 请求体由**宿主**拼好、base64 写进 `send_body.json`，脚本只负责 `-d @` 发出去
-    ///    （sh 里拼 JSON 太脆）。
-    func send(_ text: String) async -> String {
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return "没内容，没发。" }
-        guard !lastPeer.isEmpty else { return "还不知道发给谁（还没收到过 ta 的消息）。" }
-
-        // 1) 拼请求体（照 iLink 的 `sendmessage` 形状）。
-        //    `message_type = 2` = BOT 发出；`item_list[].type = 1` = TEXT（纯文本不用先传媒体）。
-        let textItem: [String: Any] = ["text": body]
-        let item: [String: Any] = ["type": 1, "text_item": textItem]
-        var msg: [String: Any] = [
-            "from_user_id": "",
-            "to_user_id": lastPeer,
-            "client_id": UUID().uuidString,
-            "message_type": 2,
-            "message_state": 2,
-            "item_list": [item]
-        ]
-        // `context_token`：官方说「每次发都要原样带回」。能拿到就带，拿不到就省 —— 并在文案里说清带没带。
-        let hasContext = !lastContext.isEmpty
-        if hasContext { msg["context_token"] = lastContext }
-        let baseInfo: [String: Any] = ["channel_version": "1.0.0", "bot_agent": "aevis"]
-        let payload: [String: Any] = ["msg": msg, "base_info": baseInfo]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
-            return "没发出去：请求体拼不出来。"
+    func reconnectIfNeeded() {
+        if AppSettings.shared.weChatBotEnabled, AppSettings.shared.weChatBotBoundAt > 0 {
+            startPolling()
         }
-
-        // 2) base64 写进 guest（同 `writeGuest` 的写法；base64 字母表没有下划线，不会撞哨兵串）。
-        _ = await writeGuest(json, to: Guest.sendBody)
-
-        // 3) 真正发出去（脚本内部把 `http_code=` 和响应原文吐到 stdout）。
-        let result = await linux("sh \(Guest.script) send")
-        let output = result.output
-
-        // 4) 成败判定：输出里能解出 `"ret": 0` 才算成 —— **绝不假装成功**。
-        if Self.containsRetZero(output) {
-            // 成功 ⇒ 补一条聊天记录（这一步是 ta 发的，所以是 `assistant`）。
-            // ⚠️ `ChatStore.append` 会改它自己的 `@Published`，而 `await` 之后线程是随机的
-            //    ⇒ 必须回主线程再写（用本类现成的 `onMain` 包一道，和别处一致）。
-            onMain {
-                ChatStore.shared.append(
-                    ChatMessage(role: .assistant, text: body, source: "wechat"),
-                    for: PersonaStore.shared.active?.id)
-            }
-            return hasContext
-                ? "发出去了（ret=0）（带 context_token）"
-                : "发出去了（ret=0）（没带 context_token，能不能收到不确定）"
-        }
-
-        // 失败 ⇒ 如实把响应原文（截到 400 字）摆出来，绝不假装成功。
-        let clipped = String(output.suffix(400))
-        return "没发出去：" + clipped
-    }
-
-    // MARK: - 小工具
-
-    /// 把一段文本 base64 落地到 guest 的某个文件（免得出特殊字符）。
-    private func writeGuest(_ text: String, to path: String) async -> CommandResult {
-        let encoded = Data(text.utf8).base64EncodedString()
-        return await linux("printf '%s' '\(encoded)' | base64 -d > \(path)")
-    }
-
-    /// 把一段文本当 JSON 解；解不出返回 nil（**不抛**，由调用方决定怎么显示原文）。
-    private static func jsonObject(_ text: String) -> [String: Any]? {
-        guard let data = text.data(using: .utf8),
-              let value = try? JSONSerialization.jsonObject(with: data) else { return nil }
-        return value as? [String: Any]
-    }
-
-    /// 输出里末尾那个 HTTP 码像不像 2xx / 3xx。
-    private static func looksLikeHTTPCode(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let last = trimmed.split(separator: "\n").last,
-              let code = Int(last.trimmingCharacters(in: .whitespaces)) else { return false }
-        return code >= 200 && code < 400
-    }
-
-    /// 取开头的连续数字（`wc -c` 会带前导空格，这里顺手去掉）。
-    private static func firstInt(_ text: String) -> Int? {
-        let digits = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .prefix { $0.isNumber }
-        return Int(digits)
-    }
-
-    /// 输出里有没有 `"ret": 0`（去掉空白后找 `"ret":0`）。
-    ///
-    /// ⚠️ 只认**恰好 0**：`0` 后面不能跟数字或小数点，免得把 `"ret":0.5` / `"ret":10` 当成成功。
-    /// ⚠️ `ret` 非 0 = 失败 —— 这里返回 false，由调用方把原文如实报出去。
-    private static func containsRetZero(_ text: String) -> Bool {
-        let compact = text.filter { !$0.isWhitespace }
-        guard let range = compact.range(of: "\"ret\":0") else { return false }
-        guard let next = compact[range.upperBound...].first else { return true }
-        return !(next.isNumber || next == ".")
-    }
-
-    /// 从一个 getupdates 响应里抠出消息。
-    ///
-    /// ⚠️ 我们手上**没有 iLink 的权威字段表**，所以这里把几个常见的容器名 / 字段名
-    ///    都试一遍；认不出就不硬编造消息（宁可漏，不可假）。真出现新形状，
-    ///    把整条原文摆出来的地方在 `readOnce`（`lastError` / `updates.jsonl`）。
-    private static func messages(from obj: [String: Any]) -> [Incoming] {
-        let containers = ["msgs", "msg_list", "updates", "messages", "list"]
-        var items: [[String: Any]] = []
-        for key in containers {
-            if let list = obj[key] as? [[String: Any]] {
-                items = list
-                break
-            }
-        }
-        guard !items.isEmpty else { return [] }
-
-        var out: [Incoming] = []
-        for item in items {
-            let from = (item["from_user_name"] as? String)
-                ?? (item["from"] as? String)
-                ?? (item["sender"] as? String)
-                ?? (item["user_name"] as? String)
-                ?? "对方"
-            let text = (item["content"] as? String)
-                ?? (item["text"] as? String)
-                ?? (item["msg"] as? String)
-                ?? (item["message"] as? String)
-                ?? ""
-            guard !text.isEmpty else { continue }
-            // peer = 回发时要用的收件人 id（iLink 的 `to_user_id`）。优先 from_user_id。
-            let peer = (item["from_user_id"] as? String)
-                ?? (item["from_user_name"] as? String)
-                ?? (item["from"] as? String)
-                ?? (item["sender"] as? String)
-            // context = 该用户最近一次入站带的 `context_token`，回发时要**原样带回**。
-            let context = (item["context_token"] as? String)
-                ?? (item["contextToken"] as? String)
-            out.append(Incoming(from: from, text: text, at: Date(),
-                                peer: peer, context: context))
-        }
-        return out
     }
 }
