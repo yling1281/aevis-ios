@@ -1,0 +1,66 @@
+/Users/runner/work/aevis-ios/aevis-ios/Aevis/Features/Console/ConsoleView.swift:17:28: error: cannot find 'Shell' in scope
+/Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/FusionPhoneAuth.swift:110:10: error: 'onSDKTokenAuthFailure(_:failToken:error:)' has been renamed to 'onSDKTokenAuthFailure(_:fail:error:)'
+AlicomFusionAuth.AlicomFusionAuthDelegate.onSDKTokenAuthFailure:3:8: note: 'onSDKTokenAuthFailure(_:failToken:error:)' was obsoleted in Swift 3
+  func onSDKTokenAuthFailure(_ handler: AlicomFusionAuthHandler, failToken: AlicomFusionAuthToken, error: AlicomFusionEvent)}
+/Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/FusionPhoneAuth.swift:152:10: error: 'onGetPhoneNumberForVerification(_:event:)' has been renamed to 'onGetPhoneNumber(forVerification:event:)'
+The following build commands failed:
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AppIconStore.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/App/AppRouter.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AppSettings.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AppShortcuts.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AppUpdate.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Features/Settings/AppearanceSettingsCard.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AppleMusicProvider.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Features/Music/AppleMusicView.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AttachmentService.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AudioSession.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/AutoSync.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftCompile normal arm64 /Users/runner/work/aevis-ios/aevis-ios/Aevis/Core/BackupService.swift (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    
+
+SwiftExplicitDependencyGeneratePcm x86_64 /Users/runner/work/aevis-ios/aevis-ios/build-sim/SwiftExplicitPrecompiledModules/ReplayKit-7XSSASBQ915MKW5QAXDLQ6ER2.pcm
+
+warning: ONLY_ACTIVE_ARCH=YES requested with multiple ARCHS and no active architecture could be computed; building for all applicable architectures (in target 'AevisLive' from project 'Aevis')
+warning: ONLY_ACTIVE_ARCH=YES requested with multiple ARCHS and no active architecture could be computed; building for all applicable architectures (in target 'AevisBroadcast' from project 'Aevis')
+warning: ONLY_ACTIVE_ARCH=YES requested with multiple ARCHS and no active architecture could be computed; building for all applicable architectures (in target 'Aevis' from project 'Aevis')
+** BUILD FAILED **
+
+
+The following build commands failed:
+	EmitSwiftModule normal arm64 (in target 'Aevis' from project 'Aevis')
+	SwiftEmitModule normal arm64 Emitting\ module\ for\ Aevis (in target 'Aevis' from project 'Aevis')
+(2 failures)
