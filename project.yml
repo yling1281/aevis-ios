@@ -395,6 +395,16 @@ targets:
     dependencies:
       - target: AevisLive
         embed: true
+      # 阿里云融合认证（号码认证 / 一键登录）。2026-11-02 接入。
+      # 这是个**动态** xcframework（Mach-O dylib），所以必须 embed + 让 Xcode 签名，
+      # 否则启动时报 "Library not loaded: @rpath/AlicomFusionAuth.framework"。
+      # 它自带 PrivacyInfo.xcprivacy，隐私清单不用我们手写。
+      # ⚠️ 路径必须小写 `vendor/` —— 仓库里已有的就是小写，
+      #    Windows 上 Vendor/vendor 是同一个目录（看不出来），
+      #    但 CI 的 macOS 区分大小写，写大写会直接找不到文件。
+      - framework: vendor/AlicomFusionAuth.xcframework
+        embed: true
+        codeSign: true
     # >>> extension-dep:start
     # 这一段和下面的 AevisBroadcast target 是**成对**的：
     # scripts/strip_extension.py 会按标记一起摘掉，用来在
