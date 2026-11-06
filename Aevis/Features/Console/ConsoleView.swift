@@ -10,7 +10,7 @@ import SwiftUI
 struct ConsoleView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: PaperSpace.md) {
+            VStack(alignment: .leading, spacing: PaperSpace.x6) {
                 PaperCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("命令台已下线")
@@ -25,8 +25,8 @@ struct ConsoleView: View {
                     .padding(16)
                 }
             }
-            .padding(.horizontal, PaperSpace.lg)
-            .padding(.top, PaperSpace.md)
+            .padding(.horizontal, PaperSpace.x8)
+            .padding(.top, PaperSpace.x6)
         }
         .background(Paper.bg)
         .navigationTitle("命令台")

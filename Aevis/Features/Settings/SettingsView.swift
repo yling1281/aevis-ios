@@ -329,7 +329,7 @@ struct SettingsView: View {
                                 .fill(settings.accentColor.opacity(0.12))
                         )
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(Shell.provider.displayName)
+                        Text("命令台")
                             .font(.aevis(15.5, weight: .medium))
                             .foregroundStyle(.primary)
                         Text("\(Pronoun.current)也能用命令行帮你干活")

@@ -377,7 +377,9 @@ private struct HerChatLogPage: View {
         guard !text.isEmpty, !sending else { return }
         sending = true
         Task { @MainActor in
-            let result = await WeChatBotService.shared.send(text)
+            // WeChatBotService 只有绑定/轮询（probe/startBind/reconnect），
+            // 没有对外发消息的接口，这里不能假装发出去了。
+            let result = "这个入口还不能发消息，请到「设置 - 微信」里操作"
             note = result
             if result.hasPrefix("发出去了") {
                 draft = ""

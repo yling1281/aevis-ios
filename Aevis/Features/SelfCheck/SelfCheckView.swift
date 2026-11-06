@@ -134,13 +134,6 @@ struct SelfCheckView: View {
             detail: allHaveSchema ? "每个工具都有 JSON Schema" : "有工具缺 parameters"
         ))
 
-        let shell = Shell.provider
-        rows.append(NeteaseCrypto.SelfCheck(
-            name: "命令台",
-            passed: shell.isAvailable,
-            detail: "\(shell.displayName)：\(shell.isAvailable ? "可用" : "未接入")"
-        ))
-
         rows.append(NeteaseCrypto.SelfCheck(
             name: "内置图标",
             passed: AppIconOption.allCases.count >= 5,

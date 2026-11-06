@@ -110,8 +110,8 @@ extension FusionPhoneAuth: AlicomFusionAuthDelegate {
     func onSDKTokenAuthFailure(_ handler: AlicomFusionAuthHandler,
                                fail failToken: AlicomFusionAuthToken,
                                error: AlicomFusionEvent) {
-        NSLog("[Fusion] token 鉴权失败：\(error.errorMsg ?? "")")
-        onFail?("TOKEN_FAIL", error.errorMsg ?? "鉴权失败")
+        NSLog("[Fusion] token 鉴权失败：\(error.resultMsg ?? "")")
+        onFail?("TOKEN_FAIL", error.resultMsg ?? "鉴权失败")
     }
 
     /// 一键登录成功：`maskToken` 是取号凭证，不是手机号。
@@ -140,8 +140,8 @@ extension FusionPhoneAuth: AlicomFusionAuthDelegate {
     func onVerifyFailed(_ handler: AlicomFusionAuthHandler,
                         nodeName: String,
                         error: AlicomFusionEvent) {
-        NSLog("[Fusion] 取号失败：\(error.errorMsg ?? "")")
-        onFail?("VERIFY_FAIL", error.errorMsg ?? "取号失败")
+        NSLog("[Fusion] 取号失败：\(error.resultMsg ?? "")")
+        onFail?("VERIFY_FAIL", error.resultMsg ?? "取号失败")
     }
 
     func onTemplateFinish(_ handler: AlicomFusionAuthHandler, event: AlicomFusionEvent) {
