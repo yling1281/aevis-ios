@@ -14,7 +14,6 @@ struct ConsoleView: View {
     @State private var historyIndex = -1
     @FocusState private var focused: Bool
 
-    private let provider = Shell.provider
 
     private struct ConsoleLine: Identifiable {
         let id = UUID()
@@ -206,11 +205,12 @@ struct ConsoleView: View {
         input = ""
         history.append(command)
         historyIndex = history.count
-        append("\(provider.workingDirectory) $ \(command)", kind: .command)
+        append("$ \(command)", kind: .command)
 
         running = true
         Task { @MainActor in
-            let result = await Shell.run(command)
+            // 内置 Linux 已于 2026-11-02 移除，命令台不再执行真实命令
+            let result = (output: "命令台已下线：内置 Linux 已移除。需要执行命令请走服务器通道。", exitCode: 1)
             running = false
 
             if result.output == "__CLEAR__" {
