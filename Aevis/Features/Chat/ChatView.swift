@@ -938,19 +938,9 @@ struct ChatView: View {
                 }
             }
 
-            Button {
-                closeMorePanel()
-                showScreenPanel = true
-            } label: {
-                moreTile("看屏幕", "record.circle")
-            }
-
-            Button {
-                closeMorePanel()
-                router.showSettings = true
-            } label: {
-                moreTile("设置", "slider.horizontal.3")
-            }
+            // 「看屏幕」和「设置」已按 2026-11-06 要求从这里移除：
+            //   · 看屏幕：旧的录屏入口先下线，之后按「录屏取帧 -> 模型识别 + OCR」重做
+            //   · 设置：聊天页不该有设置入口，统一走「我的 - 设置」
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)

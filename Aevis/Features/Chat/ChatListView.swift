@@ -90,13 +90,6 @@ struct ChatListView: View {
     private var addMenu: some View {
         Menu {
             Button {
-                pairing = true
-            } label: {
-                Label("扫一扫 · 配对电脑版", systemImage: "qrcode.viewfinder")
-            }
-            .disabled(!QRScannerView.isAvailable)
-
-            Button {
                 adding = true
             } label: {
                 Label("新建联系人", systemImage: "person.badge.plus")
