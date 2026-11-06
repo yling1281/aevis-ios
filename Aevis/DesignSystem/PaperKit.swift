@@ -14,22 +14,17 @@ import SwiftUI
 
 struct PaperCard<Content: View>: View {
     var radius: CGFloat = PaperRadius.lg
-    var shadow: CGFloat = 2.5
+    /// 保留这个参数只是为了不破坏调用处；新版不再画错位黑块。
+    var shadow: CGFloat = 0
     @ViewBuilder var content: Content
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(Paper.ink)
-                .offset(x: shadow, y: shadow)
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Paper.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(Paper.ink, lineWidth: PaperStroke.thin)
-                )
-        }
+        // 原来这里是「黑块偏移 + 1.5pt 黑描边」的纸感硬阴影。
+        // 换成米白底之后那圈黑边显得很脏，Android 侧已经去掉，
+        // iOS 这边直接用系统玻璃（aevisGlass 内部会按用户设置决定用不用玻璃）。
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .aevisGlass(cornerRadius: radius)
     }
 }
 
@@ -75,7 +70,7 @@ struct PaperChip: View {
                 .background(Paper.surface, in: RoundedRectangle(cornerRadius: PaperRadius.sm, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: PaperRadius.sm, style: .continuous)
-                        .strokeBorder(Paper.ink, lineWidth: 1.5)
+                        .strokeBorder(Paper.line, lineWidth: 1)
                 )
                 .background(
                     RoundedRectangle(cornerRadius: PaperRadius.sm, style: .continuous)
@@ -99,7 +94,7 @@ struct PaperIconButton: View {
                 .background(Paper.surface, in: RoundedRectangle(cornerRadius: PaperRadius.md, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: PaperRadius.md, style: .continuous)
-                        .strokeBorder(Paper.ink, lineWidth: 1.5)
+                        .strokeBorder(Paper.line, lineWidth: 1)
                 )
                 .background(
                     RoundedRectangle(cornerRadius: PaperRadius.md, style: .continuous)
@@ -123,7 +118,7 @@ struct PaperAvatar: View {
             .background(tint, in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                    .strokeBorder(Paper.ink, lineWidth: 1.5)
+                    .strokeBorder(Paper.line, lineWidth: 1)
             )
     }
 }
@@ -180,11 +175,11 @@ struct PaperSwitch: View {
                 Capsule()
                     .fill(on ? Paper.accent : Paper.surfaceSunken)
                     .frame(width: 38, height: 22)
-                    .overlay(Capsule().strokeBorder(Paper.ink, lineWidth: 1.5))
+                    .overlay(Capsule().strokeBorder(Paper.line, lineWidth: 1))
                 Circle()
                     .fill(Paper.surface)
                     .frame(width: 15, height: 15)
-                    .overlay(Circle().strokeBorder(Paper.ink, lineWidth: 1.5))
+                    .overlay(Circle().strokeBorder(Paper.line, lineWidth: 1))
                     .padding(.horizontal, 2)
             }
         }
@@ -205,7 +200,7 @@ struct PaperPrimaryButton: View {
                 .background(Paper.accent, in: RoundedRectangle(cornerRadius: PaperRadius.md, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: PaperRadius.md, style: .continuous)
-                        .strokeBorder(Paper.ink, lineWidth: 1.5)
+                        .strokeBorder(Paper.line, lineWidth: 1)
                 )
                 .background(
                     RoundedRectangle(cornerRadius: PaperRadius.md, style: .continuous)
@@ -244,8 +239,7 @@ struct PaperTabBar: View {
             }
         }
         .padding(6)
-        .background(Paper.surface, in: Capsule())
-        .overlay(Capsule().strokeBorder(Paper.ink, lineWidth: 1.5))
-        .background(Capsule().fill(Paper.ink).offset(x: 2.5, y: 2.5))
+        // 同样去掉黑描边和错位黑块，靠玻璃材质浮在内容上
+        .aevisGlass(cornerRadius: 30)
     }
 }
