@@ -88,6 +88,13 @@ final class WeChatBotService: ObservableObject {
     @Published private(set) var probes: [ProbeResult] = []
     @Published private(set) var qrPayload: String?
     @Published private(set) var incoming: [Incoming] = []
+
+    /// 清空「最近收到的」列表。
+    /// WeChatBotCard 的「清空」按钮调的就是这个；incoming 是 private(set)，
+    /// 所以必须由 Service 自己提供入口，外部不能直接改。
+    func clearIncoming() {
+        incoming.removeAll()
+    }
     @Published private(set) var received = 0
     @Published var lastError: String?
 
