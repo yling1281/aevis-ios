@@ -386,9 +386,16 @@ struct SettingsView: View {
             //    价格 = DeepSeek 官方价 × 1.5。用户只负责「选哪个模型」。
             VStack(alignment: .leading, spacing: 9) {
                 HStack {
-                    Text("云端模型")
-                        .font(.aevis(12.5))
-                        .foregroundStyle(.secondary)
+                    // 当前生效的模型直接写在标题里 —— 光有单选圆点，
+                    // 用户不知道「现在到底在用哪个」。
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("云端模型")
+                            .font(.aevis(12.5))
+                            .foregroundStyle(.secondary)
+                        Text("当前：\(cloudModels.selected?.label ?? cloudModels.selectedID)")
+                            .font(.aevis(11))
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer()
                     if cloudModels.loading {
                         ProgressView().controlSize(.small)

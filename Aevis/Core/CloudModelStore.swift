@@ -138,7 +138,15 @@ final class CloudModelStore: ObservableObject {
     /// 在非隔离上下文里也能用同一个值（两边不会选出两个不同的模型）。
     var selectedID: String {
         get { Self.selectedID }
-        set { Self.selectedID = newValue }
+        set {
+            // ⚠️ 以前这里只写 UserDefaults，不发变更通知。
+            //    SettingsView 用的是 @ObservedObject，收不到 objectWillChange 就不会重算，
+            //    界面上的选中圆点永远停在旧的一行 —— 用户看到的就是
+            //    「点了没反应 / 模型切不了」。值其实写进去了，只是界面没刷新。
+            guard newValue != Self.selectedID else { return }
+            objectWillChange.send()
+            Self.selectedID = newValue
+        }
     }
 
     var selected: CloudModel? {
