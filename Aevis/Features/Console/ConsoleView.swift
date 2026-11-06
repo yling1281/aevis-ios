@@ -2,229 +2,34 @@ import SwiftUI
 
 /// 命令台。
 ///
-/// 不是模拟器截图里的装饰 —— 它真的能执行命令（文件、文本、网络），
-/// 只是所有文件操作都被关在 App 自己的工作目录里。
+/// 内置 Linux（iSH / AlpineRuntime / ShellProvider）已于 2026-11-02 整体移除，
+/// 执行命令的能力随之下线。这里保留入口不删，避免设置页少一块，
+/// 打开后给一句明确说明，而不是白屏或报错。
+///
+/// 需要执行命令时走服务器通道（backend 有对应接口），不要再往 App 里塞运行时。
 struct ConsoleView: View {
-    @ObservedObject private var fonts = FontStore.shared
-
-    @State private var lines: [ConsoleLine] = []
-    @State private var input = ""
-    @State private var running = false
-    @State private var history: [String] = []
-    @State private var historyIndex = -1
-    @FocusState private var focused: Bool
-
-
-    private struct ConsoleLine: Identifiable {
-        let id = UUID()
-        var text: String
-        var kind: Kind
-
-        enum Kind {
-            case command
-            case output
-            case failure
-            case note
-        }
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            banner
-            output
-            quickCommands
-            inputBar
+        ScrollView {
+            VStack(alignment: .leading, spacing: PaperSpace.md) {
+                PaperCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("命令台已下线")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Paper.ink)
+
+                        Text("内置 Linux 在 2026-11-02 被整体移除（占 200MB、启动慢、维护成本高）。\n执行命令的能力一并下线，需要跑命令请走服务器通道。")
+                            .font(.system(size: 12))
+                            .lineSpacing(5)
+                            .foregroundColor(Paper.inkSub)
+                    }
+                    .padding(16)
+                }
+            }
+            .padding(.horizontal, PaperSpace.lg)
+            .padding(.top, PaperSpace.md)
         }
+        .background(Paper.bg)
         .navigationTitle("命令台")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("清空") {
-                    lines.removeAll()
-                    append(provider.welcome, kind: .note)
-                }
-            }
-        }
-        .onAppear {
-            if lines.isEmpty {
-                append(provider.welcome, kind: .note)
-            }
-        }
-    }
-
-    // MARK: - 顶部说明
-
-    private var banner: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(provider.displayName)
-                    .font(.aevis(14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(provider.isAvailable ? "可用" : "未接入")
-                    .font(.aevis(11))
-                    .foregroundStyle(provider.isAvailable ? Color.green : Color.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(
-                            (provider.isAvailable ? Color.green : Color.orange).opacity(0.14)
-                        )
-                    )
-                Spacer(minLength: 0)
-            }
-            Text(provider.availability)
-                .font(.aevis(11.5))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Rectangle().fill(.bar))
-    }
-
-    // MARK: - 输出
-
-    private var output: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(lines) { line in
-                        Text(line.text)
-                            .font(.aevisMono(12.5))
-                            .foregroundStyle(color(for: line.kind))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(line.id)
-                    }
-                    if running {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            Text("正在执行…")
-                                .font(.aevisMono(12.5))
-                                .foregroundStyle(.secondary)
-                        }
-                        .id("running")
-                    }
-                    Color.clear.frame(height: 1).id("bottom")
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            }
-            .background(Color.black.opacity(0.03))
-            .onChange(of: lines.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
-            }
-            .onChange(of: running) { _, _ in
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
-            .onTapGesture { focused = false }
-        }
-    }
-
-    private func color(for kind: ConsoleLine.Kind) -> Color {
-        switch kind {
-        case .command: return .primary
-        case .output: return .primary.opacity(0.82)
-        case .failure: return .red
-        case .note: return .secondary
-        }
-    }
-
-    // MARK: - 快捷命令
-
-    private var quickCommands: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(["help", "pwd", "ls", "date", "env"], id: \.self) { command in
-                    Button {
-                        input = command
-                        execute()
-                    } label: {
-                        Text(command)
-                            .font(.aevisMono(12.5))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .aevisGlass(cornerRadius: 12)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-        .background(Rectangle().fill(.bar))
-    }
-
-    // MARK: - 输入
-
-    private var inputBar: some View {
-        HStack(spacing: 8) {
-            Text("$")
-                .font(.aevisMono(14, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            TextField("输一条命令，回车执行", text: $input)
-                .font(.aevisMono(14))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($focused)
-                .disabled(running)
-                .submitLabel(.send)
-                .onSubmit { execute() }
-
-            Button(action: execute) {
-                Image(systemName: running ? "stop.fill" : "arrow.up")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        Circle().fill(
-                            running ? Color.gray.opacity(0.5)
-                            : (input.isEmpty ? Color.gray.opacity(0.3) : Color.accentColor)
-                        )
-                    )
-                    .contentShape(Circle())
-            }
-            .disabled(input.isEmpty && !running)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Rectangle().fill(.bar))
-    }
-
-    // MARK: - 执行
-
-    private func execute() {
-        let command = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty, !running else { return }
-
-        input = ""
-        history.append(command)
-        historyIndex = history.count
-        append("$ \(command)", kind: .command)
-
-        running = true
-        Task { @MainActor in
-            // 内置 Linux 已于 2026-11-02 移除，命令台不再执行真实命令
-            let result = (output: "命令台已下线：内置 Linux 已移除。需要执行命令请走服务器通道。", exitCode: 1)
-            running = false
-
-            if result.output == "__CLEAR__" {
-                lines.removeAll()
-                return
-            }
-            let text = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
-                append(text, kind: result.exitCode == 0 ? .output : .failure)
-            }
-        }
-    }
-
-    private func append(_ text: String, kind: ConsoleLine.Kind) {
-        lines.append(ConsoleLine(text: text, kind: kind))
     }
 }
