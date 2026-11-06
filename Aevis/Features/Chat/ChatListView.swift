@@ -14,6 +14,8 @@ struct ChatListView: View {
     @State private var adding = false
     /// 加号菜单里的「扫一扫 · 配对电脑版」。
     @State private var pairing = false
+    /// 统一扫一扫（新建的联系人/群聊/配对都从这里进）
+    @State private var scanning = false
     /// ⭐ 群聊。观察它，新建 / 删群后列表立刻跟着变。
     @ObservedObject private var groups = GroupStore.shared
     /// 加号菜单里的「新建群聊」—— 用 overlay 呈现，不用第三个 `.sheet`。
@@ -43,6 +45,17 @@ struct ChatListView: View {
             NavigationStack {
                 PersonaEditorView(adding: true)
                     .environmentObject(personaStore)
+            }
+        }
+        .sheet(isPresented: $scanning) {
+            // 统一扫码入口：配对码 / 人设码 / 链接都在这里分发
+            UniversalScanView { payload in
+                if payload.hasPrefix("aevis://pair") {
+                    scanning = false
+                    pairing = true
+                    return true
+                }
+                return false
             }
         }
         .sheet(isPresented: $pairing) {
@@ -94,10 +107,15 @@ struct ChatListView: View {
             } label: {
                 Label("新建群聊", systemImage: "person.2.badge.plus")
             }
+
+            Button {
+                scanning = true
+            } label: {
+                Label("扫一扫", systemImage: "qrcode.viewfinder")
+            }
         } label: {
-            Image(systemName: "plus")
-                .font(.aevis(15, weight: .semibold))
-                .foregroundStyle(V2.accent)
+            // 自绘加号，不用 SF Symbols（各系统版本字形会变）
+            IcPlus(color: V2.accent, size: 17)
                 .frame(width: 34, height: 34)
                 .background(Circle().fill(V2.soft(0.13)))
         }
