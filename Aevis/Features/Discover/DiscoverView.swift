@@ -20,7 +20,6 @@ struct DiscoverView: View {
     @State private var showCouple = false
     @State private var showDiary = false
     @State private var showTodo = false
-    @State private var showMC = false
     @State private var showBrowser = false
     @State private var showAppleMusic = false
     /// 人设广场（2026-11-01 用户要求：在发现页就能刷，也能自己写一个上传）。
@@ -146,9 +145,6 @@ struct DiscoverView: View {
             .sheet(isPresented: $showTodo) {
                 TodoView()
             }
-            .sheet(isPresented: $showMC) {
-                MCView()
-            }
             .sheet(isPresented: $showBrowser) {
                 // 内置浏览器。它自己的标题栏 / 返回键**只在被导航壳包住时才成立**
                 //（`InAppBrowserView` 里用的是 `.navigationTitle` / `.navigationBarTitleDisplayMode`），
@@ -187,7 +183,6 @@ struct DiscoverView: View {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("-aevisOpenDiary") { showDiary = true }
         if args.contains("-aevisOpenTodo") { showTodo = true }
-        if args.contains("-aevisOpenMC") { showMC = true }
         #endif
     }
 

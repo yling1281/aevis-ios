@@ -28,7 +28,6 @@ struct PersonaSheet: View {
     /// ⭐ 2026-10-04：从电脑版同步过来的三样 —— 个性标签 / 她的歌单 / 一起玩。
     @State private var showTags = false
     @State private var showPlaylist = false
-    @State private var showMC = false
     @State private var note: String?
 
     /// ⭐ 2026-10-04：她此刻的心情（她在聊天里悄悄写下的「心里话」）。
@@ -90,9 +89,6 @@ struct PersonaSheet: View {
             }
             .sheet(isPresented: $showPlaylist) {
                 HerPlaylistSheet()
-            }
-            .sheet(isPresented: $showMC) {
-                MCView()
             }
             .onChange(of: pickedAvatar) { _, item in
                 guard let item else { return }
@@ -187,9 +183,6 @@ struct PersonaSheet: View {
             }
             row("她的歌单", "她在你网易云里收藏的那些歌") {
                 showPlaylist = true
-            }
-            row("一起玩", "选一种玩法，陪你在《我的世界》里过一天") {
-                showMC = true
             }
         }
         .aevisGlass(cornerRadius: 20)
