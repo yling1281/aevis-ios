@@ -56,7 +56,7 @@ struct AevisLiveWidget: Widget {
                 // 最小形态（同时有别的活动时）：只留一个点
                 AevisMarker(active: !AevisLiveWidget.isIdle(context.state))
             }
-            .keylineTint(Color.pink)
+            .keylineTint(Color(red: 0.494, green: 0.420, blue: 0.847))
         }
     }
 
@@ -73,9 +73,36 @@ private struct AevisMarker: View {
     let active: Bool
 
     var body: some View {
-        Circle()
-            .fill(active ? Color.pink : Color.gray.opacity(0.5))
-            .frame(width: active ? 9 : 6, height: active ? 9 : 6)
+        // 原来就是一个 9pt 的粉圆点，放在黑底上只是「有个东西」，
+        // 看不出是谁、也看不出状态。换成「气泡 + 光晕」：
+        //   · 气泡本身用描边（黑底上填充白会糊），
+        //   · 活跃时外面套一圈 18% 白的柔光，远看像在呼吸，
+        //   · 挂机态缩到 65% 并降到 40% 不透明度，存在感很弱。
+        ZStack {
+            if active {
+                Circle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 22, height: 22)
+            }
+            Canvas { ctx, s in
+                let w = s.width, h = s.height
+                let st = StrokeStyle(lineWidth: max(1.2, w * 0.10),
+                                     lineCap: .round, lineJoin: .round)
+                // 对话气泡：圆角方 + 左下小尾巴
+                var p = Path()
+                let inset = w * 0.14
+                p.addRoundedRect(
+                    in: CGRect(x: inset, y: inset, width: w - inset * 2, height: (h - inset * 2) * 0.74),
+                    cornerSize: CGSize(width: w * 0.26, height: w * 0.26)
+                )
+                p.move(to: CGPoint(x: w * 0.30, y: h * 0.62))
+                p.addLine(to: CGPoint(x: w * 0.24, y: h * 0.86))
+                p.addLine(to: CGPoint(x: w * 0.46, y: h * 0.68))
+                ctx.stroke(p, with: .color(.white.opacity(active ? 1.0 : 0.42)), style: st)
+            }
+            .frame(width: active ? 20 : 16, height: active ? 20 : 16)
+        }
+        .frame(width: 24, height: 24)
     }
 }
 
