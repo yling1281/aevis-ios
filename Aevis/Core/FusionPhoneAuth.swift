@@ -59,7 +59,7 @@ final class FusionPhoneAuth: NSObject {
             handler = AlicomFusionAuthHandler(token: t, schemeCode: scheme)
             handler?.setFusionAuthDelegate(self)
         } else {
-            handler?.updateToken(t)
+            handler?.update(t)
         }
         NSLog("[Fusion] prepare ok")
     }
@@ -108,10 +108,10 @@ extension FusionPhoneAuth: AlicomFusionAuthDelegate {
     }
 
     func onSDKTokenAuthFailure(_ handler: AlicomFusionAuthHandler,
-                               failToken: AlicomFusionAuthToken,
+                               fail failToken: AlicomFusionAuthToken,
                                error: AlicomFusionEvent) {
-        NSLog("[Fusion] token 鉴权失败：\(error.errorCode ?? "") \(error.errorMsg ?? "")")
-        onFail?(error.errorCode ?? "TOKEN_FAIL", error.errorMsg ?? "鉴权失败")
+        NSLog("[Fusion] token 鉴权失败：\(error.errorMsg ?? "")")
+        onFail?("TOKEN_FAIL", error.errorMsg ?? "鉴权失败")
     }
 
     /// 一键登录成功：`maskToken` 是取号凭证，不是手机号。
@@ -140,17 +140,17 @@ extension FusionPhoneAuth: AlicomFusionAuthDelegate {
     func onVerifyFailed(_ handler: AlicomFusionAuthHandler,
                         nodeName: String,
                         error: AlicomFusionEvent) {
-        NSLog("[Fusion] 取号失败：\(error.errorCode ?? "") \(error.errorMsg ?? "")")
-        onFail?(error.errorCode ?? "VERIFY_FAIL", error.errorMsg ?? "取号失败")
+        NSLog("[Fusion] 取号失败：\(error.errorMsg ?? "")")
+        onFail?("VERIFY_FAIL", error.errorMsg ?? "取号失败")
     }
 
     func onTemplateFinish(_ handler: AlicomFusionAuthHandler, event: AlicomFusionEvent) {
         // 授权页关掉了（用户返回 / 切了别的方式）。不算错误，交给上层判断。
-        NSLog("[Fusion] 授权页结束：\(event.errorCode ?? "")")
+        NSLog("[Fusion] 授权页结束")
     }
 
-    func onGetPhoneNumberForVerification(_ handler: AlicomFusionAuthHandler,
-                                         event: AlicomFusionEvent) -> String {
+    func onGetPhoneNumber(forVerification handler: AlicomFusionAuthHandler,
+                          event: AlicomFusionEvent) -> String {
         ""
     }
 
@@ -164,6 +164,6 @@ extension FusionPhoneAuth: AlicomFusionAuthDelegate {
     }
 
     func onVerifyInterrupt(_ handler: AlicomFusionAuthHandler, event: AlicomFusionEvent) {
-        NSLog("[Fusion] 取号中断：\(event.errorCode ?? "")")
+        NSLog("[Fusion] 取号中断")
     }
 }
