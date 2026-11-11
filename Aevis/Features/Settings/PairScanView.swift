@@ -98,6 +98,10 @@ struct PairScanView: View {
                     .id(scanToken)
                     .ignoresSafeArea(edges: .bottom)
 
+                // 微信那种取景框：四周压暗 + 四角亮边 + 一条上下扫的横线。
+                // 之前只有文字说「放进取景框」，框本身没画 —— 用户 2026-11-11 提的。
+                ScanFrameOverlay()
+
                 VStack {
                     Spacer()
                     Text("把电脑上那张二维码放进取景框")
@@ -489,5 +493,81 @@ struct PairScanView: View {
         }
         problem = lastProblem ?? "配对失败。"
         stage = .failed
+    }
+}
+
+// MARK: - 取景框
+
+/// 扫码界面的取景框：四周压暗、中间一个方形四角亮边、一条横线来回扫。
+/// 纯 SwiftUI 画，不碰相机层（`QRScannerView` 是 UIViewControllerRepresentable，
+/// 往里塞 SwiftUI 会打架）。
+private struct ScanFrameOverlay: View {
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height) * 0.66
+            let rect = CGRect(x: (geo.size.width - side) / 2,
+                              y: (geo.size.height - side) / 2 - 24,
+                              width: side,
+                              height: side)
+
+            ZStack {
+                // 挖洞压暗：外圈半透明黑，中间那块留亮
+                Path { p in
+                    p.addRect(CGRect(origin: .zero, size: geo.size))
+                    p.addRoundedRect(in: rect,
+                                     cornerSize: CGSize(width: 20, height: 20))
+                }
+                .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
+
+                // 四角
+                ScanCornerMarks(rect: rect, length: 28)
+                    .stroke(Color.white,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
+
+                // 扫描横线
+                Rectangle()
+                    .fill(LinearGradient(
+                        colors: [.clear, Color.green.opacity(0.95), .clear],
+                        startPoint: .leading, endPoint: .trailing))
+                    .frame(width: rect.width - 20, height: 2)
+                    .position(x: rect.midX,
+                              y: sweep ? rect.minY + 14 : rect.maxY - 14)
+                    .animation(.easeInOut(duration: 2.2)
+                        .repeatForever(autoreverses: true), value: sweep)
+            }
+            .onAppear { sweep = true }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)     // 别挡住相机的点击
+    }
+}
+
+/// 只画取景框的四个角（每角两段线）。
+private struct ScanCornerMarks: Shape {
+    let rect: CGRect
+    let length: CGFloat
+
+    func path(in _: CGRect) -> Path {
+        var p = Path()
+        let l = length
+        // 左上
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY + l))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.minX + l, y: rect.minY))
+        // 右上
+        p.move(to: CGPoint(x: rect.maxX - l, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + l))
+        // 右下
+        p.move(to: CGPoint(x: rect.maxX, y: rect.maxY - l))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.maxX - l, y: rect.maxY))
+        // 左下
+        p.move(to: CGPoint(x: rect.minX + l, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - l))
+        return p
     }
 }
