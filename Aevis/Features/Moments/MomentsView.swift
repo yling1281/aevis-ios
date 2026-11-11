@@ -207,49 +207,57 @@ struct MomentsView: View {
 
     /// 朋友圈封面 —— 微信那种：半屏通栏、无圆角，右下角 头像+名字+签名。
     ///
-    /// **没设封面图就不显示**（不留一块空白占地方）。
+    /// ⚠️ **没设封面图也要有封面**（2026-11-12 用户：「背景图没有搞好，
+    ///    就是那个跟微信那样子的没搞好」）。
+    ///    以前这里 `if let data = ...` 不成立就**什么都不画**，顶部直接是空的，
+    ///    看着像少了一块。微信的做法是：没设封面就给一块深色通栏。
+    ///    现在没图就用主题色渐变兜底 —— 结构、层次、文字位置全都一致。
     @ViewBuilder
     private var coverHeader: some View {
-        if let data = settings.momentCoverData, let image = UIImage(data: data) {
-            Color.clear
-                .frame(height: coverHeight)
-                .overlay(Image(uiImage: image).resizable().scaledToFill())
-                .clipped()
-                .overlay(
+        let cover = settings.momentCoverData.flatMap { UIImage(data: $0) }
+        Color.clear
+            .frame(height: coverHeight)
+            .overlay {
+                if let cover {
+                    Image(uiImage: cover).resizable().scaledToFill()
+                } else {
                     LinearGradient(
-                        colors: [Color.black.opacity(0.02), Color.black.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
+                        colors: [settings.accentColor.opacity(0.92),
+                                 settings.accentColor.opacity(0.55),
+                                 Color.black.opacity(0.35)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
                     )
-                )
-                // 右下角：名字在头像左边，签名在名字下面。
-                .overlay(alignment: .bottomTrailing) {
-                    HStack(alignment: .bottom, spacing: 9) {
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text(displayName(for: .me))
-                                .font(mfont(16, weight: .semibold))
-                                .foregroundStyle(.white)
-                            if !profile.signature.isEmpty {
-                                Text(profile.signature)
-                                    .font(mfont(12))
-                                    .foregroundStyle(.white.opacity(0.92))
-                            }
-                        }
-                        AevisAvatar(source: .me, size: 62)
-                    }
-                    .padding(.trailing, 14)
-                    .padding(.bottom, 12)
                 }
-        }
-
-        if settings.momentCoverData == nil, !settings.momentSignature.isEmpty {
-            Text(settings.momentSignature)
-                .font(mfont(14))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .aevisGlass(cornerRadius: cardCorner)
-        }
+            }
+            .clipped()
+            .overlay(
+                LinearGradient(
+                    colors: [Color.black.opacity(0.02), Color.black.opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            // 右下角：名字在头像左边，签名在名字下面。
+            .overlay(alignment: .bottomTrailing) {
+                HStack(alignment: .bottom, spacing: 9) {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(displayName(for: .me))
+                            .font(mfont(16, weight: .semibold))
+                            .foregroundStyle(.white)
+                        let line = profile.signature.isEmpty
+                            ? settings.momentSignature : profile.signature
+                        if !line.isEmpty {
+                            Text(line)
+                                .font(mfont(12))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    AevisAvatar(source: .me, size: 62)
+                }
+                .padding(.trailing, 14)
+                .padding(.bottom, 12)
+            }
     }
 
     private var composer: some View {
