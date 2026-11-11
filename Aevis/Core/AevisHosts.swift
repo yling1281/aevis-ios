@@ -132,15 +132,20 @@ enum AevisHosts {
     /// 三条线路，**顺序就是优先级**。用户口径：「三个路线你自己点选」——
     /// 主 App 和管理端**共用这一份**，别再各写一遍。
     ///
-    /// 🔴 2026-10-31：三条线**全部指向 4-4 同一套后端**（`aevis_auth` / `/v1/*`），
-    ///    区别只在走哪个域名 —— `aevis.cn` 备案稳作主用，`faka.lingyan.cyou` /
-    ///    `lingyan.cyou` 是备用入口（同一条 HK 反代 → 隧道 18878）。三条实测均 200。
-    ///    ⚠️ 老的三条（`account.aevis.cn` / `apekin.com` / 裸 `account.lingyan.cyou`）
-    ///       指向的是**已下线的老后端**，别再加回来。
+    /// 🔴 2026-11-11 实测修正：以前线路一是 `account.aevis.cn`，
+    ///    那个域名背后是**已下线的老后端**，`/prod-api/aevis/health` 稳定 404 ——
+    ///    用户点「线路一」永远切不过去，看到的却是"没区别"。
+    ///    现在三条全部是实测返回 200 的活入口（都经香港反代到同一套后端）：
+    ///      · `aevis.cn`            1.4s
+    ///      · `faka.lingyan.cyou`   1.4s
+    ///      · `lingyan.cyou`        5.0s（最慢，兜底）
+    ///    ⚠️ 注意：这三条**机器是同一台**，只是门牌不同。
+    ///       真做到「香港 / 北京 / 陕西」三地互备，得先让那两台也能访问到
+    ///       4-4 的 8788（现在是 cloud firewall 挡着的），否则接上去就是 404。
     static let accountLines: [Line] = [
-        Line(name: "线路一", base: accountBase),                              // aevis.cn（主用）
-        Line(name: "线路二", base: "https://faka.lingyan.cyou" + apiPath),    // lingyan 备用
-        Line(name: "线路三", base: "https://lingyan.cyou" + apiPath),         // lingyan 主域备用
+        Line(name: "线路一", base: "https://" + accountDomain + apiPath),
+        Line(name: "线路二", base: "https://faka.lingyan.cyou" + apiPath),
+        Line(name: "线路三", base: "https://lingyan.cyou" + apiPath),
     ]
 
     static var accountCandidates: [String] { accountLines.map { $0.base } }
