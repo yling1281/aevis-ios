@@ -44,6 +44,117 @@ struct MeView: View {
     @State private var showRules = false
     @State private var showPoints = false
     @State private var showMore = false
+    @State private var showDiscover = false
+
+    // MARK: - 个人中心版首页（`settings.homeStyle == "personal"`）
+
+    /// 大头像 + 名字 + 一条活动横幅。
+    private var personalHero: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Group {
+                    if let img = profile.avatarImage {
+                        Image(uiImage: img).resizable().scaledToFill()
+                    } else {
+                        Circle().fill(V2.soft(0.14))
+                            .overlay(Image(systemName: "person.fill")
+                                .font(.aevis(26))
+                                .foregroundStyle(V2.accent))
+                    }
+                }
+                .frame(width: 64, height: 64)
+                .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.nickname.isEmpty ? "我" : profile.nickname)
+                        .font(.aevis(19, weight: .semibold))
+                    Text(profile.signature.isEmpty ? statusLine : profile.signature)
+                        .font(.aevis(12.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button {
+                    route = SettingsRoute(focus: nil)
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.aevis(15, weight: .medium))
+                        .foregroundStyle(V2.accent)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(V2.soft(0.13)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // 活动横幅
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles").font(.aevis(15))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Aevis 会员").font(.aevis(13, weight: .semibold))
+                    Text(memberLine).font(.aevis(11.5)).opacity(0.88)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.aevis(11)).opacity(0.8)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                LinearGradient(colors: [V2.accent, V2.accent.opacity(0.62)],
+                               startPoint: .leading, endPoint: .trailing),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { showPoints = true }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// 圆形小入口 + 小字，4 列。
+    private var personalGrid: some View {
+        let items: [(String, String, () -> Void)] = [
+            ("会员", "crown", { showPoints = true }),
+            ("积分", "star.circle", { showPoints = true }),
+            ("模型", "cpu", { route = SettingsRoute(focus: "model") }),
+            ("记忆库", "brain", { route = SettingsRoute(focus: "memory") }),
+            ("陪伴", "heart", { route = SettingsRoute(focus: "companion") }),
+            ("AI 权限", "wand.and.stars", { route = SettingsRoute(focus: "aitools") }),
+            ("健康", "cross.case", { showHealth = true }),
+            ("人设广场", "square.grid.2x2", { showDiscover = true })
+        ]
+
+        return LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+            spacing: 18
+        ) {
+            ForEach(items.indices, id: \.self) { i in
+                Button(action: items[i].2) {
+                    VStack(spacing: 7) {
+                        Circle()
+                            .fill(V2.soft(0.13))
+                            .frame(width: 50, height: 50)
+                            .overlay(
+                                Image(systemName: items[i].1)
+                                    .font(.aevis(19))
+                                    .foregroundStyle(V2.accent)
+                            )
+                        Text(items[i].0)
+                            .font(.aevis(11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 18)
+        .padding(.horizontal, 6)
+        .background(Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
 
     var body: some View {
         NavigationStack {
@@ -63,7 +174,13 @@ struct MeView: View {
 
                 ScrollView {
                     VStack(spacing: 14) {
-                        profileCard
+                        // 两套首页：个人中心版（头像+名字+活动+圆形入口）/ 微信版（原来的列表）
+                        if settings.isPersonalHome {
+                            personalHero
+                            personalGrid
+                        } else {
+                            profileCard
+                        }
 
                         V2SectionTitle("账号")
                         V2Card {
@@ -209,6 +326,8 @@ struct MeView: View {
             .sheet(isPresented: $showInbox) { NavigationStack { InboxView() } }
             .sheet(isPresented: $showTickets) { NavigationStack { TicketListView() } }
             .sheet(isPresented: $showPoints) { PointsView() }
+            // 人设广场在「发现」里，个人中心版从这里直接开门
+            .sheet(isPresented: $showDiscover) { NavigationStack { DiscoverView() } }
         }
     }
 

@@ -146,12 +146,15 @@ struct SettingsView: View {
         case "bubbles": BubbleSettingsCard()
         case "emoji": EmojiCard()
         case "appearance":
-            // ⚠️ **两种进入方式给的东西不一样**（用户 2026-09-28 的要求：
-            //    「在特定的页面只展示特定的设置，砍掉其他设置，但是功能还是在的，
-            //      在总设置里还是会展现」）：
-            //    · 从「我」那一页的「外观」**直达**进来 → 只给聊天背景 + 气泡圆角
-            //    · 走「设置」整页 → 完整 7 组（主题色/字体/图标/玻璃/简易模式都在）
-            AppearanceSettingsCard(chatOnly: activeFocus != nil)
+            VStack(spacing: 0) {
+                HomeStyleCard()
+                // ⚠️ **两种进入方式给的东西不一样**（用户 2026-09-28 的要求：
+                //    「在特定的页面只展示特定的设置，砍掉其他设置，但是功能还是在的，
+                //      在总设置里还是会展现」）：
+                //    · 从「我」那一页的「外观」**直达**进来 → 只给聊天背景 + 气泡圆角
+                //    · 走「设置」整页 → 完整 7 组（主题色/字体/图标/玻璃/简易模式都在）
+                AppearanceSettingsCard(chatOnly: activeFocus != nil)
+            }
         case "memory": MemoryCard()
         case "moments": MomentsCard()
         case "companion": CompanionCard()

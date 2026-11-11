@@ -40,7 +40,8 @@ final class DisclaimerStore: ObservableObject {
     static let shared = DisclaimerStore()
 
     /// 站上的静态 JSON。改这个文件就能改 App 里的免责声明，不用发版。
-    static let remoteURL = AevisHosts.siteURL("/disclaimer.json")
+    /// ⚠️ 走主域，不用 `sucai.aevis.cn` —— 那边整站 301 到主域，白多一次跳转。
+    static let remoteURL = URL(string: AevisHosts.accountPlainBase + "/disclaimer.json")
 
     private static let cacheKey = "legal.disclaimer.doc"
 

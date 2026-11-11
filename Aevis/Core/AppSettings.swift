@@ -369,6 +369,7 @@ final class AppSettings: ObservableObject {
         static let activeProfile = "aevis.apiProfile.active"
         static let activeSearchSource = "aevis.activeSearchSource"
         static let autoTestOnLaunch = "aevis.autoTestOnLaunch"
+        static let homeStyle = "aevis.homeStyle"
         static let speakerEnabled = "aevis.speakerEnabled"
         static let voiceMessageEnabled = "aevis.voiceMessageEnabled"
         static let speechRate = "aevis.speechRate"
@@ -623,6 +624,16 @@ final class AppSettings: ObservableObject {
     @Published var autoTestOnLaunch: Bool {
         didSet { UserDefaults.standard.set(autoTestOnLaunch, forKey: Key.autoTestOnLaunch) }
     }
+
+    /// 首页风格，两套让人自己挑：
+    /// - `wechat`：聊天 / 通讯录 / 发现 / 我（跟微信一样）
+    /// - `personal`：打开就是「我的」，上面头像名字、一排圆形入口，联系人和朋友圈往下排
+    @Published var homeStyle: String {
+        didSet { UserDefaults.standard.set(homeStyle, forKey: Key.homeStyle) }
+    }
+
+    /// 首页是不是「个人中心」那套。
+    var isPersonalHome: Bool { homeStyle == "personal" }
 
     // MARK: - API 预设（能存很多套，随时切）
     //
@@ -1662,6 +1673,7 @@ final class AppSettings: ObservableObject {
             contextLimit = 25
         }
         autoTestOnLaunch = defaults.object(forKey: Key.autoTestOnLaunch) as? Bool ?? true
+        homeStyle = defaults.string(forKey: Key.homeStyle) ?? "wechat"
         if let data = defaults.data(forKey: Key.searchSources),
            let decoded = try? JSONDecoder().decode([SearchSource].self, from: data),
            !decoded.isEmpty {

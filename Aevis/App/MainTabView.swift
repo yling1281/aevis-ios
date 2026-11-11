@@ -61,7 +61,8 @@ struct MainTabView: View {
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    @State private var tab: MainTab = .chats
+    /// 首屏落在哪个 tab —— 个人中心式直接给「我」。
+    @State private var tab: MainTab = AppSettings.shared.isPersonalHome ? .me : .chats
 
     /// 热更新检测（2026-10-31）。启动 / 回前台各查一次，服务端 6 小时节流。
     @StateObject private var updateCenter = AppUpdateCenter.shared
