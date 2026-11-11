@@ -506,9 +506,14 @@ private struct ScanFrameOverlay: View {
 
     var body: some View {
         GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height) * 0.66
+            // ⚠️ 这里的坐标系**必须和相机预览一致**。
+            //    之前这个 GeometryReader 带了 `.ignoresSafeArea()`，于是它按整块屏幕算，
+            //    而 `QRScannerView` 在 NavigationStack 里只占安全区 —— 两套坐标系差了一个
+            //    导航栏高度，框和那条扫描线就整体飘到屏幕上方去了（用户 2026-11-11 报的）。
+            //    现在不 ignore，框按真实可用区域居中。
+            let side = min(geo.size.width * 0.72, geo.size.height * 0.52)
             let rect = CGRect(x: (geo.size.width - side) / 2,
-                              y: (geo.size.height - side) / 2 - 24,
+                              y: max(20, (geo.size.height - side) / 2 - geo.size.height * 0.04),
                               width: side,
                               height: side)
 
@@ -539,7 +544,6 @@ private struct ScanFrameOverlay: View {
             }
             .onAppear { sweep = true }
         }
-        .ignoresSafeArea()
         .allowsHitTesting(false)     // 别挡住相机的点击
     }
 }

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// 免责声明 —— **整页**，文字全部在 App 里（不依赖网络）。
@@ -158,21 +159,27 @@ struct DisclaimerView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             ForEach(block.paragraphs, id: \.self) { text in
-                Text(text)
-                    .font(.aevis(13.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            ForEach(block.bullets, id: \.self) { text in
-                HStack(alignment: .top, spacing: 8) {
-                    Text("·")
-                        .font(.aevis(13.5))
-                        .foregroundStyle(settings.accentColor)
+                VStack(alignment: .leading, spacing: 8) {
                     Text(text)
                         .font(.aevis(13.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    linkButtons(in: text)
+                }
+            }
+
+            ForEach(block.bullets, id: \.self) { text in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("·")
+                            .font(.aevis(13.5))
+                            .foregroundStyle(settings.accentColor)
+                        Text(text)
+                            .font(.aevis(13.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    linkButtons(in: text)
                 }
             }
         }
@@ -193,12 +200,77 @@ struct DisclaimerView: View {
                 .font(.aevis(12.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(Self.webURL)
-                .font(.aevisMono(12))
-                .foregroundStyle(settings.accentColor)
-                .textSelection(.enabled)
+            if let url = URL(string: Self.webURL) {
+                Link(destination: url) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "safari")
+                            .font(.system(size: 12, weight: .medium))
+                        Text(Self.webURL)
+                            .font(.aevisMono(12))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .foregroundStyle(settings.accentColor)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(settings.accentColor.opacity(0.10)))
+                }
+            } else {
+                Text(Self.webURL)
+                    .font(.aevisMono(12))
+                    .foregroundStyle(settings.accentColor)
+                    .textSelection(.enabled)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 18)
+    }
+
+    // MARK: - 正文里的链接
+
+    /// 正文里出现的链接 —— 换成**真的能点**的按钮。
+    ///
+    /// 用户 2026-11-11：协议里那些 SDK / 网址看着像链接，其实只是纯文本，点不动。
+    /// SwiftUI 的 `Text` 不会自动识别裸网址，所以这里用 `NSDataDetector` 找出来，
+    /// 每条给一个独立按钮 —— 有底、有图标、点得到，不再是"假装能点"的文字。
+    @ViewBuilder
+    private func linkButtons(in text: String) -> some View {
+        let urls = Self.links(in: text)
+        if !urls.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(urls, id: \.absoluteString) { url in
+                    Link(destination: url) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.system(size: 11, weight: .medium))
+                            Text(url.host ?? url.absoluteString)
+                                .font(.aevis(12))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(settings.accentColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(settings.accentColor.opacity(0.10)))
+                    }
+                }
+            }
+            .padding(.leading, 2)
+        }
+    }
+
+    private static func links(in text: String) -> [URL] {
+        guard let detector = try? NSDataDetector(
+            types: NSTextCheckingResult.CheckingType.link.rawValue
+        ) else { return [] }
+        let ns = text as NSString
+        let matches = detector.matches(in: text,
+                                       range: NSRange(location: 0, length: ns.length))
+        var seen = Set<String>()
+        var out: [URL] = []
+        for m in matches {
+            guard let u = m.url, seen.insert(u.absoluteString).inserted else { continue }
+            out.append(u)
+        }
+        return out
     }
 }

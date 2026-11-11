@@ -381,15 +381,26 @@ struct MeView: View {
         return n.isEmpty ? "还没起名字" : n
     }
 
-    /// 头像：圆形柔底 + 首字。**不带玻璃** —— 这一页的玻璃已经全拆了。
+    /// 头像：有自定义图就用图，没有就圆形柔底 + 首字。**不带玻璃** —— 这一页的玻璃已经全拆了。
+    ///
+    /// ⚠️ 之前这里只画了首字，`profile.avatarImage` 压根没读 ——
+    ///    用户在「我的」页看到的永远是那个字母，以为头像改不了
+    ///    （2026-11-11 报的：账号头像改不了）。头像本身早就存下来了，是这里没显示。
     private var avatar: some View {
-        ZStack {
-            Circle().fill(V2.soft(0.16))
-            Text(String(nickname.prefix(1)))
-                .font(.aevis(21, weight: .semibold))
-                .foregroundStyle(V2.accent)
+        Group {
+            if let img = profile.avatarImage {
+                Image(uiImage: img).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(V2.soft(0.16))
+                    Text(String(nickname.prefix(1)))
+                        .font(.aevis(21, weight: .semibold))
+                        .foregroundStyle(V2.accent)
+                }
+            }
         }
         .frame(width: 56, height: 56)
+        .clipShape(Circle())
     }
 
     // MARK: - 打开 App 先进哪一页

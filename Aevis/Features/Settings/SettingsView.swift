@@ -380,6 +380,63 @@ struct SettingsView: View {
     /// 云端模型列表（模型 + 积分单价由后端下发）
     @ObservedObject private var cloudModels = CloudModelStore.shared
 
+    /// 哪些厂商是展开的。**默认空 = 全部收起** ——
+    /// 模型多的时候一屏列不完，全展开要滑很久（用户 2026-11-11 要的二级菜单）。
+    @State private var expandedVendors: Set<String> = []
+
+    private func vendorExpanded(_ vendor: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedVendors.contains(vendor) },
+            set: { open in
+                if open { expandedVendors.insert(vendor) }
+                else { expandedVendors.remove(vendor) }
+            }
+        )
+    }
+
+    /// 单个模型一行（分组里的内容）。
+    private func modelRow(_ m: CloudModel) -> some View {
+        Button {
+            cloudModels.selectedID = m.id
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: cloudModels.selectedID == m.id
+                      ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(cloudModels.selectedID == m.id
+                                     ? settings.accentColor : Color.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(m.label)
+                            .font(.aevis(14, weight: .medium))
+                        if m.isDefault {
+                            Text("推荐")
+                                .font(.aevis(10, weight: .medium))
+                                .foregroundStyle(settings.accentColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(settings.accentColor.opacity(0.14)))
+                        }
+                    }
+                    if !m.note.isEmpty {
+                        Text(m.note)
+                            .font(.aevis(11.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(m.priceHint)
+                        .font(.aevis(11))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 9)
+            .padding(.leading, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardTitle("模型接入")
@@ -414,45 +471,38 @@ struct SettingsView: View {
                     }
                 }
 
-                ForEach(cloudModels.models) { m in
-                    Button {
-                        cloudModels.selectedID = m.id
-                    } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: cloudModels.selectedID == m.id
-                                  ? "largecircle.fill.circle" : "circle")
-                                .font(.system(size: 17))
-                                .foregroundStyle(cloudModels.selectedID == m.id
-                                                 ? settings.accentColor : Color.secondary)
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Text(m.label)
-                                        .font(.aevis(14, weight: .medium))
-                                    if m.isDefault {
-                                        Text("推荐")
-                                            .font(.aevis(10, weight: .medium))
-                                            .foregroundStyle(settings.accentColor)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Capsule().fill(settings.accentColor.opacity(0.14)))
-                                    }
-                                }
-                                if !m.note.isEmpty {
-                                    Text(m.note)
-                                        .font(.aevis(11.5))
-                                        .foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                Text(m.priceHint)
-                                    .font(.aevis(11))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Spacer(minLength: 0)
+                // 按厂商分组，二级菜单，默认全收起。
+                // 收起时右侧标出「这一组里现在选中的是哪个」，不展开也知道在用什么。
+                ForEach(cloudModels.grouped) { group in
+                    DisclosureGroup(isExpanded: vendorExpanded(group.vendor)) {
+                        ForEach(group.models) { m in
+                            modelRow(m)
                         }
-                        .padding(.vertical, 9)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(group.vendor)
+                                .font(.aevis(13.5, weight: .medium))
+                                .foregroundStyle(.primary)
+                            Text("\(group.models.count)")
+                                .font(.aevis(10.5))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                            Spacer(minLength: 6)
+                            if let cur = cloudModels.selected,
+                               group.models.contains(where: { $0.id == cur.id }) {
+                                Text(cur.label)
+                                    .font(.aevis(11))
+                                    .foregroundStyle(settings.accentColor)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .padding(.vertical, 6)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .tint(settings.accentColor)
+                    .padding(.vertical, 1)
                 }
 
                 if cloudModels.models.isEmpty {

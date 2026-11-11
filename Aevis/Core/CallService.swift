@@ -2,6 +2,10 @@ import Combine
 import Foundation
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// 实时通话。
 ///
 /// 真的能通：麦克风 → 识别成文字 → 发给模型 → 用语音念出来 → 继续听。
@@ -62,7 +66,12 @@ final class CallService: ObservableObject {
     /// 而 `ChatStore` 只认一个 `currentID`。不记的话就会串台 ——
     /// 轻则ta的回复落进别人的会话（用户在自己那边看不到，就成了「ta不回我消息」），
     /// 重则 `currentID` 是 nil 时消息连盘都不落，重启就没了。
-    private var contactID: UUID?
+    /// 这通电话打给了谁。
+    ///
+    /// `private(set)`：外面只读，用来取**这一通**的对方头像 ——
+    /// 通话页以前读的是「当前选中的联系人」，从通讯录给别人打电话时会显示成上一个人的脸
+    /// （用户 2026-11-11 报的「打电话头像不对」）。
+    private(set) var contactID: UUID?
 
     /// 这一通电话的编号。挂断时换一个新的，
     /// 在途的那一轮就能认出「电话已经挂了」：照样把话写进聊天记录，但不再出声。

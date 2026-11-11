@@ -130,10 +130,10 @@ private struct AevisText: View {
 
     var body: some View {
         if AevisLiveWidget.isIdle(state) {
-            Text("在，随时找我")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            // 挂机态**不写任何文案**。
+            // 以前这里印一句「在，随时找我」——用户 2026-11-11 明确说默认不要这句：
+            // 挂机就该是安静的，别替他说话。名字上面已经有了，这里留空。
+            EmptyView()
         } else {
             Text(state.text)
                 .font(.subheadline)

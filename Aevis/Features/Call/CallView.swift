@@ -115,7 +115,11 @@ struct CallView: View {
 
     private var portrait: some View {
         VStack(spacing: 18) {
-            AevisAvatar(source: .ai, size: 128, seed: persona.avatarSeed)
+            // 头像跟着**这通电话的对方**走（`call.contactID`），
+            // 不是「当前选中的联系人」—— 否则从通讯录给别人打电话会显示成上一个人的脸。
+            AevisAvatar(source: .ai, size: 128,
+                        seed: persona.avatarSeed,
+                        image: call.contactID.flatMap { personaStore.avatar(for: $0) })
                 .overlay(
                     Circle()
                         .strokeBorder(
@@ -130,30 +134,51 @@ struct CallView: View {
         }
     }
 
-    /// 音量波形。没在说话时就是平的 —— 一眼看出麦克风在不在工作。
+    /// 通话波形。**自己驱动**（`TimelineView`），不依赖任何音量电平。
+    ///
+    /// ⚠️ 以前它绑的是 `ListenService.shared.level` —— 那是「一起听」的播放电平。
+    ///    打电话时 ListenService 根本没在跑，`level` 恒为 0，于是整排柱子永远是同一高度，
+    ///    看起来就是「没有波动」（用户 2026-11-11 报的）。
+    ///    现在改成按时间相位起伏：接通后一直在动，静音时归平，思考时慢而小。
     private var waveform: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<17, id: \.self) { index in
-                Capsule()
-                    .fill(settings.accentColor.opacity(0.85))
-                    .frame(
-                        width: 3.5,
-                        height: barHeight(index)
-                    )
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0,
+                                paused: call.state != .active)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 4) {
+                ForEach(0..<17, id: \.self) { index in
+                    Capsule()
+                        .fill(settings.accentColor.opacity(0.85))
+                        .frame(width: 3.5, height: barHeight(index, at: t))
+                }
             }
         }
         .frame(height: 34)
-        .animation(.easeOut(duration: 0.12), value: listen.level)
     }
 
-    private func barHeight(_ index: Int) -> CGFloat {
-        // 中间高两边低，再叠上实时音量
+    private func barHeight(_ index: Int, at t: TimeInterval) -> CGFloat {
+        // 中间高两边低
         let center = 8.0
         let distance = abs(Double(index) - center) / center
-        let shape = 1.0 - distance * 0.75
+        let shape = 1.0 - distance * 0.72
         let base = 3.0
-        let live = max(0.06, listen.level)
-        return CGFloat(base + live * 30 * shape)
+
+        // 没接通 / 已挂断：一条静止的细线
+        guard call.state == .active else { return CGFloat(base) }
+        // 静音：近乎归平，让「按了静音」看得见
+        guard !call.muted else { return CGFloat(base + 1.5 * shape) }
+
+        // ta 在想：慢、幅度小。说话 / 听你说：正常起伏
+        let speed = call.thinking ? 2.2 : 6.0
+        let amp = call.thinking ? 0.35 : 1.0
+        let phase = t * speed
+
+        // 两个不同频率叠加，避免整排同步上下（那样像进度条，不像声波）
+        let w1 = sin(phase + Double(index) * 0.55)
+        let w2 = sin(phase * 1.7 - Double(index) * 0.9)
+        let mix = (w1 * 0.6 + w2 * 0.4 + 1) / 2      // 0…1
+        let live = 0.25 + 0.75 * mix
+
+        return CGFloat(base + live * 28 * amp * shape)
     }
 
     // MARK: - 状态区

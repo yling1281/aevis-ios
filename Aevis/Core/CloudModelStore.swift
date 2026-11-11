@@ -59,6 +59,33 @@ struct CloudModel: Identifiable, Codable, Hashable {
         String(format: "输入 %.0f 积分 / 百万字，输出 %.0f 积分 / 百万字",
                inputPointsPerM, outputPointsPerM)
     }
+
+    /// 归到哪个厂商分组。
+    ///
+    /// 后端目前只下发 `id` / `label`，没有 `vendor` 字段，所以这里按名字认。
+    /// 认不出来的一律进「其他」，**不隐藏** —— 宁可多一行，也不能让用户看不到模型
+    /// （用户 2026-11-11：型号不固定，随时会上下架）。
+    var vendor: String {
+        let s = (id + " " + label).lowercased()
+        if s.contains("deepseek") { return "DeepSeek" }
+        if s.contains("claude") || s.contains("sonnet")
+            || s.contains("opus") || s.contains("haiku") { return "Claude" }
+        if s.contains("gemini") || s.contains("vertex") { return "Gemini" }
+        if s.contains("gpt") || s.contains("openai") { return "GPT" }
+        if s.contains("glm") || s.contains("chatglm") || s.contains("zhipu") { return "GLM" }
+        if s.contains("kimi") || s.contains("moonshot") { return "Kimi" }
+        if s.contains("minimax") { return "MiniMax" }
+        if s.contains("grok") { return "Grok" }
+        if s.contains("qwen") || s.contains("tongyi") { return "Qwen" }
+        return "其他"
+    }
+}
+
+/// 一个厂商 + 它名下的模型。
+struct CloudModelGroup: Identifiable {
+    let vendor: String
+    let models: [CloudModel]
+    var id: String { vendor }
 }
 
 /// 云端模型的拉取 + 本地缓存。
@@ -152,6 +179,21 @@ final class CloudModelStore: ObservableObject {
     var selected: CloudModel? {
         models.first(where: { $0.id == selectedID })
             ?? Self.fallback.first(where: { $0.id == selectedID })
+    }
+
+    /// 按厂商分组后的列表（二级菜单用，默认全部收起）。
+    ///
+    /// 次序固定：DeepSeek 排第一 —— 它是默认模型所在的组，展开时最靠上。
+    /// 其余按常见程度排，认不出来的「其他」垫底。
+    var grouped: [CloudModelGroup] {
+        let order = ["DeepSeek", "Claude", "Gemini", "GPT", "GLM",
+                     "Kimi", "MiniMax", "Grok", "Qwen", "其他"]
+        var bucket: [String: [CloudModel]] = [:]
+        for m in models { bucket[m.vendor, default: []].append(m) }
+        return order.compactMap { v in
+            guard let list = bucket[v], !list.isEmpty else { return nil }
+            return CloudModelGroup(vendor: v, models: list)
+        }
     }
 
     /// 拉模型列表（带缓存与兜底）。
