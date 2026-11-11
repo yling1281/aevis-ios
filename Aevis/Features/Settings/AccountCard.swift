@@ -27,6 +27,8 @@ struct AccountCard: View {
     @State private var busy = false
     @State private var probing = false
     @State private var switching = false
+    /// 每条线路的实测延迟（进页面时跑一次 `AccountEndpoint.probeAll()`）。
+    @State private var probes: [AccountEndpoint.Node] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -115,22 +117,36 @@ struct AccountCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 13)
+        // 每次进这一页都重新测一遍 —— 用户 2026-11-11：
+        // 「线路一二三好像没什么区别」，就是因为界面只写名字、看不到差别。
+        .task {
+            probes = await AccountEndpoint.probeAll()
+        }
     }
 
     /// 一个可点选的线路按钮。当前这条用强调色填充，其余是淡灰胶囊底。
+    /// 右边带上**实测毫秒**，探不通就是 `×` —— 这样"哪条快"一眼能看出来。
     private func lineButton(_ line: AevisHosts.Line) -> some View {
         let active = AevisHosts.lineName(for: settings.accountServerURL) == line.name
+        let ms = probes.first(where: { $0.base == line.base })?.ms
         return Button {
             Task { await switchTo(line) }
         } label: {
-            Text(line.name)
-                .font(.aevis(13, weight: active ? .medium : .regular))
-                .foregroundStyle(active ? Color.white : Color.secondary)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule().fill(active ? settings.accentColor : Color.primary.opacity(0.07))
-                )
+            HStack(spacing: 4) {
+                Text(line.name)
+                Text(ms.map { "\($0)ms" } ?? "×")
+                    .font(.aevis(11, weight: .regular))
+                    .foregroundStyle(active ? Color.white.opacity(0.75)
+                                            : (ms == nil ? Color.red.opacity(0.7)
+                                                         : Color.secondary.opacity(0.7)))
+            }
+            .font(.aevis(13, weight: active ? .medium : .regular))
+            .foregroundStyle(active ? Color.white : Color.secondary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(active ? settings.accentColor : Color.primary.opacity(0.07))
+            )
         }
         .buttonStyle(.plain)
         .disabled(switching || probing)

@@ -32,6 +32,11 @@ enum AccountEndpoint {
 
     /// 依次探测候选线路，返回第一个能通的，并记下来。
     /// 全都不通就返回线路一 —— 让上层照常报错，而不是在这里假装成功。
+    ///
+    /// ⚠️ 2026-11-11 用户要求：**每次打开 App 都测速，选最快的那条**。
+    ///    以前是「上次那条还通就继续用」，等于永远停在第一次探到的那条上，
+    ///    换网（Wi-Fi ↔ 蜂窝）之后也不会重新选。现在改成每次并发测全部，
+    ///    按 RTT 升序取第一条。
     @discardableResult
     static func refresh() async -> String {
         // 🔴 ① 远端配置说走哪儿就走哪儿 —— 这是「**不发新包也能换接口入口**」那条路。
@@ -47,16 +52,68 @@ enum AccountEndpoint {
             //    （第 ② 步会拿这份缓存接着用）—— 那就成了"改得回去吗"的坑。
             return remote
         }
-        // ② 上次那条还通就继续用（省一次请求）
-        if let cached = resolved, !cached.isEmpty, await reachable(cached) {
-            return cached
+
+        // ② 并发测速，谁快走谁（每次启动都重新测）
+        let ranked = await probeAll()
+        lastProbe = ranked
+        if let best = ranked.first {
+            UserDefaults.standard.set(best.base, forKey: key)
+            return best.base
         }
-        // ③ 依次探候选
-        for base in AevisHosts.accountCandidates where await reachable(base) {
-            UserDefaults.standard.set(base, forKey: key)
-            return base
-        }
+
+        // ③ 全军覆没：退回编译进去的那条，让上层照常报错
         return AevisHosts.accountBase
+    }
+
+    /// 一条线路的实测结果。
+    struct Node: Identifiable, Equatable {
+        let base: String
+        /// 往返毫秒；nil = 这条探不通。
+        let ms: Int?
+        var id: String { base }
+        var alive: Bool { ms != nil }
+    }
+
+    /// 最近一次测速的结果（设置页拿它显示「线路一 32ms」这种）。
+    /// 跟机器走，不跨设备。
+    private(set) static var lastProbe: [Node] = []
+
+    /// 并发测所有候选线路，返回**能通的那几条**，按 RTT 升序。
+    ///
+    /// 为什么并发：串行探 4 条、每条最坏等 6 秒，冷启动能卡 24 秒。
+    /// 并发之后最坏也就是最慢那条的时间（4 秒超时）。
+    static func probeAll() async -> [Node] {
+        let candidates = AevisHosts.accountCandidates
+        return await withTaskGroup(of: Node.self) { group in
+            for base in candidates {
+                group.addTask { Node(base: base, ms: await measure(base)) }
+            }
+            var out: [Node] = []
+            for await node in group where node.alive {
+                out.append(node)
+            }
+            return out.sorted { ($0.ms ?? .max) < ($1.ms ?? .max) }
+        }
+    }
+
+    /// 测一条线路的往返时间（毫秒）。返回 nil = 不通 / 不是 2xx。
+    ///
+    /// 和 `reachable` 用同一个端点、同一个判定，只是**多记一个耗时**。
+    static func measure(_ base: String) async -> Int? {
+        guard let url = URL(string: base + "/health") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 4
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let started = Date()
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else { return nil }
+            return Int(Date().timeIntervalSince(started) * 1000)
+        } catch {
+            return nil
+        }
     }
 
     /// 远端配置里那个接口地址（没配就返回 nil）。顺手把末尾的 `/` 削掉 ——

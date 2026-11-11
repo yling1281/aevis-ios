@@ -502,80 +502,33 @@ struct PairScanView: View {
 
 // MARK: - 取景框
 
-/// 扫码界面的取景框：四周压暗、中间一个方形四角亮边、一条横线来回扫。
-/// 纯 SwiftUI 画，不碰相机层（`QRScannerView` 是 UIViewControllerRepresentable，
-/// 往里塞 SwiftUI 会打架）。
+/// 扫码界面上的**唯一**一层提示：一条上下扫的横线。
+///
+/// ⚠️ 2026-11-11 用户第三次反馈「还是有两个扫码的，只留一个」——
+///    之前这里除了横线还画了「挖洞压暗 + 四角亮边」，加上相机画面本身，
+///    看起来就是两个框套在一起。现在**只留一条线**，别的全去掉。
 private struct ScanFrameOverlay: View {
     @State private var sweep = false
 
     var body: some View {
         GeometryReader { geo in
-            // ⚠️ 这里的坐标系**必须和相机预览一致**。
-            //    之前这个 GeometryReader 带了 `.ignoresSafeArea()`，于是它按整块屏幕算，
-            //    而 `QRScannerView` 在 NavigationStack 里只占安全区 —— 两套坐标系差了一个
-            //    导航栏高度，框和那条扫描线就整体飘到屏幕上方去了（用户 2026-11-11 报的）。
-            //    现在不 ignore，框按真实可用区域居中。
-            let side = min(geo.size.width * 0.68, geo.size.height * 0.50)
-            let rect = CGRect(x: (geo.size.width - side) / 2,
-                              y: (geo.size.height - side) / 2,
-                              width: side,
-                              height: side)
+            // 扫描线走的那条竖直区间：画面中间偏上，长度取短边的 46%
+            let travel = min(geo.size.width, geo.size.height) * 0.46
+            let midY = geo.size.height / 2
+            let top = midY - travel / 2
+            let bottom = midY + travel / 2
 
-            ZStack {
-                // 挖洞压暗：外圈半透明黑，中间那块留亮
-                Path { p in
-                    p.addRect(CGRect(origin: .zero, size: geo.size))
-                    p.addRoundedRect(in: rect,
-                                     cornerSize: CGSize(width: 20, height: 20))
-                }
-                .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
-
-                // 四角
-                ScanCornerMarks(rect: rect, length: 28)
-                    .stroke(Color.white,
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
-
-                // 扫描横线
-                Rectangle()
-                    .fill(LinearGradient(
-                        colors: [.clear, Color.green.opacity(0.95), .clear],
-                        startPoint: .leading, endPoint: .trailing))
-                    .frame(width: rect.width - 20, height: 2)
-                    .position(x: rect.midX,
-                              y: sweep ? rect.minY + 14 : rect.maxY - 14)
-                    .animation(.easeInOut(duration: 2.2)
-                        .repeatForever(autoreverses: true), value: sweep)
-            }
-            .onAppear { sweep = true }
+            Rectangle()
+                .fill(LinearGradient(
+                    colors: [.clear, Color.green.opacity(0.95), .clear],
+                    startPoint: .leading, endPoint: .trailing))
+                .frame(width: min(geo.size.width * 0.64, 280), height: 2)
+                .position(x: geo.size.width / 2,
+                          y: sweep ? top : bottom)
+                .animation(.easeInOut(duration: 2.2)
+                    .repeatForever(autoreverses: true), value: sweep)
+                .onAppear { sweep = true }
         }
         .allowsHitTesting(false)     // 别挡住相机的点击
-    }
-}
-
-/// 只画取景框的四个角（每角两段线）。
-private struct ScanCornerMarks: Shape {
-    let rect: CGRect
-    let length: CGFloat
-
-    func path(in _: CGRect) -> Path {
-        var p = Path()
-        let l = length
-        // 左上
-        p.move(to: CGPoint(x: rect.minX, y: rect.minY + l))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.minX + l, y: rect.minY))
-        // 右上
-        p.move(to: CGPoint(x: rect.maxX - l, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + l))
-        // 右下
-        p.move(to: CGPoint(x: rect.maxX, y: rect.maxY - l))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.maxX - l, y: rect.maxY))
-        // 左下
-        p.move(to: CGPoint(x: rect.minX + l, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - l))
-        return p
     }
 }

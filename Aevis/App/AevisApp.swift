@@ -195,9 +195,13 @@ struct AevisApp: App {
     ///    那是帮倒忙。启动那次探测已经够了，用户还能在设置里点「换线」。
     static func applyEndpointOverride() async {
         await RemoteConfig.shared.refresh()
-        guard let remote = AccountEndpoint.remoteOverride() else { return }
+        // `refresh()` 内部已经处理好了优先级：远端覆盖 > 实测最快 > 编译进去的那条。
+        // 用户 2026-11-11：「服务器每次都要测速，选最快的，每一次打开 App 都要测」——
+        // 从后台切回来同样算"打开"，网络环境（Wi-Fi ↔ 蜂窝）多半已经变了，
+        // 不重测就会一直卡在原来那条慢线上。
+        let base = await AccountEndpoint.refresh()
         let current = await MainActor.run { AppSettings.shared.accountServerURL }
-        guard remote != current, await AccountEndpoint.reachable(remote) else { return }
-        await MainActor.run { AppSettings.shared.accountServerURL = remote }
+        guard base != current else { return }
+        await MainActor.run { AppSettings.shared.accountServerURL = base }
     }
 }
