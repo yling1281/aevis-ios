@@ -93,6 +93,12 @@ struct AevisApp: App {
                             //    系统一回收进程就没了。
                             if phase != .active {
                                 ChatStore.shared.flushToDisk()
+                                // 切后台别把这一轮回复掐断（用户 2026-11-12：
+                                // 「只要切后台，它就会停止对话」）。系统给 ~30 秒。
+                                KeepAlive.begin()
+                            } else {
+                                // 回前台：交还后台时间，别占着
+                                KeepAlive.end()
                             }
                             // 回到前台：把灵动岛的活动接上（挂了超过 8 小时就被系统收了，
                             // 得重开一个挂机态）。详见 `LiveIslandCenter.sync()`。
