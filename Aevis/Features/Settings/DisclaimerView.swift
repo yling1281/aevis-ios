@@ -150,7 +150,7 @@ struct DisclaimerView: View {
 
     // MARK: - 每一节
 
-    private func section(_ block: Block) -> some View {
+    private func section(_ block: LegalBlock) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(block.title)
                 .font(.aevis(15.5, weight: .semibold))
