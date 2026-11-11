@@ -141,10 +141,14 @@ enum AevisHosts {
     /// ⚠️ 陕西自己**做不了公网入口**：`103.236.72.107:80` 被运营商拦了
     ///    （返回 `HTTP/1.1 404 NOTOK`、Date 是 2005 年，典型的未备案拦截），
     ///    8788 也只有内网可达。所以陕西只能当**源站**，入口放北京/香港。
+    ///
+    /// ⚠️ **`aevis.cn` 没有备案**（用户 2026-11-12 明确纠正）——
+    ///    它随时可能像 4-4 那样被按域名拦掉，所以不再当线路用，
+    ///    只用备案过的 `lingyan.cyou` 两个门牌。
     static let accountLines: [Line] = [
         Line(name: "北京", base: apekinAccountBase),
-        Line(name: "香港", base: "https://" + accountDomain + apiPath),
-        Line(name: "香港备用", base: "https://faka.lingyan.cyou" + apiPath),
+        Line(name: "香港一", base: "https://faka.lingyan.cyou" + apiPath),
+        Line(name: "香港二", base: "https://lingyan.cyou" + apiPath),
     ]
 
     static var accountCandidates: [String] { accountLines.map { $0.base } }
