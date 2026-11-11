@@ -393,15 +393,31 @@ struct PairScanView: View {
 
     private func handleScanned(_ text: String) {
         guard stage == .scanning else { return }     // 认到一段就够，别被连报十几遍影响
-        guard let parsed = PairClient.parse(text) else {
-            // 扫到的不是配对码 —— **不能静默**，否则用户只会觉得"扫了没反应"
-            problem = PairClient.Failure.notOurCode.errorDescription
-            stage = .failed
+
+        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // ① 我们自己的配对码 —— 走原来的确认流程
+        if let parsed = PairClient.parse(raw) {
+            ticket = parsed
+            problem = nil
+            stage = .confirming
             return
         }
-        ticket = parsed
-        problem = nil
-        stage = .confirming
+
+        // ② 扫到的是网址：直接开浏览器，不再报「不是我们的码」
+        if let url = URL(string: raw),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            #if canImport(UIKit)
+            UIApplication.shared.open(url)
+            #endif
+            stage = .scanning                        // 留在扫码页，方便接着扫
+            return
+        }
+
+        // ③ 真不认识 —— **不能静默**，否则用户只会觉得"扫了没反应"
+        problem = PairClient.Failure.notOurCode.errorDescription
+        stage = .failed
     }
 
     private func restart() {
