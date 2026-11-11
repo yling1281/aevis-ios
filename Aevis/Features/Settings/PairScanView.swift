@@ -94,12 +94,16 @@ struct PairScanView: View {
     private var scanner: some View {
         ZStack {
             if QRScannerView.isAvailable {
+                // ⚠️ 这里**不要**给相机加 `.ignoresSafeArea`。
+                //    相机一旦比取景框大一圈，两个坐标系就不一样：
+                //    框和扫描线按安全区算、画面按整屏算，视觉上就是「框飘了」，
+                //    而且压暗层和画面边缘错开，看起来像**两个框**叠在一起
+                //    （用户 2026-11-11 两次反馈：飘 + 两个二维码框）。
+                //    让相机和覆盖层都严格待在同一个安全区里，才对得上。
                 QRScannerView { text in handleScanned(text) }
                     .id(scanToken)
-                    .ignoresSafeArea(edges: .bottom)
 
                 // 微信那种取景框：四周压暗 + 四角亮边 + 一条上下扫的横线。
-                // 之前只有文字说「放进取景框」，框本身没画 —— 用户 2026-11-11 提的。
                 ScanFrameOverlay()
 
                 VStack {
@@ -511,9 +515,9 @@ private struct ScanFrameOverlay: View {
             //    而 `QRScannerView` 在 NavigationStack 里只占安全区 —— 两套坐标系差了一个
             //    导航栏高度，框和那条扫描线就整体飘到屏幕上方去了（用户 2026-11-11 报的）。
             //    现在不 ignore，框按真实可用区域居中。
-            let side = min(geo.size.width * 0.72, geo.size.height * 0.52)
+            let side = min(geo.size.width * 0.68, geo.size.height * 0.50)
             let rect = CGRect(x: (geo.size.width - side) / 2,
-                              y: max(20, (geo.size.height - side) / 2 - geo.size.height * 0.04),
+                              y: (geo.size.height - side) / 2,
                               width: side,
                               height: side)
 

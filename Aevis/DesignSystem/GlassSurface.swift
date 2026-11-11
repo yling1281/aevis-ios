@@ -545,6 +545,21 @@ struct AevisAvatar: View {
         #endif
     }
 
+    /// 没上传照片时球里显示的字。
+    ///
+    /// ⚠️ 以前这里是个**纯色球，一个字都没有** —— 用户在通话页看到的
+    ///    「头像还是没有」就是它：不是没加载，是兜底本来就不画东西。
+    ///    现在至少有名字首字，跟「我的」页那个头像保持一致的口径。
+    private var initial: String {
+        let name: String
+        switch source {
+        case .ai: name = personaStore.persona.name
+        case .me: name = profileStore.nickname
+        }
+        let first = name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)
+        return first.isEmpty ? "·" : String(first)
+    }
+
     private var orb: some View {
         ZStack {
             Circle()
@@ -556,6 +571,9 @@ struct AevisAvatar: View {
                         endRadius: size * 0.78
                     )
                 )
+            Text(initial)
+                .font(.system(size: size * 0.38, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.95))
             Circle()
                 .strokeBorder(Color.white.opacity(0.30), lineWidth: 0.6)
         }

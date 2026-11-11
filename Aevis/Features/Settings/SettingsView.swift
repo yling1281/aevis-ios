@@ -439,23 +439,21 @@ struct SettingsView: View {
 
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            cardTitle("模型接入")
+            cardTitle("模型")
 
-            // ★ 2026-10-31：云端模型 —— 不再让用户填 API Key / 接口地址。
+            // ★ 2026-10-31：不再让用户填 API Key / 接口地址。
             //    聊天统一走我们的云端网关（`/v1/llm/chat`），按 token 扣积分，
             //    价格 = DeepSeek 官方价 × 1.5。用户只负责「选哪个模型」。
+            //
+            // ★ 2026-11-11 用户：「模型接入你就直接叫模型，云端模型那层也不要了，
+            //    直接顶替」—— 所以这里不再有「云端模型」这个小标题，
+            //    只剩一行「当前用哪个 + 刷新」。
             VStack(alignment: .leading, spacing: 9) {
                 HStack {
-                    // 当前生效的模型直接写在标题里 —— 光有单选圆点，
-                    // 用户不知道「现在到底在用哪个」。
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("云端模型")
-                            .font(.aevis(12.5))
-                            .foregroundStyle(.secondary)
-                        Text("当前：\(cloudModels.selected?.label ?? cloudModels.selectedID)")
-                            .font(.aevis(11))
-                            .foregroundStyle(.tertiary)
-                    }
+                    Text("当前：\(cloudModels.selected?.label ?? cloudModels.selectedID)")
+                        .font(.aevis(12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     Spacer()
                     if cloudModels.loading {
                         ProgressView().controlSize(.small)

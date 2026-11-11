@@ -397,7 +397,9 @@ struct MomentsView: View {
                     .foregroundStyle(authorColor(moment.author))
 
                 if !moment.text.isEmpty {
-                    Text(moment.text)
+                    // 显示层再兜一道：历史数据里可能已经存进了 `<tool_call>…</tool_call>`，
+                    // 落库清洗只对新数据生效（用户 2026-11-11 截图里那条就是这么来的）。
+                    Text(MomentStore.stripToolCall(moment.text))
                         .font(mfont(15))
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)

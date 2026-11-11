@@ -268,7 +268,13 @@ final class MomentStore: ObservableObject {
 
     @discardableResult
     func post(text: String, author: Moment.Author, image: UIImage? = nil) -> Moment? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 🔴 落库前先剥掉工具调用标签。
+        //    2026-11-11 用户截图里有一条动态长这样：
+        //        <tool_call>post_moment{content:七点多天就黑透了…}</tool_call>
+        //    模型把「准备调用工具」的原文也吐进了正文，于是整段 XML 成了朋友圈内容。
+        //    这里是**唯一入库口**，清在这儿最保险。
+        let cleaned = Self.stripToolCall(text)
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || image != nil else { return nil }
 
         var moment = Moment(author: author, text: trimmed)
@@ -278,6 +284,27 @@ final class MomentStore: ObservableObject {
         moments.insert(moment, at: 0)
         save()
         return moment
+    }
+
+    /// 剥掉模型漏出来的工具调用标签（`<tool_call>…</tool_call>` 及其他残片）。
+    ///
+    /// 模型偶尔会不走结构化 `tool_calls` 字段，而是把调用意图写成文本；
+    /// 那种文本**绝不能进正文**。截断的开标签也要处理。
+    static func stripToolCall(_ raw: String) -> String {
+        var s = raw
+        let patterns = [
+            "(?s)<tool_call>.*?</tool_call>",
+            "(?s)<tool_calls>.*?</tool_calls>",
+            "(?s)<tool_call>.*$",          // 流被截断：只有开标签
+            "(?s)<tool_calls>.*$",
+            "</?tool_calls?>",
+            "</?tool_call>"
+        ]
+        for p in patterns {
+            s = s.replacingOccurrences(of: p, with: "",
+                                       options: .regularExpression)
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func remove(_ moment: Moment) {

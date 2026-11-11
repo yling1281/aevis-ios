@@ -20,6 +20,8 @@ struct AccountCard: View {
 
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var account = AccountService.shared
+    /// 「我的」页那个姓名头像就是本机这一份 —— 账号卡直接用它，不另起一套。
+    @ObservedObject private var profile = ProfileStore.shared
 
     @State private var note: String?
     @State private var busy = false
@@ -221,7 +223,7 @@ struct AccountCard: View {
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("改昵称 / 换头像在网页「我的账号」里")
+                Text("换头像 / 改昵称在「我的」页")
                     .font(.aevis(10.5))
                     .foregroundStyle(.tertiary)
             }
@@ -238,13 +240,18 @@ struct AccountCard: View {
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 
-    /// 头像。有图就加载，没有（或加载失败）回落成首字圆点。
-    ///
-    /// ⚠️ `AsyncImage` 失败时**什么都不画**（留一块空的），所以必须给 fallback ——
-    ///    否则网络一差，那一行就变成"名字旁边一个洞"。
+    /// 头像。**本地设过的优先** —— 用户 2026-11-11：
+    /// 「账号头像，我们那里不是有个姓名头像吗？直接就是用那个」。
+    /// 也就是说这一格跟「我的」页必须是同一张脸，而不是去网页上再拉一张。
+    /// 本地没设过才回落到账号资料里的图，最后才是首字。
     @ViewBuilder
     private var avatarView: some View {
-        if let url = account.avatarURL {
+        if let local = profile.avatarImage {
+            Image(uiImage: local)
+                .resizable()
+                .scaledToFill()
+                .clipShape(Circle())
+        } else if let url = account.avatarURL {
             AsyncImage(url: url) { phase in
                 if case .success(let image) = phase {
                     image.resizable().scaledToFill()
