@@ -184,7 +184,15 @@ struct MainTabView: View {
                 } else {
                     CompanionRequestBar(
                         item: request,
-                        onAccept: { accept(request.kind) },
+                        onAccept: {
+                            // ⚠️ **先收条，再执行**（用户 2026-11-12：
+                            //    「点用了它就会弹一个新弹窗，但是你也要收回去」）。
+                            //    以前这里只调 `accept(kind)`，没清 `pending` ——
+                            //    通话页弹出来了，那条申请还挂在下面，关掉通话就露出来，
+                            //    看起来像"点了同意反而多了一个窗"。
+                            companionRequest.accept()
+                            accept(request.kind)
+                        },
                         onDecline: { companionRequest.decline() }
                     )
                     .padding(.horizontal, 14)

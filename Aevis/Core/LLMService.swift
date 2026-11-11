@@ -328,6 +328,26 @@ enum LLMService {
             }
 
             if result.toolCalls.isEmpty {
+                // 🔴 **每条消息都必须有正文**。
+                //    用户 2026-11-12：「打开网页之后它也不会回文本消息，
+                //    记住每条消息必须都要回文本消息」。
+                //    有些模型在工具返回之后会给出一个空 assistant（或被截断成空），
+                //    老代码直接 `return` ⇒ 界面上就是**一片空白**，用户以为卡死了。
+                //    这里空正文就**再要一次**（不带工具，逼它说话）。宁可多一轮，
+                //    也不能让他干等一个空气泡。
+                if result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    messages.append([
+                        "role": "user",
+                        "content": "（上面这些已经办完了，用你自己的话跟我说一句结果。别调工具，别空着。）"
+                    ])
+                    _ = try await sendOnce(
+                        config: config,
+                        messages: messages,
+                        tools: [],
+                        onDelta: onDelta,
+                        onReasoning: onReasoning
+                    )
+                }
                 return
             }
 
