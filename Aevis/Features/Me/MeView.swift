@@ -214,7 +214,7 @@ struct MeView: View {
                         V2SectionTitle("陪伴")
                         V2Card {
                             V2Row(symbol: "bolt.horizontal",
-                                  title: "模型接入",
+                                  title: "模型",
                                   detail: modelLine,
                                   action: { route = SettingsRoute(focus: "model") })
                             V2Divider()

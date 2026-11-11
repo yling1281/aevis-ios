@@ -628,7 +628,7 @@ struct ChatView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)
             } else {
-                Text("还差一步：右上角设置 →「模型接入」，填上你的 API Key，TA 才会说话。")
+                Text("还差一步：右上角设置 →「模型」，填上你的 API Key，TA 才会说话。")
                     .font(.aevis(settings.simpleMode ? 15 : 13.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

@@ -24,7 +24,9 @@ struct DeviceCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            title("这台设备")
+            // 标题就是「设备码」——用户 2026-11-11：「那个设备码，就是这台设备还在」
+            // 说明他一直把这张卡认成「设备码」，那就照他的叫法改，别再叫「这台设备」。
+            title("设备码")
 
             codeRow
             rule

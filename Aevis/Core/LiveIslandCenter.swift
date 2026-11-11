@@ -77,12 +77,42 @@ final class LiveIslandCenter {
         }
     }
 
+    /// ta 的头像缩略图（96×96 JPEG，约 3–6 KB）。
+    ///
+    /// 用户 2026-11-11：「灵动岛打电话就是带头像」—— 以前这里只有一个画出来的气泡图标，
+    /// 谁也看不出是谁。现在把当前联系人的头像压小传进去，扩展里直接画脸。
+    ///
+    /// ⚠️ 必须小：ActivityKit 的 ContentState 有大小上限，原图会让 update 静默失败。
+    /// ⚠️ 96×96 JPEG 0.7 大约 4KB，够灵气动岛那个小圆用。
+    private static func avatarThumb() -> Data? {
+        #if canImport(UIKit)
+        guard let img = PersonaStore.shared.avatarImage else { return nil }
+        let side: CGFloat = 96
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side),
+                                               format: format)
+        let small = renderer.image { _ in
+            let scale = max(side / max(1, img.size.width),
+                            side / max(1, img.size.height))
+            let w = img.size.width * scale
+            let h = img.size.height * scale
+            img.draw(in: CGRect(x: (side - w) / 2, y: (side - h) / 2,
+                                width: w, height: h))
+        }
+        return small.jpegData(compressionQuality: 0.7)
+        #else
+        return nil
+        #endif
+    }
+
     /// 起一个**挂机态**的活动（`text` 为空）。
     private func requestIdle() {
         guard activity == nil else { return }
         do {
             let attributes = AevisMessageAttributes(startedAt: Date())
-            let state = AevisMessageAttributes.ContentState(name: "", text: "", at: Date())
+            let state = AevisMessageAttributes.ContentState(
+                name: "", text: "", at: Date(), avatar: Self.avatarThumb())
             let content = ActivityContent(state: state, staleDate: nil)
             activity = try Activity.request(attributes: attributes,
                                             content: content,
@@ -104,7 +134,8 @@ final class LiveIslandCenter {
         guard !said.isEmpty else { return }
         let herName = name.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let state = AevisMessageAttributes.ContentState(name: herName, text: said, at: Date())
+        let state = AevisMessageAttributes.ContentState(
+            name: herName, text: said, at: Date(), avatar: Self.avatarThumb())
         let content = ActivityContent(state: state, staleDate: nil)
 
         // 前台：**静默更新**（人正看着聊天，再弹一下就是打扰）。

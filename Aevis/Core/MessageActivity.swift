@@ -17,6 +17,13 @@ struct AevisMessageAttributes: ActivityAttributes {
         var text: String
         /// 这句话的时间（锁屏上显示）。
         var at: Date
+        /// ta的头像（96×96 JPEG）。nil = 没设过头像，扩展里回落到气泡图标。
+        ///
+        /// ⚠️ **必须很小**：ActivityKit 对 ContentState 的大小有上限，
+        ///    原图（动辄几百 KB）直接塞会让 update 静默失败。主 App 那边压到 ~5KB 再传。
+        /// ⚠️ 用 `Data?` 而不是 `UIImage` —— 这个文件两个 target 都编，
+        ///    不能依赖 UIKit（见文件头）。
+        var avatar: Data? = nil
     }
 
     /// 这个活动是什么时候起的（用来判断"挂了多久、要不要重开"）。

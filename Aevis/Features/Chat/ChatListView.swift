@@ -89,13 +89,11 @@ struct ChatListView: View {
     /// 右上角那颗加号（2026-11-01 重画：从工具栏搬进大标题栏，v2 的页面不再用系统导航栏）。
     private var addMenu: some View {
         Menu {
-            Button {
-                pairing = true
-            } label: {
-                Label("扫一扫", systemImage: "qrcode.viewfinder")
-            }
-            .disabled(!QRScannerView.isAvailable)
-
+            // ⚠️ 这里**只能有一个「扫一扫」**。
+            //    2026-11-11 之前并排放了两个 Button、都叫「扫一扫」：
+            //    一个进 `PairScanView`（配对电脑），一个进 `UniversalScanView`。
+            //    用户看到的就是「加号里有两个扫一扫」。
+            //    留通用那个 —— 它自己会认配对码并转给 `PairScanView`，能力是超集。
             Button {
                 adding = true
             } label: {
@@ -113,6 +111,7 @@ struct ChatListView: View {
             } label: {
                 Label("扫一扫", systemImage: "qrcode.viewfinder")
             }
+            .disabled(!QRScannerView.isAvailable)
         } label: {
             // 自绘加号，不用 SF Symbols（各系统版本字形会变）
             IcPlus(color: V2.accent, size: 17)

@@ -1,4 +1,8 @@
 import ActivityKit
+
+#if canImport(UIKit)
+import UIKit
+#endif
 import SwiftUI
 import WidgetKit
 
@@ -35,7 +39,7 @@ struct AevisLiveWidget: Widget {
             DynamicIsland {
                 // ——— 展开区（灵动岛拉长之后那几块）———
                 DynamicIslandExpandedRegion(.leading) {
-                    AevisMarker(active: !AevisLiveWidget.isIdle(context.state))
+                    AevisMarker(active: !AevisLiveWidget.isIdle(context.state), avatar: context.state.avatar)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     AevisTime(state: context.state)
@@ -48,13 +52,13 @@ struct AevisLiveWidget: Widget {
                 }
             } compactLeading: {
                 // 灵动岛横向那种形态：左边一个小标记
-                AevisMarker(active: !AevisLiveWidget.isIdle(context.state))
+                AevisMarker(active: !AevisLiveWidget.isIdle(context.state), avatar: context.state.avatar)
             } compactTrailing: {
                 // 右边：有消息时也放个小标记；挂机时留空（不显眼）
                 AevisCompactTail(state: context.state)
             } minimal: {
                 // 最小形态（同时有别的活动时）：只留一个点
-                AevisMarker(active: !AevisLiveWidget.isIdle(context.state))
+                AevisMarker(active: !AevisLiveWidget.isIdle(context.state), avatar: context.state.avatar)
             }
             .keylineTint(Color(red: 0.494, green: 0.420, blue: 0.847))
         }
@@ -71,36 +75,53 @@ struct AevisLiveWidget: Widget {
 /// 那个「ta在」的小标记。挂机时只是一个小灰点，有消息时是粉色、稍大一点。
 private struct AevisMarker: View {
     let active: Bool
+    /// ta的头像（主 App 压好的 96×96 JPEG）。
+    /// 用户 2026-11-11：「灵动岛打电话就是带头像」—— 有图就画脸，没图才回落到气泡。
+    var avatar: Data? = nil
 
     var body: some View {
         // 原来就是一个 9pt 的粉圆点，放在黑底上只是「有个东西」，
-        // 看不出是谁、也看不出状态。换成「气泡 + 光晕」：
-        //   · 气泡本身用描边（黑底上填充白会糊），
-        //   · 活跃时外面套一圈 18% 白的柔光，远看像在呼吸，
-        //   · 挂机态缩到 65% 并降到 40% 不透明度，存在感很弱。
+        // 看不出是谁、也看不出状态。换成「头像/气泡 + 光晕」：
+        //   · 有头像 → 圆形裁切，活跃时满亮、挂机时压到 65%
+        //   · 没头像 → 描边气泡（黑底上填充白会糊）
+        //   · 活跃时外面套一圈 18% 白的柔光，远看像在呼吸
         ZStack {
             if active {
                 Circle()
                     .fill(Color.white.opacity(0.18))
                     .frame(width: 22, height: 22)
             }
-            Canvas { ctx, s in
-                let w = s.width, h = s.height
-                let st = StrokeStyle(lineWidth: max(1.2, w * 0.10),
-                                     lineCap: .round, lineJoin: .round)
-                // 对话气泡：圆角方 + 左下小尾巴
-                var p = Path()
-                let inset = w * 0.14
-                p.addRoundedRect(
-                    in: CGRect(x: inset, y: inset, width: w - inset * 2, height: (h - inset * 2) * 0.74),
-                    cornerSize: CGSize(width: w * 0.26, height: w * 0.26)
-                )
-                p.move(to: CGPoint(x: w * 0.30, y: h * 0.62))
-                p.addLine(to: CGPoint(x: w * 0.24, y: h * 0.86))
-                p.addLine(to: CGPoint(x: w * 0.46, y: h * 0.68))
-                ctx.stroke(p, with: .color(.white.opacity(active ? 1.0 : 0.42)), style: st)
+            if let avatar, let image = UIImage(data: avatar) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: active ? 20 : 18, height: active ? 20 : 18)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle().strokeBorder(
+                            Color.white.opacity(active ? 0.45 : 0.22),
+                            lineWidth: 0.8)
+                    )
+                    .opacity(active ? 1 : 0.65)
+            } else {
+                Canvas { ctx, s in
+                    let w = s.width, h = s.height
+                    let st = StrokeStyle(lineWidth: max(1.2, w * 0.10),
+                                         lineCap: .round, lineJoin: .round)
+                    // 对话气泡：圆角方 + 左下小尾巴
+                    var p = Path()
+                    let inset = w * 0.14
+                    p.addRoundedRect(
+                        in: CGRect(x: inset, y: inset, width: w - inset * 2, height: (h - inset * 2) * 0.74),
+                        cornerSize: CGSize(width: w * 0.26, height: w * 0.26)
+                    )
+                    p.move(to: CGPoint(x: w * 0.30, y: h * 0.62))
+                    p.addLine(to: CGPoint(x: w * 0.24, y: h * 0.86))
+                    p.addLine(to: CGPoint(x: w * 0.46, y: h * 0.68))
+                    ctx.stroke(p, with: .color(.white.opacity(active ? 1.0 : 0.42)), style: st)
+                }
+                .frame(width: active ? 20 : 16, height: active ? 20 : 16)
             }
-            .frame(width: active ? 20 : 16, height: active ? 20 : 16)
         }
         .frame(width: 24, height: 24)
     }
@@ -167,7 +188,7 @@ private struct AevisCompactTail: View {
         if AevisLiveWidget.isIdle(state) {
             EmptyView()
         } else {
-            AevisMarker(active: true)
+            AevisMarker(active: true, avatar: state.avatar)
         }
     }
 }
@@ -178,7 +199,7 @@ private struct AevisLockScreen: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            AevisMarker(active: !AevisLiveWidget.isIdle(context.state))
+            AevisMarker(active: !AevisLiveWidget.isIdle(context.state), avatar: context.state.avatar)
 
             VStack(alignment: .leading, spacing: 2) {
                 AevisTitle(state: context.state)

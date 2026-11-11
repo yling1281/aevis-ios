@@ -156,7 +156,7 @@ struct VoiceSettingsCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text("走的是 OpenAI 兼容的 /audio/speech。地址和 Key 留空时会自动沿用上面「模型接入」里那套，大多数中转站不用重复填。外接失败会自动退回系统音色，不会让 ta 突然哑掉。")
+                Text("走的是 OpenAI 兼容的 /audio/speech。地址和 Key 留空时会自动沿用上面「模型」里那套，大多数中转站不用重复填。外接失败会自动退回系统音色，不会让 ta 突然哑掉。")
                     .font(.aevis(11.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
