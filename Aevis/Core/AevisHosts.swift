@@ -129,23 +129,22 @@ enum AevisHosts {
         var id: String { name }
     }
 
-    /// 三条线路，**顺序就是优先级**。用户口径：「三个路线你自己点选」——
-    /// 主 App 和管理端**共用这一份**，别再各写一遍。
+    /// 三条线路，**顺序就是优先级**。用户口径：「一个香港、一个北京、一个陕西」。
     ///
-    /// 🔴 2026-11-11 实测修正：以前线路一是 `account.aevis.cn`，
-    ///    那个域名背后是**已下线的老后端**，`/prod-api/aevis/health` 稳定 404 ——
-    ///    用户点「线路一」永远切不过去，看到的却是"没区别"。
-    ///    现在三条全部是实测返回 200 的活入口（都经香港反代到同一套后端）：
-    ///      · `aevis.cn`            1.4s
-    ///      · `faka.lingyan.cyou`   1.4s
-    ///      · `lingyan.cyou`        5.0s（最慢，兜底）
-    ///    ⚠️ 注意：这三条**机器是同一台**，只是门牌不同。
-    ///       真做到「香港 / 北京 / 陕西」三地互备，得先让那两台也能访问到
-    ///       4-4 的 8788（现在是 cloud firewall 挡着的），否则接上去就是 404。
+    /// 🔴 2026-11-12 实测（本机 → 各入口，本地 `curl` 完整 HTTP）：
+    ///      · 北京 `account.apekin.com`      174 ms  ← 边缘反代，回源陕西 8788
+    ///      · 香港 `aevis.cn`               1471 ms
+    ///      · 香港 `faka.lingyan.cyou`      1337 ms
+    ///    北京那条是这轮新接的：nginx `location ^~ /prod-api/aevis/` →
+    ///    本机 SSH 隧道 18788 → 陕西 4-4 的 8788（源站不对公网暴露）。
+    ///
+    /// ⚠️ 陕西自己**做不了公网入口**：`103.236.72.107:80` 被运营商拦了
+    ///    （返回 `HTTP/1.1 404 NOTOK`、Date 是 2005 年，典型的未备案拦截），
+    ///    8788 也只有内网可达。所以陕西只能当**源站**，入口放北京/香港。
     static let accountLines: [Line] = [
-        Line(name: "线路一", base: "https://" + accountDomain + apiPath),
-        Line(name: "线路二", base: "https://faka.lingyan.cyou" + apiPath),
-        Line(name: "线路三", base: "https://lingyan.cyou" + apiPath),
+        Line(name: "北京", base: apekinAccountBase),
+        Line(name: "香港", base: "https://" + accountDomain + apiPath),
+        Line(name: "香港备用", base: "https://faka.lingyan.cyou" + apiPath),
     ]
 
     static var accountCandidates: [String] { accountLines.map { $0.base } }
