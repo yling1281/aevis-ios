@@ -38,6 +38,22 @@ struct Moment: Codable, Identifiable, Equatable {
     var likes: [Author] = []
     var comments: [MomentComment] = []
 
+    /// 这条是谁发的（2026-11-12）。
+    ///
+    /// 之前只有 `author: me / ta` 两档 —— 系统里有几个联系人时，"ta"永远是
+    /// 当前活跃的那一个，换个角色同一条动态就变成另一个人发的。
+    /// 现在把具体联系人 id 记下来；`nil` = 老数据，按当前活跃的算。
+    var authorID: UUID? = nil
+
+    /// 谁能看（2026-11-12 用户：「每个东西其实都是要选，就是可以选择的」）。
+    ///
+    /// `nil` / `"public"` = 公开（ta 能看到、会来评论）；
+    /// `"private"`      = 仅自己可见（列表里带个小锁，不触发 ta 的互动）。
+    /// 老存档没有这个字段 → 解码成 nil，等于公开，行为不变。
+    var audience: String? = nil
+
+    var isPrivate: Bool { audience == "private" }
+
     var hasImage: Bool { imageName != nil }
 }
 
@@ -267,7 +283,8 @@ final class MomentStore: ObservableObject {
     // MARK: - 增删
 
     @discardableResult
-    func post(text: String, author: Moment.Author, image: UIImage? = nil) -> Moment? {
+    func post(text: String, author: Moment.Author, image: UIImage? = nil,
+              audience: String? = nil, authorID: UUID? = nil) -> Moment? {
         // 🔴 落库前先剥掉工具调用标签。
         //    2026-11-11 用户截图里有一条动态长这样：
         //        <tool_call>post_moment{content:七点多天就黑透了…}</tool_call>
@@ -281,6 +298,8 @@ final class MomentStore: ObservableObject {
         if let image {
             moment.imageName = storeImage(image)
         }
+        moment.audience = (audience == "private") ? "private" : nil
+        moment.authorID = authorID
         moments.insert(moment, at: 0)
         save()
         return moment

@@ -54,6 +54,8 @@ struct MomentsView: View {
     @State private var showClearConfirm = false
     /// 「装扮朋友圈」开没开。
     @State private var showDecor = false
+    /// 全屏发布页（右上角三点 → 发布朋友圈）
+    @State private var showCompose = false
 
     private var persona: Persona { personaStore.persona }
 
@@ -141,6 +143,16 @@ struct MomentsView: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        // 2026-11-12 用户：「右边上面三个点要再加一个发布朋友圈，
+                        // 做一个全屏的二级菜单，在那里面去发布」。
+                        Button {
+                            showCompose = true
+                        } label: {
+                            Label("发布朋友圈", systemImage: "square.and.pencil")
+                        }
+
+                        Divider()
+
                         Button {
                             Task { await askHerToPost() }
                         } label: {
@@ -177,6 +189,18 @@ struct MomentsView: View {
             }
             .sheet(isPresented: $showDecor) {
                 MomentsDecorSheet()
+            }
+            .fullScreenCover(isPresented: $showCompose) {
+                MomentsComposeView { text, image, audience, ids in
+                    // 我的一条
+                    _ = moments.post(text: text, author: .me,
+                                     image: image, audience: audience)
+                    // 「所有人一起发」：选中的每个人各来一条同样的内容
+                    for pid in ids {
+                        _ = moments.post(text: text, author: .ta, image: image,
+                                         audience: audience, authorID: pid)
+                    }
+                }
             }
             .alert(commentAlertTitle, isPresented: Binding(
                 get: { commentingOn != nil },
@@ -215,9 +239,17 @@ struct MomentsView: View {
                 .frame(height: coverHeight)
                 .overlay(Image(uiImage: image).resizable().scaledToFill())
                 .clipped()
+                // 2026-11-12 用户：「朋友圈要做一个遮罩，因为上面它直接跑到上面去了」。
+                // 封面是通栏铺到状态栏/灵动岛下面的，不加顶部压暗的话，
+                // 白色的时间/电量直接糊在亮色封面上看不见。
+                // 三段：顶 45%（压住状态栏）→ 中间 10%（不脏图）→ 底部 55%（托住名字）。
                 .overlay(
                     LinearGradient(
-                        colors: [Color.black.opacity(0.02), Color.black.opacity(0.55)],
+                        stops: [
+                            .init(color: .black.opacity(0.45), location: 0.0),
+                            .init(color: .black.opacity(0.10), location: 0.32),
+                            .init(color: .black.opacity(0.55), location: 1.0),
+                        ],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
