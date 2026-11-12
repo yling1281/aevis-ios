@@ -230,7 +230,8 @@ struct RootView: View {
         // ⚠️ 恢复完 `personaStore` 变了，`normal` 那一层会自己从
         //    「造一个她」切到主界面 —— 不用我们手动跳。
         .task(id: account.isSignedIn) {
-            guard account.isSignedIn, !gate.isBlocking else { return }
+            // 设备码门禁 2026-11-12 已拆，这里不再看 gate；登录了就同步。
+            guard account.isSignedIn else { return }
 
             // 登录后先拉一次聊天记录（换机第一次登录 since=0 → 全量）。
             // ⚠️ 这件事跟下面那个 `didTryRestore` 无关 —— 那个是一次性网盘恢复，
@@ -259,23 +260,20 @@ struct RootView: View {
         #endif
     }
 
-    /// 授权门禁（**第一道**）。
+    /// 登录门（**唯一一道**）。
     ///
-    /// 用户 2026-09-25 的口径：「打开 APP 就提示没有授权，然后就展示设备码
-    /// 和没有授权的那个界面」「填设备码之后就自动通过，就是一个账号一个设备码」。
+    /// 用户原话：「你一定要强制性登录的，去退出登录的话，就回到初始界面，就要登录账号」。
     ///
-    /// **只拦"从没授权过的设备"**：一旦授权过（存在本机），
-    /// 以后断网、服务器挂了都照样进 —— 聊天记录都在这台手机里，
-    /// 拿网络去锁它等于把用户自己的东西扣住了。
+    /// 🔴 2026-11-12 用户：「这台设备你还是没有删，就是设备码这个东西你还是没有删」——
+    ///    设备码门禁这一版**整条拆掉**：不再有「先填设备码、再登录」，
+    ///    打开 App 只判登录态。`DeviceGate` 那套代码留着不删（后台/自检还在用），
+    ///    但不再挡在首屏前面。
     ///
-    /// 顺序（用户 2026-09-28 定的）：「先那个设备码，然后你还要登录账号」——
-    /// 所以**设备码在前、账号在后**，两道都过才进主界面。
+    /// 只拦"从没登录过"的：本地有 token（`isSignedIn`）就放行 ——
+    /// 断网、服务器挂了照样进（`isSignedIn` 只看本地有没有 token，不联网）。
     @ViewBuilder
     private var gated: some View {
-        if gate.isBlocking {
-            DeviceGateView()
-                .transition(.opacity)
-        } else if needsLogin {
+        if needsLogin {
             LoginView()
                 .transition(.opacity)
         } else {

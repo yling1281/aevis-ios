@@ -255,10 +255,13 @@ struct MeView: View {
                                   detail: accountLine,
                                   action: { route = SettingsRoute(focus: "account") })
                             V2Divider()
-                            V2Row(symbol: "iphone.gen3",
-                                  title: "这台设备",
-                                  detail: deviceLine,
-                                  action: { route = SettingsRoute(focus: "device") })
+                            // 2026-11-12 用户：「这台设备你还是没有删，就是设备码这个东西」
+                            //             「外观的这个个人中心你还是没做」
+                            // → 设备码那一行换成「外观」，点进去直达主题/字体/图标/聊天背景。
+                            V2Row(symbol: "paintpalette",
+                                  title: "外观",
+                                  detail: "主题色、字体、图标、聊天背景",
+                                  action: { route = SettingsRoute(focus: "appearance") })
                         }
 
                         V2SectionTitle("陪伴")
@@ -610,8 +613,6 @@ struct MeView: View {
         let count = MemoryStore.shared.items.count
         return count == 0 ? "还没有记忆" : "\(count) 条"
     }
-
-    private var deviceLine: String { DeviceIdentity.pretty }
 
     private var modelLine: String {
         guard settings.isConfigured else { return "还没填 API Key，ta 不会说话" }

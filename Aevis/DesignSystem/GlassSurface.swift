@@ -224,21 +224,30 @@ struct AevisBackground: View {
     }
 
     var body: some View {
-        ZStack {
-            switch skin.style {
-            case .white:
-                pureWhite
-            case .aurora:
-                aurora
-            case .plain:
-                base
-            case .paper:
-                paper
-            case .custom:
-                customImage
-            }
-        }
-        .ignoresSafeArea()
+        // 🔴 2026-11-12 用户：「背景图直接全部改成素色」。
+        //
+        // 之前这里按 `scope` 分三种（开始页 / 聊天页 / 基础），每种都能被用户
+        // 设成极光、纸纹或**自定义图片**。结果是同一台手机上，登录页、聊天页、
+        // 我的页背景各不相同 —— 用户看到的就是"整个还是很怪"。
+        //
+        // 现在**一律素色**：只画 `base`（浅色 #F7F6FB / 深色 #14131A），
+        // 不再读 `settings.*BackgroundStyle` / 自定义图 / 光晕。
+        // 想要回原来的花样，恢复下面被注释的那段 switch 即可 —— 设置项本身
+        // 没有删，用户之前选的样式还在。
+        base
+            .ignoresSafeArea()
+
+        // —— 原实现（保留备查）——
+        // ZStack {
+        //     switch skin.style {
+        //     case .white:  pureWhite
+        //     case .aurora: aurora
+        //     case .plain:  base
+        //     case .paper:  paper
+        //     case .custom: customImage
+        //     }
+        // }
+        // .ignoresSafeArea()
     }
 
     // MARK: - 各样样式

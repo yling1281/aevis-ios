@@ -147,6 +147,21 @@ final class AccountService: ObservableObject {
         lastError = nil
     }
 
+    /// 注销账号（不可恢复）。
+    ///
+    /// 2026-11-12 用户：「注销账号做一下」。
+    /// 服务端会：撤掉所有会话、删身份（微信/QQ openid）、删会员、积分清零并记一笔账本、
+    /// 账号行匿名化成 `deleted+<uid>@aevis.invalid`（订单和审计还对得上）。
+    /// 成功后**本地登录态一起清**，调用方不用再补 `signOut()`。
+    ///
+    /// - Parameter confirm: 必须原样是「注销」两个字，服务端会核对。
+    @MainActor
+    func deleteAccount(confirm: String) async throws {
+        guard isConfigured, isSignedIn else { throw AccountError.unauthorized }
+        _ = try await post("/v1/auth/account/delete", ["confirm": confirm])
+        signOut()
+    }
+
     /// 有 token 的时候拉一次资料，顺便验证 token 还有效。
     @MainActor
     func refreshProfile() async {

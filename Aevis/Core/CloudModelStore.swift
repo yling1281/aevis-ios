@@ -103,7 +103,16 @@ final class CloudModelStore: ObservableObject {
     @Published private(set) var loading = false
 
     private let cacheKey = "aevis.cloudModels.v1"
-    private let ttl: TimeInterval = 6 * 3600
+    /// 缓存多久算旧。
+    ///
+    /// 🔴 2026-11-12 用户：「模型的名称你还是没有改 iOS 版本的」。
+    ///    根因不是没改，是**永远拉不到新名字**：`loadCache()` 以前把 `loadedAt`
+    ///    写成"现在"，于是每次启动都重新开始计时，`refresh()` 一直走"还没过期"提前返回 ——
+    ///    只要用户常开 App，缓存里的旧名字就永远换不掉。
+    ///    现在 `loadedAt` 用**落盘时间**，TTL 收到 30 分钟，后台改名后最迟半小时生效。
+    private let ttl: TimeInterval = 30 * 60
+    /// 缓存写入时间（UserDefaults 里的秒级时间戳）
+    private let cacheStampKey = "aevis.cloudModels.v1.at" 
 
     /// 兜底名单（与后端 PRICE_TABLE 对齐）。后端不可达时至少让用户能选。
     ///
@@ -240,6 +249,7 @@ final class CloudModelStore: ObservableObject {
     private func saveCache(_ list: [CloudModel]) {
         if let data = try? JSONEncoder().encode(list) {
             UserDefaults.standard.set(data, forKey: cacheKey)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: cacheStampKey)
         }
         // 另存一份纯 id 数组 —— 非隔离的 `knownIDs` 要用（它拿不到 @Published 的 models）
         UserDefaults.standard.set(list.map(\.id), forKey: cacheKey + ".ids")
@@ -250,7 +260,10 @@ final class CloudModelStore: ObservableObject {
            let list = try? JSONDecoder().decode([CloudModel].self, from: data),
            !list.isEmpty {
             models = list
-            loadedAt = Date()   // 缓存当次有效，6 小时后再拉
+            // ⚠️ 用**落盘时间**，不是"现在"：否则每次启动都续命，
+            //    后端改了名字这边永远看不到（2026-11-12 的 bug）。
+            let stamp = UserDefaults.standard.double(forKey: cacheStampKey)
+            loadedAt = stamp > 0 ? Date(timeIntervalSince1970: stamp) : .distantPast
         } else {
             models = Self.fallback
         }

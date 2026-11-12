@@ -27,6 +27,11 @@ struct AccountCard: View {
     @State private var busy = false
     @State private var probing = false
     @State private var switching = false
+    /// 注销账号：第一道说明 → 第二道手打「注销」。
+    @State private var showDeleteExplain = false
+    @State private var showDeleteConfirm = false
+    @State private var typedConfirm = ""
+    @State private var deleting = false
     /// 每条线路的实测延迟（进页面时跑一次 `AccountEndpoint.probeAll()`）。
     @State private var probes: [AccountEndpoint.Node] = []
 
@@ -43,6 +48,10 @@ struct AccountCard: View {
             }
             rule
             actionRow
+            if account.isSignedIn {
+                rule
+                deleteRow
+            }
 
             if let note {
                 rule
@@ -76,6 +85,66 @@ struct AccountCard: View {
                 .padding(.vertical, 12)
         }
         .aevisGlass(cornerRadius: 20)
+        .confirmationDialog("注销账号", isPresented: $showDeleteExplain, titleVisibility: .visible) {
+            Button("继续注销", role: .destructive) {
+                typedConfirm = ""
+                showDeleteConfirm = true
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这个账号的会员、积分、微信/QQ 绑定都会被清掉，注销后不能恢复。")
+        }
+        .alert("确认注销", isPresented: $showDeleteConfirm) {
+            TextField("输入「注销」两个字", text: $typedConfirm)
+            Button("取消", role: .cancel) {}
+            Button("注销", role: .destructive) {
+                Task { await performDelete() }
+            }
+        } message: {
+            Text("请输入「注销」两个字确认。")
+        }
+    }
+
+    /// 注销这一行：红字，跟「退出登录」分开，别让人手滑点到。
+    private var deleteRow: some View {
+        row {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("注销账号")
+                    .font(.aevis(15))
+                    .foregroundStyle(.red)
+                Text("会员、积分、绑定关系全部清掉，不能恢复")
+                    .font(.aevis(11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button(deleting ? "注销中…" : "注销") {
+                showDeleteExplain = true
+            }
+            .font(.aevis(14))
+            .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .disabled(deleting)
+        }
+    }
+
+    /// 真注销：先核对手打的字，再打服务端。成功后 `deleteAccount` 会清掉本地登录态，
+    /// `RootView` 盯着 `isSignedIn`，会自动退回登录页 —— 这里只留一句提示。
+    @MainActor
+    private func performDelete() async {
+        let text = typedConfirm.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text == "注销" else {
+            note = "要输入「注销」两个字才能注销。"
+            return
+        }
+        deleting = true
+        defer { deleting = false }
+        do {
+            try await account.deleteAccount(confirm: text)
+            note = "账号已注销。"
+        } catch {
+            note = error.localizedDescription
+        }
     }
 
     // MARK: - 各行

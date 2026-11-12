@@ -132,7 +132,10 @@ struct SettingsView: View {
                         keys: ["aitools", "wxbot", "companion", "music",
                                "system", "mcp", "console"]),
             CardSection(id: "data", title: "账号与数据",
-                        keys: ["account", "sync", "device", "devicelist", "pair", "share", "about"])
+                        // 2026-11-12：「这台设备你还是没有删，就是设备码这个东西」——
+                        // `device`（设备码）和 `devicelist`（设备列表）两张卡从这里摘掉，
+                        // 首屏的设备码门禁也一起拆了。卡片文件还在，只是没有入口。
+                        keys: ["account", "sync", "pair", "share", "about"])
         ]
     }
 
