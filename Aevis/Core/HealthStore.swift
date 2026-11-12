@@ -26,7 +26,33 @@ import HealthKit
 final class HealthStore: ObservableObject {
     static let shared = HealthStore()
 
-    private let store = HKHealthStore()
+    /// 真的能不能用健康：设备支持 **且** 签名里真的带了 HealthKit 权限。
+    ///
+    /// 🔴 2026-11-12 用户：「经期闪退」。
+    ///    `HKHealthStore()` 在缺 entitlement 时会抛 OC 异常（NSInvalidArgumentException），
+    ///    Swift 的 do/catch **接不住**，进程当场死。所以这里先探一遍，没有就
+    ///    整个健康功能降级成本地记录，一次都不碰 HealthKit。
+    private static let entitled: Bool = HealthStore.probeHealthEntitlement()
+
+    private var _store: HKHealthStore?
+
+    /// 拿 HKHealthStore。不可用就返回 nil —— 所有调用点都走 `hk()?.`。
+    private func hk() -> HKHealthStore? {
+        guard isAvailable else { return nil }
+        if let _store { return _store }
+        let s = HKHealthStore()
+        _store = s
+        return s
+    }
+
+    private static func probeHealthEntitlement() -> Bool {
+        guard let task = _SecTaskCreateFromSelf(nil) else { return false }
+        let key = "com.apple.developer.healthkit" as CFString
+        guard let raw = _SecTaskCopyValueForEntitlement(task, key, nil) else { return false }
+        if let b = raw as? Bool { return b }
+        if let n = raw as? NSNumber { return n.boolValue }
+        return true   // 是个字典也算有
+    }
 
     @Published private(set) var authorized = false
     /// 健康 App 里的经期记录。
@@ -70,7 +96,10 @@ final class HealthStore: ObservableObject {
         localPeriodDays = Self.loadLocal(key: localKey)
     }
 
-    var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
+    var isAvailable: Bool {
+        guard Self.entitled else { return false }
+        return HKHealthStore.isHealthDataAvailable()
+    }
 
     // MARK: - 授权
 
@@ -85,7 +114,7 @@ final class HealthStore: ObservableObject {
         ]
         let share: Set<HKSampleType> = [menstrual]
         do {
-            try await store.requestAuthorization(toShare: share, read: read)
+            try await hk()?.requestAuthorization(toShare: share, read: read)
             // ⚠️ 读权限是**问不出来**的（苹果故意的，防推断）。所以这里只判写权限；
             //    读不到数据时各查询自己回 0，不把 authorized 判成 false 卡在授权页。
             authorized = true
@@ -135,7 +164,7 @@ final class HealthStore: ObservableObject {
         }
 
         // ② 没有写权限就**不碰 HealthKit**（没权限时它抛的是 OC 异常，接不住）
-        let canWrite = isAvailable && store.authorizationStatus(for: menstrual) == .sharingAuthorized
+        let canWrite = isAvailable && hk()?.authorizationStatus(for: menstrual) == .sharingAuthorized
         if canWrite {
             // ① 给 1 分钟窗口 —— 零长度样本会抛 OC 异常，do/catch 接不住
             let sample = HKCategorySample(
@@ -145,7 +174,7 @@ final class HealthStore: ObservableObject {
                 end: day.addingTimeInterval(60)
             )
             do {
-                try await store.save(sample)
+                try await hk()?.save(sample)
                 lastError = nil
             } catch {
                 // 这里能接住的只是 Swift 层的错误（权限 / 数据库），记下来继续走本地兜底
@@ -185,7 +214,7 @@ final class HealthStore: ObservableObject {
             let days = (samples as? [HKCategorySample])?.map { $0.startDate } ?? []
             Task { @MainActor in self.applyHealthDays(days) }
         }
-        store.execute(query)
+        hk()?.execute(query)
     }
 
     /// 健康里的记录 + 本地兜底，按"天"去重后合并。
@@ -224,7 +253,7 @@ final class HealthStore: ObservableObject {
             ) { _, result, _ in
                 continuation.resume(returning: result?.sumQuantity()?.doubleValue(for: unit))
             }
-            store.execute(q)
+            hk()?.execute(q)
         }
     }
 
@@ -235,7 +264,7 @@ final class HealthStore: ObservableObject {
             let q = HKSampleQuery(sampleType: type, predicate: nil, limit: 1, sortDescriptors: sort) { _, samples, _ in
                 continuation.resume(returning: (samples?.first as? HKQuantitySample)?.quantity.doubleValue(for: unit))
             }
-            store.execute(q)
+            hk()?.execute(q)
         }
     }
 
@@ -261,7 +290,7 @@ final class HealthStore: ObservableObject {
                     .reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) } ?? 0
                 continuation.resume(returning: total > 0 ? total / 3600.0 : nil)
             }
-            store.execute(q)
+            hk()?.execute(q)
         }
     }
 
@@ -295,7 +324,7 @@ final class HealthStore: ObservableObject {
                 } ?? []
                 continuation.resume(returning: rows)
             }
-            store.execute(q)
+            hk()?.execute(q)
         }
         workouts = list
     }
@@ -328,3 +357,16 @@ final class HealthStore: ObservableObject {
         UserDefaults.standard.set(days.map { $0.timeIntervalSince1970 }, forKey: key)
     }
 }
+
+// MARK: - 私有符号（只为探测 entitlement）
+//
+// `SecTask*` 在 iOS SDK 里是私有头（`SecTask.h`），Swift 看不见，只能这样声明。
+// ⚠️ 只用来**读自己进程的 entitlement**，不涉及任何外部数据。
+// ⚠️ 上架 App Store 会被审核拒（私有 API）；本项目是自签分发，可以这样用。
+@_silgen_name("SecTaskCreateFromSelf")
+private func _SecTaskCreateFromSelf(_ allocator: CFAllocator?) -> CFTypeRef?
+
+@_silgen_name("SecTaskCopyValueForEntitlement")
+private func _SecTaskCopyValueForEntitlement(_ task: CFTypeRef?,
+                                             _ entitlement: CFString,
+                                             _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?) -> CFTypeRef?
