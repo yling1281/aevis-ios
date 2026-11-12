@@ -122,7 +122,7 @@ struct AppleMusicView: View {
         Group {
             if let url = song.artwork?.url(width: 56, height: 56) {
                 AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
+                    image.resizable().scaledToFill().clipped()
                 } placeholder: {
                     Color.primary.opacity(0.08)
                 }

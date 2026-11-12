@@ -147,7 +147,7 @@ struct PlazaAvatar: View {
         Group {
             if let u = URL(string: url), !url.isEmpty {
                 AsyncImage(url: u) { img in
-                    img.resizable().scaledToFill()
+                    img.resizable().scaledToFill().clipped()
                 } placeholder: {
                     fallback
                 }

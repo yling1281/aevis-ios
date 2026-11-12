@@ -545,6 +545,11 @@ struct AevisAvatar: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: size, height: size)
+                // 🔴 `.clipped()` 不能省。`scaledToFill` 会按原图比例把图放大到
+                //    **超出** frame 再裁 —— 少了这一层，溢出的那部分会画到父视图上，
+                //    表现就是用户说的「头像容易偏移很多」：脸跑到圆外面、压住旁边的字。
+                //    `clipShape` 只裁形状，不负责把内容限制在 frame 里。
+                .clipped()
                 .clipShape(Circle())
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.28), lineWidth: 0.6))
         } else {

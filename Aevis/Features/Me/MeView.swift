@@ -59,7 +59,7 @@ struct MeView: View {
             HStack(spacing: 14) {
                 Group {
                     if let img = profile.avatarImage {
-                        Image(uiImage: img).resizable().scaledToFill()
+                        Image(uiImage: img).resizable().scaledToFill().clipped()
                     } else {
                         Circle().fill(V2.soft(0.14))
                             .overlay(Image(systemName: "person.fill")
@@ -448,7 +448,7 @@ struct MeView: View {
     private var avatar: some View {
         Group {
             if let img = profile.avatarImage {
-                Image(uiImage: img).resizable().scaledToFill()
+                Image(uiImage: img).resizable().scaledToFill().clipped()
             } else {
                 ZStack {
                     Circle().fill(V2.soft(0.16))
