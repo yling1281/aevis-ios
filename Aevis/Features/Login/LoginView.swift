@@ -221,9 +221,12 @@ struct LoginView: View {
                 .font(.aevis(25, weight: .semibold))
                 .foregroundStyle(.primary)
 
+            // ⚠️ 这里**不能**照抄抖音那句「未注册的手机号验证通过后将自动注册」——
+            //    我们的注册要设密码（`/v1/auth/register` 收 email + password + code），
+            //    验证码登录只对**已注册**邮箱发码。照抄就是骗人，用户会卡在"发了码收不到"。
             Text(isRegistering
-                 ? "没注册的邮箱验证通过后会自动创建账号"
-                 : "未注册的邮箱验证通过后将自动注册")
+                 ? "邮箱 + 密码 + 验证码，注册即赠 30 天体验"
+                 : "验证码只发给已注册的邮箱；还没有账号就点「去注册」")
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
