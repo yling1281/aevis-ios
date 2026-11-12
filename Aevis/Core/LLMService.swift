@@ -77,6 +77,34 @@ enum LLMService {
         var assistantMessage: [String: Any]
     }
 
+    /// 把一张图压成模型能吃的 `data:image/jpeg;base64,…`。
+    ///
+    /// 🔴 2026-11-12 用户：「录屏提取的东西是乱码，直接用 DeepSeek 的图像识别」。
+    ///    根因有两层：① 这里从来没把图片发出去过（只发了本地 OCR 的文本）；
+    ///    ② 后端把多模态数组 `json.dumps` 成字符串再截断 8000 字符，
+    ///    截图变成一串残段 —— 模型看到的当然是乱码。两处都要改，这处是①。
+    ///
+    /// 长边压到 1024、质量 0.7：再大既慢又贵，识别效果也不会更好。
+    static func imageDataURL(_ data: Data) -> String? {
+        #if canImport(UIKit)
+        guard let img = UIImage(data: data) else { return nil }
+        let maxSide: CGFloat = 1024
+        let longest = max(img.size.width, img.size.height)
+        let scale = longest > maxSide ? maxSide / longest : 1
+        let size = CGSize(width: max(1, img.size.width * scale),
+                          height: max(1, img.size.height * scale))
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.scale = 1
+        let small = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let jpeg = small.jpegData(compressionQuality: 0.7) else { return nil }
+        return "data:image/jpeg;base64," + jpeg.base64EncodedString()
+        #else
+        return nil
+        #endif
+    }
+
     static func streamReply(
         config: LLMConfig,
         systemPrompt: String,
@@ -273,7 +301,7 @@ enum LLMService {
                     content = item.text
                 }
                 if item.role == .user, let raw = item.imageData,
-                   let url = Self.imageDataURL(raw) {
+                   let url = LLMService.imageDataURL(raw) {
                     // 多模态：文字 + 图一起发。后端已经把这条链路修通了
                     // （以前它会把整个数组 json.dumps 成字符串再截断）。
                     let textPart: [String: Any] = [
@@ -299,33 +327,6 @@ enum LLMService {
             return built
         }
 
-        /// 把一张图压成模型能吃的 `data:image/jpeg;base64,…`。
-        ///
-        /// 🔴 2026-11-12 用户：「录屏提取的东西是乱码，直接用 DeepSeek 的图像识别」。
-        ///    根因有两层：① 这里从来没把图片发出去过（只发了本地 OCR 的文本）；
-        ///    ② 后端把多模态数组 `json.dumps` 成字符串再截断 8000 字符，
-        ///    截图变成一串残段 —— 模型看到的当然是乱码。两处都要改，这处是①。
-        ///
-        /// 长边压到 1024、质量 0.7：再大既慢又贵，识别效果也不会更好。
-        static func imageDataURL(_ data: Data) -> String? {
-            #if canImport(UIKit)
-            guard let img = UIImage(data: data) else { return nil }
-            let maxSide: CGFloat = 1024
-            let longest = max(img.size.width, img.size.height)
-            let scale = longest > maxSide ? maxSide / longest : 1
-            let size = CGSize(width: max(1, img.size.width * scale),
-                              height: max(1, img.size.height * scale))
-            let fmt = UIGraphicsImageRendererFormat.default()
-            fmt.scale = 1
-            let small = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
-                img.draw(in: CGRect(origin: .zero, size: size))
-            }
-            guard let jpeg = small.jpegData(compressionQuality: 0.7) else { return nil }
-            return "data:image/jpeg;base64," + jpeg.base64EncodedString()
-            #else
-            return nil
-            #endif
-        }
 
         // 循环里会往数组里 append（assistant / tool 消息），所以要 `var`；
         // 而降级只发生在 round == 0、还没 append 过任何东西之前，重建是安全的。
