@@ -493,6 +493,23 @@ struct ChatView: View {
                                 speakerImage: member?.image
                             )
                             .id(message.id)
+                            // 长按气泡：重新生成 / 复制（用户 2026-11-12：「重新生成也没有」）
+                            .contextMenu {
+                                if message.role != .user {
+                                    Button {
+                                        regenerate(message)
+                                    } label: {
+                                        Label("重新生成", systemImage: "arrow.clockwise")
+                                    }
+                                }
+                                if !message.text.isEmpty {
+                                    Button {
+                                        UIPasteboard.general.string = message.text
+                                    } label: {
+                                        Label("复制", systemImage: "doc.on.doc")
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -1068,8 +1085,21 @@ struct ChatView: View {
     /// `image` 只影响**显示**：聊天里出现一张图，而发给模型的是 `text`
     /// —— 从那张图里 OCR 出来的文字。用户要的就是这个：
     /// 「走的还是图片，只不过 TA 那边收到的是文字识别的东西。」
-    private func send(text: String, image: Data?) {
-        if isSending { stopSending() }
+    /// 重新生成这条回复（长按 AI 气泡 → 重新生成）。
+    ///
+    /// 做法：把「这条之前最近的一条用户消息」之后的**全部**消息删掉（含旧答案），
+    /// 再用那句话重跑一次，但 **不再 echo 用户消息** ——
+    /// 否则列表里会出现两条一模一样的提问。
+    private func regenerate(_ message: ChatMessage) {
+        guard !isSending else { return }
+        guard let idx = chat.messages.firstIndex(where: { $0.id == message.id }) else { return }
+        guard let ui = chat.messages[..<idx].lastIndex(where: { $0.role == .user }) else { return }
+        let user = chat.messages[ui]
+        chat.truncate(after: user.id)
+        send(text: user.text, image: user.imageData, echoUser: false)
+    }
+
+    private func send(text: String, image: Data?, echoUser: Bool = true) {        if isSending { stopSending() }
 
         errorText = nil
         toolNote = nil
@@ -1093,7 +1123,11 @@ struct ChatView: View {
             return
         }
 
-        chat.append(ChatMessage(role: .user, text: text, imageData: image))
+        //  是「重新生成」用的：用户那句话已经在列表里了，
+        // 再 append 一次就会变成连着两条一样的提问。
+        if echoUser {
+            chat.append(ChatMessage(role: .user, text: text, imageData: image))
+        }
         chat.append(ChatMessage(role: .assistant, text: ""))
 
         let config = settings.llm

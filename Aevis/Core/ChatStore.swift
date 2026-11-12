@@ -148,6 +148,21 @@ final class ChatStore: ObservableObject {
         pushToCloud(message, peer: currentContactID)
     }
 
+    /// 删掉这条消息**之后**的所有消息（含它自己之后的 AI 回复）。
+    ///
+    /// 用户 2026-11-12：「重新生成也没有」—— 要重答一次，就得先把旧答案抹掉，
+    /// 否则界面上会出现两段回答接着。
+    /// `messages` 是 `private(set)`，只能在这里改，所以这个动作必须走本方法。
+    /// - Returns: 被删掉的那一段（调用方一般不用，但便于回滚/日志）。
+    @discardableResult
+    func truncate(after id: UUID) -> [ChatMessage] {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return [] }
+        let dropped = Array(messages[(i + 1)...])
+        messages.removeSubrange((i + 1)...)
+        save()
+        return dropped
+    }
+
     /// 把一条消息推上云（多端同步）。**失败静默** —— 网络抖一下不能挡住聊天。
     private func pushToCloud(_ message: ChatMessage, peer: UUID?) {
         guard !isApplyingRemote, let peer else { return }
