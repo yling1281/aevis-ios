@@ -343,6 +343,12 @@ settings:
     #   ④ 出厂落在**通讯录**（`sanitizeTab` 兜底从 chats 改成 contacts）——
     #      跟设置页写的「出厂是通讯录」对齐。
     #   ⑤ 站内信 / 积分 / 人设广场的卡片跟着换底色；底栏选中色跟着主题色走。
+    # ⭐ 0.0.131（2026-11-13 凌晨·三）：**放不出声音的三个真原因**。
+    #   ① 播放页从来没显示过 errorText —— 没版权/要会员的歌点下去毫无反应，
+    #      看着就像「播放页没做、放不出声」。现在有错误条 + 重试 / 下一首。
+    #   ② 320k 是会员音质，拿不到时直接判失败。现在自动降 128k 重试一次
+    #      （实测《晴天》那种 404 的是真没版权，但有一批歌是只有 128k）。
+    #   ③ 没版权的歌自动跳下一首，最多连跳 3 首，防止全是 VIP 歌时空转。
     # ⭐ 0.0.130（2026-11-13 凌晨）：**「我」页二级菜单一步到全屏**（用户：「我要的是二级菜单全屏，
     #   不是小卡片弹出来」）。积分/规则/常见问题/免责声明/工单/人设广场/朋友圈/情侣空间/通讯录
     #   全部从 .sheet 换成 .fullScreenCover，并去掉重复的 NavigationStack 包装。
@@ -360,8 +366,8 @@ settings:
     #   ③ 人设广场卡片终于有头像：3 处把相对路径 `/v1/media/x` 直接塞给 AsyncImage，
     #      而 URL(string:) 拿到相对地址是解析不出 host 的 → 一直只显示名字首字占位。
     #      改成 avatarAbsolute。
-    MARKETING_VERSION: "0.0.130"
-    CURRENT_PROJECT_VERSION: "130"
+    MARKETING_VERSION: "0.0.131"
+    CURRENT_PROJECT_VERSION: "131"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

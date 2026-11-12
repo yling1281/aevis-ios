@@ -68,6 +68,13 @@ final class MusicPlayer: NSObject, ObservableObject {
     private var observedPlayer: AVPlayer?
     private var loadingTask: Task<Void, Never>?
 
+    /// 因为「没版权 / 要会员」连着自动跳了几首。
+    ///
+    /// 有些歌网易直接回 `url: null`（code 404/403），点下去只会弹个错。
+    /// 与其让用户一首首手点，不如自动往后跳 —— 但**必须限次数**：
+    /// 歌单里全是 VIP 歌时，不限制就会一路空转到递归里出不来。
+    private var autoSkipCount = 0
+
     /// 锁屏 / 灵动岛上那张封面图。`[曲目 id: 画好的图]`。
     ///
     /// 缓存是必要的：它每次发布都得**现算一遍**（`MPMediaItemArtwork` 是按
@@ -198,13 +205,25 @@ final class MusicPlayer: NSObject, ObservableObject {
 
     func next() async {
         guard !queue.isEmpty else { return }
+        autoSkipCount = 0
         index = (index + 1) % queue.count
         await loadCurrent()
     }
 
     func previous() async {
         guard !queue.isEmpty else { return }
+        autoSkipCount = 0
         index = (index - 1 + queue.count) % queue.count
+        await loadCurrent()
+    }
+
+    /// 失败后用户点「重试」走这里。
+    /// 不动队列、不动 index，就是把当前这首重新取一次地址再放。
+    func retry() async {
+        guard current != nil else { return }
+        BlackBox.step("重试当前这首")
+        autoSkipCount = 0
+        errorText = nil
         await loadCurrent()
     }
 
@@ -293,10 +312,23 @@ final class MusicPlayer: NSObject, ObservableObject {
             updateNowPlaying()
             loadArtwork(for: track)
             BlackBox.step("已经在放了")
+            autoSkipCount = 0
         } catch {
             BlackBox.failure("放歌失败", detail: error.localizedDescription)
             errorText = error.localizedDescription
             isPlaying = false
+
+            // 没版权 / 要会员的歌，网易直接回 url: null。
+            // 与其让用户对着错误一句句手点下一首，不如自动往后跳 ——
+            // 但最多连跳 3 首，歌单全是 VIP 时不能空转。
+            if autoSkipCount < 3, queue.count > 1 {
+                autoSkipCount += 1
+                BlackBox.step("这首放不了，自动跳下一首（第 \(autoSkipCount) 次）")
+                errorText = nil
+                index = (index + 1) % queue.count
+                await loadCurrent()
+                return
+            }
         }
 
         _ = lyricTask

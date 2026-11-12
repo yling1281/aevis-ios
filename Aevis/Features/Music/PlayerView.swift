@@ -202,6 +202,13 @@ struct PlayerView: View {
             // 中间这一块：唱片 ⇄ 歌词，点一下换。两样**不同时出现**。
             stage
 
+            // 放不出来的原因 + 两个出口。
+            // 这一块以前**完全没有** —— errorText 有值但没人读，
+            // 用户点一首没版权的歌就是「点了没反应、也没声音」。
+            if let err = player.errorText, !err.isEmpty {
+                errorBanner(err)
+            }
+
             Spacer(minLength: 8)
 
             progressArea
@@ -225,6 +232,56 @@ struct PlayerView: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 8)
         .animation(.easeOut(duration: 0.2), value: note)
+    }
+
+    /// 播放失败的原因 + 两个出口（重试 / 下一首）。
+    ///
+    /// 网易对没版权或要会员的歌会直接回 `url: null`（code 404 / 403）。
+    /// 以前页面什么都不显示，用户看到的就是「播放页没反应、放不出声音」——
+    /// 其实地址压根没拿到。现在把原因摆出来，还能一键跳过。
+    private func errorBanner(_ text: String) -> some View {
+        VStack(spacing: 9) {
+            Text(text)
+                .font(.aevis(12.5))
+                .foregroundStyle(theme.onBackground.opacity(0.92))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    BlackBox.tap("播放器 · 重试放歌")
+                    Task { await player.retry() }
+                } label: {
+                    Text("重试")
+                        .font(.aevis(12.5, weight: .semibold))
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(theme.onBackground.opacity(0.16)))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    BlackBox.tap("播放器 · 跳过这首")
+                    Task { await player.next() }
+                } label: {
+                    Text("下一首")
+                        .font(.aevis(12.5, weight: .semibold))
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(theme.onBackground.opacity(0.16)))
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundStyle(theme.onBackground.opacity(0.92))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.black.opacity(0.28))
+        )
+        .padding(.top, 10)
     }
 
     /// 中间那块：**会转的唱片** 或 **整屏歌词**，点一下切换。

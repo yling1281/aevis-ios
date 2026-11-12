@@ -854,7 +854,20 @@ final class NeteaseClient {
     /// ⚠️ `ids` 的值是 `[123]` —— **带方括号**。这里同样踩过
     /// `percentEncodedQuery` 那个坑（历史 bug「点歌就闪退」）。
     /// 现在方括号由 `queryItems` 编成 `%5B%5D`，服务端解码后一样。
+    ///
+    /// **320k 拿不到会降 128k 再要一次** —— 320k 是会员音质，
+    /// 有些歌非会员只给 128k。原来一步失败就直接报错，白瞎了一首能放的歌。
     func playableURL(for id: String, quality: Int = 320000) async throws -> URL {
+        do {
+            return try await rawPlayableURL(for: id, quality: quality)
+        } catch {
+            guard quality > 128000 else { throw error }
+            BlackBox.step("\(quality / 1000)k 没拿到，降 128k 重试")
+            return try await rawPlayableURL(for: id, quality: 128000)
+        }
+    }
+
+    private func rawPlayableURL(for id: String, quality: Int) async throws -> URL {
         BlackBox.step("取播放地址 id=\(id)")
         let json = try await request(
             plain: ("/api/song/enhance/player/url", ["ids": "[\(id)]", "br": "\(quality)"]),
