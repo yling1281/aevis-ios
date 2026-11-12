@@ -184,7 +184,7 @@ struct LoginView: View {
                 withAnimation(.snappy(duration: 0.25)) { showNative = true }
             } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: "safari")
+                    Image(systemName: "envelope.badge")
                         .font(.aevis(16))
                     Text("登录 / 注册")
                         .font(.aevis(16, weight: .semibold))
@@ -197,7 +197,7 @@ struct LoginView: View {
             .buttonStyle(.plain)
             .disabled(working)
 
-            Text("在浏览器里登录，登录完会自动回到 Aevis。账号密码、QQ、邮箱、扫码都能用；新用户也能在这一页注册。")
+            Text("用邮箱验证码或密码登录；新用户在同一页注册。")
                 .font(.aevis(11.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -227,82 +227,80 @@ struct LoginView: View {
         #endif
     }
 
-    // MARK: - 第三方登录（2026-11-02）
+    // MARK: - 第三方 / 其它入口（2026-11-12 改成一排小圆圈）
     //
-    // 用户要求：「弄好就在 app 开微信和 QQ 登录」。
-    //   · 微信：走我们自己的小程序扫码（见 `WXLoginSheet` 顶部那段说明）；
-    //   · QQ：跳 QQ 互联授权，服务端换完登录态再 302 回 `aevis://login?token=…`。
-    // 两条路都放在**第一屏**，不再藏在「其它登录方式」里。
+    // 用户原话：「绑定 QQ 微信的话都说了弄那个小圆圈」「登录 UI 全部重新做吧」。
+    // 以前是两张长条（图标 + 标题 + 副标题），像设置项；现在压成一排**圆形图标 +
+    // 下面一行字**，跟微信登录页同一个语汇：一眼看清有哪几种方式，点哪个进哪条路。
     private var thirdPartyCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("快速登录")
                 .font(.aevis(12))
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 0) {
-                Button {
+            HStack(spacing: 0) {
+                circleEntry("微信", symbol: "message.fill",
+                            color: Color(red: 0.29, green: 0.72, blue: 0.36),
+                            enabled: !working) {
                     showWXLogin = true
-                } label: {
-                    thirdRow("微信登录", "扫一下码，回来就登上了",
-                             color: Color(red: 0.29, green: 0.72, blue: 0.36),
-                             symbol: "qrcode")
                 }
-                .buttonStyle(.plain)
-                .disabled(working)
 
-                Rectangle()
-                    .fill(Color.primary.opacity(0.07))
-                    .frame(height: 0.5)
-                    .padding(.leading, 56)
-
-                Button {
+                circleEntry("QQ", symbol: "bubble.left.and.bubble.right.fill",
+                            color: Color(red: 0.26, green: 0.55, blue: 0.93),
+                            enabled: !working) {
                     loginWithQQ()
-                } label: {
-                    thirdRow("QQ 登录", "跳 QQ 授权页，回来就登上了",
-                             color: Color(red: 0.26, green: 0.55, blue: 0.93),
-                             symbol: "bubble.left.and.bubble.right.fill")
                 }
-                .buttonStyle(.plain)
-                .disabled(working)
+
+                circleEntry("手机号", symbol: "iphone",
+                            color: Color(red: 0.32, green: 0.62, blue: 0.95),
+                            enabled: !working) {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showNative = true
+                        tab = .code
+                    }
+                }
+
+                circleEntry("邮箱", symbol: "envelope.fill",
+                            color: Color(red: 0.55, green: 0.45, blue: 0.92),
+                            enabled: !working) {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showNative = true
+                        tab = .code
+                    }
+                }
             }
-            .padding(.vertical, 4)
-            .aevisGlass(cornerRadius: 18)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 4)
         }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 14)
+        .aevisGlass(cornerRadius: 20)
     }
 
-    private func thirdRow(_ title: String, _ detail: String,
-                          color: Color, symbol: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.aevis(15, weight: .medium))
-                .foregroundStyle(color)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(color.opacity(0.13)))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
+    /// 一个圆形入口：54pt 圆底 + 图标，下面 11.5pt 字。
+    private func circleEntry(_ title: String, symbol: String, color: Color,
+                             enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.14))
+                        .frame(width: 54, height: 54)
+                    Image(systemName: symbol)
+                        .font(.aevis(21, weight: .medium))
+                        .foregroundStyle(color)
+                }
                 Text(title)
-                    .font(.aevis(15.5, weight: .medium))
-                    .foregroundStyle(.primary)
-                Text(detail)
                     .font(.aevis(11.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-
-            Spacer(minLength: 8)
-
-            if working {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.aevis(12, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.45)
     }
 
     // MARK: - 三条路的切换
@@ -594,7 +592,15 @@ struct LoginView: View {
         }
     }
 
-    /// QQ：内置浏览器跳授权 → 服务端把 token 送回 `aevis://login`。
+    /// QQ：**系统浏览器**跳授权 → 服务端 302 回 `aevis://login` → `RootView.onOpenURL` 收。
+    ///
+    /// 🔴 2026-11-12 用户明确：「QQ 的那个登录不是内置浏览器，是切换到系统的那个浏览器，
+    ///    不要用里面的那个内置浏览器」。原来走 `WebAuth`（`ASWebAuthenticationSession`），
+    ///    那是**应用内**的 Safari 视图：QQ 授权页里再要拉起 QQ 客户端、或在它自己的
+    ///    域间跳转时，这个内嵌视图经常收不到 `aevis://` 回调 —— 用户看到的就是
+    ///    「QQ 回调有问题」。改用 `UIApplication.shared.open` 交给**真 Safari**，
+    ///    回调走系统的 URL scheme 唤起（`RootView.onOpenURL` → `receiveWebLogin`），
+    ///    这条路本来就已经实现好了，只是没被 QQ 用上。
     private func loginWithQQ() {
         guard !working else { return }
         note = nil
@@ -602,39 +608,34 @@ struct LoginView: View {
         working = true
 
         Task { @MainActor in
-            defer { working = false }
             // 🔴 2026-10-31：4-4 改成先进程问一次授权地址（`POST /v1/auth/qq/url`），
             //    所以这里必须先 await 拿到 URL 才能开浏览器。
-            //    拿不到只有两种原因：服务端没配 QQ 互联（当前就是这种），或网络断了 ——
+            //    拿不到只有两种原因：服务端没配 QQ 互联，或网络断了 ——
             //    两种都给同一句人话，别让用户去猜"账号服务器地址不对"。
             guard let url = await account.qqLoginURL() else {
+                working = false
                 note = "QQ 登录暂不可用（服务端还未配置 QQ 互联），先用邮箱验证码登录吧。"
                 noteIsBad = true
                 return
             }
-            // ⚠️ scheme 必须是 `aevis` —— 服务端就是往这个 scheme 跳的
-            //    （`AEVIS_APP_SCHEME`，默认 aevis）。对不上就永远收不到回调，
-            //    表现是"点了 QQ 登录，转一圈没反应"。
-            let callback = await WebAuth.shared.run(url: url, scheme: appScheme)
-            guard let callback else {
-                return          // 用户自己取消的，不用弹红字
-            }
-            let params = callback.queryParameters
-            if let token = params["token"], !token.isEmpty {
-                do {
-                    try await account.adoptWebToken(token)
-                } catch {
-                    note = error.localizedDescription
-                    noteIsBad = true
+            #if canImport(UIKit)
+            UIApplication.shared.open(url) { opened in
+                if !opened {
+                    Task { @MainActor in
+                        working = false
+                        note = "打不开浏览器。请检查系统里是否限制了打开网页。"
+                        noteIsBad = true
+                    }
+                } else {
+                    // 交出去了就不再拦着按钮 —— 用户可能在 Safari 里待一会儿。
+                    // 真正的结果由 `RootView.onOpenURL` 带回来。
+                    Task { @MainActor in working = false }
                 }
-                return
             }
-            note = AccountService.loginFailureText(params["qq_error"])
-            noteIsBad = true
+            #else
+            working = false
+            #endif
         }
     }
 
-    private var appScheme: String {
-        (Bundle.main.object(forInfoDictionaryKey: "AEVIS_APP_SCHEME") as? String) ?? "aevis"
-    }
 }

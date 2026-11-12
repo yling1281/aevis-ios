@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 /// 微信登录（2026-11-02）
 ///
 /// ## 为什么是「扫码」不是「一键授权」
@@ -99,7 +103,29 @@ struct WXLoginSheet: View {
             }
             .frame(height: 268)
 
-            Text(expired ? "这张码过期了，换一张" : "用微信扫一下，进去点「确认登录」")
+            // 直接跳微信小程序（用户 2026-11-12 要求）。自动跳过一次，
+            // 用户从微信切回来如果没确认，可以再点这里重新进。
+            Button {
+                openInWeChat()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "message.fill")
+                        .font(.aevis(14, weight: .medium))
+                    Text("打开微信授权")
+                        .font(.aevis(14.5, weight: .medium))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Color(red: 0.29, green: 0.72, blue: 0.36))
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(loading)
+
+            Text(expired ? "这张码过期了，换一张" : "进微信后点「确认登录」，这里会自动跳进 App")
                 .font(.aevis(V2.sub))
                 .foregroundStyle(expired ? Color.orange : V2.dim(0.55))
                 .multilineTextAlignment(.center)
@@ -108,9 +134,9 @@ struct WXLoginSheet: View {
 
     private var hintCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            row("1", "手机微信扫上面的码")
-            row("2", "会打开 Aevis 小程序的一个确认页")
-            row("3", "点「确认登录」，这里会自动跳进 App")
+            row("1", "点上面的「打开微信授权」直接进小程序")
+            row("2", "也可以用另一台手机扫上面的码")
+            row("3", "在微信里点「确认登录」，这里会自动跳进 App")
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,11 +193,33 @@ struct WXLoginSheet: View {
             ticket = t
             secondsLeft = t.expiresIn
             loading = false
+            // 🔴 2026-11-12 用户：「微信的话也是直接跳转到微信，跳转到小程序进行授权」——
+            //    拿到 `weixin://dl/business/...` 就**直接拉起微信**，不用先看码再扫。
+            //    没装微信 / 系统拦了跳转 → 什么都不发生，下面那张小程序码照旧能扫。
+            openInWeChat(silent: true)
             await watch(t)
         } catch {
             loading = false
             errorText = error.localizedDescription
         }
+    }
+
+    /// 拉起微信小程序。`silent` = 自动尝试时失败不弹字（用户还能扫码）。
+    private func openInWeChat(silent: Bool = false) {
+        guard let jump = ticket?.jumpURL else {
+            if !silent {
+                errorText = "这台设备打不开微信，用下面的码扫一下。"
+            }
+            return
+        }
+        #if canImport(UIKit)
+        UIApplication.shared.open(jump) { ok in
+            guard !ok, !silent else { return }
+            Task { @MainActor in
+                errorText = "打不开微信，用下面的码扫一下。"
+            }
+        }
+        #endif
     }
 
     /// 每 2 秒问一句「确认了吗」。**不无限等** —— 票过期就停，让用户自己点「换一张」。

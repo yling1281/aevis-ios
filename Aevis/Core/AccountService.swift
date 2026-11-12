@@ -330,6 +330,9 @@ final class AccountService: ObservableObject {
         let imageURL: URL?
         /// 有效期（秒）。
         let expiresIn: Int
+        /// `weixin://dl/business/...` —— 有它就**直接跳微信小程序**做授权，
+        /// 没有（或跳不动）才退回显示小程序码让用户扫。
+        var jumpURL: URL? = nil
     }
 
     enum WXLoginStatus {
@@ -351,7 +354,15 @@ final class AccountService: ObservableObject {
             image = URL(string: raw.hasPrefix("http") ? raw : base + raw)
         }
         let ttl = (json["expires_in"] as? Int) ?? 180
-        return WXLoginTicket(ticket: ticket, imageURL: image, expiresIn: ttl)
+        // 服务端给的 `weixin://dl/business/...` —— 有这个就能**直接跳微信小程序**，
+        // 不用让用户先看到码再自己扫（用户 2026-11-12：「微信的话也是直接跳转到微信，
+        // 跳转到小程序进行授权」）。
+        var jump: URL?
+        if let s = json["jump_url"] as? String, !s.isEmpty {
+            jump = URL(string: s)
+        }
+        return WXLoginTicket(ticket: ticket, imageURL: image,
+                             expiresIn: ttl, jumpURL: jump)
     }
 
     /// ② 问一句「小程序那边确认了吗」。拿到 token 就当场登录。
