@@ -26,6 +26,8 @@ final class AccountService: ObservableObject {
 
     /// 服务器地址变了、或者登录状态变了，界面要跟着刷新。
     @Published private(set) var profile: Profile?
+    /// 当前账号还没有真邮箱 —— 进 App 后先绑邮箱，别的一律不让用。
+    @Published private(set) var needsEmailBind = false
     @Published private(set) var busy = false
     @Published var lastError: String?
 
@@ -46,6 +48,13 @@ final class AccountService: ObservableObject {
         /// 空 = 没设过头像，界面回落到昵称首字。
         var avatar: String
         var expiresAt: Date?
+        /// 账号上有没有**真邮箱**。
+        ///
+        /// 2026-11-12：只绑了微信、还没补邮箱的账号（库里 email 是 NULL）
+        /// 服务端回 `email_bound: false`。App 要把人挡在绑定页，
+        /// 不然这个号换台手机就找不回来了。
+        /// 老服务端不返回这个字段 → nil，按"不用管"处理。
+        var emailBound: Bool? = nil
 
         /// 界面上显示哪个名字 —— 昵称优先，其次账号号，最后邮箱。
         var displayName: String {
@@ -144,6 +153,7 @@ final class AccountService: ObservableObject {
         settings.accountToken = ""
         settings.accountExpiresAt = 0
         profile = nil
+        needsEmailBind = false
         lastError = nil
     }
 
@@ -171,6 +181,8 @@ final class AccountService: ObservableObject {
         do {
             let me = try await get("/v1/me")
             profile = profileFrom(me)
+            // 没真邮箱 → 交给 RootView 拦一道绑定页
+            needsEmailBind = (profile?.emailBound == false)
             lastError = nil
             // 2026-11-12 用户：「各个渠道的头像同步……记得去拉取云端的头像」。
             // 以前只在登录那一下落本地，之后在小程序里改了头像，App 这边
@@ -510,6 +522,27 @@ final class AccountService: ObservableObject {
         let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard target.contains("@") else { throw AccountError.missingFields }
         _ = try await post("/v1/auth/email/code", ["email": target])
+    }
+
+    /// 给当前账号补一个真邮箱（2026-11-12）。
+    ///
+    /// 只绑了微信的号在库里没有邮箱，进主界面前会被 `RootView` 拦到绑定页。
+    /// 绑成功后服务端会把 `wx:<uid>` 那套 key 下的数据迁到这个邮箱，
+    /// 所以本地记的账号标识也要跟着换成邮箱 —— 否则积分/站内信会看成另一个人。
+    @MainActor
+    @discardableResult
+    func bindEmail(_ email: String, code: String) async throws -> Profile {
+        let target = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard target.contains("@") else { throw AccountError.missingFields }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count == 6 else { throw AccountError.missingFields }
+        _ = try await post("/v1/auth/email/bind", ["email": target, "code": trimmed])
+
+        settings.accountEmail = target
+        await refreshProfile()
+        needsEmailBind = false
+        return profile ?? Profile(id: "", username: target, nickname: "",
+                                  accountNo: "", avatar: "", expiresAt: nil)
     }
 
     /// 第二步：邮箱 + 密码 + 验证码 → 建号并直接登录。
@@ -861,7 +894,8 @@ final class AccountService: ObservableObject {
             nickname: (user["nickname"] as? String) ?? "",
             accountNo: accountNo,
             avatar: Self.text(user["avatar"]),
-            expiresAt: expires
+            expiresAt: expires,
+            emailBound: (user["email_bound"] as? Bool)
         )
     }
 

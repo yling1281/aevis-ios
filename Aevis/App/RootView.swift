@@ -276,6 +276,11 @@ struct RootView: View {
         if needsLogin {
             LoginView()
                 .transition(.opacity)
+        } else if needsEmailBind {
+            // 2026-11-12 用户：「检测到微信登录成功、但没绑邮箱，再让他们绑定一下」。
+            // 这一层在主界面之前：不绑邮箱进不去（左下角留了退出登录）。
+            BindEmailView()
+                .transition(.opacity)
         } else {
             normal
                 .transition(.opacity)
@@ -300,6 +305,19 @@ struct RootView: View {
         if args.contains("-aevisDemo") || args.contains("-aevisSkipGate") { return false }
         #endif
         return !account.isSignedIn
+    }
+
+    /// 要不要先补邮箱（微信登录建的号、账号上还没有真邮箱）。
+    ///
+    /// 跟 `needsLogin` 一样，截图自检（`-aevisDemo`）不能让这一层挡住，
+    /// 否则 CI 那几十张图会全变成绑定页。
+    private var needsEmailBind: Bool {
+        guard account.isConfigured, account.isSignedIn else { return false }
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-aevisDemo") || args.contains("-aevisSkipGate") { return false }
+        #endif
+        return account.needsEmailBind
     }
 
     @ViewBuilder
