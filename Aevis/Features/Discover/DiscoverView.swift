@@ -8,7 +8,6 @@ import SwiftUI
 /// ⭐ 2026-10-04：老板看完电脑版新界面之后说「**手机端也同步这些**」——
 ///    这一页一次补齐了四块：虚拟银行 / 日记 / 待办 / 一起玩。
 struct DiscoverView: View {
-    @EnvironmentObject private var personaStore: PersonaStore
     @ObservedObject private var router = AppRouter.shared
     @ObservedObject private var together = ListenTogetherService.shared
     @ObservedObject private var player = MusicPlayer.shared
@@ -16,6 +15,11 @@ struct DiscoverView: View {
     @ObservedObject private var diary = DiaryStore.shared
     @ObservedObject private var todo = TodoStore.shared
     /// 选人：这些入口以前直接吃"当前活跃角色"，现在统一先选（默认上次那个）。
+    ///
+    /// ⚠️ 2026-11-12:这里原来还有一行 `@EnvironmentObject private var personaStore`,
+    ///    和下面这个同名的 `@ObservedObject` 撞了 ——
+    ///    `invalid redeclaration of 'personaStore'`，CI 编译直接失败。
+    ///    保留 ObservedObject（指向单例），不依赖环境注入，sheet 里也能用。
     @ObservedObject private var personaStore = PersonaStore.shared
 
     @State private var showMusic = false
