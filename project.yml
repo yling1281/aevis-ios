@@ -343,6 +343,10 @@ settings:
     #   ④ 出厂落在**通讯录**（`sanitizeTab` 兜底从 chats 改成 contacts）——
     #      跟设置页写的「出厂是通讯录」对齐。
     #   ⑤ 站内信 / 积分 / 人设广场的卡片跟着换底色；底栏选中色跟着主题色走。
+    # ⭐ 0.0.129（2026-11-12 深夜·二）：**朋友圈按微信重做**（用户：「历史残留你还是在」）。
+    #   ① 删掉信息流顶部那张「说点什么…+发表」输入卡 —— 微信朋友圈没有它，发动态只从右上角进。
+    #   ② 评论从系统 alert（卡片弹出来）改成**贴着键盘的底部输入条**，点评论自动聚焦。
+    #   ③ 右上角菜单去掉「装扮朋友圈」（也是残留）。
     # ⭐ 0.0.128（2026-11-12 深夜）：**第二套底栏真的做了**（用户：「切换之后下面四个还在」）。
     #   ① `phoneTabs` 以前把四个 tab 写死，`homeStyle` 只改首屏落在哪一页 ——
     #      所以设了「个人中心式」看着毫无变化。现在 tab 列表跟着风格走：
@@ -352,8 +356,8 @@ settings:
     #   ③ 人设广场卡片终于有头像：3 处把相对路径 `/v1/media/x` 直接塞给 AsyncImage，
     #      而 URL(string:) 拿到相对地址是解析不出 host 的 → 一直只显示名字首字占位。
     #      改成 avatarAbsolute。
-    MARKETING_VERSION: "0.0.128"
-    CURRENT_PROJECT_VERSION: "128"
+    MARKETING_VERSION: "0.0.129"
+    CURRENT_PROJECT_VERSION: "129"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

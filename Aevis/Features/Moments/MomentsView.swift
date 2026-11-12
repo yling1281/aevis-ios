@@ -41,6 +41,8 @@ struct MomentsView: View {
     @State private var commentDraft = ""
     /// 这条评论是回复谁的（nil = 直接评论动态）。
     @State private var replyToName: String?
+    /// 底部评论条的焦点 —— 点「评论」要直接把键盘顶起来。
+    @FocusState private var commentFocused: Bool
 
     // —— 封面：微信那样，半屏通栏、无圆角 ——
     //
@@ -94,8 +96,10 @@ struct MomentsView: View {
                 // 微信是**通栏一行一条 + 细分隔线**，没有卡片、没有圆角、没有间距。
                 // 所以这里 spacing 归 0、去掉左右留白，每条后面插一根分隔线（左侧缩进）。
                 LazyVStack(spacing: 0) {
-                    composer
-                    feedDivider
+                    // 🔴 2026-11-12 用户：「朋友圈的那些历史残留你还是在」——
+                    //    顶部那个"说点什么…+发表"的输入卡就是残留。微信朋友圈没有它，
+                    //    发动态只从右上角相机进（全屏 MomentsComposeView）。
+                    //    这里删掉后，信息流第一行就是动态本身。
 
                     if moments.moments.isEmpty {
                         emptyState
@@ -160,12 +164,6 @@ struct MomentsView: View {
                         }
                         .disabled(busy || !settings.isConfigured)
 
-                        Button {
-                            showDecor = true
-                        } label: {
-                            Label("装扮朋友圈", systemImage: "paintbrush")
-                        }
-
                         Button(role: .destructive) {
                             showClearConfirm = true
                         } label: {
@@ -202,13 +200,12 @@ struct MomentsView: View {
                     }
                 }
             }
-            .alert(commentAlertTitle, isPresented: Binding(
-                get: { commentingOn != nil },
-                set: { if !$0 { commentingOn = nil; replyToName = nil } }
-            )) {
-                TextField("说点什么…", text: $commentDraft, axis: .vertical)
-                Button("发出去") { submitComment() }
-                Button("取消", role: .cancel) { commentingOn = nil; replyToName = nil }
+            // 🔴 评论不再用系统 alert（那是"卡片弹出来"的典型），
+            //    改成微信那样**贴着键盘的底部输入条**（safeAreaInset 会自己顶起来）。
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if commentingOn != nil {
+                    commentBar
+                }
             }
             .onChange(of: pickedPhoto) { _, item in
                 guard let item else { return }
@@ -476,6 +473,7 @@ struct MomentsView: View {
                                 replyToName = displayName(for: comment.author)
                                 commentDraft = ""
                                 commentingOn = moment
+                                commentFocused = true
                             }
                         }
                     }
@@ -500,6 +498,7 @@ struct MomentsView: View {
                         commentDraft = ""
                         replyToName = nil
                         commentingOn = moment
+                        commentFocused = true
                     } label: {
                         Label("评论", systemImage: "bubble.right")
                             .font(mfont(12))
@@ -550,10 +549,39 @@ struct MomentsView: View {
         moment.likes.contains(.me) ? .me : moment.author
     }
 
-    /// 弹窗标题：回复某个人时写清楚回的是谁，不然容易发错人。
-    private var commentAlertTitle: String {
-        guard let replyToName, !replyToName.isEmpty else { return "评论" }
-        return "回复 \(replyToName)"
+    /// 底部评论条 —— 微信那种贴着键盘的输入条（不是系统 alert 卡片）。
+    private var commentBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .bottom, spacing: 9) {
+                TextField(replyToName.map { "回复 \($0)" } ?? "评论",
+                          text: $commentDraft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .font(mfont(14))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Color(.secondarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .focused($commentFocused)
+
+                Button {
+                    submitComment()
+                } label: {
+                    Text("发送")
+                        .font(mfont(14, weight: .semibold))
+                        .foregroundStyle(canSubmitComment ? settings.accentColor : Color.secondary)
+                        .padding(.vertical, 9)
+                }
+                .disabled(!canSubmitComment)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(.bar)
+    }
+
+    private var canSubmitComment: Bool {
+        !commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// 评论那一行的"谁说的"—— 回复别人时带上「回复 XX」。
