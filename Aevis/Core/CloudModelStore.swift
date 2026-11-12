@@ -15,12 +15,18 @@ struct CloudModel: Identifiable, Codable, Hashable {
     /// 官方价（元 / 百万 token），用于展示"我们比官方贵多少"
     let officialInputYuanPerM: Double
     let officialOutputYuanPerM: Double
+    /// 按次计费时每次多少积分（0 = 这个模型按 token 算）。
+    /// 2026-11-12 用户：「按次计费也要把价格写出来，按量计费也要把价格写出来」。
+    var perCallPoints: Double = 0
+    /// "per_token" / "per_call"
+    var billing: String = "per_token"
 
     enum CodingKeys: String, CodingKey {
         case id, label, note
         case isDefault = "default"
         case inputPointsPerM, outputPointsPerM
         case officialInputYuanPerM, officialOutputYuanPerM
+        case perCallPoints, billing
     }
 
     /// ⚠️ **必须显式写这个初始化器**。
@@ -31,7 +37,8 @@ struct CloudModel: Identifiable, Codable, Hashable {
     /// 所以这里把全参初始化器补回来（兜底名单就是用它建的）。
     init(id: String, label: String, note: String, isDefault: Bool,
          inputPointsPerM: Double, outputPointsPerM: Double,
-         officialInputYuanPerM: Double, officialOutputYuanPerM: Double) {
+         officialInputYuanPerM: Double, officialOutputYuanPerM: Double,
+         perCallPoints: Double = 0, billing: String = "per_token") {
         self.id = id
         self.label = label
         self.note = note
@@ -40,6 +47,8 @@ struct CloudModel: Identifiable, Codable, Hashable {
         self.outputPointsPerM = outputPointsPerM
         self.officialInputYuanPerM = officialInputYuanPerM
         self.officialOutputYuanPerM = officialOutputYuanPerM
+        self.perCallPoints = perCallPoints
+        self.billing = billing
     }
 
     init(from decoder: Decoder) throws {
@@ -52,12 +61,17 @@ struct CloudModel: Identifiable, Codable, Hashable {
         outputPointsPerM = (try? c.decode(Double.self, forKey: .outputPointsPerM)) ?? 0
         officialInputYuanPerM = (try? c.decode(Double.self, forKey: .officialInputYuanPerM)) ?? 0
         officialOutputYuanPerM = (try? c.decode(Double.self, forKey: .officialOutputYuanPerM)) ?? 0
+        perCallPoints = (try? c.decode(Double.self, forKey: .perCallPoints)) ?? 0
+        billing = (try? c.decode(String.self, forKey: .billing)) ?? "per_token"
     }
 
     /// 「输入 1 元 ≈ 多少积分」这类提示用得上。
     var priceHint: String {
-        String(format: "输入 %.0f 积分 / 百万字，输出 %.0f 积分 / 百万字",
-               inputPointsPerM, outputPointsPerM)
+        if billing == "per_call", perCallPoints > 0 {
+            return String(format: "每次 %.0f 积分", perCallPoints)
+        }
+        return String(format: "输入 %.0f 积分 / 百万字，输出 %.0f 积分 / 百万字",
+                      inputPointsPerM, outputPointsPerM)
     }
 
     /// 归到哪个厂商分组。
@@ -235,7 +249,9 @@ final class CloudModelStore: ObservableObject {
                     inputPointsPerM: (row["inputPointsPerM"] as? Double) ?? 0,
                     outputPointsPerM: (row["outputPointsPerM"] as? Double) ?? 0,
                     officialInputYuanPerM: (row["officialInputYuanPerM"] as? Double) ?? 0,
-                    officialOutputYuanPerM: (row["officialOutputYuanPerM"] as? Double) ?? 0
+                    officialOutputYuanPerM: (row["officialOutputYuanPerM"] as? Double) ?? 0,
+                    perCallPoints: (row["perCallPoints"] as? Double) ?? 0,
+                    billing: (row["billing"] as? String) ?? "per_token"
                 )
             }
             if !decoded.isEmpty {
