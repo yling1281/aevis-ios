@@ -82,7 +82,11 @@ struct MainTabView: View {
         //    首屏纹丝不动，看起来就是"只有切换、没有效果"。
         //    现在切换当场落到对应首屏：个人中心 → 「我」，微信式 → 「聊天」。
         .onChange(of: settings.homeStyle) { _, _ in
-            tab = settings.isPersonalHome ? .me : .chats
+            // 切换风格时既要换首屏，也要防「当前 tab 在新风格里不存在」——
+            // 比如正在通讯录（微信式）切到个人中心式，而那边只有「我 / 聊天」。
+            let vis = visibleTabs
+            let want: MainTab = settings.isPersonalHome ? .me : .chats
+            tab = vis.contains(want) ? want : (vis.first ?? .chats)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await updateCenter.checkIfNeeded() }
@@ -245,28 +249,29 @@ struct MainTabView: View {
         #endif
     }
 
-    /// iPhone：底下那四个 tab（原样）。
+    /// iPhone：底栏 tab。**数量跟着「首页样式」走** ——
+    ///
+    /// - `wechat`（微信式）：聊天 / 通讯录 / 发现 / 我，四个
+    /// - `personal`（个人中心式）：**只有两个** —— 我 / 聊天，「我」在第一格
+    ///
+    /// 🔴 2026-11-12 用户：「切换之后下面四个还在」——
+    ///    以前这个 TabView 把四个 tab 写死了，`homeStyle` 只改首屏落在哪一页，
+    ///    tab 数量纹丝不动。所以看着就是"只有开关、没有效果"。
+    private var visibleTabs: [MainTab] {
+        settings.isPersonalHome ? [.me, .chats] : [.chats, .contacts, .discover, .me]
+    }
+
     private var phoneTabs: some View {
         TabView(selection: $tab) {
             // ⚠️ `page(for:)` 里那四行 `.aevisScreen` 是**全量操作埋点**的一半，
-            // 别删 —— 底栏四个页面 + 那几个弹层全是从这一处呈现的，
+            // 别删 —— 底栏页面 + 那几个弹层全是从这一处呈现的，
             // 挂在那里 = 一种布局改完两种布局都覆盖
             //（用户要求「不管点了哪个按键都要记起来」）。
-            page(for: .chats)
-                .tabItem { Label(MainTab.chats.title, systemImage: MainTab.chats.symbol) }
-                .tag(MainTab.chats)
-
-            page(for: .contacts)
-                .tabItem { Label(MainTab.contacts.title, systemImage: MainTab.contacts.symbol) }
-                .tag(MainTab.contacts)
-
-            page(for: .discover)
-                .tabItem { Label(MainTab.discover.title, systemImage: MainTab.discover.symbol) }
-                .tag(MainTab.discover)
-
-            page(for: .me)
-                .tabItem { Label(MainTab.me.title, systemImage: MainTab.me.symbol) }
-                .tag(MainTab.me)
+            ForEach(visibleTabs) { item in
+                page(for: item)
+                    .tabItem { Label(item.title, systemImage: item.symbol) }
+                    .tag(item)
+            }
         }
         // 底栏选中色跟着主题色走（2026-11-01 v2：淡紫）。
         .tint(settings.accentColor)
@@ -281,7 +286,7 @@ struct MainTabView: View {
         NavigationSplitView {
             List(selection: padSelection) {
                 Section {
-                    ForEach(MainTab.allCases) { item in
+                    ForEach(visibleTabs) { item in
                         Label(item.title, systemImage: item.symbol)
                             .tag(item)
                     }
@@ -359,5 +364,9 @@ struct MainTabView: View {
         // —— 模拟器里真起电话必然失败，失败就没有那一层，截图等于白截。
         if args.contains("-aevisOpenCall") { router.startCall() }
         #endif
+
+        // 兜底：设的默认页 / 截图参数可能指向当前风格里不存在的 tab
+        //（个人中心式只有「我 / 聊天」两格），落到第一格，别让 TabView 空着。
+        if !visibleTabs.contains(tab) { tab = visibleTabs.first ?? .chats }
     }
 }

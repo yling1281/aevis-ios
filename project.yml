@@ -343,8 +343,17 @@ settings:
     #   ④ 出厂落在**通讯录**（`sanitizeTab` 兜底从 chats 改成 contacts）——
     #      跟设置页写的「出厂是通讯录」对齐。
     #   ⑤ 站内信 / 积分 / 人设广场的卡片跟着换底色；底栏选中色跟着主题色走。
-    MARKETING_VERSION: "0.0.127"
-    CURRENT_PROJECT_VERSION: "127"
+    # ⭐ 0.0.128（2026-11-12 深夜）：**第二套底栏真的做了**（用户：「切换之后下面四个还在」）。
+    #   ① `phoneTabs` 以前把四个 tab 写死，`homeStyle` 只改首屏落在哪一页 ——
+    #      所以设了「个人中心式」看着毫无变化。现在 tab 列表跟着风格走：
+    #      微信式 = 聊天/通讯录/发现/我；个人中心式 = **只有「我 / 聊天」两格，「我」在第一格**。
+    #      iPad 侧栏同步；`applyLaunchOptions` 加了兜底（默认页/截图参数指向不存在的 tab 时落到第一格）。
+    #   ② 「我」页的「更多设置」在个人中心式下**默认展开** —— 用户：「那些其实都是收起来的呀」。
+    #   ③ 人设广场卡片终于有头像：3 处把相对路径 `/v1/media/x` 直接塞给 AsyncImage，
+    #      而 URL(string:) 拿到相对地址是解析不出 host 的 → 一直只显示名字首字占位。
+    #      改成 avatarAbsolute。
+    MARKETING_VERSION: "0.0.128"
+    CURRENT_PROJECT_VERSION: "128"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

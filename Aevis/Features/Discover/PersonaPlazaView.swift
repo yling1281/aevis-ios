@@ -274,7 +274,7 @@ struct PersonaPlazaStrip: View {
 
     private func card(_ p: PlazaPersona) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            PlazaAvatar(name: p.name, url: p.avatarURL, size: 58)
+            PlazaAvatar(name: p.name, url: p.avatarAbsolute, size: 58)
             Text(p.name)
                 .font(.aevis(13.5, weight: .medium))
                 .lineLimit(1)
@@ -406,7 +406,7 @@ struct PersonaPlazaView: View {
                     if case .success(let img) = phase {
                         img.resizable().scaledToFill()
                     } else {
-                        PlazaAvatar(name: p.name, url: p.avatarURL, size: 64)
+                        PlazaAvatar(name: p.name, url: p.avatarAbsolute, size: 64)
                             .frame(maxWidth: .infinity, minHeight: 96)
                     }
                 }
@@ -415,7 +415,7 @@ struct PersonaPlazaView: View {
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             } else {
-                PlazaAvatar(name: p.name, url: p.avatarURL, size: 64)
+                PlazaAvatar(name: p.name, url: p.avatarAbsolute, size: 64)
             }
             Text(p.name)
                 .font(.aevis(14.5, weight: .medium))

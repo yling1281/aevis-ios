@@ -43,7 +43,10 @@ struct MeView: View {
     @State private var showTickets = false
     @State private var showRules = false
     @State private var showPoints = false
-    @State private var showMore = false
+    /// 「更多设置」展开状态。
+    /// 个人中心式默认**全部展开** —— 用户 2026-11-12：「那些的话其实都是收起来的呀」，
+    /// 他要的是进去一眼看全，不是再点一次才看到表情/音乐/外接工具。
+    @State private var showMore = AppSettings.shared.isPersonalHome
     @State private var showDiscover = false
     // 个人中心版的「社交」那一排（2026-11-12）
     @State private var showContacts = false
