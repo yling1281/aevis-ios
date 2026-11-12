@@ -19,8 +19,71 @@ struct EmojiCard: View {
     @State private var remoteURLs = ""
     @State private var remoteNote: String?
     @State private var importingRemote = false
+    /// 发现里的表情包（2026-11-12）：创作者上传的，可以一键导进来。
+    @State private var plazaPacks: [PlazaPack] = []
+    @State private var loadingPlaza = false
+    @State private var plazaError: String?
+
+    struct PlazaPack: Identifiable {
+        let id: String
+        let name: String
+        let intro: String
+        let cover: String
+        let items: [String]
+        var count: Int { items.count }
+    }
 
     private var importedCount: Int { emoji.custom.count }
+
+    /// 把 `/v1/emoji/list` 的相对路径补成绝对地址。
+    private func absolute(_ u: String) -> String {
+        let v = u.trimmingCharacters(in: .whitespacesAndNewlines)
+        if v.isEmpty { return "" }
+        return v.hasPrefix("http") ? v : (AevisHosts.accountBase + v)
+    }
+
+    private func loadPlaza() async {
+        await MainActor.run { loadingPlaza = true; plazaError = nil }
+        guard let url = URL(string: AevisHosts.accountBase + "/v1/emoji/list") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let d = obj["data"] as? [String: Any],
+                  let rows = d["rows"] as? [[String: Any]] else {
+                await MainActor.run { loadingPlaza = false; plazaError = "读取失败" }
+                return
+            }
+            let packs = rows.map { r -> PlazaPack in
+                let raw = (r["items"] as? [String]) ?? []
+                return PlazaPack(
+                    id: (r["id"] as? String) ?? UUID().uuidString,
+                    name: (r["name"] as? String) ?? "",
+                    intro: (r["intro"] as? String) ?? "",
+                    cover: absolute((r["cover_url"] as? String) ?? ""),
+                    items: raw.map { self.absolute($0) }
+                )
+            }
+            await MainActor.run { plazaPacks = packs; loadingPlaza = false }
+        } catch {
+            await MainActor.run { loadingPlaza = false; plazaError = "网络异常" }
+        }
+    }
+
+    private func importPack(_ p: PlazaPack) {
+        guard !p.items.isEmpty else { return }
+        Task {
+            await MainActor.run { note = "正在导入「\(p.name)」…" }
+            let r = await emoji.importRemoteURLs(p.items)
+            await MainActor.run {
+                if r.added.isEmpty {
+                    note = "「\(p.name)」没导进来（\(r.failed.count) 张失败）"
+                } else {
+                    note = "「\(p.name)」导入 \(r.added.count) 张" +
+                        (r.failed.isEmpty ? "" : "，\(r.failed.count) 张失败")
+                }
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -226,8 +289,77 @@ struct EmojiCard: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
+
+            rule
+
+            // ——— 发现里的表情包（2026-11-12）———
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("发现里的表情包")
+                        .font(.aevis(12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button {
+                        Task { await loadPlaza() }
+                    } label: {
+                        Text(loadingPlaza ? "加载中…" : "刷新")
+                            .font(.aevis(12.5))
+                            .foregroundStyle(settings.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(loadingPlaza)
+                }
+
+                if let plazaError {
+                    Text(plazaError)
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                } else if plazaPacks.isEmpty {
+                    Text(loadingPlaza ? "正在读…" : "还没有人上传过表情包")
+                        .font(.aevis(11.5))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ForEach(plazaPacks.prefix(6)) { p in
+                        HStack(spacing: 10) {
+                            if let u = URL(string: p.cover), !p.cover.isEmpty {
+                                AsyncImage(url: u) { phase in
+                                    if case .success(let img) = phase {
+                                        img.resizable().scaledToFill()
+                                    } else {
+                                        Color.secondary.opacity(0.12)
+                                    }
+                                }
+                                .frame(width: 38, height: 38)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.name).font(.aevis(13, weight: .medium))
+                                Text("\(p.count) 张\(p.intro.isEmpty ? "" : " · " + p.intro)")
+                                    .font(.aevis(11))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                            Button {
+                                importPack(p)
+                            } label: {
+                                Text("导入")
+                                    .font(.aevis(12.5, weight: .medium))
+                                    .padding(.horizontal, 12).padding(.vertical, 5)
+                                    .background(Capsule().fill(settings.accentColor.opacity(0.14)))
+                                    .foregroundStyle(settings.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
         }
         .aevisGlass(cornerRadius: 20)
+        .task { await loadPlaza() }
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.image],

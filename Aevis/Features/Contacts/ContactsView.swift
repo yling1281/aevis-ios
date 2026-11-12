@@ -32,7 +32,7 @@ struct ContactsView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         if personaStore.contacts.isEmpty {
-                            V2Empty("通讯录里还没有人", hint: "点右上角 + 建一个，或者去「发现 · 人设广场」挑一个")
+                            V2Empty("通讯录里还没有人", hint: "点右上角 + 建一个，或者去「发现」挑一个")
                         } else {
                             V2Card {
                                 ForEach(personaStore.contacts.indices, id: \.self) { i in

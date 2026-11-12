@@ -260,7 +260,7 @@ struct PersonaSheet: View {
                 HStack {
                     Image(systemName: "square.and.arrow.up")
                         .font(.aevis(15))
-                    Text(publishing ? "正在提交…" : "把 TA 上传到人设广场")
+                    Text(publishing ? "正在提交…" : "把 TA 上传到「发现」")
                         .font(.aevis(15))
                     Spacer(minLength: 8)
                 }
@@ -283,7 +283,7 @@ struct PersonaSheet: View {
         let account = AppSettings.shared.accountEmail
             .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !account.isEmpty else {
-            note = "先登录账号，才能上传到人设广场"
+            note = "先登录账号，才能上传到「发现」"
             return
         }
         var req = URLRequest(url: URL(string: AevisHosts.accountBase + "/v1/psquare/publish")!)
@@ -303,7 +303,7 @@ struct PersonaSheet: View {
             let (data, _) = try await URLSession.shared.data(for: req)
             let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             if (obj["code"] as? Int) == 0 {
-                note = "已提交到人设广场，AI 审核通过后会先上架"
+                note = "已提交到「发现」，AI 审核通过后会先上架"
             } else {
                 note = (obj["msg"] as? String) ?? "提交失败，稍后再试"
             }

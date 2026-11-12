@@ -16,6 +16,8 @@ struct PlazaPersona: Identifiable, Hashable {
     let personality: String
     let tagline: String
     let avatarURL: String
+    /// 形象图（2026-11-12 后端新加）：广场卡片优先显示它，没有才用圆形头像。
+    let coverURL: String
     let adoptCount: Int
 
     init(dict: [String: Any]) {
@@ -28,6 +30,7 @@ struct PlazaPersona: Identifiable, Hashable {
         personality = dict["personality"] as? String ?? ""
         tagline = dict["tagline"] as? String ?? ""
         avatarURL = dict["avatar_url"] as? String ?? ""
+        coverURL = dict["cover_url"] as? String ?? ""
         adoptCount = dict["adopt_count"] as? Int ?? 0
     }
 
@@ -46,6 +49,31 @@ struct PlazaPersona: Identifiable, Hashable {
         p.personality = personality
         p.speakingStyle = tagline
         return p
+    }
+
+    /// 后端可能存相对路径（`/v1/media/x.jpg`），补成绝对地址。
+    private func absolute(_ u: String) -> String {
+        let v = u.trimmingCharacters(in: .whitespacesAndNewlines)
+        if v.isEmpty { return "" }
+        return v.hasPrefix("http") ? v : (AevisHosts.accountBase + v)
+    }
+
+    var avatarAbsolute: String { absolute(avatarURL) }
+    var coverAbsolute: String { absolute(coverURL) }
+
+    /// 把这个人设的头像下载下来，存成本地头像。
+    ///
+    /// 2026-11-12 用户：「下载下来也是自带头像的」——
+    /// 以前只把文字设定搬进通讯录，头像永远是首字占位。
+    /// 优先用头像，没有头像才退回形象图（裁成方的也能用）。
+    func applyAvatar(to pid: UUID) async {
+        let raw = avatarAbsolute.isEmpty ? coverAbsolute : avatarAbsolute
+        guard !raw.isEmpty, let url = URL(string: raw) else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let img = UIImage(data: data) else { return }
+        await MainActor.run {
+            PersonaStore.shared.setAvatar(img, for: pid, original: data)
+        }
     }
 
     var subtitle: String {
@@ -271,6 +299,20 @@ struct PersonaPlazaView: View {
     @State private var detail: PlazaPersona?
     @State private var showPublish = false
     @State private var toast: String?
+    /// 搜索词（2026-11-12 用户：「iOS 端的那个人设广场是要加搜索的」）。
+    @State private var kw = ""
+
+    /// 按名字 / 身份 / 一句话 / 性格过滤。空词就是全部。
+    private var filtered: [PlazaPersona] {
+        let q = kw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return store.rows }
+        return store.rows.filter { p in
+            [p.name, p.identity, p.tagline, p.personality, p.relation]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(q)
+        }
+    }
 
     private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -288,19 +330,34 @@ struct PersonaPlazaView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 80)
                 } else {
-                    LazyVGrid(columns: cols, spacing: 12) {
-                        ForEach(store.rows) { p in
-                            Button { detail = p } label: { tile(p) }
-                                .buttonStyle(.plain)
+                    if filtered.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.aevis(26)).foregroundStyle(.tertiary)
+                            Text("没找到「\(kw)」")
+                                .font(.aevis(13.5)).foregroundStyle(.secondary)
+                            Button("清空搜索") { kw = "" }
+                                .font(.aevis(13))
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 70)
+                    } else {
+                        LazyVGrid(columns: cols, spacing: 12) {
+                            ForEach(filtered) { p in
+                                Button { detail = p } label: { tile(p) }
+                                    .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(14)
                     }
-                    .padding(14)
                 }
             }
             .refreshable { await store.load() }
             .background(V2.background.ignoresSafeArea())
-            .navigationTitle("人设广场")
+            .navigationTitle("发现")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $kw, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "搜名字 / 身份 / 一句话")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { dismiss() }
@@ -343,7 +400,23 @@ struct PersonaPlazaView: View {
 
     private func tile(_ p: PlazaPersona) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            PlazaAvatar(name: p.name, url: p.avatarURL, size: 64)
+            // 2026-11-12：有形象图就铺一张大的（方形裁切），没有才退回圆形头像。
+            if !p.coverAbsolute.isEmpty {
+                AsyncImage(url: URL(string: p.coverAbsolute)) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().scaledToFill()
+                    } else {
+                        PlazaAvatar(name: p.name, url: p.avatarURL, size: 64)
+                            .frame(maxWidth: .infinity, minHeight: 96)
+                    }
+                }
+                .frame(height: 116)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            } else {
+                PlazaAvatar(name: p.name, url: p.avatarURL, size: 64)
+            }
             Text(p.name)
                 .font(.aevis(14.5, weight: .medium))
                 .foregroundStyle(.primary)
@@ -394,7 +467,7 @@ struct PlazaDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 14) {
-                        PlazaAvatar(name: persona.name, url: persona.avatarURL, size: 76)
+                        PlazaAvatar(name: persona.name, url: persona.avatarAbsolute, size: 76)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(persona.name).font(.aevis(20, weight: .semibold))
                             Text(persona.subtitle)
@@ -422,6 +495,8 @@ struct PlazaDetailView: View {
                         let id = PersonaStore.shared.add(p)
                         PersonaStore.shared.select(id)
                         added = true
+                        // 头像一起带过来（用户：下载下来也自带头像）
+                        Task { await persona.applyAvatar(to: id) }
                         onUsed("已把「\(p.name)」加进通讯录")
                         dismiss()
                     } label: {
