@@ -26,6 +26,11 @@ struct ShareCard: View {
     @State private var backupURL: URL?
     @State private var showImporter = false
     @State private var busy = false
+    /// 选完文件先不立刻恢复：先弹一张带「导入」按钮的确认页（用户 2026-11-12：
+    /// 「选取的话你右上角没有那个提交……那些文件备份的那些文件全都是没有那种提交」）。
+    @State private var showRestoreConfirm = false
+    @State private var pendingBackup: Data?
+    @State private var pendingName = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -85,11 +90,73 @@ struct ShareCard: View {
         }
         .fileImporter(
             isPresented: $showImporter,
-            allowedContentTypes: [.json, .data],
+            // 备份文件有 `.json` 也有 `.aevis`（加密二进制），还有用户自己改名的。
+            // 限定类型会让文件在选择器里变灰 —— 右上角「打开」跟着用不了。
+            // 干脆放开成全类型，读完由 BackupService 自己判断是不是备份。
+            allowedContentTypes: [.item],
             allowsMultipleSelection: false
         ) { result in
             handlePicked(result)
         }
+        .sheet(isPresented: $showRestoreConfirm) { restoreConfirmSheet }
+    }
+
+    /// 「恢复备份」确认页：**右上角有「导入」**，不再选完文件就闷头覆盖。
+    private var restoreConfirmSheet: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                Image(systemName: "doc.zipper")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(.secondary)
+
+                Text(pendingName.isEmpty ? "备份文件" : pendingName)
+                    .font(.aevis(15, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+
+                Text("导入会用这份备份覆盖这台手机上现有的联系人、聊天记录、记忆和朋友圈。")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .navigationTitle("恢复备份")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        showRestoreConfirm = false
+                        pendingBackup = nil
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("导入") { applyPendingBackup() }
+                        .font(.aevis(15, weight: .semibold))
+                }
+            }
+        }
+    }
+
+    private func applyPendingBackup() {
+        guard let data = pendingBackup else {
+            showRestoreConfirm = false
+            return
+        }
+        busy = true
+        do {
+            let summary = try BackupService.shared.restore(from: data)
+            note = summary + "。头像和朋友圈配图不在包里，要自己重设一次。"
+        } catch {
+            note = "恢复失败：" + error.localizedDescription
+        }
+        busy = false
+        pendingBackup = nil
+        pendingName = ""
+        showRestoreConfirm = false
     }
 
     // MARK: - 各行
@@ -293,11 +360,13 @@ struct ShareCard: View {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             do {
-                let data = try Data(contentsOf: url)
-                let summary = try BackupService.shared.restore(from: data)
-                note = summary + "。头像和朋友圈配图不在包里，要自己重设一次。"
+                // 只读进内存，等用户在确认页点右上角「导入」再覆盖
+                pendingBackup = try Data(contentsOf: url)
+                pendingName = url.lastPathComponent
+                note = nil
+                showRestoreConfirm = true
             } catch {
-                note = "恢复失败：" + error.localizedDescription
+                note = "读不了这个文件：" + error.localizedDescription
             }
         case .failure(let error):
             note = "选文件失败：" + error.localizedDescription
