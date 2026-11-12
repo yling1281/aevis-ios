@@ -172,6 +172,10 @@ final class AccountService: ObservableObject {
             let me = try await get("/v1/me")
             profile = profileFrom(me)
             lastError = nil
+            // 2026-11-12 用户：「各个渠道的头像同步……记得去拉取云端的头像」。
+            // 以前只在登录那一下落本地，之后在小程序里改了头像，App 这边
+            // 刷新资料只更新卡片文字、头像还是旧的。这里每次都同步一次。
+            await applyToLocalProfile()
         } catch {
             lastError = error.localizedDescription
         }
@@ -553,7 +557,29 @@ final class AccountService: ObservableObject {
     @MainActor
     @discardableResult
     func uploadAvatar(_ image: UIImage) async throws -> Profile {
-        throw AccountError.server("头像上传暂未开放（服务端还没提供图片存储），昵称可以先改。")
+        // 2026-11-12：4-4 早就有 `/v1/media`（base64 落盘 + `/v1/media/<name>` 取图），
+        // 小程序一直在用，App 这边却还停在"暂未开放"。
+        // 流程：图 → JPEG → base64 → POST /v1/media 拿 name → 把绝对地址写进账号资料。
+        guard let data = image.jpegData(compressionQuality: 0.9) else {
+            throw AccountError.badResponse("头像编码失败")
+        }
+        if data.count > 7 * 1024 * 1024 {
+            throw AccountError.server("头像太大了（超过 7 MB），换一张小点的")
+        }
+        let up = try await post("/v1/media", [
+            "ext": "jpg",
+            "data": data.base64EncodedString(),
+        ])
+        guard let name = up["name"] as? String, !name.isEmpty else {
+            throw AccountError.badResponse("上传接口没返回文件名")
+        }
+        let url = base + "/v1/media/" + name
+        _ = try await post("/v1/me/profile", ["avatar": url])
+        await refreshProfile()
+        await applyToLocalProfile()
+        return profile ?? Profile(id: "", username: settings.accountEmail,
+                                  nickname: "", accountNo: "", avatar: url,
+                                  expiresAt: nil)
     }
 
     /// 把账号上的资料落到**本地**（`ProfileStore`）。
@@ -768,7 +794,9 @@ final class AccountService: ObservableObject {
             //   ⚠️ 判据是**顶层同时有 `code` 和 `data` 两个键** —— 万一是老式扁平响应
             //      （比如某个本地回落接口）就没有这两个键，原样返回，不影响其他调用点。
             if let code = json["code"] as? Int, json.keys.contains("data") {
-                if code == 200 {
+                // 2026-11-12：`/v1/media` 这套接口成功回的是 `code: 0`（不是 200），
+                // 以前只认 200 ⇒ 头像上传永远被当成失败。两个都认。
+                if code == 200 || code == 0 {
                     return (json["data"] as? [String: Any]) ?? json
                 }
                 let msg = (json["msg"] as? String).flatMap { $0.isEmpty ? nil : $0 }
