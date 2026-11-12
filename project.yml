@@ -343,6 +343,10 @@ settings:
     #   ④ 出厂落在**通讯录**（`sanitizeTab` 兜底从 chats 改成 contacts）——
     #      跟设置页写的「出厂是通讯录」对齐。
     #   ⑤ 站内信 / 积分 / 人设广场的卡片跟着换底色；底栏选中色跟着主题色走。
+    # ⭐ 0.0.130（2026-11-13 凌晨）：**「我」页二级菜单一步到全屏**（用户：「我要的是二级菜单全屏，
+    #   不是小卡片弹出来」）。积分/规则/常见问题/免责声明/工单/人设广场/朋友圈/情侣空间/通讯录
+    #   全部从 .sheet 换成 .fullScreenCover，并去掉重复的 NavigationStack 包装。
+    #   健康(经期)/音乐/站内信暂留 sheet —— 它们没有返回按钮，直接改会出不来。
     # ⭐ 0.0.129（2026-11-12 深夜·二）：**朋友圈按微信重做**（用户：「历史残留你还是在」）。
     #   ① 删掉信息流顶部那张「说点什么…+发表」输入卡 —— 微信朋友圈没有它，发动态只从右上角进。
     #   ② 评论从系统 alert（卡片弹出来）改成**贴着键盘的底部输入条**，点评论自动聚焦。
@@ -356,8 +360,8 @@ settings:
     #   ③ 人设广场卡片终于有头像：3 处把相对路径 `/v1/media/x` 直接塞给 AsyncImage，
     #      而 URL(string:) 拿到相对地址是解析不出 host 的 → 一直只显示名字首字占位。
     #      改成 avatarAbsolute。
-    MARKETING_VERSION: "0.0.129"
-    CURRENT_PROJECT_VERSION: "129"
+    MARKETING_VERSION: "0.0.130"
+    CURRENT_PROJECT_VERSION: "130"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

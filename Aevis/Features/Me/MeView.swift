@@ -384,22 +384,26 @@ struct MeView: View {
                     .environmentObject(settings)
                     .environmentObject(ChatStore.shared)
             }
-            .sheet(isPresented: $showDisclaimer) { DisclaimerView() }
+            // 🔴 2026-11-12 用户：「我要的是二级菜单全屏，不是小卡片弹出来」——
+            //    能全屏的都从 .sheet 换成 .fullScreenCover；
+            //    PeriodView / MusicView / InboxView 暂时还是 sheet（它们没有返回按钮，
+            //    改全屏会出不来），补上关闭按钮后再换。
+            .fullScreenCover(isPresented: $showDisclaimer) { DisclaimerView() }
             .sheet(isPresented: $showHealth) { PeriodView() }
-            .sheet(isPresented: $showRules) { RulesView() }
+            .fullScreenCover(isPresented: $showRules) { RulesView() }
             .sheet(isPresented: $showInbox) { NavigationStack { InboxView() } }
-            .sheet(isPresented: $showTickets) { NavigationStack { TicketListView() } }
-            .sheet(isPresented: $showPoints) { PointsView() }
+            .fullScreenCover(isPresented: $showTickets) { NavigationStack { TicketListView() } }
+            .fullScreenCover(isPresented: $showPoints) { PointsView() }
             // 人设广场在「发现」里，个人中心版从这里直接开门
-            .sheet(isPresented: $showDiscover) { NavigationStack { DiscoverView() } }
+            .fullScreenCover(isPresented: $showDiscover) { DiscoverView() }
             // ⚠️ `ContactsView` 要 `@EnvironmentObject PersonaStore` —— sheet 是独立
             //    呈现上下文，别指望它一定继承父视图的 environment，显式注入最稳。
-            .sheet(isPresented: $showContacts) {
-                NavigationStack { ContactsView() }
+            .fullScreenCover(isPresented: $showContacts) {
+                ContactsView()
                     .environmentObject(PersonaStore.shared)
             }
-            .sheet(isPresented: $showMoments) { NavigationStack { MomentsView() } }
-            .sheet(isPresented: $showCouple) { NavigationStack { CoupleSpaceView() } }
+            .fullScreenCover(isPresented: $showMoments) { MomentsView() }
+            .fullScreenCover(isPresented: $showCouple) { CoupleSpaceView() }
             .sheet(isPresented: $showMusic) { NavigationStack { MusicView() } }
         }
     }
