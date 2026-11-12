@@ -111,9 +111,13 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            // 登录页也是「开始页」这条路上的一环（门禁 → 登录 → 主界面），
-            // 背景跟 RootView 的 `.start` 保持一致 —— 不然从门禁进登录会"啪"一下变脸。
-            AevisBackground(scope: .start)
+            // 登录页背景：**素色**（`scope: .base` 不读用户的自定义背景/光晕）。
+            //
+            // 🔴 2026-11-12 用户：「这个背景还是不一样」。原来这里是 `scope: .start`，
+            //    也就是跟着「开始页」那套设置走 —— 用户要是选过极光/自定义图，
+            //    登录页就变成一片带光晕的花底，跟抖音那种干净白底完全两回事。
+            //    登录页是**进门第一屏**，不该被后面的个性化设置影响。
+            AevisBackground(scope: .base)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
