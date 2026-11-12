@@ -59,7 +59,10 @@ struct MeView: View {
             HStack(spacing: 14) {
                 Group {
                     if let img = profile.avatarImage {
-                        Image(uiImage: img).resizable().scaledToFill().clipped()
+                        // 先定尺寸再裁，不然按原图像素铺开、看着会偏
+                        Image(uiImage: img).resizable().scaledToFill()
+                            .frame(width: 64, height: 64)
+                            .clipped()
                     } else {
                         Circle().fill(V2.soft(0.14))
                             .overlay(Image(systemName: "person.fill")
@@ -67,12 +70,17 @@ struct MeView: View {
                                 .foregroundStyle(V2.accent))
                     }
                 }
-                .frame(width: 64, height: 64)
                 .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(profile.nickname.isEmpty ? "我" : profile.nickname)
                         .font(.aevis(19, weight: .semibold))
+                        // 2026-11-12 用户：「名字有时候会被遮住」（iPhone 14 Pro Max / iOS 27）——
+                        // 长名字原来会换行、再被卡片高度裁掉。现在单行 + 必要时缩一点 + 尾部省略。
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .truncationMode(.tail)
+                        .allowsTightening(true)
                     Text(profile.signature.isEmpty ? statusLine : profile.signature)
                         .font(.aevis(12.5))
                         .foregroundStyle(.secondary)

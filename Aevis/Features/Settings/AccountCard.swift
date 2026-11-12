@@ -332,14 +332,22 @@ struct AccountCard: View {
     @ViewBuilder
     private var avatarView: some View {
         if let local = profile.avatarImage {
+            // ⚠️ 顺序不能反：先定尺寸再裁，最后才裁圆。
+            //    2026-11-12 用户：「设置头像的时候那个头像偏移了，个人页看的是好的」——
+            //    这里原来只有 clipShape、没有 frame/clipped，图片按原始像素铺开再被
+            //    外层 frame 压缩，看着就是偏的（个人页那边有 clipped 所以正常）。
             Image(uiImage: local)
                 .resizable()
                 .scaledToFill()
+                .frame(width: 46, height: 46)
+                .clipped()
                 .clipShape(Circle())
         } else if let url = account.avatarURL {
             AsyncImage(url: url) { phase in
                 if case .success(let image) = phase {
                     image.resizable().scaledToFill()
+                        .frame(width: 46, height: 46)
+                        .clipped()
                 } else {
                     avatarFallback
                 }
