@@ -64,12 +64,23 @@ struct PeriodView: View {
 
     private var unavailableCard: some View {
         card {
-            Text("这台设备不支持健康数据")
-                .font(.aevis(15, weight: .medium))
-            Text("模拟器或非 iPhone 上读不到健康。经期记录仍然可以记在这台设备上。")
-                .font(.aevis(12.5))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // 2026-11-12：不能一律写"设备不支持"。自签包最常见的原因是
+            // **签名里没带 HealthKit 权限**，跟设备无关 —— 文案说错了会让人白折腾。
+            if health.availability == .noEntitlement {
+                Text("这个安装包没有健康权限")
+                    .font(.aevis(15, weight: .medium))
+                Text("签名用的描述文件里没带 HealthKit。经期照常记在这台手机上；换一个带健康权限的包之后，会自动同步进健康 App。")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("这台设备不支持健康数据")
+                    .font(.aevis(15, weight: .medium))
+                Text("模拟器或非 iPhone 上读不到健康。经期记录仍然可以记在这台设备上。")
+                    .font(.aevis(12.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

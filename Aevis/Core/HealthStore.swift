@@ -96,16 +96,36 @@ final class HealthStore: ObservableObject {
         localPeriodDays = Self.loadLocal(key: localKey)
     }
 
-    var isAvailable: Bool {
-        guard Self.entitled else { return false }
-        return HKHealthStore.isHealthDataAvailable()
+    /// 健康能不能用，细分原因 —— 界面按这个给不同提示，
+    /// 不要一律写"设备不支持"（那是误导）。
+    enum Availability {
+        case ok
+        /// 设备支持，但这个安装包的签名里没带 HealthKit 权限（自签最常见）
+        case noEntitlement
+        /// 模拟器 / 非 iPhone
+        case unsupportedDevice
     }
+
+    var availability: Availability {
+        if !HKHealthStore.isHealthDataAvailable() { return .unsupportedDevice }
+        if !Self.entitled { return .noEntitlement }
+        return .ok
+    }
+
+    var isAvailable: Bool { availability == .ok }
 
     // MARK: - 授权
 
     func requestAuthorization() async {
         guard isAvailable else {
-            lastError = "这台设备不支持健康（模拟器或非 iPhone）。"
+            switch availability {
+            case .noEntitlement:
+                lastError = "这个安装包没有健康权限（签名里没带 HealthKit），先在 App 里记，重签后会自动同步。"
+            case .unsupportedDevice:
+                lastError = "这台设备不支持健康（模拟器或非 iPhone）。"
+            case .ok:
+                lastError = "健康暂时不可用。"
+            }
             return
         }
         let read: Set<HKObjectType> = [
@@ -119,6 +139,10 @@ final class HealthStore: ObservableObject {
             //    读不到数据时各查询自己回 0，不把 authorized 判成 false 卡在授权页。
             authorized = true
             await refresh()
+            // 没权限期间记在 App 里的那些，现在补写进健康（用户 2026-11-12：
+            // 「如果没有权限那就先到 APP 里面记录，如果有权限了那就同步」）
+            await syncLocalToHealth()
+            await loadPeriodDays()
         } catch {
             lastError = error.localizedDescription
         }
@@ -192,6 +216,41 @@ final class HealthStore: ObservableObject {
         }
 
         await loadPeriodDays()
+    }
+
+    /// 把「没权限时记在 App 里」的经期日期补写进健康 App。
+    ///
+    /// 只在**有写权限**时才动 HealthKit；写失败也不抛（本地那份还在，页面上看得见）。
+    /// 已经在健康里的日期跳过，不会重复写。
+    func syncLocalToHealth() async {
+        guard isAvailable else { return }
+        guard hk()?.authorizationStatus(for: menstrual) == .sharingAuthorized else { return }
+        guard !localPeriodDays.isEmpty else { return }
+
+        let cal = Calendar.current
+        let existing = Set(periodDays.map { cal.startOfDay(for: $0) })
+        var wrote = 0
+        for day in localPeriodDays {
+            let d = cal.startOfDay(for: day)
+            if existing.contains(d) { continue }
+            // 1 分钟窗口：零长度分类样本会抛 OC 异常，接不住
+            let sample = HKCategorySample(
+                type: menstrual,
+                value: HKCategoryValueMenstrualFlow.unspecified.rawValue,
+                start: d,
+                end: d.addingTimeInterval(60)
+            )
+            do {
+                try await hk()?.save(sample)
+                wrote += 1
+            } catch {
+                // 单条失败不影响其它日期
+                continue
+            }
+        }
+        if wrote > 0 {
+            lastError = nil
+        }
     }
 
     func loadPeriodDays() async {
