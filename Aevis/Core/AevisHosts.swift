@@ -94,6 +94,12 @@ enum AevisHosts {
 
     /// 可选模型列表（用户自己选模型）。
     static var llmModelsURL: String { account("/v1/llm/models") }
+    /// 每个模型**当前是否在线**（2026-11-12）。
+    ///
+    /// 数据来自上游那个 Uptime Kuma 状态页（公开 JSON，不花额度），
+    /// 我们每 60 秒同步一次。App 只拿它点绿点/灰点，**不写任何文字** ——
+    /// 用户原话：「不要在 App 里给文字展现……是同步下架」。
+    static var llmStatusURL: String { account("/v1/llm/status") }
     /// 积分余额。
     static var llmBalanceURL: String { account("/v1/llm/balance") }
     /// 对话（OpenAI 兼容，流式/非流式都支持）。

@@ -399,7 +399,12 @@ struct SettingsView: View {
 
     /// 单个模型一行（分组里的内容）。
     private func modelRow(_ m: CloudModel) -> some View {
-        Button {
+        // 上游明确挂了的模型：绿点变灰点、整行置灰、点不动。
+        // 用户 2026-11-12：「App 看不了模型状态」+「不要在 App 里给文字展现」——
+        // 所以只用一个小圆点表示，不加任何说明文字。
+        let offline = cloudModels.offlineIDs.contains(m.id.lowercased())
+        return Button {
+            guard !offline else { return }
             cloudModels.selectedID = m.id
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -410,6 +415,10 @@ struct SettingsView: View {
                                      ? settings.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
+                        Circle()
+                            .fill(offline ? Color.secondary.opacity(0.35)
+                                          : Color.green.opacity(0.85))
+                            .frame(width: 6, height: 6)
                         Text(m.label)
                             .font(.aevis(14, weight: .medium))
                         if m.isDefault {
@@ -438,6 +447,8 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(offline)
+        .opacity(offline ? 0.45 : 1)
     }
 
     private var modelCard: some View {

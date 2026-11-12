@@ -102,6 +102,13 @@ final class CloudModelStore: ObservableObject {
     /// 正在拉取（界面据此显示转圈）
     @Published private(set) var loading = false
 
+    /// 上游**当前明确离线**的模型 id（2026-11-12）。
+    ///
+    /// 只装 `/v1/llm/status` 里 `online == false` 的那些 —— 状态页里没监控的模型
+    /// 不进这个集合，照常当可用（没数据 ≠ 挂了）。
+    /// 界面只拿它点灰点/置灰，**不显示任何文字**（用户要求）。
+    @Published private(set) var offlineIDs: Set<String> = []
+
     private let cacheKey = "aevis.cloudModels.v1"
     /// 缓存多久算旧。
     ///
@@ -236,6 +243,8 @@ final class CloudModelStore: ObservableObject {
                 loadedAt = Date()
                 lastError = ""
                 saveCache(decoded)
+                // 顺手把「哪些模型现在离线」也拿一遍（失败就当全在线）
+                await refreshStatus()
                 return
             }
             lastError = "云端没返回可选模型"
@@ -244,6 +253,31 @@ final class CloudModelStore: ObservableObject {
         }
         // 拉失败 → 用缓存 / 兜底，别让用户卡在"没有模型可选"
         if models.isEmpty { models = Self.fallback }
+    }
+
+    /// 拉一次「哪些模型现在离线」（2026-11-12）。
+    ///
+    /// 数据源是后端的 `/v1/llm/status`，它读的是上游那个公开状态页 JSON
+    /// （不需要 key、不花额度）。拿不到就保持空集合 —— 界面上全是绿点，
+    /// 比"全部标灰、用户以为全挂了"要好。
+    func refreshStatus() async {
+        guard let url = URL(string: AevisHosts.llmStatusURL) else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            let payload = (obj["data"] as? [String: Any]) ?? obj
+            let list = (payload["models"] as? [[String: Any]]) ?? []
+            var off = Set<String>()
+            for row in list {
+                guard let id = row["model"] as? String else { continue }
+                if (row["online"] as? Bool) == false {
+                    off.insert(id.lowercased())
+                }
+            }
+            offlineIDs = off
+        } catch {
+            // 状态拿不到不影响选模型
+        }
     }
 
     private func saveCache(_ list: [CloudModel]) {
