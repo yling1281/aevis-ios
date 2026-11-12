@@ -256,10 +256,11 @@ struct AevisBackground: View {
             : Color(red: 0.969, green: 0.965, blue: 0.984)   // #F7F6FB
     }
 
-    /// 两团光晕，第一团跟着主题色走，所以换主题色连背景都会变。
+    /// 两团光晕：**都跟着主题色走** —— 换主题色整块背景一起变。
     ///
-    /// 第二团固定是**淡蓝**（#6FA8E8）—— 跟淡紫主色配在一起，
-    /// 才是用户要的那套「淡紫 + 淡蓝」，不是以前的青绿。
+    /// ⚠️ 2026-11-12 之前第二团是写死的淡蓝（#6FA8E8）。用户把主题色改成紫之后，
+    ///    背景仍是「紫 + 蓝」两套色系，看着就是"整个还是以前那个颜色"。
+    ///    现在两团都从 `accentColor` 派生，只有强弱区别。
     private var aurora: some View {
         ZStack {
             base
@@ -275,7 +276,16 @@ struct AevisBackground: View {
                 endRadius: 430
             )
             RadialGradient(
-                colors: [Color(red: 0.435, green: 0.659, blue: 0.910).opacity(scheme == .dark ? 0.30 : 0.20), .clear],
+                // 🔴 2026-11-12 用户：「整个还是以前的那个颜色，改成紫色」。
+                //    这一团原来是**写死的淡蓝** `(0.435, 0.659, 0.910)`，
+                //    不跟主题色走 —— 用户把主题色改成紫，背景还是紫+蓝两色打架。
+                //    现在从 `accentColor` 派生：取它本身、压暗一点、再降透明度，
+                //    整块背景就只有一个色系，换什么主题都自洽。
+                colors: [
+                    settings.accentColor
+                        .opacity(scheme == .dark ? 0.22 : 0.14),
+                    .clear
+                ],
                 center: UnitPoint(x: 0.92, y: 0.10),
                 startRadius: 0,
                 endRadius: 400
