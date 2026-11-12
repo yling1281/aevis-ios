@@ -274,19 +274,45 @@ final class AccountService: ObservableObject {
 
     /// ① 要一张二维码的票。
     ///
-    /// 🔴 2026-10-31：4-4 的 `aevis_auth` **没有设备扫码登录这套接口**
-    ///    （老的 `/api/device/login/new` + `poll` 随老服务一起下线了）。
-    ///    这里**明确抛出"不可用"**，让 `ScanLoginView` 显示一句人话并提示改走密码/验证码，
-    ///    而不是画一张永远扫不开的二维码 —— 那是最坑人的"看起来能用"。
+    /// 🔴 2026-11-12：服务端**补上了**这套接口
+    ///    （`/v1/auth/device/qr/new|poll|approve`，见 `aevis_auth.py` 里的
+    ///     `dev_qr_*`）。在这之前这里一直是硬编码抛「暂不可用」，
+    ///    用户报的「用手扫码的这个接口也生成不出来了」就是它。
     @MainActor
     func newDeviceLoginTicket() async throws -> DeviceTicket {
-        throw AccountError.server("扫码登录暂不可用（服务端未提供该接口），请用邮箱验证码或密码登录。")
+        let json = try await post("/v1/auth/device/qr/new",
+                                  ["device_id": DeviceIdentity.wireCode])
+        guard let ticket = json["ticket"] as? String, !ticket.isEmpty else {
+            throw AccountError.server("服务器没有返回扫码票据，稍后再试。")
+        }
+        // 二维码内容走**自定义 scheme**：扫它的必须是已登录的 Aevis
+        // （任何相机扫开只会得到一句"没有可处理的应用"），不会泄露任何账号信息。
+        let text = (json["qr_text"] as? String) ?? ("aevis://qr/" + ticket)
+        let ttl = (json["expires_in"] as? Int) ?? 180
+        return DeviceTicket(ticket: ticket, scanURL: text, expiresIn: ttl)
     }
 
     /// ② 问一句「有人批了吗」。
     @MainActor
     func pollDeviceLogin(ticket: String) async throws -> DeviceLoginStatus {
-        throw AccountError.server("扫码登录暂不可用。")
+        let json = try await post("/v1/auth/device/qr/poll", ["ticket": ticket])
+        let status = (json["status"] as? String) ?? ""
+        if status == "approved" {
+            let token = (json["token"] as? String) ?? ""
+            guard !token.isEmpty else {
+                throw AccountError.server("服务器没有返回登录凭据。")
+            }
+            let email = (json["email"] as? String) ?? ""
+            return .approved(email: email, token: token)
+        }
+        return .pending
+    }
+
+    /// ③ 已登录的这台手机点头同意：给对面发一枚新 token。
+    @MainActor
+    func approveDeviceLogin(ticket: String) async throws {
+        _ = try await post("/v1/auth/device/qr/approve",
+                           ["ticket": ticket, "device_id": DeviceIdentity.wireCode])
     }
 
     /// App 里点 QQ 登录时要打开的那一页（内置浏览器）。

@@ -39,6 +39,19 @@ struct PairScanView: View {
     /// 想再扫必须**换一个实例**（同一个实例不会二次回调）。
     @State private var scanToken = UUID()
 
+    // 「批准新设备登录」的结果提示（2026-11-12）
+    @State private var showApproveAlert = false
+    @State private var approveNote = ""
+
+    /// 从 `aevis://qr/<票>` 里取票。不是这种码就返回 nil，交给后面的分支。
+    static func deviceTicket(from text: String) -> String? {
+        guard let url = URL(string: text),
+              url.scheme?.lowercased() == "aevis",
+              url.host?.lowercased() == "qr" else { return nil }
+        let t = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return t.isEmpty ? nil : t
+    }
+
     private enum Stage: Equatable {
         case scanning
         case manual
@@ -75,6 +88,12 @@ struct PairScanView: View {
         }
         .onAppear {
             if mode == .manual { stage = .manual }
+        }
+        // 扫到「批准新设备」的码时，用系统弹窗回一句结果 —— 这里没有别的提示位。
+        .alert("批准新设备", isPresented: $showApproveAlert) {
+            Button("好") { }
+        } message: {
+            Text(approveNote)
         }
     }
 
@@ -403,6 +422,25 @@ struct PairScanView: View {
         guard stage == .scanning else { return }     // 认到一段就够，别被连报十几遍影响
 
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // ⓪ 「批准新设备登录」的码（`aevis://qr/<票>`，2026-11-12）。
+        //
+        //    另一台手机在登录页点「手机扫码」会显示这张码；用**已经登录**的这台
+        //    扫一下就等于替它点头。谁扫谁负责 —— 码 3 分钟过期、只用一次。
+        if let t = Self.deviceTicket(from: raw) {
+            stage = .working
+            Task { @MainActor in
+                do {
+                    try await AccountService.shared.approveDeviceLogin(ticket: t)
+                    approveNote = "已批准。那台设备会自动登录。"
+                } catch {
+                    approveNote = error.localizedDescription
+                }
+                showApproveAlert = true
+                stage = .scanning       // 留在扫码页，方便接着扫别的
+            }
+            return
+        }
 
         // ① 我们自己的配对码 —— 走原来的确认流程
         if let parsed = PairClient.parse(raw) {
