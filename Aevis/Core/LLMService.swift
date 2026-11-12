@@ -105,6 +105,35 @@ enum LLMService {
         #endif
     }
 
+    /// 把一帧屏幕图**交给模型读**，返回它看到的文字/内容。
+    ///
+    /// 🔴 2026-11-12 用户：「录屏的话它是一些乱码，你直接用 Deepseek 模型的吧，
+    ///    Deepseek 模型现在有图像识别」。
+    ///    原来这条路走的是 `AttachmentService.recognizeText` —— **本地 Vision OCR**，
+    ///    模型压根没参与，界面字体一变（或截图带缩放/竖排）就吐一堆错字，
+    ///    用户看到的"乱码"就是它。现在改成真·多模态：图跟着消息一起发。
+    ///
+    /// 失败或返回空时返回 `""`，调用方自己决定要不要回落到本地 OCR。
+    static func describeScreen(_ data: Data, config: LLMConfig) async -> String {
+        guard imageDataURL(data) != nil else { return "" }
+        let ask = "这是手机屏幕截图。把上面的文字照原样读出来，再补一句这是什么界面。只写你真正看到的，看不清楚就说不清楚，不要猜。"
+        var history: [ChatMessage] = []
+        history.append(ChatMessage(role: .user, text: ask, imageData: data))
+        var out = ""
+        do {
+            for try await delta in streamReply(
+                config: config,
+                systemPrompt: "你是一个屏幕内容读取器。只输出看到的内容，不解释、不寒暄、不加建议。",
+                history: history
+            ) {
+                out += delta
+            }
+        } catch {
+            return ""
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func streamReply(
         config: LLMConfig,
         systemPrompt: String,

@@ -185,7 +185,19 @@ final class ScreenCompanion: ObservableObject {
             defer { self.working = false }
             self.frameCount += 1
             self.lastLookAt = Date()
-            let text = await AttachmentService.recognizeText(in: frame)
+
+            // 🔴 先交给**模型的视觉**读（用户 2026-11-12：「直接用 Deepseek 的图像识别」）。
+            //    以前这里只有 `recognizeText`＝本地 Vision OCR，模型没参与，
+            //    界面一换字体/缩放就吐错字 —— 用户说的"乱码"就是它。
+            var text = ""
+            if let jpeg = frame.jpegData(compressionQuality: 0.8) {
+                text = await LLMService.describeScreen(jpeg, config: AppSettings.shared.llm)
+            }
+            // 模型不可用（没登录 / 断网 / 这个型号不支持看图）才回落到本地 OCR，
+            // 至少还能认出点东西，不至于一片空白。
+            if text.isEmpty {
+                text = await AttachmentService.recognizeText(in: frame)
+            }
             self.accept(text)
         }
     }
