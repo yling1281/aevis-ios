@@ -15,12 +15,16 @@ struct DiscoverView: View {
     @ObservedObject private var couple = CoupleStore.shared
     @ObservedObject private var diary = DiaryStore.shared
     @ObservedObject private var todo = TodoStore.shared
+    /// 选人：这些入口以前直接吃"当前活跃角色"，现在统一先选（默认上次那个）。
+    @ObservedObject private var personaStore = PersonaStore.shared
 
     @State private var showMusic = false
     @State private var showCouple = false
     @State private var showDiary = false
     @State private var showTodo = false
     @State private var showBrowser = false
+    /// 正在等用户选人的那个入口
+    @State private var pick: DiscoverPick?
     @State private var showAppleMusic = false
     /// 人设广场（2026-11-01 用户要求：在发现页就能刷，也能自己写一个上传）。
     @State private var showPlaza = false
@@ -58,7 +62,7 @@ struct DiscoverView: View {
                                 V2Row(symbol: "photo.on.rectangle.angled",
                                       title: "朋友圈",
                                       detail: momentsLine,
-                                      action: { router.showMoments = true })
+                                      action: { ask(.moment) })
                                 V2Divider()
                                 // ⭐ 2026-10-01 新加。用户点名要过（2026-09-27 就答应了），
                                 //    跟钱包 / 音乐不一样 —— **不挂内测开关**，
@@ -66,17 +70,17 @@ struct DiscoverView: View {
                                 V2Row(symbol: "heart.text.square",
                                       title: "情侣空间",
                                       detail: coupleLine,
-                                      action: { showCouple = true })
+                                      action: { ask(.couple) })
                                 V2Divider()
                                 V2Row(symbol: "book.closed",
                                       title: "日记",
                                       detail: diaryLine,
-                                      action: { showDiary = true })
+                                      action: { ask(.diary) })
                                 V2Divider()
                                 V2Row(symbol: "checklist",
                                       title: "一起做的事",
                                       detail: todoLine,
-                                      action: { showTodo = true })
+                                      action: { ask(.todo) })
                             }
                         }
 
@@ -95,12 +99,12 @@ struct DiscoverView: View {
                                 V2Row(symbol: "music.note",
                                       title: "网易云音乐",
                                       detail: musicLine,
-                                      action: { showMusic = true })
+                                      action: { ask(.music) })
                                 V2Divider()
                                 V2Row(symbol: "music.note.house",
                                       title: "苹果音乐",
                                       detail: "用系统 MusicKit 搜歌、播放（需 Apple Music 订阅）",
-                                      action: { showAppleMusic = true })
+                                      action: { ask(.music) })
                             }
                         }
 
@@ -121,7 +125,7 @@ struct DiscoverView: View {
                                 V2Row(symbol: "phone.arrow.up.right",
                                       title: "实时通话",
                                       detail: "你说话，\(Pronoun.current)听；\(Pronoun.current)回话，用语音念出来",
-                                      action: { router.startCall() })
+                                      action: { ask(.call) })
                             }
                         }
                     }
@@ -130,6 +134,12 @@ struct DiscoverView: View {
                 }
             }
             .v2Page()
+            .sheet(item: $pick) { kind in
+                PersonaPicker(title: kind.title, showsCurrent: false) { id in
+                    PersonaMemory.shared.remember([id], for: kind.feature)
+                    run(kind, ids: [id])
+                }
+            }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showMusic) {
                 // MusicView 自己没有导航壳，这里给它一个
@@ -228,4 +238,65 @@ struct DiscoverView: View {
     //
     // 2026-11-01：原来那一对 `card` / `entry` 已经删了 —— 现在整页改用 v2 的
     // `V2Card` + `V2Row`（圆 22、细边、圆形淡底图标），再留一份就是两套长相。
+
+    // MARK: - 选人（2026-11-12）
+
+    /// 这些入口以前一点就直接进，默认"当前活跃角色"。现在先问一句跟谁，
+    /// 默认值是**上次选的那个人**（`PersonaMemory`），只有一个人时不打扰。
+    enum DiscoverPick: String, Identifiable {
+        case moment, couple, diary, todo, call, music
+
+        var id: String { rawValue }
+
+        var feature: String {
+            switch self {
+            case .moment: return PersonaMemory.Feature.moment
+            case .couple: return PersonaMemory.Feature.couple
+            case .diary: return PersonaMemory.Feature.together
+            case .todo: return PersonaMemory.Feature.together
+            case .call: return PersonaMemory.Feature.call
+            case .music: return PersonaMemory.Feature.listen
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .moment: return "和谁一起看"
+            case .couple: return "和谁的情侣空间"
+            case .diary: return "和谁的日记"
+            case .todo: return "和谁一起做"
+            case .call: return "打给谁"
+            case .music: return "和谁一起听"
+            }
+        }
+    }
+
+    private func ask(_ kind: DiscoverPick) {
+        let alive = personaStore.contacts
+        if alive.isEmpty { return }
+        // 只有一个联系人：别每次都弹一层，直接走
+        if alive.count == 1 {
+            run(kind, ids: [alive[0].id])
+            return
+        }
+        pick = kind
+    }
+
+    private func run(_ kind: DiscoverPick, ids: Set<UUID>) {
+        guard let id = ids.first else { return }
+        // 这一批服务（通话 / 一起听 / 情侣空间 / 日记 / 一起做）目前都是
+        // "跟着当前活跃角色走"的单例状态；先切过去再执行，等于把这些功能
+        // 绑到用户刚选的那个人身上。
+        if personaStore.active?.id != id { personaStore.select(id) }
+
+        switch kind {
+        case .moment: router.showMoments = true
+        case .couple: showCouple = true
+        case .diary: showDiary = true
+        case .todo: showTodo = true
+        case .call: router.startCall()
+        case .music: showMusic = true
+        }
+    }
+
 }
