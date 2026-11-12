@@ -76,6 +76,14 @@ struct MainTabView: View {
             }
         }
         .task { await updateCenter.checkIfNeeded() }
+        // 🔴 2026-11-12 用户：「真正的 UI 还没做，只是切换做了」——
+        //    根因之一就是这里：`tab` 是 `@State` 初始化的，只在**启动那一刻**
+        //    按 `isPersonalHome` 算一次。用户在设置里把样式改了，开关变了、
+        //    首屏纹丝不动，看起来就是"只有切换、没有效果"。
+        //    现在切换当场落到对应首屏：个人中心 → 「我」，微信式 → 「聊天」。
+        .onChange(of: settings.homeStyle) { _, _ in
+            tab = settings.isPersonalHome ? .me : .chats
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await updateCenter.checkIfNeeded() }
         }

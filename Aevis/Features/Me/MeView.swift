@@ -45,6 +45,11 @@ struct MeView: View {
     @State private var showPoints = false
     @State private var showMore = false
     @State private var showDiscover = false
+    // 个人中心版的「社交」那一排（2026-11-12）
+    @State private var showContacts = false
+    @State private var showMoments = false
+    @State private var showCouple = false
+    @State private var showMusic = false
 
     // MARK: - 个人中心版首页（`settings.homeStyle == "personal"`）
 
@@ -156,6 +161,50 @@ struct MeView: View {
                     in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    /// 社交：联系人 / 朋友圈 / 情侣空间 / 网易云音乐。
+    ///
+    /// 🔴 2026-11-12 用户把个人中心版要的东西点名了一串：
+    ///    「然后的话呢，下面可以看到联系人往下滑，然后还有个朋友圈……
+    ///      情侣空间啊，网易云音乐啊，然后这些」。
+    ///    上面那排 8 个圈是**账号与陪伴**，这一排是**社交**，分开摆才不糊成一坨。
+    private var personalSocialGrid: some View {
+        let items: [(String, String, () -> Void)] = [
+            ("联系人", "person.2", { showContacts = true }),
+            ("朋友圈", "photo.on.rectangle", { showMoments = true }),
+            ("情侣空间", "heart.circle", { showCouple = true }),
+            ("网易云", "music.note", { showMusic = true })
+        ]
+
+        return LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+            spacing: 18
+        ) {
+            ForEach(items.indices, id: \.self) { i in
+                Button(action: items[i].2) {
+                    VStack(spacing: 7) {
+                        Circle()
+                            .fill(V2.soft(0.13))
+                            .frame(width: 50, height: 50)
+                            .overlay(
+                                Image(systemName: items[i].1)
+                                    .font(.aevis(19))
+                                    .foregroundStyle(V2.accent)
+                            )
+                        Text(items[i].0)
+                            .font(.aevis(11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 18)
+        .padding(.horizontal, 6)
+        .background(Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -178,6 +227,7 @@ struct MeView: View {
                         if settings.isPersonalHome {
                             personalHero
                             personalGrid
+                            personalSocialGrid
                         } else {
                             profileCard
                         }
@@ -328,6 +378,15 @@ struct MeView: View {
             .sheet(isPresented: $showPoints) { PointsView() }
             // 人设广场在「发现」里，个人中心版从这里直接开门
             .sheet(isPresented: $showDiscover) { NavigationStack { DiscoverView() } }
+            // ⚠️ `ContactsView` 要 `@EnvironmentObject PersonaStore` —— sheet 是独立
+            //    呈现上下文，别指望它一定继承父视图的 environment，显式注入最稳。
+            .sheet(isPresented: $showContacts) {
+                NavigationStack { ContactsView() }
+                    .environmentObject(PersonaStore.shared)
+            }
+            .sheet(isPresented: $showMoments) { NavigationStack { MomentsView() } }
+            .sheet(isPresented: $showCouple) { NavigationStack { CoupleSpaceView() } }
+            .sheet(isPresented: $showMusic) { NavigationStack { MusicView() } }
         }
     }
 
