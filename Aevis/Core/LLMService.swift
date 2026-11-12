@@ -282,9 +282,13 @@ enum LLMService {
                     ]
                     let imagePart: [String: Any] = [
                         "type": "image_url",
-                        "image_url": ["url": url]
+                        "image_url": ["url": url] as [String: Any]
                     ]
-                    built.append(["role": "user", "content": [textPart, imagePart]])
+                    let userMessage: [String: Any] = [
+                        "role": "user",
+                        "content": [textPart, imagePart] as [[String: Any]]
+                    ]
+                    built.append(userMessage)
                 } else {
                     built.append([
                         "role": item.role == .user ? "user" : "assistant",
