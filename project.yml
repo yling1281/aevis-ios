@@ -377,8 +377,8 @@ settings:
     #   ③ 人设广场卡片终于有头像：3 处把相对路径 `/v1/media/x` 直接塞给 AsyncImage，
     #      而 URL(string:) 拿到相对地址是解析不出 host 的 → 一直只显示名字首字占位。
     #      改成 avatarAbsolute。
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1.0.17"
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: "1.1.17"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

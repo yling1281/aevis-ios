@@ -152,7 +152,8 @@ final class PointsService: ObservableObject {
     /// 建单并返回收银台地址。**不在这里跳转** —— 跳转由界面决定（便于加"复制链接"兜底）。
     func createRecharge(package code: String, payType: String = "wxpay") async throws -> PendingRecharge {
         let d = try await AevisCloud.call("/v1/points/recharge", method: "POST",
-                                          body: ["package": code, "payType": payType])
+                                          body: ["package": code, "payType": payType,
+                                                 "platform": "ios"])
         let p = PendingRecharge(
             orderNo: (d["orderNo"] as? String) ?? "",
             amountYuan: (d["amountYuan"] as? String) ?? "0.00",

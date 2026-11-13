@@ -87,6 +87,20 @@ struct RootView: View {
                 }
                 return
             }
+            // ⭐ 充值回跳（`aevis://pay?order=…`）：易支付收银台付完把浏览器
+            //    带回 App。立刻查一次这一单，到账就给一句提示 —— 不然用户
+            //    付完回到 App 什么都看不见，会以为没成功。
+            if url.scheme == "aevis" && url.host == "pay" {
+                Task { @MainActor in
+                    if let pts = try? await PointsService.shared.checkPending(),
+                       let n = pts {
+                        bridgeNote = "充值到账：\(n) 积分"
+                    } else {
+                        await PointsService.shared.refresh()
+                    }
+                }
+                return
+            }
             bridgeNote = AevisBridge.handle(url)
         }
         .onChange(of: bridgeNote) { _, note in
