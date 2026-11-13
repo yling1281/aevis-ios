@@ -230,7 +230,7 @@ struct AevisBackground: View {
         // 设成极光、纸纹或**自定义图片**。结果是同一台手机上，登录页、聊天页、
         // 我的页背景各不相同 —— 用户看到的就是"整个还是很怪"。
         //
-        // 现在**一律素色**：只画 `base`（浅色 #F7F6FB / 深色 #14131A），
+        // 现在**一律素色**：只画 `base`（浅色 #FAF7F1 米白 / 深色 #16151A），
         // 不再读 `settings.*BackgroundStyle` / 自定义图 / 光晕。
         // 想要回原来的花样，恢复下面被注释的那段 switch 即可 —— 设置项本身
         // 没有删，用户之前选的样式还在。
@@ -262,7 +262,7 @@ struct AevisBackground: View {
     private var base: Color {
         scheme == .dark
             ? Color(red: 0.078, green: 0.075, blue: 0.102)   // #14131A
-            : Color(red: 0.969, green: 0.965, blue: 0.984)   // #F7F6FB
+            : Color(red: 0.980, green: 0.969, blue: 0.945)   // #FAF7F1 米白
     }
 
     /// 两团光晕：**都跟着主题色走** —— 换主题色整块背景一起变。

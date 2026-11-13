@@ -65,7 +65,14 @@ class MainActivity : ComponentActivity() {
             "login" -> {
                 val token = uri.getQueryParameter("token").orEmpty()
                 if (token.isEmpty()) {
-                    Toast.makeText(this, "登录失败：没拿到凭证", Toast.LENGTH_LONG).show()
+                    // 服务端会把 QQ 那边的原话放在 msg 里（比如「redirect_uri 不对」，
+                    // 或者 QQ 互联 应用没上线），照原样弹出来，别只说「失败」。
+                    val why = uri.getQueryParameter("msg").orEmpty()
+                    Toast.makeText(
+                        this,
+                        if (why.isEmpty()) "登录失败：没拿到凭证" else why,
+                        Toast.LENGTH_LONG
+                    ).show()
                     return
                 }
                 Api.save(token, uri.getQueryParameter("email").orEmpty(),

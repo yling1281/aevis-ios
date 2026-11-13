@@ -4,7 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -166,7 +165,7 @@ fun LoginScreen(onDone: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Text("帮助", fontSize = 15.sp, color = secondary,
                 modifier = Modifier.padding(top = 4.dp)
-                    .clickable { open("https://aevis.cn/support.html") })
+                    .tapable { open("https://aevis.cn/support.html") })
         }
         Spacer(Modifier.height(26.dp))
 
@@ -185,23 +184,23 @@ fun LoginScreen(onDone: () -> Unit) {
             Mode.Code -> {
                 BigField(R.drawable.ic_login_mail, "请输入邮箱", email, { email = it })
                 if (codeSent) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     BigField(R.drawable.ic_login_hash, "邮箱里那 6 位数字", code, { code = it },
                         number = true, imeDone = true)
                 }
             }
             Mode.Password -> {
                 BigField(R.drawable.ic_login_person, "邮箱或手机号", account, { account = it })
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 BigField(R.drawable.ic_login_lock, "密码", pwd, { pwd = it }, secret = true)
             }
             Mode.Register -> {
                 BigField(R.drawable.ic_login_mail, "用来收验证码的邮箱", email, { email = it })
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 BigField(R.drawable.ic_login_lock, "密码：至少 8 位，含字母和数字", pwd,
                     { pwd = it }, secret = true, imeDone = !invited)
                 if (invited) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     BigField(R.drawable.ic_login_hash, "邮箱里那 6 位数字", code, { code = it },
                         number = true, imeDone = true)
                 }
@@ -212,7 +211,7 @@ fun LoginScreen(onDone: () -> Unit) {
         // —— 切换行 ——
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(
-                Modifier.clickable(enabled = !working) {
+                Modifier.tapable(enabled = !working) {
                     mode = if (mode == Mode.Code) Mode.Password else Mode.Code
                     codeSent = false
                 }, verticalAlignment = Alignment.CenterVertically
@@ -227,7 +226,7 @@ fun LoginScreen(onDone: () -> Unit) {
             Text(
                 if (mode == Mode.Register) "已经有账号，去登录" else "没有账号，去注册",
                 fontSize = 13.5.sp, color = secondary,
-                modifier = Modifier.clickable(enabled = !working) {
+                modifier = Modifier.tapable(enabled = !working) {
                     mode = if (mode == Mode.Register) Mode.Code else Mode.Register
                     invited = false
                 }
@@ -240,8 +239,8 @@ fun LoginScreen(onDone: () -> Unit) {
             Modifier.fillMaxWidth()
                 .clip(CircleShape)
                 .background(if (enabled && !working) V2.accent else V2.accent.copy(alpha = 0.35f))
-                .clickable(enabled = enabled && !working) { primary() }
-                .padding(vertical = 16.dp),
+                .tapable(enabled = enabled && !working) { primary() }
+                .padding(vertical = 17.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(title, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
@@ -257,7 +256,7 @@ fun LoginScreen(onDone: () -> Unit) {
                         if (agreed) Modifier.background(V2.accent)
                         else Modifier.border(1.5.dp, secondary.copy(alpha = 0.6f), CircleShape)
                     )
-                    .clickable { agreed = !agreed },
+                    .tapable { agreed = !agreed },
                 contentAlignment = Alignment.Center
             ) {
                 if (agreed) {
@@ -270,10 +269,10 @@ fun LoginScreen(onDone: () -> Unit) {
                 Row {
                     Text("已阅读并同意 ", fontSize = 11.5.sp, color = secondary)
                     Text("用户协议", fontSize = 11.5.sp, color = V2.accent,
-                        modifier = Modifier.clickable { open("https://aevis.cn/terms.html") })
+                        modifier = Modifier.tapable { open("https://aevis.cn/terms.html") })
                     Text(" 和 ", fontSize = 11.5.sp, color = secondary)
                     Text("隐私政策", fontSize = 11.5.sp, color = V2.accent,
-                        modifier = Modifier.clickable { open("https://aevis.cn/privacy.html") })
+                        modifier = Modifier.tapable { open("https://aevis.cn/privacy.html") })
                 }
                 Spacer(Modifier.height(2.dp))
                 Text("未注册的邮箱验证通过后将自动创建账号。",
@@ -282,7 +281,7 @@ fun LoginScreen(onDone: () -> Unit) {
         }
 
         if (note != null) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             Text(note ?: "", fontSize = 12.5.sp,
                 color = if (noteBad) V2.alert else secondary, lineHeight = 19.sp)
         }
@@ -292,12 +291,12 @@ fun LoginScreen(onDone: () -> Unit) {
 
         // —— 底部：微信 / QQ / 扫码 / 找回账号 ——
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CircleEntry("微信", R.drawable.ic_login_wechat,
+            CircleEntry("微信", R.drawable.ic_brand_wechat,
                 Color(0xFF4AB85C), !working) {
                 tip = "微信登录还在接入。现在用邮箱验证码最快；微信里也能直接搜「Aevis」小程序。"
             }
             Spacer(Modifier.width(14.dp))
-            CircleEntry("QQ", R.drawable.ic_login_qq,
+            CircleEntry("QQ", R.drawable.ic_brand_qq,
                 Color(0xFF428CF0), !working) {
                 // 真跳：系统浏览器 → QQ 授权 → 服务端 302 回 aevis://login
                 if (working) return@CircleEntry
@@ -321,7 +320,7 @@ fun LoginScreen(onDone: () -> Unit) {
             Text("找回账号", fontSize = 13.5.sp, color = secondary,
                 modifier = Modifier.clip(CircleShape)
                     .border(0.8.dp, secondary.copy(alpha = 0.35f), CircleShape)
-                    .clickable { open("https://aevis.cn/support.html") }
+                    .tapable { open("https://aevis.cn/support.html") }
                     .padding(horizontal = 18.dp, vertical = 11.dp))
         }
     }
@@ -348,7 +347,7 @@ private fun BigField(icon: Int, placeholder: String, value: String,
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(ink.copy(alpha = 0.055f))
-            .padding(horizontal = 16.dp, vertical = 15.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(painterResource(icon), null, tint = ink.copy(alpha = 0.5f),
@@ -391,17 +390,17 @@ private fun CircleEntry(title: String, icon: Int, color: Color,
                         enabled: Boolean, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(enabled = enabled) { onClick() }
+        modifier = Modifier.tapable(enabled = enabled) { onClick() }
             .then(if (enabled) Modifier else Modifier.padding(0.dp))
     ) {
         Box(
-            Modifier.size(52.dp).clip(CircleShape).background(color.copy(alpha = 0.13f)),
+            Modifier.size(56.dp).clip(CircleShape).background(color.copy(alpha = 0.13f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(painterResource(icon), null, tint = color, modifier = Modifier.size(20.dp))
+            Icon(painterResource(icon), null, tint = color, modifier = Modifier.size(26.dp))
         }
-        Spacer(Modifier.height(6.dp))
-        Text(title, fontSize = 11.sp,
+        Spacer(Modifier.height(7.dp))
+        Text(title, fontSize = 11.5.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f), maxLines = 1)
     }
 }
