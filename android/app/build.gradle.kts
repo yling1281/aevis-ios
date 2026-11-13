@@ -1,3 +1,13 @@
+import java.util.Properties
+
+// 正式签名的参数放在 `android/keystore.properties`（不进 git）。
+// 文件不在就回退 debug 签名 —— CI 上没有密钥也能出包，只是那个包不能覆盖安装线上版。
+val ksProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasReleaseKey = (ksProps.getProperty("storeFile") ?: "").isNotEmpty()
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,14 +24,26 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
+        versionCode = 7
         versionName = "1.1"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(ksProps.getProperty("storeFile"))
+                storePassword = ksProps.getProperty("storePassword")
+                keyAlias = ksProps.getProperty("keyAlias")
+                keyPassword = ksProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
-            // 侧载包：用 debug 签名 + R8/资源压缩，体积能砍一半
-            signingConfig = signingConfigs.getByName("debug")
+            // 有正式密钥就用正式的；没有（比如 CI）才退回 debug，保证还能出包。
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release")
+                            else signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
