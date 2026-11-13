@@ -41,12 +41,11 @@ struct DiscoverView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         // 人设广场：发现页第一屏就能横着刷。
-                        // 用户 2026-11-01：「人社广场你要在发现页那里做一个人可以在那里刷，
-                        // 然后的话呢也能在那里自己写一个上传」。
-                        PersonaPlazaStrip(
-                            onOpenAll: { showPlaza = true },
-                            onUpload: { showPublishPersona = true }
-                        )
+                        // 2026-11-13 用户：「发现页的话就是你全部重组」
+                        //                  「直接弄一个商城，里面是人设和表情包还有音色，
+                        //                    然后那个表情包直接去掉」——
+                        // 原来的「人设广场横滑条」换成一张商城入口卡。
+                        ShopEntryCard { showPlaza = true }
 
                         // 2026-11-13 用户：「首先人设广场，你有两个，撞了两个设字」——
                         // 横滑条上已经有「人设广场 / 写一个 / 全部」，这块再摆一个
@@ -173,7 +172,7 @@ struct DiscoverView: View {
                 AppleMusicView()
             }
             .sheet(isPresented: $showPlaza) {
-                PersonaPlazaView()
+                ShopView()
             }
             .sheet(isPresented: $showPublishPersona) {
                 PersonaPublishView { _ in }
