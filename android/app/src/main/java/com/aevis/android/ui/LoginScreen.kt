@@ -12,9 +12,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,6 +86,8 @@ fun LoginScreen(onDone: () -> Unit) {
     var working by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
     var noteBad by remember { mutableStateOf(false) }
+    /// 底部那两个圆圈（微信 / 扫码）点开时的说明弹窗
+    var tip by remember { mutableStateOf<String?>(null) }
 
     val scope = rememberCoroutineScope()
     val ink = MaterialTheme.colorScheme.onSurface
@@ -289,13 +293,30 @@ fun LoginScreen(onDone: () -> Unit) {
         // —— 底部：微信 / QQ / 扫码 / 找回账号 ——
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircleEntry("微信", R.drawable.ic_login_wechat,
-                Color(0xFF4AB85C), !working) { open("https://aevis.cn/support.html") }
+                Color(0xFF4AB85C), !working) {
+                tip = "微信登录还在接入。现在用邮箱验证码最快；微信里也能直接搜「Aevis」小程序。"
+            }
             Spacer(Modifier.width(14.dp))
             CircleEntry("QQ", R.drawable.ic_login_qq,
-                Color(0xFF428CF0), !working) { open("https://aevis.cn/support.html") }
+                Color(0xFF428CF0), !working) {
+                // 真跳：系统浏览器 → QQ 授权 → 服务端 302 回 aevis://login
+                if (working) return@CircleEntry
+                working = true
+                scope.launch {
+                    val (url, e) = withContext(Dispatchers.IO) { Api.qqAuthUrl() }
+                    working = false
+                    if (url.isEmpty()) {
+                        note = e; noteBad = true
+                    } else {
+                        open(url)
+                    }
+                }
+            }
             Spacer(Modifier.width(14.dp))
             CircleEntry("扫码", R.drawable.ic_login_qr,
-                Color(0xFF6B708C), !working) { open("https://aevis.cn/support.html") }
+                Color(0xFF6B708C), !working) {
+                tip = "扫码是给平板和网页版用的。手机上直接用邮箱验证码登录就行。"
+            }
             Spacer(Modifier.width(14.dp))
             Text("找回账号", fontSize = 13.5.sp, color = secondary,
                 modifier = Modifier.clip(CircleShape)
@@ -303,6 +324,16 @@ fun LoginScreen(onDone: () -> Unit) {
                     .clickable { open("https://aevis.cn/support.html") }
                     .padding(horizontal = 18.dp, vertical = 11.dp))
         }
+    }
+
+    if (tip != null) {
+        AlertDialog(
+            onDismissRequest = { tip = null },
+            confirmButton = {
+                TextButton(onClick = { tip = null }) { Text("知道了") }
+            },
+            text = { Text(tip ?: "", fontSize = 14.sp, lineHeight = 21.sp) }
+        )
     }
 }
 

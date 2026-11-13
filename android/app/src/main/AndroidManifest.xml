@@ -26,6 +26,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="aevis" android:host="pay" />
             </intent-filter>
+            <!-- QQ 授权完由服务端 302 回 aevis://login?token=…（和 iOS 同一套） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aevis" android:host="login" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

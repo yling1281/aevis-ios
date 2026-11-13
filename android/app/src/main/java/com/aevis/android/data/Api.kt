@@ -42,6 +42,20 @@ object Api {
              JSONObject().put("email", norm(email)).put("password", password)
                  .put("code", code.trim()), email)
 
+    /**
+     * QQ 一键登录：拿授权地址。用法跟 iOS 一样 —— 丢给**系统浏览器**打开，
+     * QQ 授权完服务端 302 回 `aevis://login?token=…`，由 MainActivity 接。
+     * 返回 (地址, 错误文案)。
+     */
+    fun qqAuthUrl(): Pair<String, String> {
+        val (code, json) = post("/v1/auth/qq/url", JSONObject(), null)
+        if (code !in 200..299) return "" to "网络异常（HTTP $code）"
+        val data = json.optJSONObject("data") ?: json
+        val url = data.optString("auth_url").ifEmpty { data.optString("url") }
+        if (url.isEmpty()) return "" to json.optString("msg").ifEmpty { "QQ 登录还没配置" }
+        return url to ""
+    }
+
     fun logout() = signOut()
 
     /** 余额（积分）。没登录或网络不通都返回 null，界面如实显示「—」。 */
