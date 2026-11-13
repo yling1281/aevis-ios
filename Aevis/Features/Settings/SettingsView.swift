@@ -129,8 +129,11 @@ struct SettingsView: View {
                         //    `wallet`（虚拟钱包/银行）、`qqbot` / `wechatbot`（QQ 桥接）。
                         //    **不是隐藏，是入口彻底不生成**：key 不在这张表里，
                         //    `card(_:)` 那个 switch 也就永远不会被调到。
+                        // 2026-11-13 用户：「在控制台做了什么这个已下线，
+                        //   下线了的话那你这个就不要了呗」——`console` 从入口表里摘掉。
+                        //   卡片和页面还在（截图自检用得到），只是用户点不进去。
                         keys: ["aitools", "wxbot", "companion", "music",
-                               "system", "mcp", "console"]),
+                               "system", "mcp"]),
             CardSection(id: "data", title: "账号与数据",
                         // 2026-11-12：「这台设备你还是没有删，就是设备码这个东西」——
                         // `device`（设备码）和 `devicelist`（设备列表）两张卡从这里摘掉，

@@ -48,17 +48,10 @@ struct DiscoverView: View {
                             onUpload: { showPublishPersona = true }
                         )
 
-                        VStack(spacing: 8) {
-                            V2SectionTitle("刷一刷", trailing: "全部人设", onTrailing: { showPlaza = true })
-                            // 横滑条上面已经有「全部」了，这里不再摆一行「人设广场」——
-                            // 同一屏两个一模一样的入口，用户会以为其中一个是别的功能。
-                            V2Card {
-                                V2Row(symbol: "square.and.pencil",
-                                      title: "写一个人设传上去",
-                                      detail: "自己写的也能被别人的通讯录取走",
-                                      action: { showPublishPersona = true })
-                            }
-                        }
+                        // 2026-11-13 用户：「首先人设广场，你有两个，撞了两个设字」——
+                        // 横滑条上已经有「人设广场 / 写一个 / 全部」，这块再摆一个
+                        // 「刷一刷 + 全部人设 + 写一个人设」就是同一件事说两遍，
+                        // 而且两个「设」字挨着看着像标题重复。整块去掉。
 
                         VStack(spacing: 8) {
                             V2SectionTitle("一起玩")

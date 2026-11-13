@@ -806,30 +806,30 @@ final class ProactiveService {
         // ——— 首选：POST + JSON ———
         //
         // 中文直接放在 JSON 正文里，**不用拼进 URL 做百分号转义**。
-        // 之前走的是 `/<标题>/<内容>` 那种路径写法，中文会被转成一长串 %E5%…，
-        // 用户看到的就是「符号转码」。
-        if !key.isEmpty, let pushURL = URL(string: base + "/push") {
-            var payload: [String: Any] = [
-                "device_key": key,
-                "title": title,
-                "body": text,
-                "group": "Aevis"
-            ]
-            payload["level"] = "timeSensitive"
-
-            var request = URLRequest(url: pushURL)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.timeoutInterval = 20
-            request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-
-            // 成功就到此为止；失败往下走兜底。
-            // 用 `!= nil` 而不是 `if let result =`：返回值我们**根本不用**，
-            // 绑定一个从来没人读的变量只会让编译器警告。
-            if (try? await Self.perform(request)) != nil {
-                return
+        //
+        // ⚠️ 2026-11-13 修：端点必须是 `<scheme>://<host>/push`，
+        //    **不能**是 `<base>/push`。Bark 的路由是 `/:key/:body`，
+        //    所以 `https://api.day.app/KEY/push` 会被它解析成
+        //    「device_key=KEY、正文=push」，手机上收到的通知正文就是 "push" ——
+        //    用户说的「没推送成真正的文字」就是这个。
+        if !key.isEmpty {
+            var pushComps = URLComponents(url: parsed, resolvingAgainstBaseURL: false)
+            pushComps?.path = "/push"
+            pushComps?.query = nil
+            if let pushURL = pushComps?.url {
+                let payload = Self.barkPayload(key: key, title: title, text: text)
+                if (try? await Self.postJSON(pushURL, payload)) != nil {
+                    return
+                }
             }
-            // 失败就往下走兜底 —— 老版本 Bark 或自建服务可能没有 /push
+            // 自建服务可能把 Bark 挂在子路径（`https://x/bark/KEY`）——
+            // 那种情况下根路径的 `/push` 会 404，退回 base + "/push" 再试一次。
+            if let pushURL = URL(string: base + "/push") {
+                let payload = Self.barkPayload(key: key, title: title, text: text)
+                if (try? await Self.postJSON(pushURL, payload)) != nil {
+                    return
+                }
+            }
         }
 
         // ——— 兜底：路径那种老写法（中文照旧要转义，但至少能用） ———
@@ -845,6 +845,29 @@ final class ProactiveService {
         request.httpMethod = "GET"
         request.timeoutInterval = 20
         _ = try await Self.perform(request)
+    }
+
+    /// Bark 的 JSON 正文，字段按官方 `POST /push` 的定义来。
+    /// `isArchive: 1` 让它进 Bark 的历史列表，翻得到；不然划掉就没了。
+    private static func barkPayload(key: String, title: String,
+                                    text: String) -> [String: Any] {
+        [
+            "device_key": key,
+            "title": title,
+            "body": text,
+            "group": "Aevis",
+            "level": "timeSensitive",
+            "isArchive": 1
+        ]
+    }
+
+    private static func postJSON(_ url: URL, _ payload: [String: Any]) async throws -> Bool {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 20
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        return try await perform(request)
     }
 
     /// 发一次请求，成功返回；失败抛出人话。

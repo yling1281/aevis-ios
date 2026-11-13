@@ -91,17 +91,9 @@ struct MeView: View {
                 }
 
                 Spacer()
-
-                Button {
-                    route = SettingsRoute(focus: nil)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.aevis(15, weight: .medium))
-                        .foregroundStyle(V2.accent)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(V2.soft(0.13)))
-                }
-                .buttonStyle(.plain)
+                // 2026-11-13 用户：「上面还有两个总设置，我都说了去掉去掉去掉」——
+                // 顶栏 `V2TopBar` 右上角已经有一个齿轮，这里再画一个就是两个。
+                // 只留顶栏那个（两套首页共用）。
             }
 
             // 活动横幅
@@ -130,12 +122,12 @@ struct MeView: View {
     }
 
     /// 圆形小入口 + 小字，4 列。
+    ///
+    /// 2026-11-13 用户：「上面那些会员什么积分那些模型什么记忆库有的，
+    /// 你下面就不要放了呀」——顶部的会员横幅 + 顶栏齿轮已经覆盖了这几项，
+    /// 这里只留**上面没有的**：陪伴 / AI 权限 / 健康 / 人设广场。
     private var personalGrid: some View {
         let items: [(String, String, () -> Void)] = [
-            ("会员", "crown", { showPoints = true }),
-            ("积分", "star.circle", { showPoints = true }),
-            ("模型", "cpu", { route = SettingsRoute(focus: "model") }),
-            ("记忆库", "brain", { route = SettingsRoute(focus: "memory") }),
             ("陪伴", "heart", { route = SettingsRoute(focus: "companion") }),
             ("AI 权限", "wand.and.stars", { route = SettingsRoute(focus: "aitools") }),
             ("健康", "cross.case", { showHealth = true }),
