@@ -27,8 +27,18 @@ object V2 {
     val wellDark = Color(0xFF272530)
     val alert = Color(0xFFE5484D)
 
-    /** 主色（iOS 里是可换的强调色，这里先固定成默认那支紫）。*/
-    val accent = Color(0xFF6E5BE8)
+    /** 主色 —— 跟 iOS `AppSettings.accentPalette[0]` 同一个值（#9B8AF0）。*/
+    val accent = Color(0xFF9B8AF0)
+
+    /** 六支主题色，顺序与 iOS 完全一致，以后加换色直接用。*/
+    val accentPalette = listOf(
+        Color(0xFF9B8AF0), // 淡紫
+        Color(0xFF6FA8E8), // 淡蓝
+        Color(0xFF21A394), // 青
+        Color(0xFFE05185), // 玫红
+        Color(0xFFEB8C2E), // 橙
+        Color(0xFF669E33)  // 绿
+    )
 
     val cardRadius = 22.dp
     val rowRadius = 18.dp

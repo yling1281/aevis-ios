@@ -80,7 +80,8 @@ struct PointsView: View {
                 .font(.aevis(12.5))
                 .foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(service.points)")
+                // 千分位由共享 C++ 算，跟安卓显示一致
+                Text(AevisCore.points(service.points))
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                 Text("积分")

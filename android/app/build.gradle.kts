@@ -7,6 +7,8 @@ plugins {
 android {
     namespace = "com.aevis.android"
     compileSdk = 34
+    // 共享 C++ 底层（shared-core/aevis_core.cpp）
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "com.aevis.android"
@@ -33,6 +35,13 @@ android {
     kotlinOptions { jvmTarget = "17" }
     // BuildConfig 默认不生成（AGP 8），版本号要显示在「我」页，得打开
     buildFeatures { compose = true; buildConfig = true }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 dependencies {
@@ -41,7 +50,5 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    // 只用 core 里的几个图标；extended 一整套 ~10MB，APK 一半体积都是它
-    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
 }

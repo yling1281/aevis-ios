@@ -7,11 +7,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,12 +14,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.rememberCoroutineScope
 import com.aevis.android.BuildConfig
+import com.aevis.android.R
+import com.aevis.android.core.NativeCore
 import com.aevis.android.data.Api
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -126,15 +124,17 @@ private fun Field(label: String, value: String, secret: Boolean, onChange: (Stri
 
 // ------------------------------------------------------------------ 主壳
 
-private data class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+private data class Tab(val title: String, @androidx.annotation.DrawableRes val icon: Int)
 
 @Composable
 fun Shell(onSignOut: () -> Unit) {
+    // 图标用矢量 drawable，形状对着 iOS 那四个 SF Symbols 画的 ——
+    // 以前用 Material 的 Email/Person/Search，跟 iOS 差得远。
     val tabs = listOf(
-        Tab("聊天", Icons.Filled.Email),
-        Tab("通讯录", Icons.Filled.Person),
-        Tab("发现", Icons.Filled.Search),
-        Tab("我", Icons.Filled.AccountCircle)
+        Tab("聊天", R.drawable.ic_tab_chat),
+        Tab("通讯录", R.drawable.ic_tab_contacts),
+        Tab("发现", R.drawable.ic_tab_discover),
+        Tab("我", R.drawable.ic_tab_me)
     )
     var idx by remember { mutableIntStateOf(0) }
 
@@ -146,7 +146,7 @@ fun Shell(onSignOut: () -> Unit) {
                     NavigationBarItem(
                         selected = idx == i,
                         onClick = { idx = i },
-                        icon = { Icon(t.icon, contentDescription = t.title) },
+                        icon = { Icon(painterResource(t.icon), contentDescription = t.title) },
                         label = { Text(t.title, fontSize = V2.micro) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = V2.accent,
@@ -262,7 +262,8 @@ private fun MeTab(onSignOut: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("积分余额", fontSize = V2.sub)
-                Text(balance?.toString() ?: "—", fontSize = V2.title,
+                // 积分千分位由共享 C++ 算，和 iOS 显示完全一致
+                Text(NativeCore.formatPointsSafe(balance), fontSize = V2.title,
                      fontWeight = FontWeight.SemiBold, color = V2.accent)
             }
         }
@@ -281,7 +282,8 @@ private fun MeTab(onSignOut: () -> Unit) {
         // 之前装上去完全看不出是哪个版本。
         Spacer(Modifier.height(20.dp))
         Text(
-            "Aevis Android ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
+            "Aevis Android ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）" +
+                " · core ${runCatching { NativeCore.version() }.getOrDefault("—")}",
             fontSize = V2.micro,
             color = MaterialTheme.colorScheme.onSurface.copy(0.35f),
             textAlign = TextAlign.Center,

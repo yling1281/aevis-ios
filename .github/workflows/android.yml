@@ -54,7 +54,8 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+            "platform-tools" "platforms;android-34" "build-tools;34.0.0" \
+            "ndk;26.1.10909125" "cmake;3.22.1"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

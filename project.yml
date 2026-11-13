@@ -401,6 +401,8 @@ targets:
           - "Resources/Info.plist"
           # 权限声明文件是给签名用的，不该被当成资源打进包里
           - "Aevis.entitlements"
+      # 共享 C++ 底层（和安卓是同一份 .cpp）
+      - path: shared-core
     # ⚠️ 依赖清单**整体留在标记之外**（`dependencies:` 这个键 + AevisLive 那一项）。
     #
     # 为什么：`AevisLive`（实时活动扩件）**不能**被 strip_extension.py 摘掉 ——
@@ -439,6 +441,10 @@ targets:
         # 把 Assets 里所有 appiconset 都编进去，备用图标才能被
         # UIApplication.setAlternateIconName(_:) 找到
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "YES"
+        # 共享 C++ 底层：bridging header + 头文件搜索路径 + C++17
+        SWIFT_OBJC_BRIDGING_HEADER: "Aevis/Aevis-Bridging-Header.h"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/shared-core"
+        CLANG_CXX_LANGUAGE_STANDARD: "c++17"
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_USER_SCRIPT_SANDBOXING: "YES"
         # 2026-11-02：内置 Linux（iSH）整条拆掉了 ——
