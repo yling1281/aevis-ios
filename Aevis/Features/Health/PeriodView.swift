@@ -13,6 +13,9 @@ import SwiftUI
 /// ⚠️ 名字还叫 `PeriodView` 是为了不动 `MeView` 里的引用 —— 它已经不是"经期页"了。
 struct PeriodView: View {
     @ObservedObject private var health = HealthStore.shared
+    /// 用户 2026-11-13：「每一个二级菜单你都要加返回键」——
+    /// 这一页是从个人中心弹出来的，以前只能下滑退出。
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -43,6 +46,9 @@ struct PeriodView: View {
             .navigationTitle("健康")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await health.refresh() }

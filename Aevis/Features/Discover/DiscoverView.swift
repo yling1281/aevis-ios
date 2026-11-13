@@ -22,17 +22,32 @@ struct DiscoverView: View {
     ///    保留 ObservedObject（指向单例），不依赖环境注入，sheet 里也能用。
     @ObservedObject private var personaStore = PersonaStore.shared
 
-    @State private var showMusic = false
-    @State private var showCouple = false
-    @State private var showDiary = false
-    @State private var showTodo = false
-    @State private var showBrowser = false
-    /// 正在等用户选人的那个入口
-    @State private var pick: DiscoverPick?
-    @State private var showAppleMusic = false
-    /// 人设广场（2026-11-01 用户要求：在发现页就能刷，也能自己写一个上传）。
-    @State private var showPlaza = false
-    @State private var showPublishPersona = false
+    /// 所有二级页共用一个 sheet 通道。
+    ///
+    /// 以前这一页挂了 **9 个** `.sheet` 在同一个 View 上（music / couple /
+    /// diary / todo / browser / appleMusic / shop / publish / picker）。
+    /// SwiftUI 一个视图只能可靠承载一个 sheet，多挂之后点「商城」根本
+    /// 没反应 —— 用户 2026-11-13：「人设广场点不进去」。现在全收进这个 enum。
+    @State private var sheet: DiscoverSheet?
+
+    enum DiscoverSheet: Identifiable {
+        case picker(DiscoverPick)
+        case music, couple, diary, todo, browser, appleMusic, shop, publish
+
+        var id: String {
+            switch self {
+            case .picker(let k): return "pick-" + k.rawValue
+            case .music: return "music"
+            case .couple: return "couple"
+            case .diary: return "diary"
+            case .todo: return "todo"
+            case .browser: return "browser"
+            case .appleMusic: return "apple-music"
+            case .shop: return "shop"
+            case .publish: return "publish"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -45,7 +60,7 @@ struct DiscoverView: View {
                         //                  「直接弄一个商城，里面是人设和表情包还有音色，
                         //                    然后那个表情包直接去掉」——
                         // 原来的「人设广场横滑条」换成一张商城入口卡。
-                        ShopEntryCard { showPlaza = true }
+                        ShopEntryCard { sheet = .shop }
 
                         // 2026-11-13 用户：「首先人设广场，你有两个，撞了两个设字」——
                         // 横滑条上已经有「人设广场 / 写一个 / 全部」，这块再摆一个
@@ -112,7 +127,7 @@ struct DiscoverView: View {
                                 V2Row(symbol: "safari",
                                       title: "浏览器",
                                       detail: "打开网页，看到好的就发给\(Pronoun.current)",
-                                      action: { showBrowser = true })
+                                      action: { sheet = .browser })
                                 V2Divider()
                                 // 实时通话：和上面那两块用的是同一个 `Experimental.enabled`
                                 //（现在恒为 true），所以它一直都在。用户 2026-10-01 要
@@ -130,52 +145,68 @@ struct DiscoverView: View {
                 }
             }
             .v2Page()
-            .sheet(item: $pick) { kind in
-                PersonaPicker(title: kind.title, showsCurrent: false) { id in
-                    PersonaMemory.shared.remember([id], for: kind.feature)
-                    run(kind, ids: [id])
-                }
-            }
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showMusic) {
-                // MusicView 自己没有导航壳，这里给它一个
-                NavigationStack { MusicView() }
-            }
-            .sheet(isPresented: $showCouple) {
-                // CoupleSpaceView 自带 NavigationStack。
-                CoupleSpaceView()
-            }
-            .sheet(isPresented: $showDiary) {
-                DiaryView()
-            }
-            .sheet(isPresented: $showTodo) {
-                TodoView()
-            }
-            .sheet(isPresented: $showBrowser) {
-                // 内置浏览器。它自己的标题栏 / 返回键**只在被导航壳包住时才成立**
-                //（`InAppBrowserView` 里用的是 `.navigationTitle` / `.navigationBarTitleDisplayMode`），
-                // 所以这里必须给它一个 NavigationStack —— 同上面 MusicView 那一条。
-                //
-                // ⚠️ 它自己**没有任何关闭按钮**（原来只在被 push 时靠系统返回键）。
-                //    放进 sheet 后，没有这一颗「关闭」老板就永远退不出去 —— 必须在导航栏补。
-                NavigationStack {
-                    InAppBrowserView(start: nil, title: "浏览器")
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("关闭") { showBrowser = false }
+            .sheet(item: $sheet) { s in
+                switch s {
+                case .picker(let kind):
+                    PersonaPicker(title: kind.title, showsCurrent: false) { id in
+                        PersonaMemory.shared.remember([id], for: kind.feature)
+                        run(kind, ids: [id])
+                    }
+
+                case .music:
+                    // MusicView 自带工具栏但**没有返回键**，这里补一颗。
+                    NavigationStack {
+                        MusicView()
+                            .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button("关闭") { sheet = nil }
+                                }
                             }
-                        }
+                    }
+
+                case .couple:
+                    // CoupleSpaceView 自带 NavigationStack + 「关闭」。
+                    CoupleSpaceView()
+
+                case .diary:
+                    DiaryView()
+
+                case .todo:
+                    TodoView()
+
+                case .browser:
+                    // InAppBrowserView 的标题栏只在导航壳里成立，而且它自己
+                    // **没有任何关闭按钮** —— 必须在这里补，否则出不去。
+                    NavigationStack {
+                        InAppBrowserView(start: nil, title: "浏览器")
+                            .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button("关闭") { sheet = nil }
+                                }
+                            }
+                    }
+
+                case .appleMusic:
+                    // 苹果音乐：原来既没标题也没关闭，只能下滑退出 —— 补上返回。
+                    // 模拟器不支持 MusicKit，只能真机。
+                    NavigationStack {
+                        AppleMusicView()
+                            .navigationTitle("苹果音乐")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button("关闭") { sheet = nil }
+                                }
+                            }
+                    }
+
+                case .shop:
+                    ShopView()
+
+                case .publish:
+                    PersonaPublishView { _ in }
                 }
-            }
-            // 苹果音乐（Apple Music / MusicKit）。⚠️ 模拟器不支持 MusicKit，只能真机。
-            .sheet(isPresented: $showAppleMusic) {
-                AppleMusicView()
-            }
-            .sheet(isPresented: $showPlaza) {
-                ShopView()
-            }
-            .sheet(isPresented: $showPublishPersona) {
-                PersonaPublishView { _ in }
             }
             .onAppear {
                 applyLaunchOptions()
@@ -187,8 +218,8 @@ struct DiscoverView: View {
     private func applyLaunchOptions() {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("-aevisOpenDiary") { showDiary = true }
-        if args.contains("-aevisOpenTodo") { showTodo = true }
+        if args.contains("-aevisOpenDiary") { sheet = .diary }
+        if args.contains("-aevisOpenTodo") { sheet = .todo }
         #endif
     }
 
@@ -275,7 +306,7 @@ struct DiscoverView: View {
             run(kind, ids: [alive[0].id])
             return
         }
-        pick = kind
+        sheet = .picker(kind)
     }
 
     private func run(_ kind: DiscoverPick, ids: Set<UUID>) {
@@ -287,11 +318,11 @@ struct DiscoverView: View {
 
         switch kind {
         case .moment: router.showMoments = true
-        case .couple: showCouple = true
-        case .diary: showDiary = true
-        case .todo: showTodo = true
+        case .couple: sheet = .couple
+        case .diary: sheet = .diary
+        case .todo: sheet = .todo
         case .call: router.startCall()
-        case .music: showMusic = true
+        case .music: sheet = .music
         }
     }
 

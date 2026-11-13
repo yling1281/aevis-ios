@@ -101,38 +101,53 @@ struct ShopView: View {
     @State private var previewPlayer: AVPlayer?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            searchBar
-            segmented
-            Divider().opacity(0.4)
-            content
-        }
-        .background(V2.background.ignoresSafeArea())
-        .task {
-            if personaStore.rows.isEmpty { await personaStore.load() }
-            await loadPacks()
-            loadVoices()
-        }
-        .sheet(item: $openPack) { pack in
-            ShopPackDetail(pack: pack)
+        // ⚠️ 以前这里**没有 NavigationStack**，人设格子用的是 NavigationLink ——
+        //    没有导航栈的时候 NavigationLink 就是个纯装饰，点了毫无反应
+        //    （2026-11-13 用户：「人设广场点不进去」）。套上它才真的能进详情。
+        NavigationStack {
+            VStack(spacing: 0) {
+                header
+                searchBar
+                segmented
+                Divider().opacity(0.4)
+                content
+            }
+            .background(V2.background.ignoresSafeArea())
+            // 根页用自定义头（带「人设 · 表情包 · 音色」副标题），把系统空导航栏藏掉；
+            // 推进去的人设详情会自己把导航栏显示出来（带系统返回键）。
+            .toolbar(.hidden, for: .navigationBar)
+            .task {
+                if personaStore.rows.isEmpty { await personaStore.load() }
+                await loadPacks()
+                loadVoices()
+            }
+            .sheet(item: $openPack) { pack in
+                ShopPackDetail(pack: pack)
+            }
         }
     }
 
     // MARK: 顶栏
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.aevis(16, weight: .semibold))
-                    .foregroundStyle(V2.accent)
-                    .frame(width: 36, height: 36)
-                    .background(Circle().fill(V2.soft(0.12)))
+                // 2026-11-13 用户：「返回键有点怪怪的」——
+                // 原来是一个 36×36 的圆底 + 一根箭头，跟系统返回键不是一个东西，
+                // 而且圆底和左边的 18pt 留白没对齐。改成 iOS 原生的「‹ 返回」。
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left")
+                        .font(.aevis(16, weight: .semibold))
+                    Text("返回").font(.aevis(16))
+                }
+                .foregroundStyle(V2.accent)
+                .frame(height: 36)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("返回")
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("商城").font(.aevis(22, weight: .bold))
@@ -469,9 +484,14 @@ struct ShopPersonaCard: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(V2.dim(0.38))
-            .padding(.top, 7)
-            .padding(.horizontal, 2)
+            .padding(.top, 8)
+            // 跟封面里那个名字的左边缘对齐（那里是 10）——
+            // 原来这里是 2，两行字左边缘差 8pt，看着就是「没对齐」。
+            .padding(.horizontal, 10)
+            .padding(.bottom, 2)
         }
+        // 空白处也要能点进去 —— 否则只有图片/文字那几条线响应
+        .contentShape(Rectangle())
     }
 }
 
@@ -655,7 +675,9 @@ struct ShopPersonaDetail: View {
             .padding(.bottom, 30)
         }
         .background(V2.background.ignoresSafeArea())
-        .navigationTitle("")
+        // 根页把导航栏藏了，推进来的详情要显式打开 —— 否则没有系统返回键。
+        .toolbar(.visible, for: .navigationBar)
+        .navigationTitle("人设详情")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

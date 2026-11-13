@@ -383,7 +383,17 @@ struct MeView: View {
             .fullScreenCover(isPresented: $showDisclaimer) { DisclaimerView() }
             .sheet(isPresented: $showHealth) { PeriodView() }
             .fullScreenCover(isPresented: $showRules) { RulesView() }
-            .sheet(isPresented: $showInbox) { NavigationStack { InboxView() } }
+            .sheet(isPresented: $showInbox) {
+                // InboxView 自己没有关闭按钮 —— 不加这一颗就只能下滑退出。
+                NavigationStack {
+                    InboxView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { showInbox = false }
+                            }
+                        }
+                }
+            }
             .fullScreenCover(isPresented: $showTickets) { NavigationStack { TicketListView() } }
             .fullScreenCover(isPresented: $showPoints) { PointsView() }
             // 人设广场在「发现」里，个人中心版从这里直接开门
@@ -396,7 +406,17 @@ struct MeView: View {
             }
             .fullScreenCover(isPresented: $showMoments) { MomentsView() }
             .fullScreenCover(isPresented: $showCouple) { CoupleSpaceView() }
-            .sheet(isPresented: $showMusic) { NavigationStack { MusicView() } }
+            .sheet(isPresented: $showMusic) {
+                // MusicView 自带工具栏但没有返回键，这里补一颗。
+                NavigationStack {
+                    MusicView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { showMusic = false }
+                            }
+                        }
+                }
+            }
         }
     }
 
