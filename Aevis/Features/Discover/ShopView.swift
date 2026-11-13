@@ -293,10 +293,10 @@ struct ShopView: View {
                     ForEach(voices) { v in
                         ShopVoiceRow(
                             voice: v,
-                            selected: settings.speechVoiceID == v.id,
+                            selected: settings.ttsVoice == v.id,
                             previewing: previewing == v.id,
                             onPreview: { preview(v) },
-                            onSelect: { settings.speechVoiceID = v.id }
+                            onSelect: { settings.ttsVoice = v.id }
                         )
                     }
                 }
