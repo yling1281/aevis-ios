@@ -271,7 +271,7 @@ private fun MeTab(onSignOut: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("积分余额", fontSize = V2.sub)
                 // 积分千分位由共享 C++ 算，和 iOS 显示完全一致
-                Text(NativeCore.formatPointsSafe(balance), fontSize = V2.title,
+                Text(NativeCore.formatPointsSafe(balance?.toLong()), fontSize = V2.title,
                      fontWeight = FontWeight.SemiBold, color = V2.accent)
             }
         }
