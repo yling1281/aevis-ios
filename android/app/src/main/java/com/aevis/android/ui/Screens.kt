@@ -141,19 +141,27 @@ fun Shell(onSignOut: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                tabs.forEachIndexed { i, t ->
-                    NavigationBarItem(
-                        selected = idx == i,
-                        onClick = { idx = i },
-                        icon = { Icon(painterResource(t.icon), contentDescription = t.title) },
-                        label = { Text(t.title, fontSize = V2.micro) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = V2.accent,
-                            selectedTextColor = V2.accent,
-                            indicatorColor = V2.accent.copy(0.12f)
-                        )
-                    )
+            // 自绘底部栏：iOS 的 UITabBar 是「细分割线 + 4 等分 + 图标 23 / 字 10」，
+            // Material 的 NavigationBar 有胶囊指示器、高度也不同 —— 摆一起明显两个 App。
+            Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
+                HorizontalDivider(thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(0.08f))
+                Row(Modifier.fillMaxWidth().height(54.dp)) {
+                    tabs.forEachIndexed { i, t ->
+                        val on = idx == i
+                        val tint = if (on) V2.accent
+                                   else MaterialTheme.colorScheme.onSurface.copy(0.42f)
+                        Column(
+                            Modifier.weight(1f).fillMaxHeight().clickable { idx = i },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(painterResource(t.icon), contentDescription = t.title,
+                                tint = tint, modifier = Modifier.size(23.dp))
+                            Spacer(Modifier.height(3.dp))
+                            Text(t.title, fontSize = 10.sp, color = tint)
+                        }
+                    }
                 }
             }
         }

@@ -63,10 +63,22 @@ jobs:
           gradle-version: '8.7'
 
       # 第一次跑要下 AGP / Compose 那一堆依赖，慢是正常的
-      - name: Build debug APK
+      - name: Build release APK
         run: |
+          set -o pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle assembleRelease --no-daemon --stacktrace
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      # 失败时把日志发到 Release，否则 Actions 日志要登录才看得到
+      - name: Upload build log on failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: log-android-${{ github.run_number }}
+          name: Android build log ${{ github.run_number }}
+          prerelease: true
+          body: "构建失败，日志见附件"
+          files: android/build.log
 
       - name: Collect APK
         run: |
