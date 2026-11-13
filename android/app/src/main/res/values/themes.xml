@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 只为了让 Activity 起来不闪白：真正的配色在 Compose 的 Theme.kt 里 -->
+    <style name="Theme.Aevis" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F7F6FB</item>
+        <item name="android:statusBarColor">#F7F6FB</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
