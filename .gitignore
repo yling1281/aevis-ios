@@ -20,3 +20,10 @@ Aevis.xcodeproj/
 
 # 图标是脚本生成的（scripts/make_icon.py），不进版本库
 Aevis/Resources/Assets.xcassets/
+
+# 安卓构建产物 / 本机 SDK 路径
+android/.gradle/
+android/.cxx/
+android/app/.cxx/
+android/local.properties
+android/app/build/
