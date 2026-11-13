@@ -328,10 +328,10 @@ struct ChatView: View {
                 if activeGroup == nil { showPersona = true }
             } label: {
                 if let group = activeGroup {
-                    GroupAvatarBadge(size: settings.simpleMode ? 40 : 36,
+                    GroupAvatarBadge(size: settings.simpleMode ? 48 : 44,
                                      memberCount: group.memberCount)
                 } else {
-                    AevisAvatar(size: settings.simpleMode ? 40 : 36, seed: persona.avatarSeed)
+                    AevisAvatar(size: settings.simpleMode ? 48 : 44, seed: persona.avatarSeed)
                 }
             }
             .buttonStyle(.plain)

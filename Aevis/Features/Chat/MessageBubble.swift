@@ -89,7 +89,9 @@ struct MessageBubble: View {
     private var bubbleFontSize: CGFloat { simpleMode ? 17.5 : 15.5 }
     private var horizontalPadding: CGFloat { (simpleMode ? 16 : 14) * CGFloat(theme.density) }
     private var verticalPadding: CGFloat { (simpleMode ? 13 : 10) * CGFloat(theme.density) }
-    private var avatarSize: CGFloat { simpleMode ? 30 : 26 }
+    // 2026-11-13 用户：「对话的头像能不能变大一点」——
+    // 26 太小了，看不出来是谁。放到 34（简洁模式 38）。
+    private var avatarSize: CGFloat { simpleMode ? 38 : 34 }
 
     /// 基础圆角再乘两层系数：全局的 + 这一侧自己的。
     private var bubbleCorner: CGFloat {
