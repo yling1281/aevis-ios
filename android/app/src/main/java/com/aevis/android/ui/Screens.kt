@@ -19,10 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.rememberCoroutineScope
+import com.aevis.android.BuildConfig
 import com.aevis.android.data.Api
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -275,5 +277,16 @@ private fun MeTab(onSignOut: () -> Unit) {
                 Text("›", color = MaterialTheme.colorScheme.onSurface.copy(0.3f))
             }
         }
+        // 版本号常驻在底部 —— 用户 2026-11-13：「APK 的版本呢？」
+        // 之前装上去完全看不出是哪个版本。
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Aevis Android ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
+            fontSize = V2.micro,
+            color = MaterialTheme.colorScheme.onSurface.copy(0.35f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
     }
 }

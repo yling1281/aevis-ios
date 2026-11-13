@@ -12,8 +12,8 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {
@@ -27,7 +27,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    // BuildConfig 默认不生成（AGP 8），版本号要显示在「我」页，得打开
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 dependencies {
