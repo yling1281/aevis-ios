@@ -8,10 +8,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.People
-import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -131,10 +131,10 @@ private data class Tab(val title: String, val icon: androidx.compose.ui.graphics
 @Composable
 fun Shell(onSignOut: () -> Unit) {
     val tabs = listOf(
-        Tab("聊天", Icons.Outlined.ChatBubbleOutline),
-        Tab("通讯录", Icons.Outlined.People),
-        Tab("发现", Icons.Outlined.Explore),
-        Tab("我", Icons.Outlined.Person)
+        Tab("聊天", Icons.Filled.Email),
+        Tab("通讯录", Icons.Filled.Person),
+        Tab("发现", Icons.Filled.Search),
+        Tab("我", Icons.Filled.AccountCircle)
     )
     var idx by remember { mutableIntStateOf(0) }
 

@@ -65,12 +65,12 @@ jobs:
       - name: Build debug APK
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleRelease --no-daemon --stacktrace
 
       - name: Collect APK
         run: |
           set -e
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           echo "产物：$APK"
           test -s "$APK" || { echo "没有 APK"; exit 1; }
           cp "$APK" Aevis-android-debug.apk
