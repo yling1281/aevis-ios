@@ -48,6 +48,22 @@ struct ShopVoice: Identifiable, Hashable {
     let name: String
     let lang: String
     let premium: Bool
+
+    /// MiniMax 系统音色（与后端 `aevis_tts.VOICES` 同一份清单，改一处要同步）。
+    static let minimax: [ShopVoice] = [
+        .init(id: "female-shaonv", name: "少女", lang: "zh-CN", premium: true),
+        .init(id: "female-yujie", name: "御姐", lang: "zh-CN", premium: true),
+        .init(id: "female-chengshu", name: "成熟女声", lang: "zh-CN", premium: true),
+        .init(id: "female-tianmei", name: "甜美女声", lang: "zh-CN", premium: true),
+        .init(id: "male-qn-qingse", name: "青涩青年", lang: "zh-CN", premium: true),
+        .init(id: "male-qn-jingying", name: "精英青年", lang: "zh-CN", premium: true),
+        .init(id: "male-qn-badao", name: "霸道青年", lang: "zh-CN", premium: true),
+        .init(id: "male-qn-daxuesheng", name: "大学生", lang: "zh-CN", premium: true),
+        .init(id: "presenter_male", name: "男主持", lang: "zh-CN", premium: true),
+        .init(id: "presenter_female", name: "女主持", lang: "zh-CN", premium: true),
+        .init(id: "audiobook_male_1", name: "男声书", lang: "zh-CN", premium: true),
+        .init(id: "audiobook_female_1", name: "女声书", lang: "zh-CN", premium: true),
+    ]
 }
 
 // MARK: - 商城
@@ -81,7 +97,8 @@ struct ShopView: View {
     @State private var openPack: ShopEmojiPack?
 
     /// 试听用的合成器。用 State 存引用类型不理想，但这里只需要它活到页面结束。
-    @State private var previewer = AVSpeechSynthesizer()
+    /// 试听走服务端的**缓存 mp3**（每个音色只合成一次，谁点都不再花钱）。
+    @State private var previewPlayer: AVPlayer?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -307,15 +324,20 @@ struct ShopView: View {
         }
     }
 
-    /// 试听：直接用系统 TTS 播一句，不走 SpeechService ——
-    /// 那边要一整套 TTSConfig（还可能走远端），试听用不上那么重。
+    /// 试听：放服务端缓存的 mp3。
+    ///
+    /// 2026-11-13 用户：「音色不用原生的了，用 MiniMax」「试听别花我们的余额」。
+    /// 服务端每个音色只合成一次并落盘，之后所有人试听都是读文件 —— 零调用、零花费。
     private func preview(_ v: ShopVoice) {
+        previewPlayer?.pause()
         previewing = v.id
-        previewer.stopSpeaking(at: .immediate)
-        let u = AVSpeechUtterance(string: "你好，我是这个声音。")
-        u.voice = AVSpeechSynthesisVoice(identifier: v.id)
-        previewer.speak(u)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+        guard let url = URL(string:
+            "https://aevis.cn/prod-api/aevis/v1/tts/preview/\(v.id).mp3") else { return }
+        let p = AVPlayer(url: url)
+        previewPlayer = p
+        p.play()
+        // 这句试听文案大约 3 秒，留点余量把按钮态收回去
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
             if previewing == v.id { previewing = "" }
         }
     }
@@ -361,18 +383,12 @@ struct ShopView: View {
         packs = rows.compactMap { ShopEmojiPack(dict: $0) }
     }
 
+    /// 音色清单：MiniMax 的系统音色（和后端 `aevis_tts.VOICES` 一一对应）。
+    ///
+    /// 以前这里拉的是**系统** AVSpeechSynthesisVoice —— 那些音色导不出音频文件、
+    /// 发语音消息也用不了；用户充值 MiniMax 之后统一换成它家的。
     private func loadVoices() {
-        #if canImport(UIKit)
-        voices = AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language.hasPrefix("zh") }
-            .map { v in
-                ShopVoice(id: v.identifier,
-                          name: ShopVoice.friendly(v.name),
-                          lang: v.language,
-                          premium: v.quality == .premium || v.quality == .enhanced)
-            }
-            .sorted { $0.lang == $1.lang ? $0.name < $1.name : $0.lang < $1.lang }
-        #endif
+        voices = ShopVoice.minimax
     }
 }
 
