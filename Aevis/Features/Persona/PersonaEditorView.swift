@@ -17,6 +17,18 @@ struct PersonaEditorView: View {
     /// 跟编辑的区别只有两处：进来时是空白、保存时是**新增**而不是覆盖。
     var adding: Bool = false
 
+    /// 正在编辑哪个联系人（nil = 新建 / 首次引导）。
+    ///
+    /// ⚠️ 2026-11-13 用户：「给一个人设置头像，所有人都设置头像了」——
+    /// 以前这一页取头像、存头像都走 `personaStore.avatarImage / setAvatar(image)`，
+    /// 那是**当前活跃**那个人。新建一个人设时选的图会盖到当前那个人身上，
+    /// 编辑 A 时也会把 A 的图当成所有人的预览。现在一律按 id 分层。
+    var editingID: UUID? = nil
+
+    /// 还没建号（新建流程）时，先把选好的图存在内存里，`add` 拿到 id 再落盘。
+    @State private var pendingAvatar: UIImage? = nil
+    @State private var pendingAvatarData: Data? = nil
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft = Persona()
@@ -27,6 +39,19 @@ struct PersonaEditorView: View {
     @State private var cardNote: String?
     /// 导入卡片时带进来的开场白，保存后可以顺手发出去。
     @State private var pendingFirstMessage: String?
+
+    /// 头像到底是谁的：编辑就认 `editingID`，否则才是当前活跃那个。
+    private var targetID: UUID? { editingID ?? personaStore.active?.id }
+
+    /// 预览图：新建时只看刚选的那张（**不能**借用当前活跃那个人的），
+    /// 编辑时看**这个人自己**的头像。
+    private var avatarPreview: UIImage? {
+        if adding { return pendingAvatar }
+        guard let id = targetID else { return pendingAvatar }
+        return personaStore.avatar(for: id) ?? pendingAvatar
+    }
+
+    private var hasAvatar: Bool { avatarPreview != nil }
 
     var body: some View {
         ScrollView {
@@ -84,7 +109,12 @@ struct PersonaEditorView: View {
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            // 新建时留空白；编辑时才把人设读进来
+            // 新建时留空白；编辑时把**这个人**的人设读进来
+            if let id = editingID,
+               let contact = personaStore.contacts.first(where: { $0.id == id }) {
+                draft = contact.persona
+                return
+            }
             guard !adding, personaStore.persona.isComplete else { return }
             draft = personaStore.persona
         }
@@ -188,7 +218,7 @@ struct PersonaEditorView: View {
                     .multilineTextAlignment(.center)
             } else {
                 HStack(spacing: 12) {
-                    AevisAvatar(size: 46, seed: draft.avatarSeed)
+                    AevisAvatar(size: 46, seed: draft.avatarSeed, image: avatarPreview)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(draft.name.isEmpty ? "还没有名字" : draft.name)
                             .font(.aevis(20, weight: .semibold))
@@ -211,7 +241,7 @@ struct PersonaEditorView: View {
                 .foregroundStyle(.primary)
 
             HStack(spacing: 12) {
-                AevisAvatar(size: 56, seed: draft.avatarSeed)
+                AevisAvatar(size: 56, seed: draft.avatarSeed, image: avatarPreview)
 
                 PhotosPicker(selection: $pickedAvatar, matching: .images) {
                     Text("从相册选一张")
@@ -224,10 +254,9 @@ struct PersonaEditorView: View {
                 // 同上：PhotosPicker 的文字会被系统刷成强调色，要显式压回来
                 .tint(Color.primary)
 
-                if personaStore.avatarImage != nil {
+                if hasAvatar {
                     Button {
-                        personaStore.setAvatar(nil)
-                        avatarNote = "已删掉，退回默认的色光。"
+                        removeAvatar()
                     } label: {
                         Text("删掉")
                             .font(.aevis(14))
@@ -381,9 +410,17 @@ struct PersonaEditorView: View {
         Button {
             if adding {
                 // 新建：**新增**一个联系人，并自动切过去
-                personaStore.add(draft)
+                let newID = personaStore.add(draft)
+                // 选头像的时候还没有 id，先存内存，这里再按新 id 落盘
+                if let img = pendingAvatar {
+                    personaStore.setAvatar(img, for: newID, original: pendingAvatarData)
+                }
                 commitFirstMessage()
                 dismiss()
+            } else if let id = editingID {
+                personaStore.update(draft, for: id)
+                commitFirstMessage()
+                if !isFirstRun { dismiss() }
             } else {
                 personaStore.update(draft)
                 commitFirstMessage()
@@ -450,6 +487,18 @@ struct PersonaEditorView: View {
 
     // MARK: - 动作
 
+    /// 删掉头像。新建流程只清内存里那张；已有联系人按 id 删 ——
+    /// 绝不能再去动「当前活跃那个人」的头像（那就是所有人共用一张的来源）。
+    private func removeAvatar() {
+        if adding || targetID == nil {
+            pendingAvatar = nil
+            pendingAvatarData = nil
+        } else if let id = targetID {
+            personaStore.setAvatar(nil, for: id)
+        }
+        avatarNote = "已删掉，退回默认的色光。"
+    }
+
     private func loadAvatar(_ item: PhotosPickerItem) {
         avatarNote = nil
         Task { @MainActor in
@@ -461,7 +510,13 @@ struct PersonaEditorView: View {
                 }
                 #if canImport(UIKit)
                 if let image = UIImage(data: data) {
-                    personaStore.setAvatar(image, original: data)
+                    if adding || targetID == nil {
+                        // 还没建号 —— 先拿在手里，保存时再写到新联系人身上
+                        pendingAvatar = image
+                        pendingAvatarData = data
+                    } else if let id = targetID {
+                        personaStore.setAvatar(image, for: id, original: data)
+                    }
                     avatarNote = "头像换好了。"
                 } else {
                     avatarNote = "这张图格式不支持，换一张试试。"

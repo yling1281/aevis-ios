@@ -11,6 +11,8 @@ struct ContactsView: View {
     @State private var path: [UUID] = []
     @State private var adding = false
     @State private var editing = false
+    /// 正在编辑哪个联系人 —— 显式传下去，别再让编辑页去猜「当前活跃」。
+    @State private var editingID: UUID?
     @State private var pendingDelete: Contact?
 
     var body: some View {
@@ -64,7 +66,7 @@ struct ContactsView: View {
             }
             .sheet(isPresented: $editing) {
                 NavigationStack {
-                    PersonaEditorView(isFirstRun: false)
+                    PersonaEditorView(isFirstRun: false, editingID: editingID)
                         .environmentObject(personaStore)
                 }
             }
@@ -192,6 +194,7 @@ struct ContactsView: View {
 
     private func edit(_ contact: Contact) {
         personaStore.select(contact.id)
+        editingID = contact.id
         editing = true
     }
 

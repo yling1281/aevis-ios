@@ -325,6 +325,17 @@ final class PersonaStore: ObservableObject {
         return contact.id
     }
 
+    /// 改**指定**联系人的人设。
+    ///
+    /// 2026-11-13：编辑页以前只会调 `update(_:)`（= 当前活跃那个人），
+    /// 从通讯录点「编辑资料」时虽然先 `select` 了，但只要中间有任何异步/切人，
+    /// 就会写错人。显式给 id 更稳。
+    func update(_ next: Persona, for id: UUID) {
+        guard let index = contacts.firstIndex(where: { $0.id == id }) else { return }
+        contacts[index].persona = next
+        save()
+    }
+
     /// 改当前联系人的人设。一个联系人都没有时（第一次进来）顺手建一个。
     func update(_ next: Persona) {
         guard let id = active?.id else {
