@@ -5,27 +5,44 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** 一次登录/注册调用的结果。`code` 是业务码（4113 注销 / 4114 封禁 / 4115 冻结）。 */
+data class AuthResult(val ok: Boolean, val msg: String = "", val code: Int = 0)
+
 /**
  * 后端就一套：和 iOS / 网页版 / 小程序同一个（HK 反代 → 4-4）。
  *
- * ⚠️ 地址必须用已备案的 lingyan.cyou —— aevis.cn 没在 App 里用，
- * 是因为这一条链路 iOS 已经验过了，安卓照抄最省事。
+ * ⚠️ 地址必须用已备案的 lingyan.cyou —— 这条链路 iOS 已经验过，安卓照抄最省事。
  */
 object Api {
     private const val BASE = "https://lingyan.cyou/prod-api/aevis"
 
-    fun login(email: String, password: String): Pair<Boolean, String> {
-        val body = JSONObject().put("email", email).put("password", password)
-        val (code, json) = post("/v1/auth/login", body, null)
-        if (code !in 200..299) return false to "HTTP $code"
-        // 这个接口的 token 在**顶层**（`{ok,token,uid,email,membership}`），
-        // 也有分支包在 `data` 里 —— 两边都认，别因为外壳变了就登不上。
-        val data = json.optJSONObject("data") ?: json
-        val tok = data.optString("token").ifEmpty { json.optString("token") }
-        if (tok.isEmpty()) return false to json.optString("msg", "账号或密码不正确")
-        save(tok, data.optString("email").ifEmpty { email }, data.optString("uid"))
-        return true to ""
-    }
+    // ---------------- 登录的三种方式（与 iOS LoginView 一一对应）----------------
+
+    /** 验证码登录第 1 步：给邮箱发 6 位码。**只发给已注册的邮箱**。 */
+    fun sendLoginCode(email: String): AuthResult =
+        simple("/v1/auth/email/code", JSONObject().put("email", norm(email)))
+
+    /** 验证码登录第 2 步。 */
+    fun loginWithCode(email: String, code: String): AuthResult =
+        auth("/v1/auth/login/email-code",
+             JSONObject().put("email", norm(email)).put("code", code.trim()), email)
+
+    /** 密码登录。 */
+    fun loginPassword(email: String, password: String): AuthResult =
+        auth("/v1/auth/login/email",
+             JSONObject().put("email", norm(email)).put("password", password), email)
+
+    /** 注册第 1 步：发码（注册也要先验证邮箱能收信）。 */
+    fun sendRegisterCode(email: String): AuthResult =
+        simple("/v1/auth/email/code", JSONObject().put("email", norm(email)))
+
+    /** 注册第 2 步。邮箱 + 密码 + 验证码。 */
+    fun register(email: String, password: String, code: String): AuthResult =
+        auth("/v1/auth/register",
+             JSONObject().put("email", norm(email)).put("password", password)
+                 .put("code", code.trim()), email)
+
+    fun logout() = signOut()
 
     /** 余额（积分）。没登录或网络不通都返回 null，界面如实显示「—」。 */
     fun balance(): Int? {
@@ -35,7 +52,42 @@ object Api {
         return json.optJSONObject("data")?.optInt("balance", -1)?.takeIf { it >= 0 }
     }
 
-    // ---------------- 底层 ----------------
+    // ---------------- 内部 ----------------
+
+    private fun norm(email: String) = email.trim().lowercase()
+
+    /** 不用 token 的调用（发验证码）：只关心成功与否 + 服务端那句话。 */
+    private fun simple(path: String, body: JSONObject): AuthResult {
+        val (code, json) = post(path, body, null)
+        if (code !in 200..299) {
+            return AuthResult(false, json.optString("msg").ifEmpty { "网络异常（HTTP $code）" }, code)
+        }
+        val biz = json.optInt("code", 200)
+        if (biz != 200 && json.has("msg") && !json.optBoolean("ok", false)) {
+            // 服务端的 `err()` 也是 HTTP 200 + code!=200 的形态，不能只看 HTTP 码
+            return AuthResult(false, json.optString("msg", "发送失败"), biz)
+        }
+        return AuthResult(true)
+    }
+
+    /** 需要落 token 的调用：登录 / 注册。 */
+    private fun auth(path: String, body: JSONObject, email: String): AuthResult {
+        val (code, json) = post(path, body, null)
+        if (code !in 200..299) {
+            return AuthResult(false, json.optString("msg").ifEmpty { "网络异常（HTTP $code）" }, code)
+        }
+        // token 可能在顶层，也可能包在 data 里 —— 两种都认（后端有两个分支）
+        val data = json.optJSONObject("data") ?: json
+        val tok = data.optString("token").ifEmpty { json.optString("token") }
+        if (tok.isEmpty()) {
+            val biz = json.optInt("code", 0)
+            val msg = json.optString("msg").ifEmpty { "账号或密码不正确" }
+            return AuthResult(false, msg, biz)
+        }
+        save(tok, data.optString("email").ifEmpty { email.trim() },
+             data.optString("uid").ifEmpty { json.optString("uid") })
+        return AuthResult(true)
+    }
 
     private fun prefs(c: Context = appCtx) =
         c.getSharedPreferences("aevis", Context.MODE_PRIVATE)

@@ -1,0 +1,12 @@
+[
+{
+  "directory": "F:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/.cxx/RelWithDebInfo/6r2p5g44/arm64-v8a",
+  "command": "F:\\WorkBuddy\\toolchain\\android-sdk\\ndk\\26.1.10909125\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=aarch64-none-linux-android26 --sysroot=F:/WorkBuddy/toolchain/android-sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/windows-x86_64/sysroot -Daevis_EXPORTS -IF:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/src/main/cpp/../../../../../shared-core -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -O2 -g -DNDEBUG -fPIC -Wall -Wextra -fvisibility=hidden -std=gnu++17 -o CMakeFiles\\aevis.dir\\aevis_jni.cpp.o -c F:\\WorkBuddy\\2026-10-17-23-43-43\\aevis-ios\\android\\app\\src\\main\\cpp\\aevis_jni.cpp",
+  "file": "F:\\WorkBuddy\\2026-10-17-23-43-43\\aevis-ios\\android\\app\\src\\main\\cpp\\aevis_jni.cpp"
+},
+{
+  "directory": "F:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/.cxx/RelWithDebInfo/6r2p5g44/arm64-v8a",
+  "command": "F:\\WorkBuddy\\toolchain\\android-sdk\\ndk\\26.1.10909125\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=aarch64-none-linux-android26 --sysroot=F:/WorkBuddy/toolchain/android-sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/windows-x86_64/sysroot -Daevis_EXPORTS -IF:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/src/main/cpp/../../../../../shared-core -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -O2 -g -DNDEBUG -fPIC -Wall -Wextra -fvisibility=hidden -std=gnu++17 -o CMakeFiles\\aevis.dir\\F_\\WorkBuddy\\2026-10-17-23-43-43\\aevis-ios\\shared-core\\aevis_core.cpp.o -c F:\\WorkBuddy\\2026-10-17-23-43-43\\aevis-ios\\shared-core\\aevis_core.cpp",
+  "file": "F:\\WorkBuddy\\2026-10-17-23-43-43\\aevis-ios\\shared-core\\aevis_core.cpp"
+}
+]

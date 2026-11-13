@@ -1,0 +1,4 @@
+# ninja log v5
+2	73	8162792225596457	CMakeFiles/aevis.dir/F_/WorkBuddy/2026-10-17-23-43-43/aevis-ios/shared-core/aevis_core.cpp.o	d0e7694a40b5e9d
+1	475	8162792229591237	CMakeFiles/aevis.dir/aevis_jni.cpp.o	ddbd402297c9e3af
+477	525	8162792230101191	F:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/build/intermediates/cxx/RelWithDebInfo/6r2p5g44/obj/arm64-v8a/libaevis.so	d1c8cdc9e50dde8a

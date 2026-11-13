@@ -1,0 +1,3 @@
+F:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/.cxx/RelWithDebInfo/6r2p5g44/x86/CMakeFiles/aevis.dir
+F:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/.cxx/RelWithDebInfo/6r2p5g44/x86/CMakeFiles/edit_cache.dir
+F:/WorkBuddy/2026-10-17-23-43-43/aevis-ios/android/app/.cxx/RelWithDebInfo/6r2p5g44/x86/CMakeFiles/rebuild_cache.dir
