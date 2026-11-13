@@ -92,9 +92,9 @@ struct RootView: View {
             //    付完回到 App 什么都看不见，会以为没成功。
             if url.scheme == "aevis" && url.host == "pay" {
                 Task { @MainActor in
-                    if let pts = try? await PointsService.shared.checkPending(),
-                       let n = pts {
-                        bridgeNote = "充值到账：\(n) 积分"
+                    // `try?` 已经把 `Int??` 压成 `Int?`，这里直接绑一次就够
+                    if let pts = try? await PointsService.shared.checkPending() {
+                        bridgeNote = "充值到账：\(pts) 积分"
                     } else {
                         await PointsService.shared.refresh()
                     }
