@@ -1,0 +1,60 @@
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.6.109.0.auLIcd/Metal.xctoolchain --module-name Aevis --sdk-root /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk --xcode-version 17F113 --platform-family iOS --deployment-target 17.0 --bundle-identifier com.aevis.ios --output /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app --target-triple arm64-apple-ios17.0-simulator --target-triple x86_64-apple-ios17.0-simulator --binary-file /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Aevis --dependency-file /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/arm64/Aevis_dependency_info.dat --dependency-file /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/x86_64/Aevis_dependency_info.dat --stringsdata-file /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --stringsdata-file /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/x86_64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/arm64/Aevis.SwiftFileList --source-file-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/x86_64/Aevis.SwiftFileList --metadata-file-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Aevis.DependencyMetadataFileList --static-metadata-file-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Aevis.DependencyStaticMetadataFileList --swift-const-vals-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/arm64/Aevis.SwiftConstValuesFileList --swift-const-vals-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Objects-normal/x86_64/Aevis.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-11-13 13:36:56.158 appintentsmetadataprocessor[16407:46696] Starting appintentsmetadataprocessor export
+2026-11-13 13:36:56.339 appintentsmetadataprocessor[16407:46696] Writing Metadata.appintents
+2026-11-13 13:36:56.339 appintentsmetadataprocessor[16407:46696] Metadata root: /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Metadata.appintents
+
+CopySwiftLibs /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Aevis --scan-folder /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Frameworks --scan-folder /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/PlugIns --scan-folder /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/SystemExtensions --scan-folder /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Extensions --platform iphonesimulator --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.6.109.0.auLIcd/Metal.xctoolchain --toolchain /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+Ignoring --strip-bitcode because --sign was not passed
+
+ValidateEmbeddedBinary /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/PlugIns/AevisLive.appex (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/embeddedBinaryValidationUtility /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/PlugIns/AevisLive.appex -info-plist-path /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Info.plist
+
+ValidateEmbeddedBinary /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/PlugIns/AevisBroadcast.appex (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    /Applications/Xcode_26.6.app/Contents/Developer/usr/bin/embeddedBinaryValidationUtility /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/PlugIns/AevisBroadcast.appex -info-plist-path /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Info.plist
+
+AppIntentsSSUTraining (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsnltrainingprocessor --infoplist-path /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Info.plist --temp-dir-path /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/ssu --bundle-id com.aevis.ios --product-path /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app --extracted-metadata-path /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Metadata.appintents --metadata-file-list /Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/Aevis.DependencyMetadataFileList --source-file /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Info.plist --archive-ssu-assets
+2026-11-13 13:36:56.405 appintentsnltrainingprocessor[16410:46703] Parsing options for appintentsnltrainingprocessor
+2026-11-13 13:36:56.406 appintentsnltrainingprocessor[16410:46703] Starting AppIntents SSU YAML Generation
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '把电量发给${+applicationName}|用${+applicationName}看还剩多少电' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '把位置发给${+applicationName}|告诉${+applicationName}我在哪' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '告诉${+applicationName}我在干嘛|用${+applicationName}记一句我在干嘛' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '用${+applicationName}看设备信息|告诉${+applicationName}我的设备信息' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '打开${+applicationName}|用${+applicationName}打开自己' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '把健康发给${+applicationName}|用${+applicationName}记一下健康' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '把屏幕使用时间发给${+applicationName}|用${+applicationName}记一下屏幕使用时间' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '用${+applicationName}打电话|用${+applicationName}开个通话' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '用${+applicationName}一起听|用${+applicationName}打开一起听' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training '用${+applicationName}问ta今天过得怎么样|让${+applicationName}问问今天过得怎么样' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Training Negative Phrases '' for zh_CN
+2026-11-13 13:36:56.445 appintentsnltrainingprocessor[16410:46703] Application name 'Aevis' for zh_CN
+2026-11-13 13:36:56.486 appintentsnltrainingprocessor[16410:46703] Generated AppIntents SSU YAML files in file:///Users/runner/work/aevis-ios/aevis-ios/build-sim/Aevis.build/Debug-iphonesimulator/Aevis.build/ssu/
+2026-11-13 13:36:56.487 appintentsnltrainingprocessor[16410:46703] Copied AppIntents SSU YAML files to file:///Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Metadata.appintents/
+Archiving all locales.
+[------------------------------------------------------------] 0% archiving zh_CN[🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢] 100% archived zh_CN[🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢] 100% archived 1 locales/Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Metadata.appintents/nlu
+/Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app/Metadata.appintents/nlu/04a46b696eeb826b0645bc44e56c1392.version
+
+
+RegisterExecutionPolicyException /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    builtin-RegisterExecutionPolicyException /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app
+
+Validate /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    builtin-validationUtility /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app -shallow-bundle -infoplist-subpath Info.plist
+
+Touch /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app (in target 'Aevis' from project 'Aevis')
+    cd /Users/runner/work/aevis-ios/aevis-ios
+    /usr/bin/touch -c /Users/runner/work/aevis-ios/aevis-ios/build-sim/Debug-iphonesimulator/Aevis.app
+
+warning: ONLY_ACTIVE_ARCH=YES requested with multiple ARCHS and no active architecture could be computed; building for all applicable architectures (in target 'AevisLive' from project 'Aevis')
+warning: ONLY_ACTIVE_ARCH=YES requested with multiple ARCHS and no active architecture could be computed; building for all applicable architectures (in target 'AevisBroadcast' from project 'Aevis')
+warning: ONLY_ACTIVE_ARCH=YES requested with multiple ARCHS and no active architecture could be computed; building for all applicable architectures (in target 'Aevis' from project 'Aevis')
+** BUILD SUCCEEDED **
+
