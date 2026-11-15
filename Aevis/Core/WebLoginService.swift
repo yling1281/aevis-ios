@@ -63,7 +63,11 @@ final class WebLoginService: ObservableObject {
             prompt = nil
             notice = "已授权，回到浏览器就能直接充值了。"
             if let s = d["redirect"] as? String, let url = URL(string: s) {
-                UIApplication.shared.open(url)
+                // ⚠️ 必须写全 `options:completionHandler:` ——
+                // 在 async 函数里，`open(url)` 会被重载解析到 **async 版本**，
+                // 于是编译器报「expression is 'async' but is not marked with 'await'」。
+                // 显式给出 completionHandler 就固定成同步那个重载了。
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         } catch {
             prompt = nil

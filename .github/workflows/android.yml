@@ -28,11 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       # ⚠️ 2026-11-13：`android-actions/setup-android@v3` 在 ubuntu-latest 上
       #    直接失败（SDK 目录/许可那一步），所以改成自己下 cmdline-tools。
@@ -54,13 +54,13 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" "platforms;android-34" "build-tools;34.0.0" \
+            "platform-tools" "platforms;android-36" "build-tools;35.0.0" \
             "ndk;26.1.10909125" "cmake;3.22.1"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.13'
 
       # 第一次跑要下 AGP / Compose 那一堆依赖，慢是正常的
       - name: Build release APK
