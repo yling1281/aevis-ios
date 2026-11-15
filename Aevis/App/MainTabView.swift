@@ -289,30 +289,76 @@ struct MainTabView: View {
     /// ⚠️ 侧边栏的选中态要**接回 `tab`**（而不是自己另存一份）——
     /// 这样「设置里选了默认进哪一页」「`-aevisOpenTab=` 截图参数」
     /// 和底栏那套逻辑是**同一份状态**，两边不会各说各话。
+    // MARK: - iPad 侧边玻璃胶囊 Dock（2026-11-15 重做）
+
+    /// iPad：**浮在侧边的玻璃胶囊 Dock**。
+    ///
+    /// 用户：「平板端我记得不是可以去左边或者右边，不是有一个小圆圈吗？
+    /// 而不是像那个，就是设置那样子」「我也想要那种胶囊一样的 Dock 栏…
+    /// 放到右边或者左边，然后也是那种玻璃一样的那种」。
+    ///
+    /// 以前这里是 `NavigationSplitView + List(.sidebar)` —— 就是系统"设置"
+    /// 那种左边灰底列表，用户明确否掉了。
+    ///
+    /// 现在的做法：
+    ///   · 内容占满，左侧留 74pt 给 Dock（**不是**系统分栏，没有分隔线）
+    ///   · Dock 是一条 `.ultraThinMaterial` 胶囊，垂直居中浮着
+    ///   · 里面四个圆形图标，选中的那格变成填充胶囊并染色
     private var splitLayout: some View {
-        NavigationSplitView {
-            List(selection: padSelection) {
-                Section {
-                    ForEach(visibleTabs) { item in
-                        Label(item.title, systemImage: item.symbol)
-                            .tag(item)
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationTitle("Aevis")
-            .navigationBarTitleDisplayMode(.inline)
-        } detail: {
+        ZStack(alignment: .leading) {
+            // 兜底背景：内容缩进后左边那条不该露系统底色
+            Color(uiColor: .systemBackground).ignoresSafeArea()
+
             page(for: tab)
+                .padding(.leading, 74)
+
+            padDock
+                .padding(.leading, 12)
         }
-        .navigationSplitViewStyle(.balanced)
     }
 
-    /// 右栏当前显示哪一页。
-    ///
-    /// ⚠️ `List(selection:)` 只吃**可选**绑定（没选中时是 nil），
-    /// 所以这里做一层桥接：往 `tab` 写的时候把 nil 挡掉，
-    /// 免得点空白处把当前页清没了。
+    /// 竖排的玻璃胶囊。四个圆形按钮，选中的填充。
+    private var padDock: some View {
+        VStack(spacing: 4) {
+            ForEach(visibleTabs) { item in
+                let on = (tab == item)
+                Button {
+                    guard tab != item else { return }
+                    withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                        tab = item
+                    }
+                    #if canImport(UIKit)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    #endif
+                } label: {
+                    ZStack {
+                        if on {
+                            Capsule(style: .continuous)
+                                .fill(settings.accentColor.opacity(0.17))
+                                .frame(width: 46, height: 46)
+                        }
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 19, weight: on ? .semibold : .regular))
+                            .foregroundStyle(
+                                on ? settings.accentColor
+                                   : Color.primary.opacity(0.52)
+                            )
+                            .frame(width: 46, height: 46)
+                            .contentShape(Rectangle())
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(7)
+        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6)
+        )
+        .shadow(color: .black.opacity(0.10), radius: 16, y: 5)
+    }
+
     private var padSelection: Binding<MainTab?> {
         Binding(get: { tab },
                 set: { if let picked = $0 { tab = picked } })
