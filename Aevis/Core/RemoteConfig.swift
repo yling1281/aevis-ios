@@ -66,7 +66,11 @@ final class RemoteConfig {
 
     /// 从**一个**基址拉配置；拿到并写进缓存就返回 `true`。
     private func fetch(from base: String) async -> Bool {
-        guard let url = URL(string: base + "/api/app/config") else { return false }
+        // 🔴 2026-11-14 修：原来打的是 `/api/app/config` 并解 `{"config":{}}`，
+        //    但 4-4 上这个接口是 `/v1/app/config`，返回 `{code,data,msg}`。
+        //    两边对不上 ⇒ 远端配置**从来没生效过**，`accountBase` 覆盖、
+        //    线路列表这些全落空。这里对齐真实契约。
+        guard let url = URL(string: base + "/v1/app/config") else { return false }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -78,8 +82,11 @@ final class RemoteConfig {
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 return false
             }
-            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let config = root["config"] as? [String: Any] else { return false }
+            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return false }
+            // 新契约是信封（data 里），老接口才直接给 config —— 两个都认
+            guard let config = (root["data"] as? [String: Any])
+                ?? (root["config"] as? [String: Any]) else { return false }
 
             var fresh: [String: String] = [:]
             for (key, value) in config {
@@ -140,6 +147,13 @@ final class RemoteConfig {
     private static func text(from value: Any) -> String {
         if let text = value as? String { return text }
         if let number = value as? NSNumber { return number.stringValue }
+        // 数组 / 字典（比如云端下发的线路列表）序列化成 JSON 字符串再存 ——
+        // 缓存是 `[String: String]`，放不下结构体，上层按需再解析。
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value),
+           let text = String(data: data, encoding: .utf8) {
+            return text
+        }
         return ""
     }
 }

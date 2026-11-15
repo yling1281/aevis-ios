@@ -27,3 +27,8 @@ android/.cxx/
 android/app/.cxx/
 android/local.properties
 android/app/build/
+
+# 正式签名（绝不入库）
+android/keystore.properties
+*.jks
+*.keystore

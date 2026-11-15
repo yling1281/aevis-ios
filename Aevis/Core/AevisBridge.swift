@@ -102,6 +102,15 @@ enum AevisBridge {
         parse(url)?.host == "login"
     }
 
+    /// 这条是不是「浏览器要 App 授权登录」（`aevis://weblogin?t=…`）。
+    ///
+    /// 2026-11-13 新增：网页版充值必须先登录，手机上最快的路子是
+    /// 浏览器跳 App、App 点一下允许、浏览器自己轮询拿到登录态。
+    /// 和 `login` 一样，它也要 `await` 调服务器，所以不能走 `handle(_:)`。
+    static func isWebLoginRequest(_ url: URL) -> Bool {
+        parse(url)?.host == "weblogin"
+    }
+
     /// 处理一条回传。返回一句给用户看的提示（没有就不显示）。
     @discardableResult
     static func handle(_ url: URL) -> String? {

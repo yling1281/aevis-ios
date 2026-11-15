@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  直连线路的证书信任（2026-11-14）
+
+  只对 103.236.72.107 这一个 IP 生效：
+    · 额外信任我们自建的 CA（res/raw/aevis_direct_ca.crt，私钥只在服务器上）
+    · 同时保留系统 CA —— 以后这条口换成公网证书也不用改代码
+
+  别的域名一律不适用这份配置，仍然按系统默认走。
+-->
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="false">103.236.72.107</domain>
+        <trust-anchors>
+            <certificates src="@raw/aevis_direct_ca" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

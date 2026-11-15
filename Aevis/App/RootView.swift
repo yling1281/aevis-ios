@@ -8,6 +8,8 @@ struct RootView: View {
     @StateObject private var gate = DeviceGate.shared
     /// 账号状态 —— 退出登录之后要立刻退回登录页，所以得盯着它。
     @ObservedObject private var account = AccountService.shared
+    /// 网页授权登录（2026-11-13）：浏览器跳 `aevis://weblogin?t=…` 时弹确认框。
+    @ObservedObject private var webLogin = WebLoginService.shared
     /// 快捷指令回传来的那一句话，在顶上飘一下就消失。
     @State private var bridgeNote: String?
     /// 上次崩了 → **整个屏幕报错误码**（用户 2026-09-26 明确要求）。
@@ -62,6 +64,20 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showCrash) {
             CrashReportView { showCrash = false }
         }
+        // 网页要授权登录（`aevis://weblogin?t=…`）：弹一张卡让用户点允许。
+        // 页面上必须同时出现**设备**和**四位验证码**，用户才能确认
+        // 「这是我刚才在电脑上点的那一次」，而不是别人塞过来的链接。
+        .sheet(item: $webLogin.prompt) { p in
+            WebLoginSheet(prompt: p,
+                          busy: webLogin.busy,
+                          onAllow: { Task { await webLogin.allow() } },
+                          onDeny: { Task { await webLogin.deny() } })
+        }
+        .onChange(of: webLogin.notice) { _, note in
+            guard let note else { return }
+            bridgeNote = note
+            webLogin.notice = nil
+        }
         // ⚠️ 2026-10-31 下线：百度网盘引导（授权没拿到，功能已关）。
         //    这块原来会在登录后弹「把东西存到你的网盘」—— 留着就是骗人。
         // 授权通过的那一刻：门禁页淡出、主界面淡入。
@@ -84,6 +100,16 @@ struct RootView: View {
                     if let problem = await account.receiveWebLogin(url) {
                         bridgeNote = problem
                     }
+                }
+                return
+            }
+            // ⭐ 网页要授权登录（`aevis://weblogin?t=…`）：
+            //    浏览器那边已经开好一张票在轮询，这里只是问用户「同不同意」。
+            //    同意之后浏览器自己就能拿到登录态，不需要我们再回跳。
+            if AevisBridge.isWebLoginRequest(url) {
+                let ticket = AevisBridge.parse(url)?.params["t"] ?? ""
+                Task { @MainActor in
+                    await webLogin.begin(ticket: ticket)
                 }
                 return
             }

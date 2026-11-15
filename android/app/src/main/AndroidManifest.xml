@@ -1,7 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 扫一扫（2026-11-13）：扫码登录网页用 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Android 16 的 Live Updates（状态栏胶囊）要先有通知权限（13+ 是运行时权限） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- ============ 权限中心（2026-11-15）============
+         这一批是「App 会用到、但必须用户自己在系统里点同意」的权限。
+         声明在这里，申请/跳转在 `ui/PermissionScreen.kt` 里统一做 ——
+         好处是审核和用户都能一眼看到全部用途，而不是在十几个页面里各弹各的。 -->
+
+    <!-- 语音：按住说话 / 语音通话 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- 位置：天气、附近这类问答（不做后台定位） -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- 相册：换头像、发图。13+ 是 READ_MEDIA_IMAGES，12 及以下才是读存储 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- 14+ 选部分照片时给的是这个，只读用户选中的那几张 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+    <!-- 电池优化：锁屏后还能收消息 / 通话不断线 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- 使用情况访问：统计你每天用了哪些 App（只在「报告」里展示，不上传） -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- 悬浮窗：通话/一起听时的小窗 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -9,14 +47,14 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Aevis"
         android:supportsRtl="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Aevis">
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.Aevis">
-            <intent-filter>
+            android:theme="@style/Theme.Aevis">            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
@@ -34,6 +72,21 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="aevis" android:host="login" />
             </intent-filter>
+            <!-- 网页版充值要登录：浏览器跳 aevis://weblogin?t=… 让 App 点一下授权
+                 （2026-11-13，和 iOS 的 weblogin 同一个口径） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aevis" android:host="weblogin" />
+            </intent-filter>
         </activity>
+
+        <!-- 原生扫一扫（2026-11-13）：竖屏、无标题，识别完把内容回给 MainActivity -->
+        <activity
+            android:name=".ui.CameraScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Aevis" />
     </application>
 </manifest>

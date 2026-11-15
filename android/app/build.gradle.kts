@@ -16,7 +16,7 @@ plugins {
 
 android {
     namespace = "com.aevis.android"
-    compileSdk = 34
+    compileSdk = 36
     // 共享 C++ 底层（shared-core/aevis_core.cpp）
     ndkVersion = "26.1.10909125"
 
@@ -24,8 +24,8 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.1"
+        versionCode = 27
+        versionName = "1.0.0"
     }
 
     signingConfigs {
@@ -74,4 +74,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.annotation:annotation:1.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+    // 扫码（2026-11-13）：只引解码核心，相机用系统 `android.hardware.Camera`，
+    // 不再拉 CameraX 那一串依赖 —— 包体只涨 ~500KB。
+    implementation("com.google.zxing:core:3.5.3")
 }

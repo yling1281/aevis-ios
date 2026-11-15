@@ -43,6 +43,8 @@ struct MeView: View {
     @State private var showTickets = false
     @State private var showRules = false
     @State private var showPoints = false
+    /// 扫一扫（2026-11-13）：扫电脑上的登录码，给网页授权。
+    @State private var showScan = false
     /// 「更多设置」展开状态。
     /// 个人中心式默认**全部展开** —— 用户 2026-11-12：「那些的话其实都是收起来的呀」，
     /// 他要的是进去一眼看全，不是再点一次才看到表情/音乐/外接工具。
@@ -237,6 +239,11 @@ struct MeView: View {
 
                         V2SectionTitle("账号")
                         V2Card {
+                            V2Row(symbol: "qrcode.viewfinder",
+                                  title: "扫一扫",
+                                  detail: "扫电脑上的登录码，给网页授权",
+                                  action: { showScan = true })
+                            V2Divider()
                             V2Row(symbol: "crown",
                                   title: "会员",
                                   detail: memberLine,
@@ -265,6 +272,12 @@ struct MeView: View {
                                   title: "外观",
                                   detail: "主题色、字体、图标、聊天背景",
                                   action: { route = SettingsRoute(focus: "appearance") })
+                            V2Divider()
+                            // 多语言（2026-11-14）：点一下在中 / 英之间切，选完落盘
+                            V2Row(symbol: "globe",
+                                  title: L.t("语言"),
+                                  detail: L.label,
+                                  action: { L.set(L.lang == "zh" ? "en" : "zh") })
                         }
 
                         V2SectionTitle("陪伴")
@@ -381,6 +394,18 @@ struct MeView: View {
             //    PeriodView / MusicView / InboxView 暂时还是 sheet（它们没有返回按钮，
             //    改全屏会出不来），补上关闭按钮后再换。
             .fullScreenCover(isPresented: $showDisclaimer) { DisclaimerView() }
+            // 扫一扫：扫码 → 抠票号 → 交给 WebLoginService（它会在 RootView 弹确认框）
+            .fullScreenCover(isPresented: $showScan) {
+                QRScanSheet { raw in
+                    if let ticket = QRScan.ticket(from: raw) {
+                        Task { @MainActor in
+                            await WebLoginService.shared.begin(ticket: ticket)
+                        }
+                    } else {
+                        WebLoginService.shared.notice = "这不是 Aevis 的登录码，扫电脑上那张二维码。"
+                    }
+                }
+            }
             .sheet(isPresented: $showHealth) { PeriodView() }
             .fullScreenCover(isPresented: $showRules) { RulesView() }
             .sheet(isPresented: $showInbox) {

@@ -107,13 +107,24 @@ enum AccountEndpoint {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let started = Date()
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await session(for: base).data(for: request)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else { return nil }
             return Int(Date().timeIntervalSince(started) * 1000)
         } catch {
             return nil
         }
+    }
+
+    /// 按 base 选 session（2026-11-14）。
+    ///
+    /// 直连那条是自签证书，`URLSession.shared` 会直接握手失败 ——
+    /// 如果探速还用 shared，这条线路永远探不通、永远轮不到它。
+    private static func session(for base: String) -> URLSession {
+        if let host = URL(string: base)?.host, host == DirectTrustDelegate.host {
+            return AccountService.directSession
+        }
+        return URLSession.shared
     }
 
     /// 远端配置里那个接口地址（没配就返回 nil）。顺手把末尾的 `/` 削掉 ——
@@ -159,7 +170,7 @@ enum AccountEndpoint {
         request.timeoutInterval = 6
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await session(for: base).data(for: request)
             guard let http = response as? HTTPURLResponse else { return false }
             return (200..<300).contains(http.statusCode)
         } catch {

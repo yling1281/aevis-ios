@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aevis.android.R
+import com.aevis.android.core.I18n.tr
 import com.aevis.android.data.Api
 import com.aevis.android.data.AuthResult
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +89,8 @@ fun LoginScreen(onDone: () -> Unit) {
     var noteBad by remember { mutableStateOf(false) }
     /// 底部那两个圆圈（微信 / 扫码）点开时的说明弹窗
     var tip by remember { mutableStateOf<String?>(null) }
+    /// 微信扫码登录弹窗（2026-11-14 真接上，不再是说明弹窗）
+    var wxOpen by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val ink = MaterialTheme.colorScheme.onSurface
@@ -157,20 +161,22 @@ fun LoginScreen(onDone: () -> Unit) {
     Column(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            // 2026-11-14：enableEdgeToEdge 下不加这个，顶部「帮助」会被状态栏压住
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp)
             .padding(top = 10.dp, bottom = 30.dp)
     ) {
         // —— 顶部：只有「帮助」（强制登录门禁，没有上一页可退）——
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text("帮助", fontSize = 15.sp, color = secondary,
+            Text(tr("帮助"), fontSize = 15.sp, color = secondary,
                 modifier = Modifier.padding(top = 4.dp)
                     .tapable { open("https://aevis.cn/support.html") })
         }
         Spacer(Modifier.height(26.dp))
 
         // —— 标题 ——
-        Text("登录发现更多精彩", fontSize = 25.sp, fontWeight = FontWeight.SemiBold, color = ink)
+        Text(tr("登录发现更多精彩"), fontSize = 25.sp, fontWeight = FontWeight.SemiBold, color = ink)
         Spacer(Modifier.height(8.dp))
         Text(
             if (mode == Mode.Register) "邮箱 + 密码 + 验证码，注册即赠 30 天体验"
@@ -267,15 +273,15 @@ fun LoginScreen(onDone: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Column {
                 Row {
-                    Text("已阅读并同意 ", fontSize = 11.5.sp, color = secondary)
-                    Text("用户协议", fontSize = 11.5.sp, color = V2.accent,
+                    Text(tr("已阅读并同意 "), fontSize = 11.5.sp, color = secondary)
+                    Text(tr("用户协议"), fontSize = 11.5.sp, color = V2.accent,
                         modifier = Modifier.tapable { open("https://aevis.cn/terms.html") })
-                    Text(" 和 ", fontSize = 11.5.sp, color = secondary)
-                    Text("隐私政策", fontSize = 11.5.sp, color = V2.accent,
+                    Text(tr(" 和 "), fontSize = 11.5.sp, color = secondary)
+                    Text(tr("隐私政策"), fontSize = 11.5.sp, color = V2.accent,
                         modifier = Modifier.tapable { open("https://aevis.cn/privacy.html") })
                 }
                 Spacer(Modifier.height(2.dp))
-                Text("未注册的邮箱验证通过后将自动创建账号。",
+                Text(tr("未注册的邮箱验证通过后将自动创建账号。"),
                     fontSize = 11.sp, color = tertiary)
             }
         }
@@ -293,7 +299,9 @@ fun LoginScreen(onDone: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircleEntry("微信", R.drawable.ic_brand_wechat,
                 Color(0xFF4AB85C), !working) {
-                tip = "微信登录还在接入。现在用邮箱验证码最快；微信里也能直接搜「Aevis」小程序。"
+                // 真扫码登录：出小程序码 → 微信扫 → 轮询拿 token
+                if (working) return@CircleEntry
+                wxOpen = true
             }
             Spacer(Modifier.width(14.dp))
             CircleEntry("QQ", R.drawable.ic_brand_qq,
@@ -314,10 +322,10 @@ fun LoginScreen(onDone: () -> Unit) {
             Spacer(Modifier.width(14.dp))
             CircleEntry("扫码", R.drawable.ic_login_qr,
                 Color(0xFF6B708C), !working) {
-                tip = "扫码是给平板和网页版用的。手机上直接用邮箱验证码登录就行。"
+                tip = "扫一扫是登录之后用的：「我 → 扫一扫」扫电脑上的登录码，给网页授权。"
             }
             Spacer(Modifier.width(14.dp))
-            Text("找回账号", fontSize = 13.5.sp, color = secondary,
+            Text(tr("找回账号"), fontSize = 13.5.sp, color = secondary,
                 modifier = Modifier.clip(CircleShape)
                     .border(0.8.dp, secondary.copy(alpha = 0.35f), CircleShape)
                     .tapable { open("https://aevis.cn/support.html") }
@@ -329,9 +337,21 @@ fun LoginScreen(onDone: () -> Unit) {
         AlertDialog(
             onDismissRequest = { tip = null },
             confirmButton = {
-                TextButton(onClick = { tip = null }) { Text("知道了") }
+                TextButton(onClick = { tip = null }) { Text(tr("知道了")) }
             },
             text = { Text(tip ?: "", fontSize = 14.sp, lineHeight = 21.sp) }
+        )
+    }
+
+    if (wxOpen) {
+        WeChatLoginDialog(
+            onClose = { wxOpen = false },
+            onLoggedIn = {
+                wxOpen = false
+                note = "微信登录成功"
+                noteBad = false
+                onDone()
+            }
         )
     }
 }

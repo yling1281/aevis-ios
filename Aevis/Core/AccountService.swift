@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 
 #if canImport(UIKit)
 import UIKit
@@ -23,6 +24,18 @@ import UIKit
 final class AccountService: ObservableObject {
 
     static let shared = AccountService()
+
+    /// 直连线路专用的 session —— 它带证书固定校验（2026-11-14）。
+    /// ⚠️ 必须由类持有：`URLSession` 只弱引用 delegate，
+    ///    随手 new 一个 `URLSession(configuration:delegate:)` 会在下一个 runloop 丢 delegate。
+    static let directSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 20
+        cfg.timeoutIntervalForResource = 30
+        return URLSession(configuration: cfg,
+                          delegate: DirectTrustDelegate(),
+                          delegateQueue: nil)
+    }()
 
     /// 服务器地址变了、或者登录状态变了，界面要跟着刷新。
     @Published private(set) var profile: Profile?
@@ -805,8 +818,13 @@ final class AccountService: ObservableObject {
     private func send(_ request: URLRequest) async throws -> [String: Any] {
         let data: Data
         let response: URLResponse
+        // 直连那条线路是自签证书，必须走带固定校验的 session；
+        // 其余线路（香港 / 北京）证书正常，用系统默认。
+        let host = request.url?.host ?? ""
+        let session: URLSession = (host == DirectTrustDelegate.host)
+            ? AccountService.directSession : URLSession.shared
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw AccountError.unreachable(error.localizedDescription)
         }
@@ -1019,5 +1037,51 @@ extension URL {
             result[item.name] = item.value ?? ""
         }
         return result
+    }
+}
+
+// MARK: - 直连线路的证书固定（2026-11-14）
+
+/// 只服务 `https://103.236.72.107:54319` 这条自签线路。
+///
+/// 为什么不用「把 CA 装进系统」那一套：那要用户手动装描述文件、还要在设置里
+/// 打开「完全信任」，装完等于整台设备都信任这个 CA。这里改成**只认一张证书的哈希**：
+/// 服务器换了别的证书（哪怕也是我们的 CA 签的）都连不上，中间人更签不出来。
+///
+/// ⚠️ 证书续期/重签后必须同步改 `pinnedSHA256`，否则这条线路直接连不上。
+///    当前证书到 2036-11-10，正常不会碰到。
+final class DirectTrustDelegate: NSObject, URLSessionDelegate {
+
+    /// 直连 IP。只有它走这套校验，其他域名交给系统默认处理。
+    static let host = "103.236.72.107"
+
+    /// `/opt/aevis/tls/direct.crt` 的 DER SHA256（叶子证书，不是 CA）。
+    static let pinnedSHA256 = "62691735bdcc2c940672e5fda640d1f52a534f66da2a9320083ec2eb39bb7d2c"
+
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition,
+                                                  URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              challenge.protectionSpace.host == Self.host,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate]
+        guard let leaf = chain?.first else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        let der = SecCertificateCopyData(leaf) as Data
+        let digest = SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
+        if digest == Self.pinnedSHA256 {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            // 对不上就断 —— 宁可这条线路不可用，也不能把 token 发给未知服务器
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
     }
 }

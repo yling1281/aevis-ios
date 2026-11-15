@@ -5,10 +5,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -45,22 +52,28 @@ object V2 {
     )
 
     // 圆角 / 间距：比上一版都大一号，别挤
-    val cardRadius = 24.dp
+    val cardRadius = 22.dp   // = iOS V2.cardRadius
     val rowRadius = 18.dp
-    val gutter = 20.dp
+    /** 卡片描边：极淡一层，iOS 那张卡就是靠它"立起来"的（不是靠阴影）。*/
+    val strokeLight = Color(0x14000000)
+    val strokeDark = Color(0x1FFFFFFF)
+    val gutter = 18.dp       // = iOS V2.gutter
     val cardPad = 18.dp
-    val rowHeight = 58.dp
-    val iconBox = 40.dp
+    val rowHeight = 64.dp
+    val iconBox = 38.dp      // = iOS V2.iconBox
     val iconRadius = 13.dp
-    val sectionGap = 22.dp
+    val sectionGap = 14.dp   // iOS: 卡片与下一节标题之间 14
 
-    // 字号：display 28 / title 21 / body 16 / sub 14 / tiny 12.5 / micro 11.5
-    val display = 28.sp
-    val title = 21.sp
-    val body = 16.sp
-    val sub = 14.sp
-    val tiny = 12.5.sp
-    val micro = 11.5.sp
+    // 字号：**逐条对齐 iOS `V2.swift`**（26 / 20 / 15 / 13.5 / 12 / 11）。
+    // 2026-11-14 用户：「就是纯安卓，不对，纯苹果那种味道」——
+    // 上一版整体比 iOS 大 1~2pt（body 16 vs 15、标题 28 vs 20），
+    // 加起来就成了"安卓那种撑开的观感"。
+    val display = 26.sp
+    val title = 20.sp
+    val body = 15.sp
+    val sub = 13.5.sp
+    val tiny = 12.sp
+    val micro = 11.sp
 }
 
 @Composable
@@ -113,3 +126,45 @@ private fun zeroSpacing(): Typography {
 /** 标题字重统一走这里，别各处手写 FontWeight。*/
 val TitleStyle = TextStyle(fontSize = V2.title, fontWeight = FontWeight.SemiBold)
 val DisplayStyle = TextStyle(fontSize = V2.display, fontWeight = FontWeight.Bold)
+
+/**
+ * iOS 的 `.continuous` 圆角（superellipse / squircle）。
+ *
+ * 用户 2026-11-14：「该圆润的地方没圆润起来……就是纯安卓，不对，
+ * 纯苹果那种味道」—— 原因就在这儿：`RoundedCornerShape` 是**正圆弧**，
+ * 同样半径下四角看着更"方"；iOS 的连续圆角把过渡拉长，所以显润。
+ *
+ * 这里用三次贝塞尔近似：控制点系数取 0.62（正圆是 0.5523），
+ * 圆角到直边的过渡更长，视觉上就是 iOS 那个手感。
+ */
+class SquircleShape(private val radius: Dp) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density
+    ): Outline {
+        val w = size.width
+        val h = size.height
+        val r = with(density) { radius.toPx() }.coerceIn(0f, minOf(w, h) / 2f)
+        if (r <= 0f) {
+            return Outline.Rectangle(androidx.compose.ui.geometry.Rect(0f, 0f, w, h))
+        }
+        val c = r * 0.62f
+        val path = Path().apply {
+            moveTo(r, 0f)
+            lineTo(w - r, 0f)
+            cubicTo(w - r + c, 0f, w, r - c, w, r)
+            lineTo(w, h - r)
+            cubicTo(w, h - r + c, w - r + c, h, w - r, h)
+            lineTo(r, h)
+            cubicTo(r - c, h, 0f, h - r + c, 0f, h - r)
+            lineTo(0f, r)
+            cubicTo(0f, r - c, r - c, 0f, r, 0f)
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
+
+/** 随手用：`clip(squircle(26.dp))`。*/
+fun squircle(radius: Dp): Shape = SquircleShape(radius)

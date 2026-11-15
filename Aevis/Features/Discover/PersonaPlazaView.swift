@@ -435,11 +435,13 @@ struct PersonaPlazaView: View {
                     .lineLimit(2)
                     .frame(height: 32, alignment: .top)
             }
-            HStack(spacing: 4) {
-                Image(systemName: "person.2.fill").font(.aevis(9.5))
-                Text("\(p.adoptCount)").font(.aevis(10.5))
-            }
-            .foregroundStyle(.tertiary)
+            // 2026-11-14 用户：「官方的那个领养数你可以删掉了…其实并没有真正的人领养，
+            // 我们都没有 100 个用户，你就说 100 个人已领养了」——改成**人设编号**，
+            // 这个是真的，也方便用户报编号找客服。
+            Text("编号 \(p.id)")
+                .font(.aevis(10))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(13)
@@ -472,7 +474,7 @@ struct PlazaDetailView: View {
                             Text(persona.name).font(.aevis(20, weight: .semibold))
                             Text(persona.subtitle)
                                 .font(.aevis(12.5)).foregroundStyle(.secondary)
-                            Text("\(persona.adoptCount) 人用过")
+                            Text("编号 \(persona.id)")
                                 .font(.aevis(11.5)).foregroundStyle(.tertiary)
                         }
                         Spacer(minLength: 0)

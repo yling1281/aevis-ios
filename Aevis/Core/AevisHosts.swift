@@ -155,9 +155,48 @@ enum AevisHosts {
         Line(name: "北京", base: apekinAccountBase),
         Line(name: "香港一", base: "https://faka.lingyan.cyou" + apiPath),
         Line(name: "香港二", base: "https://lingyan.cyou" + apiPath),
+        // 直连（2026-11-14）：机房新开的外网 54319 → 内网 5533，
+        // 不经过任何反代、不看域名备案。
+        // 自签 TLS，证书哈希固定在 `DirectTrustDelegate` 里 —— 不是明文。
+        Line(name: "直连", base: "https://103.236.72.107:54319"),
     ]
 
-    static var accountCandidates: [String] { accountLines.map { $0.base } }
+    /// 云端下发的线路（2026-11-14）。
+    ///
+    /// 用户原话：「有些路线不行了，我们还能云更新，拿一个保底，然后云更新加其他的线路。」
+    ///
+    /// 来源：`/v1/app/config` 的 `lines` 字段（后台 `site_config.app_account_lines`）。
+    /// `RemoteConfig` 把它序列化成 JSON 字符串缓存着，这里再解回来。
+    /// 只在启动/刷新时算一次的量级，开销可以忽略。
+    static var cloudLines: [Line] {
+        let raw = RemoteConfig.shared.string("lines")
+        guard !raw.isEmpty,
+              let data = raw.data(using: .utf8),
+              let items = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+        else { return [] }
+
+        var out: [Line] = []
+        for item in items {
+            guard var base = (item["base"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !base.isEmpty else { continue }
+            while base.hasSuffix("/") { base.removeLast() }
+            guard base.hasPrefix("http://") || base.hasPrefix("https://") else { continue }
+            out.append(Line(name: (item["name"] as? String) ?? "云端", base: base))
+        }
+        return out
+    }
+
+    /// 内置 + 云端，按 base 去重（内置的排在前面当锚点）。
+    static var allAccountLines: [Line] {
+        var out = accountLines
+        var seen = Set(out.map { $0.base })
+        for line in cloudLines where seen.insert(line.base).inserted {
+            out.append(line)
+        }
+        return out
+    }
+
+    static var accountCandidates: [String] { allAccountLines.map { $0.base } }
 
     /// 地址 → 线路名（界面上显示"现在走的是哪条"用）。
     static func lineName(for base: String) -> String? {

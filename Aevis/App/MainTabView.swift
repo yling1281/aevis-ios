@@ -17,11 +17,12 @@ enum MainTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
+        // 多语言（2026-11-14）：走共享词表，中文时原样返回
         switch self {
-        case .chats: return "聊天"
-        case .contacts: return "通讯录"
-        case .discover: return "发现"
-        case .me: return "我"
+        case .chats: return L.t("聊天")
+        case .contacts: return L.t("通讯录")
+        case .discover: return L.t("发现")
+        case .me: return L.t("我")
         }
     }
 
@@ -63,6 +64,8 @@ struct MainTabView: View {
 
     /// 首屏落在哪个 tab —— 个人中心式直接给「我」。
     @State private var tab: MainTab = AppSettings.shared.isPersonalHome ? .me : .chats
+    /// 语言变了就换 id，让整棵树重建一次（文案散在各页里，不重建只有当前页会变）。
+    @State private var langId = L.lang
 
     /// 热更新检测（2026-10-31）。启动 / 回前台各查一次，服务端 6 小时节流。
     @StateObject private var updateCenter = AppUpdateCenter.shared
@@ -76,6 +79,10 @@ struct MainTabView: View {
             }
         }
         .task { await updateCenter.checkIfNeeded() }
+        .id(langId)
+        .onReceive(NotificationCenter.default.publisher(for: .aevisLanguageChanged)) { _ in
+            langId = L.lang
+        }
         // 🔴 2026-11-12 用户：「真正的 UI 还没做，只是切换做了」——
         //    根因之一就是这里：`tab` 是 `@State` 初始化的，只在**启动那一刻**
         //    按 `isPersonalHome` 算一次。用户在设置里把样式改了，开关变了、

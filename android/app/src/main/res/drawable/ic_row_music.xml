@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  网易云音乐（音符）。
+  2026-11-14 用户：「那个音乐的符号…你要往右来一点，不要顶到白色这里，这样不美观」——
+  音符的符头在左、符干靠右，视觉重心天然偏左，摆在圆形底色里看着像贴着左边缘。
+  这里用一个 group 整体右移 1.1（24 视口里约 4.6%），视觉上就居中了。
+  ⚠️ 只动 translateX，别改 path 本身，改了两端（这里都只有安卓）就对不上。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M12 3v10.6A3.5 3.5 0 1 0 14 17V7h4V3h-6z" />
+    <group android:translateX="1.1">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M12 3v10.6A3.5 3.5 0 1 0 14 17V7h4V3h-6z" />
+    </group>
 </vector>

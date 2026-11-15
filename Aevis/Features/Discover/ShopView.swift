@@ -479,8 +479,7 @@ struct ShopPersonaCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             HStack(spacing: 4) {
-                Image(systemName: "person.2.fill").font(.aevis(9))
-                Text("\(persona.adoptCount)").font(.aevis(10.5))
+                Text("编号 \(persona.id)").font(.aevis(10))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(V2.dim(0.38))

@@ -42,6 +42,10 @@ struct ChatView: View {
     @State private var showEmojiPanel = false
     /// 右上角「TA 的资料」开没开。
     @State private var showPersona = false
+    /// 点头像弹出的那个列表（2026-11-14 用户：「点下对方的头像，然后再弹出就是列表，让我们再去选」）。
+    @State private var showAvatarMenu = false
+    /// 从上面那个列表里进「听点东西」。
+    @State private var showMusicSheet = false
     /// 顶栏那个「打电话」按钮 —— 用户 2026-10-01：
     /// 「就是右上角，你要就是有一个让他打电话」。
     /// 点下去直接进通话页（`router.startCall()`），系统来电界面那一步在
@@ -194,6 +198,20 @@ struct ChatView: View {
                 .environmentObject(chat)
                 .environmentObject(personaStore)
         }
+        // 点头像弹出的列表 —— 跟这个人有关的事都从这儿进
+        .confirmationDialog(
+            "和 \(persona.name) 一起",
+            isPresented: $showAvatarMenu,
+            titleVisibility: .visible
+        ) {
+            Button("听点东西") { showMusicSheet = true }
+            Button("一起听") { router.showPlayer = true }
+            Button("看看 \(persona.name) 的资料") { showPersona = true }
+            Button("取消", role: .cancel) {}
+        }
+        .sheet(isPresented: $showMusicSheet) {
+            MusicSearchSheet()
+        }
         // 点开一条转账看详情
         .sheet(item: $transferDetail) { message in
             TransferDetailSheet(message: message)
@@ -324,8 +342,11 @@ struct ChatView: View {
             //    用户习惯"点对方的头像看资料"，右上角那个人像按钮之外再补这一下。
             Button {
                 composerFocused = false
-                // 群没有「人设资料」可看 —— 点群头像不开那个 sheet。
-                if activeGroup == nil { showPersona = true }
+                // 2026-11-14 用户：「选择人物…都是在对方的头像那里点下对方的头像，
+                // 然后再弹出就是列表，让我们再去选」——
+                // 以前点一下直接跳「TA 的资料」，没有"选"这一步。
+                // 现在先弹一个列表，资料只是其中一项。
+                if activeGroup == nil { showAvatarMenu = true }
             } label: {
                 if let group = activeGroup {
                     GroupAvatarBadge(size: settings.simpleMode ? 48 : 44,

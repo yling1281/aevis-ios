@@ -180,64 +180,76 @@ struct MusicSearchSheet: View {
     }
 
     // MARK: - 搜索
+    //
+    // 2026-11-14 用户：「iOS 的那个网易云那个搜索那里可以重新搞一下」。
+    // 原来是「一个灰方块 + 右边一个独立『搜』按钮 + 下面一个『每日推荐』」——
+    // 三块各管各的，像网页表单，不像 iOS 的搜索。
+    // 现在是一条完整搜索条（放大镜 + 输入 + 清除，回车即搜），
+    // 快捷入口收成一排胶囊挂在下面。
 
     private var searchCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass")
+                    .font(.aevis(15, weight: .medium))
+                    .foregroundStyle(V2.dim(0.32))
+
                 TextField("歌名、歌手、或者一句歌词", text: $keyword)
-                    .font(.aevis(14.5))
+                    .font(.aevis(15))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
                     .onSubmit { runSearch() }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    )
 
-                Button(action: runSearch) {
-                    HStack(spacing: 6) {
-                        if searching {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(searching ? "找…" : "搜")
-                            .font(.aevis(14, weight: .medium))
+                if !keyword.isEmpty {
+                    Button {
+                        keyword = ""
+                        results = []
+                        note = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.aevis(15))
+                            .foregroundStyle(V2.dim(0.28))
                     }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 9)
-                    .aevisGlass(cornerRadius: 14)
+                    .buttonStyle(.plain)
                 }
-                .disabled(searching)
+
+                if searching {
+                    ProgressView().controlSize(.small)
+                }
             }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.primary.opacity(0.055))
+            )
 
-            HStack(spacing: 10) {
-                Button {
-                    Task { await loadDaily() }
-                } label: {
-                    Text("每日推荐")
-                        .font(.aevis(13.5))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .aevisGlass(cornerRadius: 13)
+            HStack(spacing: 9) {
+                quickChip("每日推荐") { Task { await loadDaily() } }
+                if !results.isEmpty {
+                    quickChip("清空") {
+                        results = []
+                        note = nil
+                    }
                 }
-                .disabled(searching)
-
                 Spacer(minLength: 0)
             }
-
-            if let note {
-                Text(note)
-                    .font(.aevis(12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
-        .padding(14)
-        .aevisGlass(cornerRadius: 18)
+    }
+
+    /// 快捷胶囊。**别用 .borderedProminent** —— 那个蓝底一眼就是系统控件，
+    /// 这套 UI 全站的胶囊都是 `aevisGlass`。
+    private func quickChip(_ title: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.aevis(13.5))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .aevisGlass(cornerRadius: 13)
+        }
+        .buttonStyle(.plain)
     }
 
     private var needLoginCard: some View {
