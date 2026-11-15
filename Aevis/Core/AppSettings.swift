@@ -370,6 +370,8 @@ final class AppSettings: ObservableObject {
         static let activeSearchSource = "aevis.activeSearchSource"
         static let autoTestOnLaunch = "aevis.autoTestOnLaunch"
         static let homeStyle = "aevis.homeStyle"
+        /// iPad 侧边 Dock 靠哪边（2026-11-15 用户：「肯定要可以切换的呀」）
+        static let padDockSide = "aevis.padDockSide"
         static let speakerEnabled = "aevis.speakerEnabled"
         static let voiceMessageEnabled = "aevis.voiceMessageEnabled"
         static let speechRate = "aevis.speechRate"
@@ -634,6 +636,18 @@ final class AppSettings: ObservableObject {
 
     /// 首页是不是「个人中心」那套。
     var isPersonalHome: Bool { homeStyle == "personal" }
+
+    // MARK: - iPad 侧边 Dock
+
+    /// iPad 上那条玻璃胶囊 Dock 靠哪边：`"left"` / `"right"`。
+    ///
+    /// 2026-11-15 用户：「平板端不是可以去左边或者右边吗」「肯定要可以切换的呀」。
+    /// 只影响 iPad 布局，iPhone 的底栏不读它。
+    @Published var padDockSide: String {
+        didSet { UserDefaults.standard.set(padDockSide, forKey: Key.padDockSide) }
+    }
+
+    var padDockOnRight: Bool { padDockSide == "right" }
 
     // MARK: - API 预设（能存很多套，随时切）
     //
@@ -1674,6 +1688,7 @@ final class AppSettings: ObservableObject {
         }
         autoTestOnLaunch = defaults.object(forKey: Key.autoTestOnLaunch) as? Bool ?? true
         homeStyle = defaults.string(forKey: Key.homeStyle) ?? "wechat"
+        padDockSide = defaults.string(forKey: Key.padDockSide) ?? "left"
         if let data = defaults.data(forKey: Key.searchSources),
            let decoded = try? JSONDecoder().decode([SearchSource].self, from: data),
            !decoded.isEmpty {

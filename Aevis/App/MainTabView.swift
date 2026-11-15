@@ -305,15 +305,19 @@ struct MainTabView: View {
     ///   · Dock 是一条 `.ultraThinMaterial` 胶囊，垂直居中浮着
     ///   · 里面四个圆形图标，选中的那格变成填充胶囊并染色
     private var splitLayout: some View {
-        ZStack(alignment: .leading) {
-            // 兜底背景：内容缩进后左边那条不该露系统底色
+        // 2026-11-15 用户：「肯定要可以切换的呀」——
+        // 左右由 `settings.padDockSide` 决定，内容缩进和 Dock 定位都跟着翻过来。
+        let onRight = settings.padDockOnRight
+        let edge: Edge.Set = onRight ? .trailing : .leading
+        return ZStack(alignment: onRight ? .trailing : .leading) {
+            // 兜底背景：内容缩进后那一条不该露系统底色
             Color(uiColor: .systemBackground).ignoresSafeArea()
 
             page(for: tab)
-                .padding(.leading, 74)
+                .padding(edge, 74)
 
             padDock
-                .padding(.leading, 12)
+                .padding(edge, 12)
         }
     }
 

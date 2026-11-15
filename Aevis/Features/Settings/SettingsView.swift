@@ -154,6 +154,13 @@ struct SettingsView: View {
         case "appearance":
             VStack(spacing: 0) {
                 HomeStyleCard()
+                // iPad 才有侧边 Dock，手机上不显示这一块
+                #if canImport(UIKit)
+                if UIDevice.current.userInterfaceIdiom == .pad {
+                    Divider().padding(.vertical, 8)
+                    PadDockCard()
+                }
+                #endif
                 // ⚠️ **两种进入方式给的东西不一样**（用户 2026-09-28 的要求：
                 //    「在特定的页面只展示特定的设置，砍掉其他设置，但是功能还是在的，
                 //      在总设置里还是会展现」）：
