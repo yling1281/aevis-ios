@@ -122,7 +122,9 @@ enum AccountEndpoint {
     /// 如果探速还用 shared，这条线路永远探不通、永远轮不到它。
     private static func session(for base: String) -> URLSession {
         if let host = URL(string: base)?.host, host == DirectTrustDelegate.host {
-            return AccountService.directSession
+            // 用 `DirectTrustSession` 而不是 `AccountService.directSession` ——
+            // 后者会把整个 AccountService（连带 AppSettings）拖进管理端的编译单元。
+            return DirectTrustSession.shared
         }
         return URLSession.shared
     }
