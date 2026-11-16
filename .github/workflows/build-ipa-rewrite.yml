@@ -19,7 +19,7 @@ permissions:
 jobs:
   build:
     name: Build rewrite ipa
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     defaults:
       run:
