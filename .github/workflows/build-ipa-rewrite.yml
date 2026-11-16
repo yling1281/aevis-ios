@@ -34,6 +34,11 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: API smoke（只读三接口）
+        run: |
+          set -o pipefail
+          swift Tests/ApiSmoke.swift https://q7m3ax.lingyan.cyou 2>&1 | tee api-smoke.log
+
       - name: Build (Release, no signing)
         id: build
         continue-on-error: true
@@ -105,6 +110,7 @@ jobs:
           files: |
             Aevis-rewrite-unsigned.ipa
             build.log
+            api-smoke.log
 
       - name: Publish failure report
         if: steps.build.outcome != 'success'
@@ -121,3 +127,4 @@ jobs:
           files: |
             errors.txt
             build.log
+            api-smoke.log
