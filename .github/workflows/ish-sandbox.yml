@@ -140,6 +140,7 @@ on:
         type: boolean
         default: false
   push:
+    branches: [ main ]
     paths:
       - '.github/workflows/ish-sandbox.yml'
       - 'ish-sandbox/**'

@@ -13,6 +13,7 @@ name: iOS18 Probe
 on:
   workflow_dispatch:
   push:
+    branches: [ main ]
     paths:
       - '.github/workflows/ios18-probe.yml'
 
