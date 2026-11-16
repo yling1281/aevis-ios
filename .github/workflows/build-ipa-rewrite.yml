@@ -45,6 +45,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            SYMROOT=build \
             build 2>&1 | tee build.log
           echo "--- 汇总 ---"
           grep -c "error:" build.log || true
