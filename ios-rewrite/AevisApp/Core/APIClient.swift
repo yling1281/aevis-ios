@@ -123,4 +123,112 @@ struct APIClient {
            let text = msg["content"] as? String { return text }
         throw APIError.decode("没有回复正文")
     }
+
+    // MARK: - P0 其余（139 E-1）
+    //
+    // 只补第一版真正会用到的：配置 / 更新日志 / 邮箱验证码登录 / 模型列表 / 余额 /
+    // 表情列表 / 媒体上传 / 备份推送。P2（QQ、微信、支付、账号卡、会话管理、web auth）
+    // **故意不实现** —— 界面上也不放入口，避免"点了没反应"。
+
+    static func appConfig() async throws -> [String: Any] {
+        try await request("/v1/app/config")
+    }
+
+    static func changelog() async throws -> [String: Any] {
+        try await request("/v1/app/changelog")
+    }
+
+    /// 发邮箱验证码（登录用）。
+    static func sendEmailCode(email: String) async throws {
+        _ = try await request(
+            "/v1/auth/email/code", method: "POST", body: ["email": email]
+        )
+    }
+
+    /// 验证码登录。
+    static func loginByCode(email: String, code: String) async throws -> LoginResult {
+        let json = try await request(
+            "/v1/auth/login/email-code", method: "POST",
+            body: ["email": email, "code": code]
+        )
+        guard let token = json["token"] as? String, !token.isEmpty else {
+            throw APIError.decode((json["msg"] as? String) ?? "没有 token")
+        }
+        return LoginResult(token: token, uid: json["uid"] as? String ?? "")
+    }
+
+    /// 注册。
+    static func register(email: String, password: String, code: String) async throws -> LoginResult {
+        let json = try await request(
+            "/v1/auth/register", method: "POST",
+            body: ["email": email, "password": password, "code": code]
+        )
+        guard let token = json["token"] as? String, !token.isEmpty else {
+            throw APIError.decode((json["msg"] as? String) ?? "没有 token")
+        }
+        return LoginResult(token: token, uid: json["uid"] as? String ?? "")
+    }
+
+    struct ModelInfo { let id: String; let name: String }
+
+    static func models(token: String) async throws -> [ModelInfo] {
+        let json = try await request("/v1/llm/models", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        let arr = (d["models"] as? [[String: Any]]) ?? (d["rows"] as? [[String: Any]]) ?? []
+        return arr.compactMap {
+            guard let id = ($0["id"] as? String) ?? ($0["name"] as? String) else { return nil }
+            return ModelInfo(id: id, name: ($0["name"] as? String) ?? id)
+        }
+    }
+
+    static func balance(token: String) async throws -> Int {
+        let json = try await request("/v1/llm/balance", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return (d["balance"] as? Int) ?? (d["points"] as? Int) ?? 0
+    }
+
+    static func emojiList(token: String) async throws -> [[String: Any]] {
+        let json = try await request("/v1/emoji/list", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return (d["rows"] as? [[String: Any]]) ?? (d["items"] as? [[String: Any]]) ?? []
+    }
+
+    /// 上传图片，返回服务端相对路径（安卓同接口、同字段）。
+    static func uploadImage(token: String, data: Data, filename: String) async throws -> String {
+        guard let url = URL(string: base + "/v1/media") else { throw APIError.decode("bad url") }
+        let boundary = "Boundary-" + UUID().uuidString
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        req.setValue("multipart/form-data; boundary=" + boundary,
+                     forHTTPHeaderField: "Content-Type")
+
+        let crlf = "\r\n"
+        var body = Data()
+        body.append(("--" + boundary + crlf).data(using: .utf8)!)
+        body.append(("Content-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"" + crlf).data(using: .utf8)!)
+        body.append(("Content-Type: image/jpeg" + crlf + crlf).data(using: .utf8)!)
+        body.append(data)
+        body.append((crlf + "--" + boundary + "--" + crlf).data(using: .utf8)!)
+        req.httpBody = body
+
+        let (respData, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        let json = (try? JSONSerialization.jsonObject(with: respData)) as? [String: Any] ?? [:]
+        guard (200..<300).contains(code) else {
+            throw APIError.http(code, (json["msg"] as? String) ?? "")
+        }
+        let d = (json["data"] as? [String: Any]) ?? json
+        let path = (d["url"] as? String) ?? (d["path"] as? String) ?? ""
+        guard !path.isEmpty else { throw APIError.decode("上传没有返回路径") }
+        return path
+    }
+
+    /// 把本地会话推上云端（备份）。结构照安卓：`{convs:{pid:[…]}}`。
+    static func backupPush(token: String, convs: [String: [[String: String]]]) async throws {
+        _ = try await request(
+            "/v1/chat/backup", method: "POST", body: ["convs": convs], token: token
+        )
+    }
 }
