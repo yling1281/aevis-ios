@@ -1,0 +1,126 @@
+import Foundation
+
+/// 所有网络请求（2026-11-17，134 骨架）。
+///
+/// BASE 用北京隧道 `https://q7m3ax.lingyan.cyou` —— 直连 54319 是自签证书，iOS 不认（安卓靠
+/// `network_security_config` 内置信任，iOS 要描述文件/ATS 例外，骨架阶段不做）。
+///
+/// 契约与安卓完全一致；错误一律抛 `APIError`，由 View 决定怎么显示。
+enum APIError: LocalizedError {
+    case http(Int, String)
+    case decode(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .http(code, msg): return msg.isEmpty ? "网络异常（HTTP \(code)）" : msg
+        case let .decode(m): return "数据解析失败：\(m)"
+        }
+    }
+}
+
+struct APIClient {
+    static let base = "https://q7m3ax.lingyan.cyou"
+
+    // MARK: - 底层
+
+    static func request(
+        _ path: String,
+        method: String = "GET",
+        body: [String: Any]? = nil,
+        token: String? = nil,
+        account: String? = nil
+    ) async throws -> [String: Any] {
+        guard let url = URL(string: base + path) else {
+            throw APIError.decode("bad url: \(path)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let account { req.setValue(account, forHTTPHeaderField: "X-Account") }
+        if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (200..<300).contains(code) else {
+            let msg = (json["msg"] as? String) ?? ""
+            throw APIError.http(code, msg)
+        }
+        return json
+    }
+
+    // MARK: - 账号
+
+    struct LoginResult { let token: String; let uid: String }
+
+    static func login(email: String, password: String) async throws -> LoginResult {
+        let json = try await request(
+            "/v1/auth/login", method: "POST",
+            body: ["email": email, "password": password]
+        )
+        guard let token = json["token"] as? String, !token.isEmpty else {
+            throw APIError.decode("没有 token")
+        }
+        return LoginResult(token: token, uid: json["uid"] as? String ?? "")
+    }
+
+    static func me(token: String) async throws -> [String: Any] {
+        try await request("/v1/me", token: token)
+    }
+
+    // MARK: - 角色
+
+    static func myPersonas(token: String, email: String) async throws -> [Persona] {
+        let json = try await request("/v1/psquare/mine", token: token, account: email)
+        let data = (json["data"] as? [String: Any]) ?? json
+        let rows = (data["rows"] as? [[String: Any]]) ?? (data["items"] as? [[String: Any]]) ?? []
+        return rows.compactMap { Persona(json: $0) }
+    }
+
+    // MARK: - 聊天
+
+    static func backupMeta(token: String) async throws -> (count: Int, bytes: Int, at: String) {
+        let json = try await request("/v1/chat/backup", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return (d["count"] as? Int ?? 0, d["bytes"] as? Int ?? 0, d["at"] as? String ?? "")
+    }
+
+    /// 恢复码 → 备份 JSON 原文（结构是 `{convs:{pid:[msg]}}` 或扁平 map，两种都要认）。
+    static func recover(code: String) async throws -> String {
+        let json = try await request(
+            "/v1/chat/recover", method: "POST", body: ["code": code]
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        guard let backup = d["backup"] as? String, !backup.isEmpty else {
+            throw APIError.decode((json["msg"] as? String) ?? "这个恢复码还没有备份")
+        }
+        return backup
+    }
+
+    static func recoverCode(token: String) async throws -> String {
+        let json = try await request("/v1/chat/recover/code", method: "POST", body: [:], token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return (d["code"] as? String) ?? (json["code"] as? String) ?? ""
+    }
+
+    /// 发一轮对话（骨架阶段用非流式；流式留给下一版接 SSE）。
+    static func sendChat(
+        token: String,
+        model: String,
+        messages: [[String: String]]
+    ) async throws -> String {
+        let json = try await request(
+            "/v1/llm/chat", method: "POST",
+            body: ["model": model, "messages": messages, "stream": false],
+            token: token
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        if let text = d["content"] as? String { return text }
+        if let choices = d["choices"] as? [[String: Any]],
+           let msg = choices.first?["message"] as? [String: Any],
+           let text = msg["content"] as? String { return text }
+        throw APIError.decode("没有回复正文")
+    }
+}

@@ -1,0 +1,122 @@
+name: iOS rewrite (unsigned ipa)
+
+# 2026-11-17（138）：新 iOS 工程（SwiftUI，`ios-rewrite/`）的独立出包流水线。
+#
+# 为什么不复用 `build-ipa.yml`：那是旧工程（`Aevis/`，UIKit + 多个 appex）的链路，
+# 两边编译产物名、target 名都不一样，混在一起早晚互相踩。这里只做新工程，互不影响。
+#
+# 触发：推以 `ipa-rw-` 开头的 tag，或手动 dispatch。
+# 产物：未签名 ipa（`Aevis-rewrite-unsigned.ipa`），配合「全能签」自签名安装。
+
+on:
+  push:
+    tags: [ 'ipa-rw-*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build rewrite ipa
+    runs-on: macos-26
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: ios-rewrite
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build (Release, no signing)
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AevisApp.xcodeproj \
+            -target AevisApp \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+          echo "--- 汇总 ---"
+          grep -c "error:" build.log || true
+          grep -m 5 "BUILD SUCCEEDED" build.log || true
+
+      - name: Collect errors
+        if: always()
+        run: |
+          grep "error:" build.log > errors.txt 2>/dev/null || true
+          echo "错误行数：$(wc -l < errors.txt)"
+          head -20 errors.txt || true
+
+      - name: Package unsigned ipa
+        if: steps.build.outcome == 'success'
+        run: |
+          set -e
+          APP="build/Release-iphoneos/AevisApp.app"
+          test -d "$APP" || { echo "::error::找不到 $APP"; ls -R build | head -40; exit 1; }
+
+          rm -rf Payload Aevis-rewrite-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/AevisApp.app
+          rm -rf Payload/AevisApp.app/_CodeSignature
+          rm -f Payload/AevisApp.app/embedded.mobileprovision
+
+          /usr/bin/zip -qry -X Aevis-rewrite-unsigned.ipa Payload
+          ls -lh Aevis-rewrite-unsigned.ipa
+
+          # 0 字节资产会让整批 Release 发布失败（旧流水线踩过），这里先拦一手
+          SIZE=$(wc -c < Aevis-rewrite-unsigned.ipa | tr -d ' ')
+          echo "ipa 字节数：$SIZE"
+          test "$SIZE" -gt 100000 || { echo "::error::ipa 只有 $SIZE 字节，不发布"; exit 1; }
+
+      - name: Read marketing version
+        id: ver
+        if: always()
+        run: |
+          V=$(grep -m1 "MARKETING_VERSION" AevisApp.xcodeproj/project.pbxproj \
+                | sed -E 's/.*MARKETING_VERSION = ([^;]+);.*/\1/' || true)
+          echo "version=${V:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "版本：${V:-unknown}"
+
+      - name: Publish rewrite ipa
+        if: steps.build.outcome == 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ipa-rw-${{ github.run_number }}
+          name: Aevis rewrite ${{ github.run_number }}
+          prerelease: true
+          body: |
+            新 iOS 工程（`ios-rewrite/`）未签名安装包。
+
+            - run: `${{ github.run_number }}`
+            - 版本: `${{ steps.ver.outputs.version }}`
+            - 提交: `${{ github.sha }}`
+            - 安装: 下载 `Aevis-rewrite-unsigned.ipa`，用「全能签」签名后安装
+          files: |
+            Aevis-rewrite-unsigned.ipa
+            build.log
+
+      - name: Publish failure report
+        if: steps.build.outcome != 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ipa-rw-fail-${{ github.run_number }}
+          name: Aevis rewrite 失败 ${{ github.run_number }}
+          prerelease: true
+          body: |
+            这次**没有出包**，下面是编译器原话（`error:` 行）。
+
+            - run: `${{ github.run_number }}`
+            - 提交: `${{ github.sha }}`
+          files: |
+            errors.txt
+            build.log
