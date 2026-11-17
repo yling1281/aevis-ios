@@ -111,9 +111,9 @@ jobs:
             - 提交: `${{ github.sha }}`
             - 安装: 下载 `Aevis-rewrite-unsigned.ipa`，用「全能签」签名后安装
           files: |
-            Aevis-rewrite-unsigned.ipa
-            build.log
-            api-smoke.log
+            ios-rewrite/Aevis-rewrite-unsigned.ipa
+            ios-rewrite/build.log
+            ios-rewrite/api-smoke.log
 
       - name: Publish failure report
         if: steps.build.outcome != 'success'
@@ -122,8 +122,8 @@ jobs:
           tag_name: ipa-rw-fail-${{ github.run_number }}
           name: Aevis rewrite 失败 ${{ github.run_number }}
           prerelease: true
-          body_path: errors.txt
+          body_path: ios-rewrite/errors.txt
           files: |
-            errors.txt
-            build.log
-            api-smoke.log
+            ios-rewrite/errors.txt
+            ios-rewrite/build.log
+            ios-rewrite/api-smoke.log
