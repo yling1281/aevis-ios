@@ -1,0 +1,5 @@
+=== ApiSmoke @ https://q7m3ax.lingyan.cyou ===
+app config: PASS http=200 body={"code":200,"data":{"account_base":"","announcement":"","chat_enabled":true,"lines":[{"base":"https://103.236.72.107:54319","name":"直连"}],"min_version":"","plaz
+llm models: PASS http=200 body={"code":0,"data":{"default":"deepseek-flash","models":[{"billing":"per_call","cacheHitPointsPerM":156.0,"default":false,"id":"deepseek-web","inputPointsPerM":0.
+recover stat: PASS http=404 body={"code":404,"data":null,"msg":"恢复码不存在"} 
+=== 3/3 passed ===
