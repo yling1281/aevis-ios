@@ -170,6 +170,21 @@ jobs:
             ios-rewrite/build.log
             ios-rewrite/api-smoke.log
 
+      - name: Push logs to ci-log branch
+        if: always()
+        run: |
+          set -x
+          mkdir -p ci-logs || true
+          cp errors.txt ci-logs/errors.txt 2>/dev/null || true
+          cp build.log ci-logs/build.log 2>/dev/null || true
+          cp api-smoke.log ci-logs/api-smoke.log 2>/dev/null || true
+          ls -l ci-logs || true
+          git config user.email "ci@aevis.cn"
+          git config user.name "aevis-ci"
+          git checkout -B ci-log
+          git add -f ci-logs || true
+          git commit -m "ci: run ${{ github.run_number }} logs" || true
+          git push -f origin ci-log || true
   screenshots:
     name: Screenshots (simulator, -demo)
     runs-on: macos-15
