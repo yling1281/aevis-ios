@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import WebKit
 
 /// 登录页（2026-11-17，144 按截图逐项做；接口按 143 的 `/v1/auth/login/email`）。
 ///
@@ -28,6 +29,8 @@ struct LoginView: View {
     @State private var showRecover = false
     @State private var showQR = false
     @State private var showLines = false
+    @State private var qqSheet = false
+    @State private var wxQR: APIClient.WXQR? = nil
     @FocusState private var focused: Field?
     enum Field { case email, password, code }
 
@@ -78,6 +81,21 @@ struct LoginView: View {
         }
         .sheet(isPresented: $showRecover) { RecoverView() }
         .sheet(isPresented: $showLines) { LineSheet() }
+        .sheet(isPresented: $qqSheet) {
+            QQSheet { token in
+                qqSheet = false
+                session.save(token: token, email: email)
+            }
+        }
+        .sheet(item: Binding(
+            get: { wxQR.map { WXItem(info: $0) } },
+            set: { if $0 == nil { wxQR = nil } }
+        )) { item in
+            WxQRView(info: item.info) { token in
+                wxQR = nil
+                session.save(token: token, email: email)
+            }
+        }
         .sheet(isPresented: $showQR) {
             WxQRView { token in
                 showQR = false
@@ -267,11 +285,12 @@ struct LoginView: View {
 
     private var thirdPartyRow: some View {
         HStack(alignment: .top, spacing: 24) {
+            // 149：微信 → 唤起小程序（jump_url），失败则出二维码；QQ → 内嵌 WKWebView 授权
             circleButton(bg: Color.hex(0x07C160), icon: "message.fill", label: "微信") {
-                tip = "需要配置 AppID，暂不可用"
+                Task { await startWeChat() }
             }
             circleButton(bg: Color.hex(0x12B7F5), icon: "bubble.left.fill", label: "QQ") {
-                tip = "需要配置 AppID，暂不可用"
+                qqSheet = true
             }
             circleButton(
                 bg: Color.adaptive(dark: AE.accent.opacity(0.18), light: Color.hex(0xEDE9FB)),
@@ -314,6 +333,33 @@ struct LoginView: View {
     }
 
     // MARK: - 行为
+
+    /// 149：唤起小程序 + 轮询；唤起失败就退回二维码
+    private func startWeChat() async {
+        do {
+            let info = try await APIClient.wxQRCreate()
+            // 优先唤起微信小程序（服务端给的 jump_url）
+            var opened = false
+            if let u = URL(string: info.jumpURL) {
+                opened = await UIApplication.shared.open(u)
+            }
+            NSLog(opened ? "open weixin://dl/business/..." : "wechat open failed, fallback qr")
+            if !opened { wxQR = info }
+            // 无论哪种方式都轮询（小程序里确认后服务端会给 token）
+            let deadline = Date().addingTimeInterval(180)
+            while Date() < deadline {
+                if let token = try? await APIClient.wxQRPoll(ticket: info.ticket), let t = token {
+                    session.save(token: t, email: email)
+                    wxQR = nil
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+            tip = opened ? "等待确认超时，请重试" : "二维码已过期，请重试"
+        } catch {
+            tip = "微信登录失败：\(error.localizedDescription)"
+        }
+    }
 
     private func sendCode() async {
         tip = ""
@@ -403,18 +449,27 @@ struct RecoverView: View {
     }
 }
 
-// MARK: - 扫码登录（146：微信/通用扫码，CoreImage 现画二维码）
+// MARK: - 扫码登录（149：服务端给 image_url，微信唤不起时用它兜底）
+
+/// SwiftUI 的 `.sheet(item:)` 需要一个 Identifiable 包装
+struct WXItem: Identifiable {
+    let id = UUID()
+    let info: APIClient.WXQR
+}
 
 struct WxQRView: View {
     @Environment(\.dismiss) private var dismiss
-    /// 拿到 token 后回调（交给 Session 保存）
+    let info: APIClient.WXQR
     var onToken: (String) -> Void
 
-    @State private var qrImage: UIImage?
-    @State private var content = ""
-    @State private var tip = "正在获取二维码…"
-    @State private var polling = false
+    @State private var tip = "等待微信里确认…（最长 180 秒）"
     @State private var cancelled = false
+
+    private var imageURL: URL? {
+        guard !info.imageURL.isEmpty else { return nil }
+        if info.imageURL.hasPrefix("http") { return URL(string: info.imageURL) }
+        return URL(string: APIClient.base + info.imageURL)
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -424,13 +479,12 @@ struct WxQRView: View {
 
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.hex(0xF2F0EA))
-                    .frame(width: 240, height: 240)
-                if let img = qrImage {
-                    Image(uiImage: img)
-                        .interpolation(.none)
-                        .resizable()
-                        .frame(width: 208, height: 208)
+                    .fill(Color.hex(0xF2F0EA)).frame(width: 240, height: 240)
+                if let u = imageURL {
+                    AsyncImage(url: u) { img in
+                        img.resizable().interpolation(.none).scaledToFit()
+                    } placeholder: { ProgressView() }
+                    .frame(width: 208, height: 208)
                 } else {
                     ProgressView()
                 }
@@ -459,170 +513,127 @@ struct WxQRView: View {
         }
         .padding(24)
         .presentationDetents([.large])
-        .interactiveDismissDisabled(false)
-        .task { await start() }
+        .task { await poll() }
     }
 
-    private func start() async {
-        do {
-            let r = try await APIClient.wxQRCreate()
-            content = r.content
-            qrImage = Self.qrImage(from: r.content)
-            tip = "等待微信扫码…（最长 120 秒）"
-            await poll(id: r.id)
-        } catch {
-            tip = "获取二维码失败：\(error.localizedDescription)"
-        }
-    }
-
-    private func poll(id: String) async {
-        polling = true
-        defer { polling = false }
-        let deadline = Date().addingTimeInterval(120)
+    private func poll() async {
+        let deadline = Date().addingTimeInterval(180)
         while !cancelled && Date() < deadline {
-            do {
-                if let token = try await APIClient.wxQRPoll(id: id) {
-                    tip = "登录成功"
-                    onToken(token)
-                    return
-                }
-            } catch {
-                tip = "轮询失败：\(error.localizedDescription)"
+            if let token = try? await APIClient.wxQRPoll(ticket: info.ticket), let t = token {
+                tip = "登录成功"
+                onToken(t)
+                return
             }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
         if !cancelled { tip = "二维码已过期，请重试" }
     }
+}
 
-    /// CoreImage 画二维码，不引第三方库
-    static func qrImage(from text: String) -> UIImage? {
-        let filter = CIFilter(name: "CIQRCodeGenerator")
-        filter?.setValue(Data(text.utf8), forKey: "inputMessage")
-        filter?.setValue("M", forKey: "inputCorrectionLevel")
-        guard let out = filter?.outputImage else { return nil }
-        let scaled = out.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
-        let ctx = CIContext()
-        guard let cg = ctx.createCGImage(scaled, from: scaled.extent) else { return nil }
-        return UIImage(cgImage: cg)
+// MARK: - QQ 网页授权（149：WKWebView 内嵌，不需要 AppID / 自定义 scheme）
+
+struct QQSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var onToken: (String) -> Void
+
+    @State private var auth: APIClient.QQAuth?
+    @State private var tip = "正在获取授权地址…"
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let a = auth {
+                    QQWebView(urlString: a.url, callbackPrefix: APIClient.qqCallbackPrefix) { code in
+                        Task { await exchange(code: code, state: a.state) }
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if !tip.isEmpty {
+                    Text(tip)
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .padding(10)
+                }
+            }
+            .navigationTitle("QQ 登录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        tip = "已取消"
+                        dismiss()
+                    }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        do {
+            auth = try await APIClient.qqAuthURL()
+            NSLog("QQ WKWebView start")
+        } catch {
+            tip = "QQ 授权失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func exchange(code: String, state: String) async {
+        tip = "已拿到 code，正在换登录态…"
+        do {
+            let token = try await APIClient.qqLogin(code: code, state: state)
+            onToken(token)
+        } catch {
+            tip = "QQ 登录失败：\(error.localizedDescription)"
+        }
     }
 }
 
-// MARK: - 线路半窗（147/148：只显示城市名与状态，不显示任何域名/IP）
+/// WKWebView 包装：拦 redirect_uri 前缀，从 query 取 code 后回调
+struct QQWebView: UIViewRepresentable {
+    let urlString: String
+    let callbackPrefix: String
+    var onCode: (String) -> Void
 
-struct LineSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var states: [String: APIClient.LineState] = [:]
-    @State private var autoPick = true
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("线路").font(.system(size: 20, weight: .semibold))
-                Spacer()
-                Button("关闭") { dismiss() }
-                    .font(.system(size: 14))
-                    .foregroundStyle(AE.accent)
-            }
-            .padding(.bottom, 12)
+    func makeUIView(context: Context) -> WKWebView {
+        let wv = WKWebView()
+        wv.navigationDelegate = context.coordinator
+        if let u = URL(string: urlString) {
+            wv.load(URLRequest(url: u))
+        }
+        return wv
+    }
 
-            Toggle("自动选择最快", isOn: $autoPick)
-                .font(.system(size: 14))
-                .tint(AE.accent)
-                .padding(.vertical, 6)
-                .onChange(of: autoPick) { on in
-                    if on { Task { await pickFastest() } }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        private let parent: QQWebView
+        private var fired = false
+        init(_ p: QQWebView) { parent = p }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if let url = navigationAction.request.url,
+               url.absoluteString.hasPrefix(parent.callbackPrefix) {
+                NSLog("decidePolicy callback: \(url.absoluteString)")
+                if !fired,
+                   let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let code = comps.queryItems?.first(where: { $0.name == "code" })?.value,
+                   !code.isEmpty {
+                    fired = true
+                    parent.onCode(code)
                 }
-
-            ForEach(APIClient.lines) { line in
-                Button {
-                    guard !line.base.isEmpty else {
-                        states[line.id] = .unavailable
-                        return
-                    }
-                    APIClient.setActiveLine(line.id)
-                    dismiss()
-                } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(line.name)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(Color.hex(0x1B1D22))
-                                if line.pinning {
-                                    Text("自签证书")
-                                        .font(.system(size: 9.5))
-                                        .foregroundStyle(Color.hex(0x8A8A8A))
-                                        .padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.hex(0xECE9E2))
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                                }
-                            }
-                            if !line.note.isEmpty {
-                                Text(line.note)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.hex(0x9A9A9A))
-                            }
-                        }
-                        Spacer()
-                        statusText(line)
-                        if APIClient.activeLine.id == line.id {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(AE.accent)
-                        }
-                    }
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-                }
+                decisionHandler(.cancel)
+                return
             }
-
-            Text("连不上会自动重试其它线路")
-                .font(.system(size: 11))
-                .foregroundStyle(Color.hex(0x9A9A9A))
-                .padding(.top, 10)
-
-            Spacer()
-        }
-        .padding(24)
-        .presentationDetents([.medium])
-        .task { await probeAll() }
-    }
-
-    @ViewBuilder
-    private func statusText(_ line: APIClient.Line) -> some View {
-        switch states[line.id] {
-        case .ok(let ms):
-            Text("\(ms)ms")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(ms < 300 ? Color.green : (ms < 800 ? Color.orange : Color.red))
-        case .timeout:
-            Text("超时").font(.system(size: 12)).foregroundStyle(.red)
-        case .certFailed:
-            Text("证书失败").font(.system(size: 12)).foregroundStyle(.red)
-        case .unavailable:
-            Text("暂不可用").font(.system(size: 12)).foregroundStyle(Color.hex(0x9A9A9A))
-        default:
-            Text("测速中…").font(.system(size: 12)).foregroundStyle(Color.hex(0x9A9A9A))
-        }
-    }
-
-    private func probeAll() async {
-        for line in APIClient.lines {
-            states[line.id] = .probing
-            states[line.id] = await APIClient.probe(line)
-        }
-    }
-
-    /// 自动选择最快：跳过不可用/证书失败，取最小 ms
-    private func pickFastest() async {
-        await probeAll()
-        let ok = states.compactMap { (k, v) -> (String, Int)? in
-            if case .ok(let ms) = v { return (k, ms) }
-            return nil
-        }.sorted { $0.1 < $1.1 }
-        if let best = ok.first {
-            APIClient.setActiveLine(best.0)
-            dismiss()
+            decisionHandler(.allow)
         }
     }
 }

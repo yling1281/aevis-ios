@@ -306,31 +306,58 @@ struct APIClient {
 
     // MARK: - 微信扫码登录（2026-11-17，146）
 
-    struct QRInfo { let id: String; let content: String }
-
-    /// `POST /v1/auth/wx/qr/create` → `{id, content}`（字段名两种都兼容）
-    static func wxQRCreate() async throws -> QRInfo {
-        let json = try await request("/v1/auth/wx/qr/create", method: "POST", body: [:])
-        let d = (json["data"] as? [String: Any]) ?? json
-        let id = (d["id"] as? String) ?? (d["qr_id"] as? String) ?? (d["ticket"] as? String) ?? ""
-        let content = (d["content"] as? String) ?? (d["url"] as? String)
-            ?? (d["qr_url"] as? String) ?? (d["qrcode"] as? String) ?? ""
-        guard !content.isEmpty else {
-            throw APIError.decode((json["msg"] as? String) ?? "二维码内容为空")
-        }
-        return QRInfo(id: id, content: content)
+    struct WXQR {
+        let ticket: String
+        let jumpURL: String    // weixin://dl/business/… 直接唤起小程序
+        let imageURL: String   // /v1/auth/wx/qr/image?t=… 兜底二维码
     }
 
-    /// `POST /v1/auth/wx/qr/poll` → 有 token 返回 token，否则 nil（未扫/待确认）
-    static func wxQRPoll(id: String) async throws -> String? {
+    /// `POST /v1/auth/wx/qr/create` → jump_url / image_url / ticket（149 实测字段）
+    static func wxQRCreate() async throws -> WXQR {
+        let json = try await request("/v1/auth/wx/qr/create", method: "POST", body: [:])
+        let d = (json["data"] as? [String: Any]) ?? json
+        return WXQR(
+            ticket: (d["ticket"] as? String) ?? "",
+            jumpURL: (d["jump_url"] as? String) ?? "",
+            imageURL: (d["image_url"] as? String) ?? ""
+        )
+    }
+
+    /// `POST /v1/auth/wx/qr/poll`（带 ticket）→ 有 token 返回 token，未确认返回 nil
+    static func wxQRPoll(ticket: String) async throws -> String? {
         let json = try await request(
-            "/v1/auth/wx/qr/poll", method: "POST", body: ["id": id]
+            "/v1/auth/wx/qr/poll", method: "POST", body: ["ticket": ticket]
         )
         let d = (json["data"] as? [String: Any]) ?? json
         if let t = d["token"] as? String, !t.isEmpty { return t }
         if let t = json["token"] as? String, !t.isEmpty { return t }
         return nil
     }
+
+    // MARK: - QQ 网页授权（149：服务端已配 client_id，不需要 AppID）
+
+    struct QQAuth { let url: String; let state: String }
+
+    static func qqAuthURL() async throws -> QQAuth {
+        let json = try await request("/v1/auth/qq/url", method: "POST", body: [:])
+        let d = (json["data"] as? [String: Any]) ?? json
+        let url = (d["auth_url"] as? String) ?? (d["url"] as? String) ?? ""
+        guard !url.isEmpty else { throw APIError.decode((json["msg"] as? String) ?? "授权地址为空") }
+        return QQAuth(url: url, state: (d["state"] as? String) ?? "")
+    }
+
+    static func qqLogin(code: String, state: String) async throws -> String {
+        let json = try await request(
+            "/v1/auth/qqlogin", method: "POST", body: ["code": code, "state": state]
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        if let t = d["token"] as? String, !t.isEmpty { return t }
+        if let t = json["token"] as? String, !t.isEmpty { return t }
+        throw APIError.decode((json["msg"] as? String) ?? "QQ 登录失败")
+    }
+
+    /// 回调前缀（服务端 redirect_uri），WKWebView 拦到它就从 query 取 code
+    static let qqCallbackPrefix = "https://aevis.cn/prod-api/aevis/v1/auth/qq/callback"
 
     // MARK: - 测速 / 自动切换（2026-11-17，147）
 
