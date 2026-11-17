@@ -75,6 +75,13 @@ jobs:
           echo "错误行数：$(wc -l < errors.txt)"
           echo "===== build.log 末尾 120 行 =====" >> errors.txt
           tail -120 build.log >> errors.txt 2>/dev/null || true
+          echo "===== 诊断 =====" >> errors.txt
+          echo "pwd=$(pwd)" >> errors.txt
+          ls -l AevisApp/Resources/ >> errors.txt 2>&1 || true
+          echo "-- build/Release-iphoneos --" >> errors.txt
+          ls -l build/Release-iphoneos/ >> errors.txt 2>&1 || true
+          echo "-- 产物 app 内 --" >> errors.txt
+          ls -l build/Release-iphoneos/*.app 2>/dev/null >> errors.txt || true
           head -60 errors.txt
 
       - name: Copy app icons into bundle（不依赖 Resources phase）
@@ -163,7 +170,7 @@ jobs:
             ios-rewrite/api-smoke.log
 
       - name: Publish failure report
-        if: steps.build.outcome != 'success'
+        if: failure() || steps.build.outcome != 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ipa-rw-fail-${{ github.run_number }}
