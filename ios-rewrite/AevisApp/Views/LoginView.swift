@@ -96,12 +96,6 @@ struct LoginView: View {
                 session.save(token: token, email: email)
             }
         }
-        .sheet(isPresented: $showQR) {
-            WxQRView { token in
-                showQR = false
-                session.save(token: token, email: email)
-            }
-        }
     }
 
     // MARK: - 组件
@@ -348,8 +342,8 @@ struct LoginView: View {
             // 无论哪种方式都轮询（小程序里确认后服务端会给 token）
             let deadline = Date().addingTimeInterval(180)
             while Date() < deadline {
-                if let token = try? await APIClient.wxQRPoll(ticket: info.ticket), let t = token {
-                    session.save(token: t, email: email)
+                if let token = (try? await APIClient.wxQRPoll(ticket: info.ticket)) ?? nil {
+                    session.save(token: token, email: email)
                     wxQR = nil
                     return
                 }
@@ -519,9 +513,9 @@ struct WxQRView: View {
     private func poll() async {
         let deadline = Date().addingTimeInterval(180)
         while !cancelled && Date() < deadline {
-            if let token = try? await APIClient.wxQRPoll(ticket: info.ticket), let t = token {
+            if let token = (try? await APIClient.wxQRPoll(ticket: info.ticket)) ?? nil {
                 tip = "登录成功"
-                onToken(t)
+                onToken(token)
                 return
             }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -635,5 +629,54 @@ struct QQWebView: UIViewRepresentable {
             }
             decisionHandler(.allow)
         }
+    }
+}
+
+
+// MARK: - 线路选择（147/148）——只显示城市名，不显示任何地址
+
+struct LineSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var active: String = APIClient.activeLine.id
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(APIClient.lines) { line in
+                        Button {
+                            guard !line.base.isEmpty else { return }
+                            APIClient.setActiveLine(line.id)
+                            active = line.id
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(line.name).font(.system(size: 16, weight: .medium))
+                                    if !line.note.isEmpty {
+                                        Text(line.note).font(.system(size: 11)).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if line.base.isEmpty {
+                                    Text("暂不可用").font(.system(size: 12)).foregroundStyle(.secondary)
+                                } else if active == line.id {
+                                    Image(systemName: "checkmark").foregroundStyle(Color(red: 0.46, green: 0.39, blue: 0.89))
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
+                    }
+                } footer: {
+                    Text("连不上会自动重试其它线路")
+                        .font(.system(size: 11))
+                }
+            }
+            .navigationTitle("线路")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
