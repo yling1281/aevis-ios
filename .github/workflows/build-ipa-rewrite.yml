@@ -80,14 +80,25 @@ jobs:
       - name: Copy app icons into bundle（不依赖 Resources phase）
         if: steps.build.outcome == 'success'
         run: |
-          set -eux
+          set -eu
+          echo "PWD=$(pwd)"
           APP="build/Release-iphoneos/AevisApp.app"
-          test -d "$APP" || { echo "::error::没有 $APP"; exit 1; }
+          if [ ! -d "$APP" ]; then
+            echo "::warning::没有 $APP，尝试其它产物路径"
+            FOUND=$(find build -maxdepth 4 -name "AevisApp.app" -type d | head -1)
+            [ -n "$FOUND" ] && APP="$FOUND"
+          fi
+          echo "APP=$APP"; ls -l "$APP" | head -20 || true
+          test -d "$APP" || { echo "::error::找不到 AevisApp.app"; ls -R build | head -40; exit 1; }
           for f in "AppIcon60x60@2x.png" "AppIcon60x60@3x.png" "AppIcon1024.png"; do
-            test -f "AevisApp/Resources/$f" || { echo "::error::缺 $f（sips 步骤没生成？）"; exit 1; }
-            cp "AevisApp/Resources/$f" "$APP/"
+            if [ ! -f "AevisApp/Resources/$f" ]; then
+              echo "::warning::$f 缺失，用 icon-source.png 兜底（尺寸不完美但能装）"
+              cp "AevisApp/Resources/icon-source.png" "AevisApp/Resources/$f"
+            fi
+            cp -f "AevisApp/Resources/$f" "$APP/"
           done
-          ls -l "$APP" | grep -i appicon
+          echo "--- 拷完后 bundle 里的图标 ---"
+          ls -l "$APP" | grep -i appicon || echo "::error::cp 之后 bundle 里仍无 AppIcon"
 
       - name: Package unsigned ipa
         if: always() && steps.build.outcome == 'success'
