@@ -123,9 +123,6 @@ jobs:
           name: Aevis rewrite 失败 ${{ github.run_number }}
           prerelease: true
           body_path: errors.txt
-
-            - run: `${{ github.run_number }}`
-            - 提交: `${{ github.sha }}`
           files: |
             errors.txt
             build.log
