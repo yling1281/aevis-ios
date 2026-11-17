@@ -59,7 +59,8 @@ jobs:
       - name: Collect errors
         if: always()
         run: |
-          ( grep -iE "error:|failed|cannot|not found|undefined symbol|No such file" build.log | head -60 ) > errors.txt || true
+          { echo "run: ${{ github.run_number }}"; echo "sha: ${{ github.sha }}"; echo; } > errors.txt
+          grep -iE "error:|failed|cannot|not found|undefined symbol|No such file" build.log | head -60 >> errors.txt || true
           echo "错误行数：$(wc -l < errors.txt)"
           echo "===== build.log 末尾 120 行 =====" >> errors.txt
           tail -120 build.log >> errors.txt 2>/dev/null || true
@@ -121,8 +122,7 @@ jobs:
           tag_name: ipa-rw-fail-${{ github.run_number }}
           name: Aevis rewrite 失败 ${{ github.run_number }}
           prerelease: true
-          body: |
-            这次**没有出包**，下面是编译器原话（`error:` 行）。
+          body_path: errors.txt
 
             - run: `${{ github.run_number }}`
             - 提交: `${{ github.sha }}`
