@@ -22,9 +22,8 @@ struct ChatView: View {
     @AppStorage("annotDim") private var annotDim = true
     @AppStorage("avatarMode") private var avatarMode = 0    // 0 双方 / 1 只角色 / 2 都不显示
 
-    private var fontSize: CGFloat {
-        switch msgSize { case 0: return 13.5; case 2: return 17; default: return 15 }
-    }
+    /// 三档字号（与安卓 msgSize 一致；行高 = ×1.45）
+    private var fontSize: CGFloat { AE.chatFont(msgSize) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,8 +101,8 @@ struct ChatView: View {
                 .font(.system(size: fontSize))
                 .lineSpacing(fontSize * 0.45)
                 .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(mine ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(mine ? AE.accent.opacity(0.20) : Color.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: AE.bubbleRadius, style: .continuous))
 
             if !mine { Spacer(minLength: 40) }
             if mine && avatarMode == 0 {

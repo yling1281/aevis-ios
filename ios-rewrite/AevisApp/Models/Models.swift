@@ -1,4 +1,33 @@
 import Foundation
+import SwiftUI
+
+/// 视觉常量（2026-11-17，140）：与安卓 `V2` 一一对应，改这里就够，别在 View 里写魔法数。
+enum AE {
+    /// 主色 #7664E2
+    static let accent = Color(red: 0x76 / 255.0, green: 0x64 / 255.0, blue: 0xE2 / 255.0)
+    /// 浅色底 #F6F3EC
+    static let bgLight = Color(red: 0xF6 / 255.0, green: 0xF3 / 255.0, blue: 0xEC / 255.0)
+    /// 深色底（与安卓 bgDark 一致）
+    static let bgDark = Color(red: 0x16 / 255.0, green: 0x15 / 255.0, blue: 0x1A / 255.0)
+
+    static let cardRadius: CGFloat = 18
+    static let bubbleRadius: CGFloat = 14
+    static let buttonRadius: CGFloat = 12
+    static let sheetRadius: CGFloat = 24
+
+    static let cardPadding: CGFloat = 16
+    static let rowHeight: CGFloat = 56
+    static let groupGap: CGFloat = 12
+
+    static let title: CGFloat = 17
+    static let body: CGFloat = 15
+    static let caption: CGFloat = 11
+
+    /// 聊天三档字号（与安卓 msgSize 对齐）
+    static func chatFont(_ size: Int) -> CGFloat {
+        switch size { case 0: return 13.5; case 2: return 17; default: return 15 }
+    }
+}
 
 /// 数据模型（2026-11-17，134 骨架）——字段名与安卓**完全对齐**：
 /// 网络层用 `role/content/img/w/skip/quote`，本地落盘也一样，方便以后两端互导。
@@ -86,5 +115,22 @@ enum LocalStore {
         if let data = try? JSONSerialization.data(withJSONObject: dict) {
             try? data.write(to: url)
         }
+        // 列表行的时间：记录该会话最后一次写入的时刻（安卓是 convAt）
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "convAt_\(pid)")
+    }
+
+    /// 该会话最后活跃时间（没有就 0）。
+    static func lastAt(_ pid: String) -> Date? {
+        let t = UserDefaults.standard.double(forKey: "convAt_\(pid)")
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
+    /// 「TA 找你了」未读数（主动消息用）。
+    static func unread(_ pid: String) -> Int {
+        UserDefaults.standard.integer(forKey: "unread_\(pid)")
+    }
+
+    static func setUnread(_ pid: String, _ n: Int) {
+        UserDefaults.standard.set(n, forKey: "unread_\(pid)")
     }
 }

@@ -127,3 +127,67 @@ jobs:
             ios-rewrite/errors.txt
             ios-rewrite/build.log
             ios-rewrite/api-smoke.log
+
+  screenshots:
+    name: Screenshots (simulator, -demo)
+    runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: ios-rewrite
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild             -project AevisApp.xcodeproj             -scheme AevisApp             -sdk iphonesimulator             -configuration Debug             -derivedDataPath build             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""             build 2>&1 | tee sim-build.log
+
+      - name: Boot simulator & install
+        run: |
+          set -eux
+          DEV=$(xcrun simctl list devices available | grep -m1 -E "iPhone (15|16|17) \(" | sed -E "s/.*\(([0-9A-F-]{36})\).*/\1/")
+          test -n "$DEV" || { echo "::error::没有可用的 iPhone 模拟器"; exit 1; }
+          xcrun simctl boot "$DEV" || true
+          xcrun simctl bootstatus "$DEV" -b
+          APP=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name "*.app" | head -1)
+          test -n "$APP" || { echo "::error::没找到 .app"; find build -name "*.app" | head; exit 1; }
+          xcrun simctl install "$DEV" "$APP"
+          echo "DEV=$DEV" >> "$GITHUB_ENV"
+
+      - name: Shoot 3 screens (chat / list / login)
+        run: |
+          set -eux
+          mkdir -p shots
+          for MODE in chat list login; do
+            xcrun simctl terminate "$DEV" com.aevis.app 2>/dev/null || true
+            xcrun simctl launch "$DEV" com.aevis.app -demo "$MODE"
+            sleep 7
+            xcrun simctl io "$DEV" screenshot "shots/ios-$MODE.png"
+          done
+          ls -l shots
+
+      - name: Assert demo marker
+        run: |
+          set -eux
+          LOG=$(xcrun simctl spawn "$DEV" log show --last 5m --style compact                   --predicate 'eventMessage CONTAINS "AEVIS_DEMO_ON"' 2>/dev/null || true)
+          echo "$LOG" | tail -20
+          echo "$LOG" | grep -q AEVIS_DEMO_ON || { echo "::error::-demo 没生效，截图可能是登录页"; exit 1; }
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: ios-rewrite/shots
+          if-no-files-found: warn
+
+      - name: Upload sim build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-logs
+          path: ios-rewrite/sim-build.log
+          if-no-files-found: ignore
