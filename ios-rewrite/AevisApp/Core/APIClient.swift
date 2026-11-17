@@ -231,4 +231,32 @@ struct APIClient {
             "/v1/chat/backup", method: "POST", body: ["convs": convs], token: token
         )
     }
+
+    // MARK: - 微信扫码登录（2026-11-17，146）
+
+    struct QRInfo { let id: String; let content: String }
+
+    /// `POST /v1/auth/wx/qr/create` → `{id, content}`（字段名两种都兼容）
+    static func wxQRCreate() async throws -> QRInfo {
+        let json = try await request("/v1/auth/wx/qr/create", method: "POST", body: [:])
+        let d = (json["data"] as? [String: Any]) ?? json
+        let id = (d["id"] as? String) ?? (d["qr_id"] as? String) ?? (d["ticket"] as? String) ?? ""
+        let content = (d["content"] as? String) ?? (d["url"] as? String)
+            ?? (d["qr_url"] as? String) ?? (d["qrcode"] as? String) ?? ""
+        guard !content.isEmpty else {
+            throw APIError.decode((json["msg"] as? String) ?? "二维码内容为空")
+        }
+        return QRInfo(id: id, content: content)
+    }
+
+    /// `POST /v1/auth/wx/qr/poll` → 有 token 返回 token，否则 nil（未扫/待确认）
+    static func wxQRPoll(id: String) async throws -> String? {
+        let json = try await request(
+            "/v1/auth/wx/qr/poll", method: "POST", body: ["id": id]
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        if let t = d["token"] as? String, !t.isEmpty { return t }
+        if let t = json["token"] as? String, !t.isEmpty { return t }
+        return nil
+    }
 }

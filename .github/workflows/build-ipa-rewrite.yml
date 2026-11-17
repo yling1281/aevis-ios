@@ -39,6 +39,17 @@ jobs:
           set -o pipefail
           swift Tests/ApiSmoke.swift https://q7m3ax.lingyan.cyou 2>&1 | tee api-smoke.log
 
+      - name: Generate app icons (sips, 不依赖 actool)
+        run: |
+          set -eux
+          SRC=AevisApp/Resources/icon-source.png
+          test -f "$SRC" || { echo "::error::缺 icon-source.png"; exit 1; }
+          sips -z 120 120   "$SRC" --out "AevisApp/Resources/AppIcon60x60@2x.png" >/dev/null
+          sips -z 180 180   "$SRC" --out "AevisApp/Resources/AppIcon60x60@3x.png" >/dev/null
+          sips -z 1024 1024 "$SRC" --out "AevisApp/Resources/AppIcon1024.png"    >/dev/null
+          ls -l AevisApp/Resources/
+          # 192→1024 是放大，会糊；等有 1024 原图替换 icon-source.png 即可，代码不用改
+
       - name: Build (Release, no signing)
         id: build
         continue-on-error: true
@@ -86,6 +97,16 @@ jobs:
           SIZE=$(wc -c < Aevis-rewrite-unsigned.ipa | tr -d ' ')
           echo "ipa 字节数：$SIZE"
           test "$SIZE" -gt 100000 || { echo "::error::ipa 只有 $SIZE 字节，不发布"; exit 1; }
+
+      - name: Verify icon in ipa（证据）
+        if: steps.build.outcome == 'success'
+        run: |
+          set -eux
+          unzip -l Aevis-rewrite-unsigned.ipa
+          rm -rf /tmp/chk && mkdir -p /tmp/chk
+          unzip -q -o Aevis-rewrite-unsigned.ipa -d /tmp/chk
+          plutil -p /tmp/chk/Payload/AevisApp.app/Info.plist | grep -A8 CFBundleIcons || true
+          ls -l /tmp/chk/Payload/AevisApp.app | grep -i "AppIcon" || true
 
       - name: Read marketing version
         id: ver

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// 视觉常量（2026-11-17，140）：与安卓 `V2` 一一对应，改这里就够，别在 View 里写魔法数。
 enum AE {
@@ -26,6 +27,31 @@ enum AE {
     /// 聊天三档字号（与安卓 msgSize 对齐）
     static func chatFont(_ size: Int) -> CGFloat {
         switch size { case 0: return 13.5; case 2: return 17; default: return 15 }
+    }
+}
+
+extension Color {
+    /// `#7664E2` → Color（144 用得多，集中一处）
+    static func hex(_ v: UInt32, alpha: Double = 1) -> Color {
+        Color(
+            .sRGB,
+            red: Double((v >> 16) & 0xFF) / 255,
+            green: Double((v >> 8) & 0xFF) / 255,
+            blue: Double(v & 0xFF) / 255,
+            opacity: alpha
+        )
+    }
+
+    /// 明暗自适应：浅色用 light，深色用 dark（跟随系统）
+    static func adaptive(dark: Color, light: Color) -> Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+    }
+
+    /// 页面底色（144：浅 #F7F5F0 / 深 #141416）
+    static var paper: Color {
+        adaptive(dark: Color.hex(0x141416), light: Color.hex(0xF7F5F0))
     }
 }
 
