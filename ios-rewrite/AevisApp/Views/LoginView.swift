@@ -27,6 +27,7 @@ struct LoginView: View {
 
     @State private var showRecover = false
     @State private var showQR = false
+    @State private var showLines = false
     @FocusState private var focused: Field?
     enum Field { case email, password, code }
 
@@ -76,6 +77,7 @@ struct LoginView: View {
             .onTapGesture { focused = nil }
         }
         .sheet(isPresented: $showRecover) { RecoverView() }
+        .sheet(isPresented: $showLines) { LineSheet() }
         .sheet(isPresented: $showQR) {
             WxQRView { token in
                 showQR = false
@@ -87,8 +89,21 @@ struct LoginView: View {
     // MARK: - 组件
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 16) {
             Spacer()
+            // 147/148：线路入口（未登录也能用），**只显示城市名，不显示地址**
+            Button {
+                showLines = true
+            } label: {
+                HStack(spacing: 3) {
+                    Text("线路 · " + APIClient.activeLine.name)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.hex(0x8A8A8A))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.hex(0xB0B0B0))
+                }
+            }
             Button("帮助") { tip = "如需帮助，请联系 aevis.cn 客服。" }
                 .font(.system(size: 14))
                 .foregroundStyle(Color.hex(0x8A8A8A))
@@ -489,5 +504,125 @@ struct WxQRView: View {
         let ctx = CIContext()
         guard let cg = ctx.createCGImage(scaled, from: scaled.extent) else { return nil }
         return UIImage(cgImage: cg)
+    }
+}
+
+// MARK: - 线路半窗（147/148：只显示城市名与状态，不显示任何域名/IP）
+
+struct LineSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var states: [String: APIClient.LineState] = [:]
+    @State private var autoPick = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("线路").font(.system(size: 20, weight: .semibold))
+                Spacer()
+                Button("关闭") { dismiss() }
+                    .font(.system(size: 14))
+                    .foregroundStyle(AE.accent)
+            }
+            .padding(.bottom, 12)
+
+            Toggle("自动选择最快", isOn: $autoPick)
+                .font(.system(size: 14))
+                .tint(AE.accent)
+                .padding(.vertical, 6)
+                .onChange(of: autoPick) { on in
+                    if on { Task { await pickFastest() } }
+                }
+
+            ForEach(APIClient.lines) { line in
+                Button {
+                    guard !line.base.isEmpty else {
+                        states[line.id] = .unavailable
+                        return
+                    }
+                    APIClient.setActiveLine(line.id)
+                    dismiss()
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(line.name)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(Color.hex(0x1B1D22))
+                                if line.pinning {
+                                    Text("自签证书")
+                                        .font(.system(size: 9.5))
+                                        .foregroundStyle(Color.hex(0x8A8A8A))
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.hex(0xECE9E2))
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                            }
+                            if !line.note.isEmpty {
+                                Text(line.note)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.hex(0x9A9A9A))
+                            }
+                        }
+                        Spacer()
+                        statusText(line)
+                        if APIClient.activeLine.id == line.id {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(AE.accent)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+            }
+
+            Text("连不上会自动重试其它线路")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.hex(0x9A9A9A))
+                .padding(.top, 10)
+
+            Spacer()
+        }
+        .padding(24)
+        .presentationDetents([.medium])
+        .task { await probeAll() }
+    }
+
+    @ViewBuilder
+    private func statusText(_ line: APIClient.Line) -> some View {
+        switch states[line.id] {
+        case .ok(let ms):
+            Text("\(ms)ms")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(ms < 300 ? Color.green : (ms < 800 ? Color.orange : Color.red))
+        case .timeout:
+            Text("超时").font(.system(size: 12)).foregroundStyle(.red)
+        case .certFailed:
+            Text("证书失败").font(.system(size: 12)).foregroundStyle(.red)
+        case .unavailable:
+            Text("暂不可用").font(.system(size: 12)).foregroundStyle(Color.hex(0x9A9A9A))
+        default:
+            Text("测速中…").font(.system(size: 12)).foregroundStyle(Color.hex(0x9A9A9A))
+        }
+    }
+
+    private func probeAll() async {
+        for line in APIClient.lines {
+            states[line.id] = .probing
+            states[line.id] = await APIClient.probe(line)
+        }
+    }
+
+    /// 自动选择最快：跳过不可用/证书失败，取最小 ms
+    private func pickFastest() async {
+        await probeAll()
+        let ok = states.compactMap { (k, v) -> (String, Int)? in
+            if case .ok(let ms) = v { return (k, ms) }
+            return nil
+        }.sorted { $0.1 < $1.1 }
+        if let best = ok.first {
+            APIClient.setActiveLine(best.0)
+            dismiss()
+        }
     }
 }

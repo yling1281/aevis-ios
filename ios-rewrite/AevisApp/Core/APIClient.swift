@@ -19,7 +19,77 @@ enum APIError: LocalizedError {
 }
 
 struct APIClient {
-    static let base = "https://q7m3ax.lingyan.cyou"
+    /// 线路（2026-11-17，147/148）：UI 只显示名字，**地址一律不上屏**。
+    struct Line: Identifiable, Equatable {
+        let id: String        // 内部 key，也用作持久化
+        let name: String      // 北京 / 香港 / 直连 / 备用
+        let base: String      // 真实地址；留空 = 暂不可用
+        let pinning: Bool     // 仅「直连」为 true（自签证书）
+        var note: String = "" // 半窗里的短注（默认/备用/最快（自签证书））
+    }
+
+    static let lines: [Line] = [
+        Line(id: "bj",   name: "北京", base: "https://q7m3ax.lingyan.cyou",     pinning: false, note: "默认（隧道）"),
+        Line(id: "hk",   name: "香港", base: "https://lingyan.cyou",            pinning: false, note: "备用"),
+        Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319",  pinning: true,  note: "最快（自签证书）"),
+        // 148：第 4 条先留空位（服务端 vhost 未修好），点了给「暂不可用」，不指向 404 地址
+        Line(id: "spare", name: "备用", base: "",                               pinning: false, note: "暂不可用")
+    ]
+
+    private static let activeKey = "apiLineId"
+
+    /// 当前生效线路（重启沿用）。
+    static var activeLine: Line {
+        let id = UserDefaults.standard.string(forKey: activeKey) ?? "bj"
+        return lines.first { $0.id == id } ?? lines[0]
+    }
+
+    static func setActiveLine(_ id: String) {
+        UserDefaults.standard.set(id, forKey: activeKey)
+        Self.session = makeSession(for: activeLine)
+    }
+
+    /// 兼容旧代码（头像相对路径拼接等）：默认线路的地址。
+    static var base: String { activeLine.base.isEmpty ? lines[0].base : activeLine.base }
+
+    // MARK: - 自签证书 pinning（仅 host:port 一处）
+
+    /// 只对「直连」这条的 host + 端口接受 server trust，其它一律系统默认校验。
+    /// **不允许**从服务端下发开关；这里写死。
+    final class PinDelegate: NSObject, URLSessionDelegate {
+        static let host = "103.236.72.107"
+        static let port = 54319
+
+        func urlSession(
+            _ session: URLSession,
+            didReceive challenge: URLAuthenticationChallenge,
+            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  challenge.protectionSpace.host == Self.host,
+                  challenge.protectionSpace.port == Self.port,
+                  let trust = challenge.protectionSpace.serverTrust else {
+                completionHandler(.performDefaultHandling, nil)
+                return
+            }
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        }
+    }
+
+    private static func makeSession(for line: Line) -> URLSession {
+        if line.pinning {
+            let cfg = URLSessionConfiguration.default
+            cfg.timeoutIntervalForRequest = 15
+            return URLSession(configuration: cfg, delegate: PinDelegate(), delegateQueue: nil)
+        }
+        return .shared
+    }
+
+    /// 当前线路用的 session（pin 只影响直连这一条）
+    private(set) static var session: URLSession = makeSession(for: activeLine)
+
+    /// 线路是否可用（地址为空 = 暂不可用）
+    static var activeAvailable: Bool { !activeLine.base.isEmpty }
 
     // MARK: - 底层
 
@@ -30,7 +100,9 @@ struct APIClient {
         token: String? = nil,
         account: String? = nil
     ) async throws -> [String: Any] {
-        guard let url = URL(string: base + path) else {
+        let host = activeLine.base
+        guard !host.isEmpty else { throw APIError.http(0, "线路暂不可用") }
+        guard let url = URL(string: host + path) else {
             throw APIError.decode("bad url: \(path)")
         }
         var req = URLRequest(url: url)
@@ -41,7 +113,7 @@ struct APIClient {
         if let account { req.setValue(account, forHTTPHeaderField: "X-Account") }
         if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200..<300).contains(code) else {
@@ -259,4 +331,62 @@ struct APIClient {
         if let t = json["token"] as? String, !t.isEmpty { return t }
         return nil
     }
+
+    // MARK: - 测速 / 自动切换（2026-11-17，147）
+
+    enum LineState: Equatable {
+        case probing
+        case ok(Int)          // 毫秒（3 次中位数）
+        case timeout
+        case certFailed       // 仅直连：pin 没通过
+        case unavailable      // 地址为空
+    }
+
+    /// 探一条线路：`GET {base}/v1/app/config`，2s 超时，3 次取中位数。
+    static func probe(_ line: Line) async -> LineState {
+        if line.base.isEmpty { return .unavailable }
+        var samples: [Int] = []
+        var certFail = false
+        for _ in 0..<3 {
+            var req = URLRequest(url: URL(string: line.base + "/v1/app/config")!)
+            req.timeoutInterval = 2
+            let sess = makeSession(for: line)
+            let t0 = Date()
+            do {
+                let (_, resp) = try await sess.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                if (200..<500).contains(code) {
+                    samples.append(Int(Date().timeIntervalSince(t0) * 1000))
+                }
+            } catch {
+                let ns = error as NSError
+                // -1202/-1200 = 证书/信任问题，直连要单独报「证书失败」，别混成超时
+                if line.pinning && (ns.code == -1202 || ns.code == -1200) { certFail = true }
+            }
+        }
+        if certFail && samples.isEmpty { return .certFailed }
+        guard !samples.isEmpty else { return .timeout }
+        return .ok(samples.sorted()[samples.count / 2])
+    }
+
+    /// 带一次自动切换的请求：失败就换下一条可用线路重试一次，并记住。
+    static func requestWithFailover(
+        _ path: String, method: String = "GET",
+        body: [String: Any]? = nil, token: String? = nil, account: String? = nil
+    ) async throws -> [String: Any] {
+        do {
+            return try await request(path, method: method, body: body, token: token, account: account)
+        } catch {
+            let current = activeLine
+            guard let next = lines.first(where: { $0.id != current.id && !$0.base.isEmpty }) else {
+                throw error
+            }
+            setActiveLine(next.id)
+            lastSwitchNote = "当前线路不可用，已切到 \(next.name)"
+            return try await request(path, method: method, body: body, token: token, account: account)
+        }
+    }
+
+    /// 最近一次自动切换提示（列表/登录页顶部条用；读过即清）。
+    static var lastSwitchNote: String = ""
 }
