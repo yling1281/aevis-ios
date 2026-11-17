@@ -4,13 +4,23 @@ import SwiftUI
 struct AevisApp: App {
     @StateObject private var session = Session.shared
 
+    /// 正常入口：没登录去登录页，登录了进会话列表。
+    @ViewBuilder private var root: some View {
+        if session.token == nil {
+            LoginView()
+        } else {
+            ChatListView()
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
                 #if DEBUG
-                // 137：CI 截图用，**只在 Debug 编进去**（Release 里这段物理上不存在）。
-                // 模拟器是全新安装、没有登录态，带 `-demo` 启动时直接渲染聊天页（样例数据、不发请求）。
-                // NSLog 那个标记是给 CI 断言用的：看不到它就说明参数没生效，别把登录页当截图交上去。
+                // CI 截图专用：带 `-demo` 启动时直接渲染聊天页（样例数据、不发请求）。
+                // Release 编译后这段物理上不存在；NSLog 供 CI 断言。
+                // 不要把 if/else 链拆到 #if/#else 两侧，Swift 会报
+                // "expected '}' at end of brace statement"（2026-11-17 实际踩过）。
                 if ProcessInfo.processInfo.arguments.contains("-demo") {
                     NavigationStack {
                         ChatView(
@@ -24,17 +34,15 @@ struct AevisApp: App {
                         )
                         .onAppear { NSLog("AEVIS_DEMO_ON") }
                     }
-                } else if session.token == nil {
-                #else
-                if session.token == nil {
-                #endif
-                    LoginView()
                 } else {
-                    ChatListView()
+                    root
                 }
+                #else
+                root
+                #endif
             }
             .environmentObject(session)
-            .preferredColorScheme(nil)   // 跟随系统（与安卓 120 的口径一致）
+            .preferredColorScheme(nil)   // 跟随系统（与安卓 1.1.10 一致）
         }
     }
 }
