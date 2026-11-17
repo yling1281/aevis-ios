@@ -378,7 +378,7 @@ settings:
     #      而 URL(string:) 拿到相对地址是解析不出 host 的 → 一直只显示名字首字占位。
     #      改成 avatarAbsolute。
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "15"
+    CURRENT_PROJECT_VERSION: "16"
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: "minimal"

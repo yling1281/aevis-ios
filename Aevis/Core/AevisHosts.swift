@@ -153,7 +153,6 @@ enum AevisHosts {
     ///    只用备案过的 `lingyan.cyou` 两个门牌。
     static let accountLines: [Line] = [
         Line(name: "北京", base: apekinAccountBase),
-        Line(name: "香港一", base: "https://faka.lingyan.cyou" + apiPath),
         Line(name: "香港二", base: "https://lingyan.cyou" + apiPath),
         // 直连（2026-11-14）：机房新开的外网 54319 → 内网 5533，
         // 不经过任何反代、不看域名备案。
