@@ -57,7 +57,7 @@ struct APIClient {
 
     static func login(email: String, password: String) async throws -> LoginResult {
         let json = try await request(
-            "/v1/auth/login", method: "POST",
+            "/v1/auth/login/email", method: "POST",
             body: ["email": email, "password": password]
         )
         guard let token = json["token"] as? String, !token.isEmpty else {
