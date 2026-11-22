@@ -34,6 +34,7 @@
 		A10000000000000000000021 /* ServerStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* ServerStatusView.swift */; };
 		A10000000000000000000022 /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThemeSettingsView.swift */; };
 		A10000000000000000000023 /* CharacterSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* CharacterSettingsView.swift */; };
+		A10000000000000000000024 /* AevisMascotMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* AevisMascotMark.swift */; };
 		A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppIcon60x60@2x.png */; };
 		A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppIcon60x60@3x.png */; };
 		A20000000000000000000003 /* AppIcon1024.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* AppIcon1024.png */; };
@@ -69,6 +70,7 @@
 		B10000000000000000000021 /* ServerStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusView.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
 		B10000000000000000000023 /* CharacterSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterSettingsView.swift; sourceTree = "<group>"; };
+		B10000000000000000000024 /* AevisMascotMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AevisMascotMark.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -146,6 +148,7 @@
 				B10000000000000000000021 /* ServerStatusView.swift */,
 				B10000000000000000000022 /* ThemeSettingsView.swift */,
 				B10000000000000000000023 /* CharacterSettingsView.swift */,
+				B10000000000000000000024 /* AevisMascotMark.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -276,6 +279,7 @@
 				A10000000000000000000021 /* ServerStatusView.swift in Sources */,
 				A10000000000000000000022 /* ThemeSettingsView.swift in Sources */,
 				A10000000000000000000023 /* CharacterSettingsView.swift in Sources */,
+				A10000000000000000000024 /* AevisMascotMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

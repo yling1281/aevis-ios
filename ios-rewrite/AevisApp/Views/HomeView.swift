@@ -20,6 +20,12 @@ struct HomeView: View {
     @State private var quota: APIClient.QuotaState? = nil
     @State private var points: APIClient.PointsHome? = nil
 
+    /// 问候区（2026-11-24）：昵称 / 头像来自 `/v1/me`，天气来自 wttr.in（10 分钟缓存）。
+    /// 全部默认为空 —— 拿不到就不显示，不用狗 logo 冒充用户头像。
+    @State private var nickname = ""
+    @State private var avatarPath = ""
+    @State private var weather: APIClient.WeatherNow? = nil
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -37,9 +43,16 @@ struct HomeView: View {
         .background(AppBackground())
         .onAppear {
             // 进页面 / 从聊天详情返回 / 切回本 tab 都重新拉一次（不做轮询）
-            Task { await loadUsage() }
+            Task {
+                await loadGreeting()
+                await loadUsage()
+            }
         }
-        .refreshable { await loadUsage() }
+        .refreshable {
+            // 下拉刷新：天气跳过 10 分钟缓存，昵称/头像/额度一起重取
+            await loadGreeting(refreshWeather: true)
+            await loadUsage()
+        }
         .sheet(isPresented: $showShop) {
             // 第 2 轮接 ShopView；这轮先明确提示，不假装能进
             VStack(spacing: 14) {
@@ -56,16 +69,128 @@ struct HomeView: View {
     // MARK: - 顶部问候
 
     private var greeting: some View {
-        HStack(spacing: 10) {
-            AevisMascot(size: 44)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("你好呀").font(.system(size: 12)).foregroundStyle(AE.textSecondary)
-                Text("今天想聊点什么？")
+        HStack(spacing: 12) {
+            avatarView
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(greetingTitle)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(AE.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text("今天想聊点什么？")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AE.textSecondary)
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 4)
+
+            // 天气拿不到就整块不显示（不放假数据）
+            if let weather, !weather.descCN.isEmpty {
+                weatherChip(weather)
+            }
         }
+    }
+
+    /// 时段问候：5–11 早上好 / 11–13 中午好 / 13–18 下午好 / 18–5 晚上好。
+    /// 有昵称就拼成「晚上好，阿狸」；没昵称只显示时段问候（不硬塞「你」这种别扭称呼）。
+    private var periodGreeting: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        switch h {
+        case 5..<11: return "早上好"
+        case 11..<13: return "中午好"
+        case 13..<18: return "下午好"
+        default: return "晚上好"
+        }
+    }
+
+    private var greetingTitle: String {
+        nickname.isEmpty ? periodGreeting : "\(periodGreeting)，\(nickname)"
+    }
+
+    // MARK: - 头像（用户自己的）
+
+    /// 头像：有图走 AsyncImage，空/失败 → 渐变圆底 + 首字占位（与 ChatView / ChatListView 同一套）。
+    @ViewBuilder
+    private var avatarView: some View {
+        if let avatarURL {
+            AsyncImage(url: avatarURL) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable().scaledToFill()
+                case .empty:
+                    avatarPlaceholder
+                default:
+                    avatarPlaceholder
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
+            .shadow(color: AE.shadowColor, radius: 4, y: 2)
+        } else {
+            avatarPlaceholder
+        }
+    }
+
+    private var avatarPlaceholder: some View {
+        ZStack {
+            Circle().fill(
+                LinearGradient(
+                    colors: [AE.accentLift, AE.accentDeep],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+            Text(String(placeholderName.prefix(1)))
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 44, height: 44)
+        .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
+        .shadow(color: AE.shadowColor, radius: 4, y: 2)
+    }
+
+    /// 占位首字：昵称 → 「我」（和 ChatView「我」的气泡占位一致）
+    private var placeholderName: String {
+        nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "我" : nickname
+    }
+
+    /// 头像地址：Session.avatar（登录/冷启动已同步）优先，其次本页 `/v1/me` 取到的那份。
+    /// 相对路径拼当前线路 base；空或拼不出合法 URL → nil（走占位）。
+    private var avatarURL: URL? {
+        let fromSession = session.avatar.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s = fromSession.isEmpty
+            ? avatarPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            : fromSession
+        guard !s.isEmpty else { return nil }
+        if s.hasPrefix("http") { return URL(string: s) }
+        return URL(string: s.hasPrefix("/") ? APIClient.base + s : APIClient.base + "/" + s)
+    }
+
+    /// 天气小胶囊：「多云 18°」
+    private func weatherChip(_ w: APIClient.WeatherNow) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: weatherSymbol(w.descCN))
+                .font(.system(size: 11, weight: .medium))
+            Text("\(w.descCN) \(w.tempC)°")
+                .font(.system(size: 11.5, weight: .medium))
+        }
+        .foregroundStyle(AE.accent)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(AE.accentSoft, in: Capsule())
+        .accessibilityLabel("南昌 \(w.descCN) \(w.tempC) 度")
+    }
+
+    private func weatherSymbol(_ desc: String) -> String {
+        if desc.contains("雷") { return "cloud.bolt.rain.fill" }
+        if desc.contains("雪") { return "cloud.snow.fill" }
+        if desc.contains("雨") { return "cloud.rain.fill" }
+        if desc.contains("雾") { return "cloud.fog.fill" }
+        if desc.contains("阴") { return "cloud.fill" }
+        if desc.contains("多云") { return "cloud.sun.fill" }
+        if desc.contains("晴") { return "sun.max.fill" }
+        return "cloud.fill"
     }
 
     // MARK: - 用量额度卡
@@ -106,11 +231,23 @@ struct HomeView: View {
                     Text(balanceLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(AE.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
-                Spacer(minLength: 0)
+
+                Spacer(minLength: 8)
+
+                // 额度卡大图：无底矢量狗头（宽 96pt，实际高度 ≈ 80pt）。
+                // 本周额度用完时换成打盹姿态（.sleep），比干巴巴的「—」更有情绪；
+                // 纯装饰，不参与无障碍朗读。
+                AevisMascotMark(
+                    pose: quota?.hasQuota == false ? .sleep : .front,
+                    size: 96
+                )
+                .accessibilityHidden(true)
             }
 
-            // 进度条 + 狗头贴末端（没拿到数据就只画空槽，不画假进度）
+            // 进度条（没拿到数据就只画空槽，不画假进度；狗头已移到右上大图）
             ZStack(alignment: .leading) {
                 Capsule().fill(AE.textPrimary.opacity(0.08)).frame(height: 8)
                 GeometryReader { geo in
@@ -120,13 +257,6 @@ struct HomeView: View {
                             colors: [Color.hex(0xFFD66B), AE.brandPurple],
                             startPoint: .leading, endPoint: .trailing))
                         .frame(width: geo.size.width * min(max(pct, 0), 100) / 100, height: 8)
-                        .overlay(alignment: .trailing) {
-                            if quota != nil {
-                                AevisMascot(size: 26)
-                                    .offset(x: 13, y: -11)
-                                    .shadow(color: AE.shadowColor, radius: 4, y: 2)
-                            }
-                        }
                 }
                 .frame(height: 8)
             }
@@ -174,6 +304,28 @@ struct HomeView: View {
                 quota = q
                 points = p
             }
+        }
+    }
+
+    // MARK: - 问候区数据
+
+    /// 昵称 / 头像（`/v1/me`）+ 天气（wttr.in，10 分钟缓存）。
+    /// 顺序：先取本服务器的昵称（快、视觉主体），再取外网天气；各自失败互不影响，也不放任何假数据。
+    private func loadGreeting(refreshWeather: Bool = false) async {
+        if let token = session.token, !token.isEmpty,
+           let json = try? await APIClient.me(token: token) {
+            let d = (json["data"] as? [String: Any]) ?? json
+            let nick = (d["nickname"] as? String) ?? (json["nickname"] as? String) ?? ""
+            let av = (d["avatar"] as? String) ?? (json["avatar"] as? String) ?? ""
+            await MainActor.run {
+                nickname = nick
+                avatarPath = av
+            }
+        }
+
+        // 天气：首屏可能有 3 秒超时，失败就不显示（不阻塞昵称渲染）
+        if let w = try? await APIClient.weatherNanchang(force: refreshWeather) {
+            await MainActor.run { weather = w }
         }
     }
 

@@ -569,6 +569,77 @@ struct APIClient {
         return PointsHome(points: pts, estMessages: max(0, est), avgMsgCost: avg)
     }
 
+    // MARK: - 天气（主页问候用，南昌）
+
+    struct WeatherNow {
+        let tempC: Int
+        let descCN: String   // 中文描述；映射不到就保留英文原文
+    }
+
+    private static let weatherCacheKey = "aevis.weather.nanchang.v1"
+    private static let weatherCacheAtKey = "aevis.weather.nanchang.v1.at"
+    /// 缓存有效期 10 分钟
+    private static let weatherTTL: TimeInterval = 600
+
+    /// 南昌实时天气：直连 `https://wttr.in/Nanchang?format=j1`（HTTPS、免 key、免登录）。
+    /// - 10 分钟内直接用 UserDefaults 缓存，避免每次进主页都打一次外网；
+    /// - `force: true` 用于下拉刷新；
+    /// - 3 秒超时，失败直接抛错，由调用方决定「不显示」——**绝不返回假数据**。
+    /// ATS：wttr.in 是标准 HTTPS 证书，不需要动 Info.plist；不走 APIClient 的线路回落。
+    static func weatherNanchang(force: Bool = false) async throws -> WeatherNow {
+        let d = UserDefaults.standard
+        if !force {
+            let at = d.double(forKey: weatherCacheAtKey)
+            if at > 0, Date().timeIntervalSince1970 - at < weatherTTL,
+               let cached = d.dictionary(forKey: weatherCacheKey),
+               let t = cached["temp"] as? Int,
+               let desc = cached["desc"] as? String, !desc.isEmpty {
+                return WeatherNow(tempC: t, descCN: desc)
+            }
+        }
+
+        guard let url = URL(string: "https://wttr.in/Nanchang?format=j1") else {
+            throw APIError.decode("bad weather url")
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 3
+        // wttr.in 对没有 UA 的请求偶尔会 400，给一个明确的 UA
+        req.setValue("AevisApp/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw APIError.http(http.statusCode, "天气服务不可用")
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard let cur = (json["current_condition"] as? [[String: Any]])?.first else {
+            throw APIError.decode("天气数据解析失败")
+        }
+        // wttr.in 的 temp_C 是字符串 "18"；兼容个别情况下给数字
+        var temp: Int? = (cur["temp_C"] as? NSNumber)?.intValue
+        if temp == nil, let s = cur["temp_C"] as? String { temp = Int(s) }
+        guard let temp else { throw APIError.decode("天气温度缺失") }
+        let en = ((cur["weatherDesc"] as? [[String: Any]])?.first?["value"] as? String) ?? ""
+        let w = WeatherNow(tempC: temp, descCN: cnWeather(en))
+
+        d.set(["temp": w.tempC, "desc": w.descCN], forKey: weatherCacheKey)
+        d.set(Date().timeIntervalSince1970, forKey: weatherCacheAtKey)
+        return w
+    }
+
+    /// wttr.in 只给英文天气描述，这里做一层轻量中文映射（映射不到就保留英文，不猜）。
+    private static func cnWeather(_ en: String) -> String {
+        let s = en.lowercased()
+        if s.isEmpty { return "" }
+        if s.contains("thunder") { return "雷阵雨" }
+        if s.contains("snow") || s.contains("sleet") || s.contains("blizzard") { return "雪" }
+        if s.contains("rain") || s.contains("drizzle") || s.contains("shower") { return "雨" }
+        if s.contains("fog") || s.contains("mist") { return "雾" }
+        if s.contains("overcast") { return "阴" }
+        if s.contains("cloud") { return "多云" }
+        if s.contains("sunny") || s.contains("clear") { return "晴" }
+        return en
+    }
+
     /// 会员套餐。字段对齐 /v1/shop/products 的 items[]（注意 price_cents 带下划线）。
     /// id 是字符串主键（aevis_shop.py：p_x / p_xl / p_xxl / p_xllll），**不是数字** ——
     /// 旧版声明成 Int 会让 `as? NSNumber` 全部解析失败、会员列表恒空、下单 product_id 传错。
