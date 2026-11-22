@@ -6,7 +6,7 @@ import AuthenticationServices
 // MARK: - 登录相关界面的视觉令牌（本文件专用）
 //
 // 收敛规则（改样式只改这里，别在 View 里撒魔法数）：
-//   · 一个强调色 LK.accent（墨靛深 #2F3A56）+ 一种页面底 AE.paper + 白卡 + 1px 细描边；
+//   · 一个强调色 LK.accent（墨靛深 #2F3A56）+ 一种页面底 Color.paper + 白卡 + 1px 细描边；
 //   · 不用渐变、不用发光、不用多层阴影；层次靠留白、描边、字重；
 //   · 圆角只用 16（卡片）/ 12（输入框、按钮）/ 10（小按钮）；不用 Capsule 药丸；
 //   · 字号只用 22 / 16 / 13 / 12 四档；不用 .rounded 设计，不用 27+ 的夸大头图字。
@@ -38,7 +38,7 @@ private enum LK {
 ///   ✗ 药丸胶囊主按钮（Capsule + 50pt 高）
 ///   ✗ 半透明柔紫胶囊提示条
 ///
-/// 现在：中性浅灰底 `AE.paper` + 一张白卡（1px 暖灰描边、16 圆角）。
+/// 现在：中性浅灰底 `Color.paper` + 一张白卡（1px 暖灰描边、16 圆角）。
 /// 唯一强调色是墨靛深 `AE.accentDeep`；层次靠留白和描边，不靠渐变与发光。
 /// 字号只有四档：22 semibold（页标题）/ 16（输入框、主按钮）/ 13（说明、链接）/ 12（脚注）。
 /// 登录内容仍然一屏放下（矮屏收紧），不引入 ScrollView。
@@ -126,7 +126,7 @@ struct LoginView: View {
 
             ZStack {
                 // 统一浅色底：不再有柔紫/暖橙发光圆团
-                AE.paper.ignoresSafeArea()
+                Color.paper.ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { focused = nil }
 
@@ -154,7 +154,7 @@ struct LoginView: View {
                 .padding(.bottom, 12)
             }
         }
-        .background(AE.paper.ignoresSafeArea())
+        .background(Color.paper.ignoresSafeArea())
         .sheet(isPresented: $showRecover) { RecoverView() }
         .sheet(isPresented: $showLines) { LineSheet() }
         .sheet(isPresented: $qqSheet) {
@@ -823,7 +823,7 @@ struct RecoverView: View {
         .padding(.horizontal, 20)
         .padding(.top, 6)
         .padding(.bottom, 16)
-        .background(AE.paper.ignoresSafeArea())
+        .background(Color.paper.ignoresSafeArea())
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
     }
@@ -935,7 +935,7 @@ struct WxQRView: View {
         .padding(.horizontal, 24)
         .padding(.top, 22)
         .padding(.bottom, 12)
-        .background(AE.paper.ignoresSafeArea())
+        .background(Color.paper.ignoresSafeArea())
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task { await poll(ticket: info.ticket) }
@@ -1030,7 +1030,7 @@ struct QQSheet: View {
         .padding(.horizontal, 24)
         .padding(.top, 22)
         .padding(.bottom, 16)
-        .background(AE.paper.ignoresSafeArea())
+        .background(Color.paper.ignoresSafeArea())
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .task { await start() }
