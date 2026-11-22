@@ -9,6 +9,45 @@ extension LocalStore {
         return dir.appendingPathComponent("convs.json")
     }
 
+    // MARK: - 角色列表本地缓存（2026-11-24，断网也能看会话列表）
+
+    /// 角色列表缓存文件：`Documents/aevis-personas.json`。
+    private static var personasURL: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("aevis-personas.json")
+    }
+
+    /// 把服务端拉到的角色列表存到本地（下次断网时用来顶上）。
+    /// 永不抛异常：存不下也不能影响聊天。
+    static func savePersonas(_ list: [Persona]) {
+        guard !list.isEmpty else { return }
+        do {
+            let data = try JSONEncoder().encode(list)
+            try data.write(to: personasURL, options: .atomic)
+        } catch {
+            NSLog("[LocalStoreExt] savePersonas failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 读本地角色缓存；没有/损坏一律返回 `[]`（调用方据此走兜底）。
+    static func loadPersonas() -> [Persona] {
+        guard let data = try? Data(contentsOf: personasURL),
+              let list = try? JSONDecoder().decode([Persona].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    /// 兜底：缓存为空（首次装/被清）但本地 convs.json 里已经有会话时，
+    /// 用会话 pid 构造最小角色（name 用 pid），保证**至少能点进去看到历史**。
+    /// 按最后活跃时间倒序（本地有记录的排前面）。
+    static func fallbackPersonas() -> [Persona] {
+        let pids = Array(exportAll().keys)
+        guard !pids.isEmpty else { return [] }
+        return pids
+            .sorted { (lastAt($0) ?? .distantPast) > (lastAt($1) ?? .distantPast) }
+            .map { Persona(id: $0, name: $0.isEmpty ? "角色" : $0, tagline: "", avatar: "") }
+    }
+
     /// 读出全部会话，原样返回（发消息后备份上云用）。
     static func exportAll() -> [String: [[String: Any]]] {
         guard let data = try? Data(contentsOf: convsURL),

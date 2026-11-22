@@ -22,6 +22,8 @@ struct ChatListView: View {
     @State private var personas: [Persona] = []
     @State private var loading = false
     @State private var error = ""
+    /// 离线轻提示：拉接口失败但有本地缓存时显示一行字，**不清空列表/不弹错误页**。
+    @State private var offlineHint = ""
     /// 手动「从云端恢复」的结果提示（几秒后自动消失）。
     @State private var restoreToast = ""
     /// 长按菜单选中的「要打开角色设置」的角色。
@@ -143,7 +145,7 @@ struct ChatListView: View {
                 Image(systemName: "person.2.fill").font(.system(size: 10))
                 Text("\(personas.count) 个角色")
                 Text("·")
-                Text(loading ? "正在同步…" : "下拉可刷新")
+                Text(loading ? "正在同步…" : (offlineHint.isEmpty ? "下拉可刷新" : offlineHint))
             }
             .font(.system(size: 11.5))
             .foregroundStyle(AE.textSecondary.opacity(0.85))
@@ -331,12 +333,31 @@ struct ChatListView: View {
         }
         #endif
 
-        guard let token = session.token else { return }
+        // ① 先把本地缓存「立刻」顶上 —— 断网/服务端挂了也不能整屏空白（用户硬要求）
+        let cached = LocalStore.loadPersonas()
+        let local = cached.isEmpty ? LocalStore.fallbackPersonas() : cached
+        if !local.isEmpty { personas = local }
+        offlineHint = ""
+
+        guard let token = session.token else {
+            // 未登录：有本地就显示本地记录，没有就走空态（提示去登录/添加）
+            return
+        }
         loading = true; error = ""
         do {
-            personas = try await APIClient.myPersonas(token: token, email: session.email)
+            let fresh = try await APIClient.myPersonas(token: token, email: session.email)
+            if !fresh.isEmpty {
+                personas = fresh
+                LocalStore.savePersonas(fresh)      // 存本地，下次断网直接用
+            }
+            error = ""
         } catch {
-            self.error = "拉取角色失败：\(error.localizedDescription)"
+            // 失败：**保留本地缓存**，只在头部加一行轻提示，不清空列表、不进错误页
+            if !personas.isEmpty {
+                offlineHint = "离线，显示本地记录"
+            } else {
+                self.error = "拉取角色失败：\(error.localizedDescription)"
+            }
         }
         loading = false
     }

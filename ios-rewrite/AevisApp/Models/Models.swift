@@ -98,7 +98,9 @@ extension Color {
 /// 数据模型（2026-11-17，134 骨架）——字段名与安卓**完全对齐**：
 /// 网络层用 `role/content/img/w/skip/quote`，本地落盘也一样，方便以后两端互导。
 
-struct Persona: Identifiable, Equatable {
+/// 角色。`Codable` 是为了**离线也能看会话列表**：拉不到接口时用本地缓存的
+/// 角色列表顶上（`LocalStore.savePersonas/loadPersonas`），不再整屏空白。
+struct Persona: Identifiable, Equatable, Codable {
     let id: String
     let name: String
     let tagline: String
