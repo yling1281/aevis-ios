@@ -59,11 +59,26 @@ struct AnimatedNumber: View {
             .font(font)
             .foregroundStyle(color)
             .monospacedDigit()
-            .contentTransition(.numericText(value: displayed))
-            .onChange(of: value) { _, newValue in
+            .modifier(NumericRollEffect(value: displayed))
+            // 单参数 onChange 是 iOS 14+；双参数版本要 iOS 17，部署目标 16.0 用不了
+            .onChange(of: value) { newValue in
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
                     displayed = newValue
                 }
             }
+    }
+}
+
+/// `.numericText(value:)` 是 iOS 17+；低版本退化为普通文本（数值照样更新，只是没有逐位滚动）。
+private struct NumericRollEffect: ViewModifier {
+    let value: Double
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.contentTransition(.numericText(value: value))
+        } else {
+            content
+        }
     }
 }

@@ -72,3 +72,19 @@ struct GlassBackdrop: View {
             .allowsHitTesting(false)
     }
 }
+
+// MARK: - 版本兼容
+
+extension View {
+    /// `.presentationBackground(.clear)` 是 iOS 16.4+ API，而工程部署目标是 16.0。
+    /// 低版本上直接不加（sheet 会保持系统默认底色），高版本才有"透出背后模糊"的效果。
+    /// 用它替换裸调用，避免 `is only available in iOS 16.4 or newer` 编译失败。
+    @ViewBuilder
+    func glassSheetBackground() -> some View {
+        if #available(iOS 16.4, *) {
+            self.presentationBackground(.clear)
+        } else {
+            self
+        }
+    }
+}

@@ -12,7 +12,7 @@ import CoreImage
 ///      - 到账 → `onPaid(result)`（调用方弹成功动效）；
 ///      - 未到账 → 回到二维码并提示「支付失败，请重试」（二维码全程可见，不打断）。
 ///
-/// 视觉统一复用 `GlassComponents` 的磨砂玻璃；外层 sheet 需配 `.presentationBackground(.clear)`。
+/// 视觉统一复用 `GlassComponents` 的磨砂玻璃；外层 sheet 需配 `.glassSheetBackground()`。
 /// 轮询在结构化 Task 里，视图消失自动取消，不泄漏、不跨页串扰。
 struct PayQRView: View {
     @EnvironmentObject private var session: Session

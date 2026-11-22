@@ -88,9 +88,9 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         AnimatedNumber(
-                            value: usedPercent, suffix: "%",
+                            value: usedPercent,
                             font: .system(size: 34, weight: .bold, design: .rounded),
-                            color: AE.textPrimary
+                            color: AE.textPrimary, suffix: "%"
                         )
                         Text("已用")
                             .font(.system(size: 12))

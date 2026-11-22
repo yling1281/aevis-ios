@@ -118,7 +118,7 @@ struct AevisApp: App {
                     .presentationDragIndicator(.hidden)
                     // 磨砂玻璃弹窗：让 sheet 背景透明，背后聊天界面才能透出模糊感。
                     // 强制更新仍由 binding 的空 set + interactiveDismissDisabled 双重保证关不掉。
-                    .presentationBackground(.clear)
+                    .glassSheetBackground()
             }
         }
     }

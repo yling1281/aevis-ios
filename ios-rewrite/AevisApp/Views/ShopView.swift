@@ -231,7 +231,7 @@ struct ShopView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("当前方案").font(.system(size: 12)).foregroundStyle(AE.textSecondary)
                         if let d = memberDays, d > 0 {
-                            AnimatedNumber(value: d, suffix: " 天", font: .system(size: 18, weight: .bold, design: .rounded))
+                            AnimatedNumber(value: d, font: .system(size: 18, weight: .bold, design: .rounded), suffix: " 天")
                                 .foregroundStyle(AE.textPrimary)
                         } else {
                             Text("未开通")
@@ -287,11 +287,9 @@ struct ShopView: View {
         let on = selectedProduct?.id == prod.id
         let name = prod.label.isEmpty ? (prod.title.isEmpty ? "\(prod.days) 天会员" : prod.title) : prod.label
         let ratio = Double(prod.percent) / 100.0
-        let scaleText = prod.percent <= 100 ? "基础用量" : "是基础用量的 \(ratioText(ratio)) 倍"
-        // 次行保留「百分之几」与每周墨点，满足用量用百分比表达的要求
-        let detail = prod.weekTotal > 0
-            ? "每周 \(prod.weekTotal) 墨点" + (prod.percent > 0 ? " · \(prod.percent)%" : "")
-            : "固定 \(prod.days) 天 · 每周发放额度"
+        // 2026-11-22 用户要求：不写具体墨点数，只讲相对倍数 + 百分比
+        let baseText = prod.percent <= 100 ? "基础用量" : "是基础用量的 \(ratioText(ratio)) 倍"
+        let scaleText = prod.percent > 0 ? "\(baseText) · \(prod.percent)%" : baseText
         // 推荐位：第二档（XL）对齐参考图 Plus 的「推荐」徽章
         let recommended = prod.id == "p_xl"
         let orig = origPrice(prod.priceCents)
@@ -313,8 +311,6 @@ struct ShopView: View {
                     }
                     Text(scaleText)
                         .font(.system(size: 12.5)).foregroundStyle(AE.textSecondary)
-                    Text(detail)
-                        .font(.system(size: 10.5)).foregroundStyle(AE.textSecondary.opacity(0.8))
                 }
                 Spacer(minLength: 6)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -555,7 +551,7 @@ struct ShopView: View {
         }
         .padding(24)
         .presentationDetents([.medium])
-        .presentationBackground(.clear)
+        .glassSheetBackground()
         .onAppear { activePay = nil }
     }
 
@@ -570,7 +566,7 @@ struct ShopView: View {
         }
         .environmentObject(session)
         .presentationDetents([.large])
-        .presentationBackground(.clear)
+        .glassSheetBackground()
     }
 
     private var alipayConfirmSheet: some View {
@@ -608,7 +604,7 @@ struct ShopView: View {
         }
         .padding(24)
         .presentationDetents([.medium])
-        .presentationBackground(.clear)
+        .glassSheetBackground()
     }
 
     /// 支付宝到账确认：每 2 秒查单，最多 12 次；到账 → 成功动效；超时 → 提示重试。
@@ -647,6 +643,6 @@ struct ShopView: View {
             }
         }
         .presentationDetents([.medium])
-        .presentationBackground(.clear)
+        .glassSheetBackground()
     }
 }
