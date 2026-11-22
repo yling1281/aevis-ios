@@ -11,6 +11,10 @@ struct AevisApp: App {
     /// 切后台回来 root 不重建，所以不会再飘。
     @State private var appeared = false
 
+    /// 前后台状态（2026-11-24）：回到 `.active` 时再查一次更新，
+    /// 这样用户从后台切回来也能看到「强制更新」，不必杀掉进程重开。
+    @Environment(\.scenePhase) private var scenePhase
+
     /// CI 截图模式（-demo）下不检查更新、不弹窗，避免网络和弹窗干扰截图。
     private var isDemo: Bool {
         #if DEBUG
@@ -109,8 +113,17 @@ struct AevisApp: App {
             // 跟随设置页的「外观」三档（themeMode）——挂在根视图上，全 App 一起变
             .modifier(ThemeModeModifier())
             .task {
-                guard !isDemo else { return }   // CI 截图模式不发网络请求
-                await update.checkIfNeeded()    // 冷启动检查一次（6 小时节流）
+                guard !isDemo else { return }        // CI 截图模式不发网络请求
+                // 冷启动**强制**查一次（无视节流），保证「进程刚起就一定检查强更」。
+                await update.checkIfNeeded(force: true)
+            }
+            // 回到前台（含从后台切回）也查一次 —— 受 30 分钟节流约束，避免频繁请求。
+            // 之前只在冷启动查 + 6 小时节流，「切走再切回」进程没重启就永远不查 → 强更不弹。
+            .onChange(of: scenePhase) { phase in
+                guard !isDemo else { return }
+                if phase == .active {
+                    Task { await update.checkIfNeeded() }
+                }
             }
             .sheet(isPresented: updateBinding) {
                 UpdateSheet(center: update)

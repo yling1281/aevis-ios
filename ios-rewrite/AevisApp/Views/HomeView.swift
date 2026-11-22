@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 /// 主页：用量额度卡 + 服务入口（只放真正能跳的：商城 / 会员，都进 ShopView）。
 /// 用量卡是真实数据：本周额度百分比来自 `GET /v1/quota/state`，
@@ -167,19 +168,29 @@ struct HomeView: View {
         return URL(string: s.hasPrefix("/") ? APIClient.base + s : APIClient.base + "/" + s)
     }
 
-    /// 天气小胶囊：「多云 18°」
+    /// 天气小胶囊：上行城市名（定位得到的 `nearest_area`，南昌兜底时是「南昌」），
+    /// 下行「多云 18°」。城市名拿不到就只显示天气那行，不留空行。
     private func weatherChip(_ w: APIClient.WeatherNow) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: weatherSymbol(w.descCN))
-                .font(.system(size: 11, weight: .medium))
-            Text("\(w.descCN) \(w.tempC)°")
-                .font(.system(size: 11.5, weight: .medium))
+        VStack(alignment: .trailing, spacing: 1) {
+            if !w.place.isEmpty {
+                Text(w.place)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(AE.textSecondary)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 4) {
+                Image(systemName: weatherSymbol(w.descCN))
+                    .font(.system(size: 11, weight: .medium))
+                Text("\(w.descCN) \(w.tempC)°")
+                    .font(.system(size: 11.5, weight: .medium))
+            }
+            .foregroundStyle(AE.accent)
         }
-        .foregroundStyle(AE.accent)
         .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(AE.accentSoft, in: Capsule())
-        .accessibilityLabel("南昌 \(w.descCN) \(w.tempC) 度")
+        .padding(.vertical, 4)
+        .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(w.place) \(w.descCN) \(w.tempC) 度")
     }
 
     private func weatherSymbol(_ desc: String) -> String {
@@ -309,8 +320,9 @@ struct HomeView: View {
 
     // MARK: - 问候区数据
 
-    /// 昵称 / 头像（`/v1/me`）+ 天气（wttr.in，10 分钟缓存）。
-    /// 顺序：先取本服务器的昵称（快、视觉主体），再取外网天气；各自失败互不影响，也不放任何假数据。
+    /// 昵称 / 头像（`/v1/me`）+ 天气（定位坐标查 wttr.in，失败回落南昌）。
+    /// 顺序刻意安排成「先人后天气」：昵称/头像先渲染，天气延后 1.5 秒再去定位，
+    /// 避免用户一进主页就被权限弹窗吓到；下拉刷新不再延迟。
     private func loadGreeting(refreshWeather: Bool = false) async {
         if let token = session.token, !token.isEmpty,
            let json = try? await APIClient.me(token: token) {
@@ -323,8 +335,22 @@ struct HomeView: View {
             }
         }
 
-        // 天气：首屏可能有 3 秒超时，失败就不显示（不阻塞昵称渲染）
-        if let w = try? await APIClient.weatherNanchang(force: refreshWeather) {
+        // 首屏延迟 1.5 秒再请求定位（权限框不要在冷启动瞬间弹）
+        if !refreshWeather {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+
+        // 主路径：定位 → 按坐标查天气（会带出城市名）
+        var w: APIClient.WeatherNow? = nil
+        if let coord = await OneShotLocation.shared.currentCoordinate(timeout: 5) {
+            w = try? await APIClient.weather(
+                lat: coord.latitude, lon: coord.longitude, force: refreshWeather)
+        }
+        // 定位被拒 / 超时 / 定位失败 / 按坐标查天气失败 → 回落南昌（保持旧行为，不变成不显示）
+        if w == nil {
+            w = try? await APIClient.weatherNanchang(force: refreshWeather)
+        }
+        if let w {
             await MainActor.run { weather = w }
         }
     }
@@ -426,6 +452,117 @@ struct HomeView: View {
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             await MainActor.run { withAnimation { tip = "" } }
+        }
+    }
+}
+
+// MARK: - 一次性定位（只为天气）
+
+/// 单次定位封装：`requestLocation()` 只取一次坐标就停，不做持续定位（省电）。
+///
+/// 几个必须这么写的点：
+/// - `CLLocationManager` 必须在主线程创建并**强引用**着，否则回调不触发 —— 所以用单例，
+///   不放在 View 的 `@State`（视图重建会重建 manager）；
+/// - 首次 `authorizationStatus == .notDetermined` 时先 `requestWhenInUseAuthorization()`，
+///   授权结果由 `locationManagerDidChangeAuthorization` 回来后**再** `requestLocation()`；
+/// - 5 秒超时兜底：用户不点弹窗 / 关掉定位服务时不会把 UI 卡住，直接返回 nil 交给调用方降级；
+/// - 坐标只保存在内存里（10 分钟），**不写 UserDefaults、不上传**，仅用于拼 wttr.in URL。
+private final class OneShotLocation: NSObject, CLLocationManagerDelegate {
+    static let shared = OneShotLocation()
+
+    private lazy var manager: CLLocationManager = {
+        let m = CLLocationManager()
+        m.delegate = self
+        m.desiredAccuracy = kCLLocationAccuracyKilometer   // 只看城市天气，公里级足够且省电
+        return m
+    }()
+
+    private var continuation: CheckedContinuation<CLLocationCoordinate2D?, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    /// 本次请求的定位超时（授权解决后按它计时）
+    private var activeTimeout: TimeInterval = 5
+    /// 内存级缓存（10 分钟）：避免切 tab 回来重复定位、重复弹权限
+    private var lastCoordinate: CLLocationCoordinate2D?
+    private var lastAt: Date?
+
+    /// 取一次当前坐标。授权被拒 / 5 秒超时 / 定位失败都返回 nil，不抛错。
+    func currentCoordinate(timeout seconds: TimeInterval = 5) async -> CLLocationCoordinate2D? {
+        if let c = lastCoordinate, let at = lastAt, Date().timeIntervalSince(at) < 600 {
+            return c
+        }
+        return await withCheckedContinuation { cont in
+            DispatchQueue.main.async {
+                // 已有请求在等：本次直接放弃（调用方会回落南昌），避免两次 requestLocation 抢回调
+                guard self.continuation == nil else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                self.continuation = cont
+                self.activeTimeout = seconds
+
+                switch self.manager.authorizationStatus {
+                case .notDetermined:
+                    // 等用户点系统权限弹窗：这里放宽到 20 秒（读弹窗要时间），
+                    // 授权一回来会重置成 5 秒的「定位」超时，见 delegate。
+                    self.startTimeout(max(seconds, 20))
+                    self.manager.requestWhenInUseAuthorization()
+                case .authorizedWhenInUse, .authorizedAlways:
+                    self.startTimeout(seconds)
+                    self.manager.requestLocation()
+                default:
+                    self.startTimeout(seconds)
+                    self.finish(nil)                               // 已拒绝 / 受家长控制等
+                }
+            }
+        }
+    }
+
+    // MARK: CLLocationManagerDelegate
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            guard continuation != nil else { return }
+            manager.requestLocation()
+            startTimeout(activeTimeout)  // 授权已解决，接下来只等定位本身（默认 5 秒）
+        case .notDetermined:
+            break                       // 首次设置 delegate 就会回调一次，等用户选择
+        default:
+            finish(nil)                 // denied / restricted：立刻降级到南昌
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        finish(locations.last?.coordinate)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        finish(nil)
+    }
+
+    // MARK: 内部
+
+    /// 统一收口：只 resume 一次 continuation，并清掉超时任务。
+    private func finish(_ coord: CLLocationCoordinate2D?) {
+        DispatchQueue.main.async {
+            self.timeoutTask?.cancel()
+            self.timeoutTask = nil
+            if let c = coord {
+                self.lastCoordinate = c
+                self.lastAt = Date()
+            }
+            guard let cont = self.continuation else { return }
+            self.continuation = nil
+            cont.resume(returning: coord)
+        }
+    }
+
+    private func startTimeout(_ seconds: TimeInterval) {
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if Task.isCancelled { return }
+            self?.finish(nil)
         }
     }
 }

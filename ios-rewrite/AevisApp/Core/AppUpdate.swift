@@ -24,7 +24,12 @@ final class AppUpdateCenter: ObservableObject {
     @Published var checking = false
 
     private var lastCheck: Date = .distantPast
-    private let checkInterval: TimeInterval = 6 * 3600   // 6 小时
+    /// 节流窗口（2026-11-24 从 6 小时改为 30 分钟）。
+    /// 原来 6 小时会让「强制更新」在用户 6 小时内查过的场景下**根本不查 → 不弹**，
+    /// 这正是「强更不弹」的根因。`/v1/app/update` 只是个 GET，30 分钟足够省，又不耽误强更。
+    /// 注意 `lastCheck` 是**内存态**（不持久化），每次冷启动都是 `.distantPast`，
+    /// 所以冷启动必然通过节流、每次都查。
+    private let checkInterval: TimeInterval = 30 * 60   // 30 分钟
 
     private init() {}
 
@@ -51,7 +56,7 @@ final class AppUpdateCenter: ObservableObject {
         return !dismissed
     }
 
-    /// 启动 / 回前台时调用。带 6 小时节流，避免频繁请求。
+    /// 启动 / 回前台时调用。带 30 分钟短节流，避免频繁请求；`force=true` 可无视节流（冷启动用）。
     func checkIfNeeded(force: Bool = false) async {
         if !force, Date().timeIntervalSince(lastCheck) < checkInterval { return }
         await check()

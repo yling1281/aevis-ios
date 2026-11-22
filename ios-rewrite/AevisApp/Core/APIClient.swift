@@ -569,36 +569,57 @@ struct APIClient {
         return PointsHome(points: pts, estMessages: max(0, est), avgMsgCost: avg)
     }
 
-    // MARK: - 天气（主页问候用，南昌）
+    // MARK: - 天气（主页问候用；默认按定位坐标，失败回落南昌）
 
     struct WeatherNow {
         let tempC: Int
         let descCN: String   // 中文描述；映射不到就保留英文原文
+        let place: String    // 城市名（wttr.in 的 nearest_area）；南昌兜底时为「南昌」，可能为空
     }
 
-    private static let weatherCacheKey = "aevis.weather.nanchang.v1"
-    private static let weatherCacheAtKey = "aevis.weather.nanchang.v1.at"
     /// 缓存有效期 10 分钟
     private static let weatherTTL: TimeInterval = 600
 
-    /// 南昌实时天气：直连 `https://wttr.in/Nanchang?format=j1`（HTTPS、免 key、免登录）。
-    /// - 10 分钟内直接用 UserDefaults 缓存，避免每次进主页都打一次外网；
-    /// - `force: true` 用于下拉刷新；
-    /// - 3 秒超时，失败直接抛错，由调用方决定「不显示」——**绝不返回假数据**。
-    /// ATS：wttr.in 是标准 HTTPS 证书，不需要动 Info.plist；不走 APIClient 的线路回落。
+    /// 按坐标查天气（主路径）。wttr.in 支持 `/{lat},{lon}?format=j1`。
+    /// - 坐标保留 3 位小数拼 URL（≈100m，足够选城市），缓存 key 只用 2 位（≈1km）：
+    ///   定位稍有漂移不会重复请求，真换城市 key 就变、旧缓存自动失效；
+    /// - 坐标**只**在本地拼 URL 和当缓存 key，不上传我们自己的服务端，也不落其它持久化字段。
+    static func weather(lat: Double, lon: Double, force: Bool = false) async throws -> WeatherNow {
+        let cacheKey = String(format: "%.2f,%.2f", lat, lon)
+        let query = String(format: "%.3f,%.3f", lat, lon)
+        return try await fetchWeather(query: query, cacheKey: cacheKey, placeFallback: "", force: force)
+    }
+
+    /// 南昌兜底：定位被拒 / 超时 / 定位失败 / 按坐标查天气失败时用，行为与旧版一致。
     static func weatherNanchang(force: Bool = false) async throws -> WeatherNow {
+        try await fetchWeather(query: "Nanchang", cacheKey: "nanchang", placeFallback: "南昌", force: force)
+    }
+
+    /// 天气请求主体：3 秒超时、10 分钟 UserDefaults 缓存、解析 temp_C / weatherDesc / nearest_area。
+    /// 失败直接抛错，由调用方决定「不显示」——**绝不返回假数据**。
+    /// ATS：wttr.in 是标准 HTTPS 证书，不需要动 Info.plist；不走 APIClient 的线路回落。
+    private static func fetchWeather(
+        query: String,
+        cacheKey: String,
+        placeFallback: String,
+        force: Bool
+    ) async throws -> WeatherNow {
         let d = UserDefaults.standard
+        let key = "aevis.weather.v2." + cacheKey
+        let atKey = key + ".at"
+
         if !force {
-            let at = d.double(forKey: weatherCacheAtKey)
+            let at = d.double(forKey: atKey)
             if at > 0, Date().timeIntervalSince1970 - at < weatherTTL,
-               let cached = d.dictionary(forKey: weatherCacheKey),
+               let cached = d.dictionary(forKey: key),
                let t = cached["temp"] as? Int,
                let desc = cached["desc"] as? String, !desc.isEmpty {
-                return WeatherNow(tempC: t, descCN: desc)
+                let place = (cached["place"] as? String) ?? placeFallback
+                return WeatherNow(tempC: t, descCN: desc, place: place)
             }
         }
 
-        guard let url = URL(string: "https://wttr.in/Nanchang?format=j1") else {
+        guard let url = URL(string: "https://wttr.in/\(query)?format=j1") else {
             throw APIError.decode("bad weather url")
         }
         var req = URLRequest(url: url)
@@ -619,10 +640,18 @@ struct APIClient {
         if temp == nil, let s = cur["temp_C"] as? String { temp = Int(s) }
         guard let temp else { throw APIError.decode("天气温度缺失") }
         let en = ((cur["weatherDesc"] as? [[String: Any]])?.first?["value"] as? String) ?? ""
-        let w = WeatherNow(tempC: temp, descCN: cnWeather(en))
 
-        d.set(["temp": w.tempC, "desc": w.descCN], forKey: weatherCacheKey)
-        d.set(Date().timeIntervalSince1970, forKey: weatherCacheAtKey)
+        // 城市名：nearest_area[0].areaName[0].value（按坐标查时就是用户所在城市）
+        let area = (json["nearest_area"] as? [[String: Any]])?.first
+        let areaName = ((area?["areaName"] as? [[String: Any]])?.first?["value"] as? String) ?? ""
+        let w = WeatherNow(
+            tempC: temp,
+            descCN: cnWeather(en),
+            place: areaName.isEmpty ? placeFallback : areaName
+        )
+
+        d.set(["temp": w.tempC, "desc": w.descCN, "place": w.place], forKey: key)
+        d.set(Date().timeIntervalSince1970, forKey: atKey)
         return w
     }
 
