@@ -472,7 +472,7 @@ struct ServerStatusView: View {
         .minimumScaleFactor(0.85)
     }
 
-    /// 单个模型卡（照参考图）：模型名 + 实时状态 + 百分比 / 平均响应（有才显示）/ 竖条序列。
+    /// 单个模型卡（照参考图）：模型名 / 右侧「实时状态胶囊 + 百分比」/ 平均响应（有才显示）/ 竖条序列。
     private func modelCard(_ m: ModelStatus) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -481,10 +481,11 @@ struct ServerStatusView: View {
                     .foregroundStyle(AE.textPrimary)
                     .lineLimit(1)
 
-                // 实时可用性（providers.alive），和右边的成功率是两件事
-                statusBadge(m.live)
+                Spacer(minLength: 8)
 
-                Spacer(minLength: 6)
+                // 实时可用性（providers.alive）在百分比左边：标签=此刻能不能用，
+                // 百分比=时间范围成功率，两个概念并排放。
+                statusBadge(m.live)
 
                 Text(m.hasData ? percentText(m.rate) : "—")
                     .font(.system(size: 17, weight: .bold, design: .rounded))
@@ -530,20 +531,29 @@ struct ServerStatusView: View {
                 }
             }
 
-            HStack(spacing: gap) {
-                if samples.isEmpty {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(AE.textSecondary.opacity(0.14))
-                        .frame(width: usable, height: 14)
-                } else {
-                    ForEach(Array(samples.enumerated()), id: \.offset) { pair in
+            ZStack(alignment: .leading) {
+                // 一条很淡的轴线：数据点还少（后端刚开始按分钟记，很多模型只有 1–2 格）时，
+                // 也不至于看起来像「卡片空了一行」，能看出这是条时间轴。
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(AE.textSecondary.opacity(0.10))
+                    .frame(width: usable, height: 2)
+
+                HStack(spacing: gap) {
+                    if samples.isEmpty {
                         RoundedRectangle(cornerRadius: 1.5)
-                            .fill(pair.element ? goodGreen : badRed)
-                            .frame(width: barW, height: 14)
+                            .fill(AE.textSecondary.opacity(0.14))
+                            .frame(width: usable, height: 14)
+                    } else {
+                        ForEach(Array(samples.enumerated()), id: \.offset) { pair in
+                            RoundedRectangle(cornerRadius: 1.5)
+                                .fill(pair.element ? goodGreen : badRed)
+                                .frame(width: barW, height: 14)
+                        }
                     }
                 }
+                .frame(width: usable, alignment: .leading)
             }
-            .frame(width: usable, alignment: .leading)
+            .frame(width: usable, height: 14, alignment: .leading)
         }
         .frame(height: 14)
     }
