@@ -512,24 +512,27 @@ struct ServerStatusView: View {
     /// 一根根细竖条：目标 3pt 宽、14pt 高、圆角 1.5，从左到右是时间顺序。
     /// 根数不写死（recent 有几个点画几根 / history 有几个非空桶画几根）；
     /// 根数少时把多余宽度摊进间距把整行铺满，根数多时自动变细以免溢出。
+    /// 算每根竖条的宽度与间距：根数少时把富余宽度摊进间距，根数多时自动变细，整行铺满不溢出。
+    /// ⚠️ 必须放在普通函数里：ViewBuilder 闭包内不允许 `var` 与赋值语句
+    /// （会报 `'buildExpression' is unavailable: this expression does not conform to 'View'`）。
+    private func barMetrics(count n: Int, usable: CGFloat) -> (w: CGFloat, gap: CGFloat) {
+        guard n > 0 else { return (3, 2) }
+        var barW: CGFloat = 3
+        var gap: CGFloat = 2
+        let needed = barW * CGFloat(n) + gap * CGFloat(n - 1)
+        if needed > usable {
+            gap = 1
+            barW = max(1, (usable - gap * CGFloat(n - 1)) / CGFloat(n))
+        } else {
+            gap = min(8, (usable - barW * CGFloat(n)) / CGFloat(max(n - 1, 1)))
+        }
+        return (barW, gap)
+    }
+
     private func seriesBars(_ samples: [Bool]) -> some View {
         GeometryReader { geo in
-            let n = samples.count
             let usable = max(geo.size.width, 1)
-            var barW: CGFloat = 3
-            var gap: CGFloat = 2
-
-            if n > 0 {
-                let needed = barW * CGFloat(n) + gap * CGFloat(n - 1)
-                if needed > usable {
-                    // 挤不下：间距压到 1pt，宽度按可用宽度均分（下限 1pt）
-                    gap = 1
-                    barW = max(1, (usable - gap * CGFloat(n - 1)) / CGFloat(n))
-                } else {
-                    // 有富余：宽度保持 3pt，把多余宽度摊进间距（上限 8pt）铺满整行
-                    gap = min(8, (usable - barW * CGFloat(n)) / CGFloat(max(n - 1, 1)))
-                }
-            }
+            let m = barMetrics(count: samples.count, usable: usable)
 
             ZStack(alignment: .leading) {
                 // 一条很淡的轴线：数据点还少（后端刚开始按分钟记，很多模型只有 1–2 格）时，
@@ -538,7 +541,7 @@ struct ServerStatusView: View {
                     .fill(AE.textSecondary.opacity(0.10))
                     .frame(width: usable, height: 2)
 
-                HStack(spacing: gap) {
+                HStack(spacing: m.gap) {
                     if samples.isEmpty {
                         RoundedRectangle(cornerRadius: 1.5)
                             .fill(AE.textSecondary.opacity(0.14))
@@ -547,7 +550,7 @@ struct ServerStatusView: View {
                         ForEach(Array(samples.enumerated()), id: \.offset) { pair in
                             RoundedRectangle(cornerRadius: 1.5)
                                 .fill(pair.element ? goodGreen : badRed)
-                                .frame(width: barW, height: 14)
+                                .frame(width: m.w, height: 14)
                         }
                     }
                 }
