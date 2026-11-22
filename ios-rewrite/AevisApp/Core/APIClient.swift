@@ -514,6 +514,61 @@ struct APIClient {
         return (d["points"] as? NSNumber)?.intValue ?? (json["points"] as? NSNumber)?.intValue ?? 0
     }
 
+    // MARK: - 主页用量（真实数据，2026-11-24）
+
+    /// 本周额度状态。服务端 `GET /v1/quota/state`（Bearer）：
+    /// `data = { ok, quota: { active, percent, left_pct, has_quota } }`。
+    /// 产品要求**只展示百分比、不给具体点数**，所以这里也只有百分比。
+    /// 拉取失败 / 未登录时调用方显示「—」，绝不回落到任何写死的数字。
+    struct QuotaState {
+        let active: Bool        // 是否会员（免费用户也有周额度，口径一致）
+        let percent: Int        // 本周已用百分比 0–100
+        let leftPct: Int        // 本周剩余百分比 0–100
+        let hasQuota: Bool      // 还有没有可用额度
+    }
+
+    static func quotaState(token: String?) async throws -> QuotaState {
+        let json = try await request("/v1/quota/state", token: token)
+        // 外层信封 {"code":200,"data":{...}} 已被 request 摊平到顶层，两种结构都兜一下
+        let d = (json["data"] as? [String: Any]) ?? json
+        let q = (d["quota"] as? [String: Any]) ?? (json["quota"] as? [String: Any]) ?? d
+        return QuotaState(
+            active: (q["active"] as? Bool) ?? false,
+            percent: (q["percent"] as? NSNumber)?.intValue ?? 0,
+            leftPct: (q["left_pct"] as? NSNumber)?.intValue ?? 0,
+            hasQuota: (q["has_quota"] as? Bool) ?? false
+        )
+    }
+
+    /// 主页墨点余额 + 「还能聊多少条」。服务端 `GET /v1/points`（Bearer）：
+    /// `data = { points, yuan, rate, items }`，后端正在追加
+    /// `avg_msg_cost`（每条消息平均消耗墨点）与 `est_messages`（预计还能聊多少条）。
+    /// 新字段没上线时按产品口径用 `points / 100` 兜底（**不是旧版的 /35**）。
+    struct PointsHome {
+        let points: Int
+        let estMessages: Int
+        let avgMsgCost: Double  // 0 = 服务端还没给这个字段
+    }
+
+    static func pointsHome(token: String?) async throws -> PointsHome {
+        let json = try await request("/v1/points", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        let pts = (d["points"] as? NSNumber)?.intValue
+            ?? (json["points"] as? NSNumber)?.intValue ?? 0
+        let avg = (d["avg_msg_cost"] as? NSNumber)?.doubleValue ?? 0
+
+        // 优先用服务端算好的 est_messages；没有就 points/avg；再没有就 points/100 兜底
+        let est: Int
+        if let e = (d["est_messages"] as? NSNumber)?.intValue, e > 0 {
+            est = e
+        } else if avg > 0 {
+            est = Int(Double(pts) / avg)
+        } else {
+            est = pts / 100
+        }
+        return PointsHome(points: pts, estMessages: max(0, est), avgMsgCost: avg)
+    }
+
     /// 会员套餐。字段对齐 /v1/shop/products 的 items[]（注意 price_cents 带下划线）。
     /// id 是字符串主键（aevis_shop.py：p_x / p_xl / p_xxl / p_xllll），**不是数字** ——
     /// 旧版声明成 Int 会让 `as? NSNumber` 全部解析失败、会员列表恒空、下单 product_id 传错。

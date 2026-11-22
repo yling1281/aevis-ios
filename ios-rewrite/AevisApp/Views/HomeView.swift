@@ -1,20 +1,24 @@
 import SwiftUI
 
 /// 主页：用量额度卡 + 服务入口（只放真正能跳的：商城 / 会员，都进 ShopView）。
+/// 用量卡是真实数据：本周额度百分比来自 `GET /v1/quota/state`，
+/// 墨点余额 / 还能聊多少条来自 `GET /v1/points`；未登录或请求失败一律显示「—」，不写死数字。
 /// 整体可滚动（主页允许滚，登录页才禁止）；底部留 TabBar 高度 padding。
 /// 卡片全部磨砂（复用 GlassComponents），入口用彩色圆角图标底（按用户截图）。
 /// 没做的功能不加按钮 —— 用户明确要求「目前没有的功能先不加按钮」。
 struct HomeView: View {
+    @EnvironmentObject private var session: Session
+
     /// 商城入口回调：由 MainTabView 注入以全屏拉起 ShopView；单独预览时为 nil 用内部占位。
     var onShop: (() -> Void)? = nil
     @State private var showShop = false        // 仅在 onShop == nil 时用的占位
     @State private var tip = ""
     @State private var serviceExpanded = true
 
-    /// 示例用量（第 1 轮先用展示值；后续接 balance/wallet API）。
-    /// usedPercent 用 @State 从 0 起、onAppear 置目标值，触发 AnimatedNumber 的开屏滚动。
-    @State private var usedPercent = 0
-    private let points = 4600
+    /// 真实用量（2026-11-24）：本周额度百分比 + 墨点余额 / 可聊条数。
+    /// 取不到就是 nil，卡片显示「—」—— **不写死 92%、不按 /35 估算**。
+    @State private var quota: APIClient.QuotaState? = nil
+    @State private var points: APIClient.PointsHome? = nil
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -32,11 +36,10 @@ struct HomeView: View {
         }
         .background(AppBackground())
         .onAppear {
-            // 开屏让百分比从 0 滚到目标值（数字动效）
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.15)) {
-                usedPercent = 92
-            }
+            // 进页面 / 从聊天详情返回 / 切回本 tab 都重新拉一次（不做轮询）
+            Task { await loadUsage() }
         }
+        .refreshable { await loadUsage() }
         .sheet(isPresented: $showShop) {
             // 第 2 轮接 ShopView；这轮先明确提示，不假装能进
             VStack(spacing: 14) {
@@ -70,7 +73,7 @@ struct HomeView: View {
     private var usageCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("用量额度")
+                Text("本周额度")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(AE.textSecondary)
                 Spacer()
@@ -84,46 +87,94 @@ struct HomeView: View {
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        AnimatedNumber(
-                            value: usedPercent,
-                            font: .system(size: 34, weight: .bold, design: .rounded),
-                            color: AE.textPrimary, suffix: "%"
-                        )
+                        if let quota {
+                            AnimatedNumber(
+                                value: quota.percent,
+                                font: .system(size: 34, weight: .bold, design: .rounded),
+                                color: AE.textPrimary, suffix: "%"
+                            )
+                        } else {
+                            // 没数据就是「—」，不回落到 92%
+                            Text("—")
+                                .font(.system(size: 34, weight: .bold, design: .rounded))
+                                .foregroundStyle(AE.textPrimary)
+                        }
                         Text("已用")
                             .font(.system(size: 12))
                             .foregroundStyle(AE.textSecondary)
                     }
-                    Text("墨点 \(points) · 约 \(points / 35) 次对话")
+                    Text(balanceLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(AE.textSecondary)
                 }
                 Spacer(minLength: 0)
             }
 
-            // 进度条 + 狗头贴末端
+            // 进度条 + 狗头贴末端（没拿到数据就只画空槽，不画假进度）
             ZStack(alignment: .leading) {
                 Capsule().fill(AE.textPrimary.opacity(0.08)).frame(height: 8)
                 GeometryReader { geo in
+                    let pct = CGFloat(quota?.percent ?? 0)
                     Capsule()
                         .fill(LinearGradient(
                             colors: [Color.hex(0xFFD66B), AE.brandPurple],
                             startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(8, geo.size.width * CGFloat(usedPercent) / 100), height: 8)
+                        .frame(width: geo.size.width * min(max(pct, 0), 100) / 100, height: 8)
                         .overlay(alignment: .trailing) {
-                            AevisMascot(size: 26)
-                                .offset(x: 13, y: -11)
-                                .shadow(color: AE.shadowColor, radius: 4, y: 2)
+                            if quota != nil {
+                                AevisMascot(size: 26)
+                                    .offset(x: 13, y: -11)
+                                    .shadow(color: AE.shadowColor, radius: 4, y: 2)
+                            }
                         }
                 }
                 .frame(height: 8)
             }
 
-            Text("您大约还有 \(100 - usedPercent)% 消息额度 · 12月01日 重置")
+            Text(quotaLine)
                 .font(.system(size: 11.5))
                 .foregroundStyle(AE.textSecondary)
         }
         .padding(16)
         .glassCard(cornerRadius: AE.cardRadius, material: .regular)
+    }
+
+    /// 墨点余额 + 还能聊多少条：拿不到就「—」，不显示 0、不用 /35 估算
+    private var balanceLine: String {
+        guard let points else { return "墨点 — · 约还能聊 — 条" }
+        return "墨点 \(points.points.formatted()) · 约还能聊 \(points.estMessages.formatted()) 条"
+    }
+
+    private var quotaLine: String {
+        if let quota {
+            return quota.hasQuota
+                ? "本周还剩 \(quota.leftPct)% 额度 · 用完后可在「商城」补充"
+                : "本周额度已用完，可到「商城」补充"
+        }
+        if session.token == nil { return "登录后可查看本周额度" }
+        return "额度暂时取不到，下拉可重试"
+    }
+
+    // MARK: - 真实用量数据
+
+    /// 拉本周额度（只给百分比）+ 墨点余额 / 可聊条数。
+    /// 未登录或任一请求失败 → 对应项置 nil，卡片显示「—」；绝不回落到写死的数字。
+    private func loadUsage() async {
+        guard let token = session.token, !token.isEmpty else {
+            await MainActor.run {
+                quota = nil
+                points = nil
+            }
+            return
+        }
+        let q = try? await APIClient.quotaState(token: token)
+        let p = try? await APIClient.pointsHome(token: token)
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.25)) {
+                quota = q
+                points = p
+            }
+        }
     }
 
     private func capsule(_ text: String) -> some View {

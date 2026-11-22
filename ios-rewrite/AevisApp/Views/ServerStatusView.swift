@@ -11,7 +11,15 @@ import Foundation
 ///    「自动选择」= 按 `APIClient.lines` 的回落顺序自动切，标记存 `apiAutoLine`。
 /// 2. 模型：`GET /v1/models/status`（服务端 `srv_edit/aevis_providers.py` 里就是给官网
 ///    「模型状态」用的公开接口，不返回任何 key）。按 DeepSeek / 双子星(gemini) / Claude
-///    三组展示，每组最多 6 行（优先有探测数据的），不把 162 个模型全铺满。
+///    三组展示，每组最多 6 张卡（优先有探测数据的），不把 162 个模型全铺满。
+///    每个模型一张磨砂卡：模型名 + 实时状态标签 + 成功率 / 「平均响应」（后端给了才显示）/
+///    一排细竖条（一根 = 一个时间点，绿=正常 红=异常）。
+///
+/// **实时状态与成功率分开看**（用户反馈过「模型挂了还显示正常」）：
+/// - 状态标签（正常/波动/异常/未监控）来自 `rows[].providers[].alive`，监控每 60 秒探一次；
+/// - 百分比与竖条优先用 `recent`（近 30 分钟逐点 1/0），没有 `recent` 才回落 `history`
+///   （30 分钟一桶，近 24 小时）；两种范围会在标题右上角如实写出；
+/// - 顶部「数据更新于…」用非空探测桶的 `t + bucket_sec` 判断，不用接口的 `at`（那是请求时刻）。
 ///
 /// 本文件自己发请求（不改 APIClient，别的地方在用），复用 `APIClient.session`
 /// （直连这条带自签证书 pinning，自己新建 URLSession 会 SSL 失败）。
@@ -31,32 +39,58 @@ struct ServerStatusView: View {
     @State private var groups: [ModelGroup] = []
     @State private var modelsLoading = true
     @State private var modelsFailed = false
-    @State private var modelsLoadedAt = ""
+    /// 探测数据覆盖到的最后时刻（epoch 秒）= 所有非空 history 桶里 `t + bucket_sec` 的最大值。
+    ///
+    /// 为什么不用接口的 `data.at`：实测生产接口里 `at` 是**服务端处理请求的时刻**（`_now()`），
+    /// 永远是「刚刚」，拿它算滞后永远不会变橙（超 10 分钟那条分支等于死代码），反而会告诉用户
+    /// 「数据是新的」。history 的 `t` 是真实探测桶的起始时间（epoch，跨时区安全），
+    /// 非空桶的 `t + bucket_sec` 才是「数据实际覆盖到哪一刻」，监控停了它就不动了。
+    @State private var probeCoverageEnd: Int?
 
     // MARK: - 数据模型
 
     private struct ModelStatus: Identifiable {
         let id: String          // model 名
-        let rate: Double        // 0...1（history 汇总）
-        let total: Int          // history 里总请求数
+        let live: LiveStatus    // 实时状态（来自 providers[].alive，最近一次探测）
+        let rate: Double        // 0...1，时间范围内的成功率
+        let samples: [Bool]     // 竖条：true = 正常（绿），false = 异常（红），按时间从左到右
+        let rangeLabel: String  // 这批 samples 的时间范围："近 30 分钟" / "近 24 小时"
+        let avgLatency: Double? // 平均响应秒数；服务端没给就是 nil，界面上不显示这一行
+        let total: Int          // 时间范围内的总请求数（用于排序）
         let probes: Int         // 服务端探测次数
-        let hasData: Bool       // false = 24 小时内没有任何探测记录
-        let bars: [Bar]         // 每个 history 桶（30 分钟一格，共 48 格 = 24 小时）
+        let hasData: Bool       // false = 没有任何时间序列数据
     }
 
-    /// 一个统计桶。`empty`（total == 0）是没有探测记录，不是"挂了"，
-    /// 所以画浅灰底，不按 0% 涂红 —— 服务端这类空桶的 rate 也是 0，直接用会全部变红。
-    private struct Bar: Identifiable {
-        let id: Int
-        let rate: Double
-        let empty: Bool
+    /// 实时状态。**不用 history 推**：history 是 30 分钟聚合，模型刚挂时那一桶还是绿的，
+    /// 最多滞后半小时（用户就是这么发现「挂了还显示正常」的）。
+    /// 这里取 `rows[].providers[].alive`，那个是监控进程每 60 秒探一次的最新结论。
+    private enum LiveStatus: Equatable {
+        case ok          // 至少一条 alive，且没有失败计数
+        case unstable    // 至少一条 alive，但最近失败过（正在恢复）
+        case down        // 一条 alive 都没有（全挂了）
+        case unknown     // providers 为空：没有可判断的数据，不能当正常
+
+        var text: String {
+            switch self {
+            case .ok:       return "正常"
+            case .unstable: return "波动"
+            case .down:     return "异常"
+            case .unknown:  return "未监控"
+            }
+        }
     }
 
-    /// 一组模型（DeepSeek / 双子星 / Claude）。`matched` = 该关键词命中的模型总数。
+    /// 一组模型（DeepSeek / 双子星 / Claude）。
+    /// `matched` = 该关键词命中的模型总数；四个 count 是**整组**的实时状态汇总
+    /// （不是只统计列出来的几行），这样没调用数据的模型也不会被藏起来。
     private struct ModelGroup: Identifiable {
         let id: String
         let title: String
         let matched: Int
+        let okCount: Int
+        let unstableCount: Int
+        let downCount: Int
+        let unknownCount: Int
         let models: [ModelStatus]
     }
 
@@ -76,11 +110,15 @@ struct ServerStatusView: View {
     private let limeGreen = Color.adaptive(dark: Color.hex(0xB7D06A), light: Color.hex(0x6B8F1B))
     private let warnOrange = Color.adaptive(dark: Color.hex(0xF0B36B), light: Color.hex(0xB26A00))
     private let badRed = Color.adaptive(dark: Color.hex(0xF08A84), light: Color.hex(0xC0392B))
+    /// 模型百分比 < 95% 时的橙色（参考图指定 #E2932F）
+    private let percentWarn = Color.hex(0xE2932F)
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
                 currentCard
+
+                freshnessRow
 
                 groupCard(title: "服务器") {
                     autoRow
@@ -90,11 +128,9 @@ struct ServerStatusView: View {
                     }
                 }
 
-                groupCard(title: "模型", trailing: "近 24 小时 · 30 分钟/格") {
-                    modelsSection
-                }
+                modelsBlock
 
-                hint("延迟来自本机实时探测，超过 3 秒记为不通。模型可用率取 history 里 ok/total 汇总（服务端给 48 格，每格 30 分钟；浅灰格 = 该时段没有探测记录）。")
+                hint("模型左侧标签（正常 / 波动 / 异常 / 未监控）按服务端最近一次探测的 providers 判定，是「此刻还能不能用」；右侧百分比与竖条是时间范围内的成功率（有 recent 用近 30 分钟，否则回落 history 的近 24 小时），两者不是一回事。延迟超过 3 秒记为不通。")
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
@@ -157,6 +193,80 @@ struct ServerStatusView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.20)
         .shadow(color: AE.shadowColor, radius: 8, y: 3)
+    }
+
+    // MARK: - 数据时间（页面顶部）
+
+    /// 模型状态的数据时间：用「探测桶覆盖到的最后时刻」（history 里非空桶的 `t + bucket_sec`），
+    /// 不是接口的 `data.at`（那个是请求时刻，永远显示「刚刚」）。
+    /// 超过 10 分钟标橙，提示监控可能停了；完全没有探测数据时明确写「暂无探测数据」。
+    @ViewBuilder
+    private var freshnessRow: some View {
+        if modelsLoading {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("正在获取模型数据…")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AE.textSecondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+        } else if modelsFailed {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(warnOrange)
+                Text("模型数据获取失败，下方标签可能不是最新")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AE.textSecondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+        } else if hasFreshnessInfo {
+            let minutes = freshMinutes
+            let stale = (minutes ?? 0) > 10
+            HStack(spacing: 6) {
+                Image(systemName: stale ? "clock.badge.exclamationmark" : "clock")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(stale ? warnOrange : AE.textSecondary)
+                Text(freshnessText(minutes, stale: stale))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(stale ? warnOrange : AE.textSecondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+        } else {
+            EmptyView()
+        }
+    }
+
+    /// 距数据覆盖时刻的分钟数；没有探测数据时返回 nil
+    private var freshMinutes: Int? {
+        guard let end = probeCoverageEnd else { return nil }
+        return max(0, Int(Date().timeIntervalSince1970) - end) / 60
+    }
+
+    /// 有没有可展示的数据时间（= 至少有一个非空探测桶）
+    private var hasFreshnessInfo: Bool {
+        probeCoverageEnd != nil
+    }
+
+    private func freshnessText(_ minutes: Int?, stale: Bool) -> String {
+        guard let m = minutes else {
+            // 全表 24 小时内没有任何探测记录：别拿接口的 at 充数，直接说没有数据
+            return "暂无探测数据（监控可能未运行）"
+        }
+        let base: String
+        if m <= 0 {
+            base = "数据刚刚更新"
+        } else if m < 60 {
+            base = "数据更新于 \(m) 分钟前"
+        } else if m < 60 * 24 {
+            base = "数据更新于 \(m / 60) 小时前"
+        } else {
+            base = "数据更新于 \(m / 60 / 24) 天前"
+        }
+        return stale ? base + " · 可能已滞后" : base
     }
 
     // MARK: - 服务器分组
@@ -236,17 +346,38 @@ struct ServerStatusView: View {
 
     // MARK: - 模型分组
 
+    /// 模型区：标题行（左「模型」右时间范围）+ 三组卡片。
+    /// 每个模型是**独立磨砂卡**（20 圆角 / 16 内边距 / 10 间距，照参考图），
+    /// 所以这一块不再套 `groupCard`，避免卡片套卡片。
+    private var modelsBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("模型")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(AE.textSecondary)
+                Spacer()
+                if !groups.isEmpty {
+                    Text(seriesRangeLabel)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AE.textSecondary)
+                }
+            }
+            .padding(.horizontal, 4)
+
+            modelsSection
+        }
+    }
+
     @ViewBuilder
     private var modelsSection: some View {
         if modelsLoading {
-            HStack(spacing: 10) {
+            // 顶部 freshnessRow 已经有「正在获取模型数据…」文案，这里只留一个居中转圈
+            HStack {
+                Spacer()
                 ProgressView().controlSize(.small)
-                Text("正在获取模型状态…")
-                    .font(.system(size: 13))
-                    .foregroundStyle(AE.textSecondary)
-                Spacer(minLength: 0)
+                Spacer()
             }
-            .frame(height: 60)
+            .frame(height: 44)
         } else if modelsFailed {
             VStack(alignment: .leading, spacing: 10) {
                 Text("状态获取失败")
@@ -265,30 +396,26 @@ struct ServerStatusView: View {
                 .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.18)
         } else if groups.isEmpty {
             Text("暂无模型数据")
                 .font(.system(size: 13))
                 .foregroundStyle(AE.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: 48)
+                .padding(.horizontal, 4)
         } else {
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(Array(groups.enumerated()), id: \.element.id) { pair in
-                    if pair.offset > 0 { divider }
-                    modelGroupBlock(pair.element)
-                }
-                if !modelsLoadedAt.isEmpty {
-                    Text("更新于 \(shortStamp(modelsLoadedAt))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(AE.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(groups) { g in
+                    modelGroupBlock(g)
                 }
             }
         }
     }
 
-    /// 一组（DeepSeek / 双子星 / Claude）：组名 + 命中数量，下面最多 6 行模型。
-    /// 该组一个可用数据都没有时写「暂无监控数据」，不硬凑 0%。
+    /// 一组（DeepSeek / 双子星 / Claude）：组名 + 命中数 + 整组实时状态汇总，
+    /// 下面最多 6 张模型卡。
     private func modelGroupBlock(_ g: ModelGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -298,66 +425,158 @@ struct ServerStatusView: View {
                 Text("\(g.matched) 个")
                     .font(.system(size: 11))
                     .foregroundStyle(AE.textSecondary)
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
+                countsRow(g)
             }
+            .padding(.horizontal, 4)
 
             if g.models.isEmpty {
-                Text("暂无监控数据")
+                Text("暂无调用记录（实时状态见组头汇总）")
                     .font(.system(size: 12.5))
                     .foregroundStyle(AE.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
                     .padding(.vertical, 2)
             } else {
-                VStack(spacing: 11) {
+                VStack(spacing: 10) {
                     ForEach(g.models) { m in
-                        modelRow(m)
+                        modelCard(m)
                     }
                 }
             }
         }
     }
 
-    private func modelRow(_ m: ModelStatus) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+    /// 「正常 3 · 波动 19 · 异常 15」——只显示非零项，颜色与标签一致。
+    /// 用 HStack 而不是 Text 拼接，避免 `.foregroundColor` 在 iOS 17 上的弃用告警。
+    private func countsRow(_ g: ModelGroup) -> some View {
+        var items: [(String, Color)] = []
+        if g.okCount > 0 { items.append(("正常 \(g.okCount)", goodGreen)) }
+        if g.unstableCount > 0 { items.append(("波动 \(g.unstableCount)", warnOrange)) }
+        if g.downCount > 0 { items.append(("异常 \(g.downCount)", badRed)) }
+        if g.unknownCount > 0 { items.append(("未监控 \(g.unknownCount)", AE.textSecondary)) }
+
+        return HStack(spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { pair in
+                if pair.offset > 0 {
+                    Text("·")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(AE.textSecondary)
+                }
+                Text(pair.element.0)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(pair.element.1)
+                    .lineLimit(1)
+            }
+        }
+        .minimumScaleFactor(0.85)
+    }
+
+    /// 单个模型卡（照参考图）：模型名 + 实时状态 + 百分比 / 平均响应（有才显示）/ 竖条序列。
+    private func modelCard(_ m: ModelStatus) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Text(displayName(m.id))
-                    .font(.system(size: 13.5, weight: .medium))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AE.textPrimary)
                     .lineLimit(1)
+
+                // 实时可用性（providers.alive），和右边的成功率是两件事
+                statusBadge(m.live)
 
                 Spacer(minLength: 6)
 
                 Text(m.hasData ? percentText(m.rate) : "—")
-                    .font(.system(size: 13.5, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(m.hasData ? barColor(m.rate) : AE.textSecondary)
+                    .foregroundStyle(m.hasData ? percentColor(m.rate) : AE.textSecondary)
+                    .layoutPriority(1)
             }
 
-            barStrip(m.bars, height: 14)
+            // 只有服务端给了 avg_latency_sec 才显示，没给就不占位、不编数字
+            if let avg = m.avgLatency {
+                Text("平均响应 \(latencySecondsText(avg))")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(AE.textSecondary)
+            }
+
+            seriesBars(m.samples)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.20)
+        .shadow(color: AE.shadowColor, radius: 8, y: 3)
     }
 
-    /// 绿/橙/红小方块条：每块 = 一个 30 分钟桶。
-    private func barStrip(_ bars: [Bar], height: CGFloat = 18) -> some View {
+    /// 一根根细竖条：目标 3pt 宽、14pt 高、圆角 1.5，从左到右是时间顺序。
+    /// 根数不写死（recent 有几个点画几根 / history 有几个非空桶画几根）；
+    /// 根数少时把多余宽度摊进间距把整行铺满，根数多时自动变细以免溢出。
+    private func seriesBars(_ samples: [Bool]) -> some View {
         GeometryReader { geo in
-            let n = max(bars.count, 1)
-            let gap: CGFloat = 1.5
-            let w = max(1.5, (geo.size.width - gap * CGFloat(n - 1)) / CGFloat(n))
-            HStack(spacing: gap) {
-                if bars.isEmpty {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(AE.textSecondary.opacity(0.16))
-                        .frame(width: geo.size.width, height: height)
+            let n = samples.count
+            let usable = max(geo.size.width, 1)
+            var barW: CGFloat = 3
+            var gap: CGFloat = 2
+
+            if n > 0 {
+                let needed = barW * CGFloat(n) + gap * CGFloat(n - 1)
+                if needed > usable {
+                    // 挤不下：间距压到 1pt，宽度按可用宽度均分（下限 1pt）
+                    gap = 1
+                    barW = max(1, (usable - gap * CGFloat(n - 1)) / CGFloat(n))
                 } else {
-                    ForEach(bars) { bar in
+                    // 有富余：宽度保持 3pt，把多余宽度摊进间距（上限 8pt）铺满整行
+                    gap = min(8, (usable - barW * CGFloat(n)) / CGFloat(max(n - 1, 1)))
+                }
+            }
+
+            HStack(spacing: gap) {
+                if samples.isEmpty {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(AE.textSecondary.opacity(0.14))
+                        .frame(width: usable, height: 14)
+                } else {
+                    ForEach(Array(samples.enumerated()), id: \.offset) { pair in
                         RoundedRectangle(cornerRadius: 1.5)
-                            .fill(bar.empty ? AE.textSecondary.opacity(0.16) : barColor(bar.rate))
-                            .frame(width: w, height: height)
+                            .fill(pair.element ? goodGreen : badRed)
+                            .frame(width: barW, height: 14)
                     }
                 }
             }
+            .frame(width: usable, alignment: .leading)
         }
-        .frame(height: height)
+        .frame(height: 14)
+    }
+
+    /// 实时状态小胶囊。颜色与延迟四档同一套语义色。
+    private func statusBadge(_ s: LiveStatus) -> some View {
+        let tint = statusColor(s)
+        return Text(s.text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.14), in: Capsule())
+            .fixedSize()
+    }
+
+    private func statusColor(_ s: LiveStatus) -> Color {
+        switch s {
+        case .ok:       return goodGreen
+        case .unstable: return warnOrange
+        case .down:     return badRed
+        case .unknown:  return AE.textSecondary
+        }
+    }
+
+    /// 百分比配色：≥95% 用主文字色（墨色），低于 95% 用橙色
+    private func percentColor(_ rate: Double) -> Color {
+        rate >= 0.95 ? AE.textPrimary : percentWarn
+    }
+
+    /// 平均响应：一位小数 + 秒
+    private func latencySecondsText(_ sec: Double) -> String {
+        String(format: "%.1f 秒", sec)
     }
 
     // MARK: - 通用小组件
@@ -453,22 +672,26 @@ struct ServerStatusView: View {
         return badRed
     }
 
+    /// 卡片右上角的大号百分比：整数即可（参考图就是 100% / 98% 这种）
     private func percentText(_ rate: Double) -> String {
-        String(format: "%.1f%%", rate * 100)
+        String(format: "%.0f%%", rate * 100)
     }
 
-    /// 服务端 `at` 是 "2026-11-22 20:24:00"，只取 "11-22 20:24" 显示
-    private func shortStamp(_ raw: String) -> String {
-        guard raw.count >= 16 else { return raw }
-        let start = raw.index(raw.startIndex, offsetBy: 5)
-        let end = raw.index(raw.startIndex, offsetBy: 16)
-        return String(raw[start..<end])
+    /// 顶部右侧的时间范围：按实际数据源写（有 recent 用「近 30 分钟」，否则「近 24 小时」）。
+    /// 混着出现时两个都写，不统一成一个，避免骗人。
+    private var seriesRangeLabel: String {
+        let labels = Set(groups.flatMap { $0.models }.map { $0.rangeLabel })
+        if labels.isEmpty { return "近 24 小时" }
+        if labels.count == 1 { return labels.first ?? "近 24 小时" }
+        return "近 30 分钟 / 近 24 小时"
     }
 
-    private func barColor(_ rate: Double) -> Color {
-        if rate >= 0.99 { return goodGreen }
-        if rate >= 0.9 { return warnOrange }
-        return badRed
+    /// 我们实际在用的三个模型（probes 常为 0，但必须列出来）
+    private static func isCoreModel(_ id: String) -> Bool {
+        switch id.lowercased() {
+        case "deepseek-flash", "deepseek-chat", "deepseek-reasoner": return true
+        default: return false
+        }
     }
 
     /// deepseek-flash → DeepSeek Flash（只做展示，id 仍用于匹配）
@@ -539,12 +762,13 @@ struct ServerStatusView: View {
         do {
             let json = try await fetchModelStatus()
             let parsed = parseModels(json)
-            // `at` 在 data 里（信封结构），顶层没有
             let data = (json["data"] as? [String: Any]) ?? json
-            let stamp = (data["at"] as? String) ?? ""
+            // 真实数据覆盖时刻：所有非空 history 桶的 t + bucket_sec 取最大
+            // （接口的 data.at 是请求时刻，永远是「刚刚」，不能用来判断滞后）
+            let coverage = latestProbeCoverageEnd(data)
             await MainActor.run {
                 groups = parsed
-                modelsLoadedAt = stamp
+                probeCoverageEnd = coverage
                 modelsLoading = false
             }
         } catch {
@@ -584,11 +808,37 @@ struct ServerStatusView: View {
         return root
     }
 
+    /// 探测数据覆盖到的最后时刻（epoch 秒）：所有「非空」history 桶的 `t + bucket_sec` 取最大。
+    ///
+    /// `t` 是桶起始时间（epoch，服务端 `probe_history` 生成），跨时区无歧义；
+    /// 空桶（total == 0）不算，否则没探测过的时段也会被当成「有数据」。
+    /// 全部为空时返回 nil，界面显示「暂无探测数据」。
+    private func latestProbeCoverageEnd(_ data: [String: Any]) -> Int? {
+        let bucket = (data["bucket_sec"] as? NSNumber)?.intValue ?? 1800
+        let rows = (data["rows"] as? [[String: Any]]) ?? []
+        var newest: Int?
+        for row in rows {
+            for h in (row["history"] as? [[String: Any]]) ?? [] {
+                let total = (h["total"] as? NSNumber)?.intValue ?? 0
+                guard total > 0 else { continue }
+                let t = (h["t"] as? NSNumber)?.intValue ?? 0
+                guard t > 0 else { continue }
+                let end = t + bucket
+                if newest == nil || end > newest! { newest = end }
+            }
+        }
+        return newest
+    }
+
     // MARK: - 解析
 
     /// 把 162 个 model 行按 DeepSeek / 双子星 / Claude 分组。
-    /// 每组最多 6 行，优先「真有探测数据」的（probes > 0 且 history 有量），再按调用量排序；
-    /// 没数据的模型不列出来（否则一堆 0% 红条会误导），整组都没数据时就显示「暂无监控数据」。
+    ///
+    /// 行列表（每组最多 6 行）只放「有调用数据」+「我们实际在用的 deepseek 三个」：
+    /// 没有 history 的模型，各种排序都只能按名字挑，容易挑出一堆恰好全挂的名字，
+    /// 看起来像整组都坏了（实测 Gemini/Claude 组就会这样）。
+    /// 所以这类模型的实时状态改用**组头汇总**呈现（正常 X · 波动 Y · 异常 Z），
+    /// 统计的是整组，不遗漏。
     private func parseModels(_ root: [String: Any]) -> [ModelGroup] {
         let data = (root["data"] as? [String: Any]) ?? root
         let rows = (data["rows"] as? [[String: Any]]) ?? []
@@ -606,49 +856,132 @@ struct ServerStatusView: View {
         }
 
         return groupSpecs.map { spec in
-            var list = parsed.filter { $0.id.lowercased().contains(spec.key) && $0.hasData }
-            // 探测次数多的排前面，其次按总调用量
+            let candidates = parsed.filter { $0.id.lowercased().contains(spec.key) }
+
+            // 整组实时状态汇总
+            var ok = 0, unstable = 0, down = 0, unknown = 0
+            for m in candidates {
+                switch m.live {
+                case .ok:       ok += 1
+                case .unstable: unstable += 1
+                case .down:     down += 1
+                case .unknown:  unknown += 1
+                }
+            }
+
+            var list = candidates.filter { $0.hasData || Self.isCoreModel($0.id) }
             list.sort { a, b in
                 if a.probes != b.probes { return a.probes > b.probes }
-                return a.total > b.total
+                // 探测数都为 0 时，先列我们实际在用的三个
+                let pa = Self.isCoreModel(a.id) ? 0 : 1
+                let pb = Self.isCoreModel(b.id) ? 0 : 1
+                if pa != pb { return pa < pb }
+                if a.total != b.total { return a.total > b.total }
+                return a.id < b.id      // 同分时按名字，保证每次刷新顺序一致
             }
             return ModelGroup(
                 id: spec.id,
                 title: spec.title,
                 matched: matchedCount[spec.id] ?? 0,
+                okCount: ok,
+                unstableCount: unstable,
+                downCount: down,
+                unknownCount: unknown,
                 models: Array(list.prefix(6))
             )
         }
     }
 
+    /// 解析一行模型。时间序列按契约降级：
+    /// 1. `recent`（近 30 分钟，1=正常 0=异常）→ 竖条与百分比都用它，范围「近 30 分钟」
+    /// 2. 没有 `recent` → 用 `history`（30 分钟一桶，共 24 小时），只取有探测量的桶，
+    ///    桶内全成功算绿、否则红；范围「近 24 小时」
+    /// 3. 两者都没有 → `hasData = false`，卡片显示「—」和一条灰色占位条
+    ///
+    /// `avg_latency_sec` 有才显示「平均响应」，没有就 nil（界面不占位、不编数字）。
     private func build(_ row: [String: Any]) -> ModelStatus? {
         let model = (row["model"] as? String) ?? ""
         guard !model.isEmpty else { return nil }
-        let history = (row["history"] as? [[String: Any]]) ?? []
-        guard !history.isEmpty else { return nil }
 
-        var okSum = 0
-        var totalSum = 0
-        var rateSum = 0.0
-        var bars: [Bar] = []
+        let avg = (row["avg_latency_sec"] as? NSNumber)?.doubleValue
 
-        for (i, h) in history.enumerated() {
-            let ok = (h["ok"] as? NSNumber)?.intValue ?? 0
-            let total = (h["total"] as? NSNumber)?.intValue ?? 0
-            let rate = (h["rate"] as? NSNumber)?.doubleValue ?? 0
-            okSum += ok
-            totalSum += total
-            rateSum += rate
-            bars.append(Bar(id: i, rate: min(max(rate, 0), 1), empty: total == 0))
+        var samples: [Bool] = []
+        var rate = 0.0
+        var total = 0
+        var range = ""
+
+        // 1) recent：近 30 分钟逐点序列（契约 1=正常 / 0=异常；按 ≥0.5 判绿，兼容 0.0~1.0 的写法）
+        if let raw = row["recent"] as? [Any], !raw.isEmpty {
+            let values = raw.compactMap { ($0 as? NSNumber)?.doubleValue }
+            if values.count == raw.count, !values.isEmpty {
+                samples = values.map { $0 >= 0.5 }
+                let ok = samples.filter { $0 }.count
+                rate = Double(ok) / Double(values.count)
+                total = values.count
+                range = "近 30 分钟"
+            }
         }
 
-        let rate = totalSum > 0 ? Double(okSum) / Double(totalSum)
-                               : rateSum / Double(history.count)
-        let probes = (row["probes"] as? NSNumber)?.intValue ?? totalSum
+        // 2) 降级：history 30 分钟一桶（空桶跳过，不把「没探测过」画成红）
+        if samples.isEmpty {
+            let history = (row["history"] as? [[String: Any]]) ?? []
+            var okSum = 0
+            var totalSum = 0
+            var histSamples: [Bool] = []
+            for h in history {
+                let t = (h["total"] as? NSNumber)?.intValue ?? 0
+                guard t > 0 else { continue }
+                let ok = (h["ok"] as? NSNumber)?.intValue ?? 0
+                okSum += ok
+                totalSum += t
+                histSamples.append(ok >= t)     // 一格里全成功才绿
+            }
+            if totalSum > 0 {
+                samples = histSamples
+                rate = Double(okSum) / Double(totalSum)
+                total = totalSum
+                range = "近 24 小时"
+            }
+        }
 
-        // 图片里条子大约 40 段；服务端给 48 段，只画最近 40 个桶
-        let shown = bars.count > 40 ? Array(bars.suffix(40)) : bars
-        return ModelStatus(id: model, rate: min(max(rate, 0), 1), total: totalSum,
-                           probes: probes, hasData: totalSum > 0, bars: shown)
+        let probes = (row["probes"] as? NSNumber)?.intValue ?? total
+
+        return ModelStatus(
+            id: model,
+            live: liveStatus(row),
+            rate: min(max(rate, 0), 1),
+            samples: samples,
+            rangeLabel: range.isEmpty ? "近 24 小时" : range,
+            avgLatency: avg,
+            total: total,
+            probes: probes,
+            hasData: !samples.isEmpty
+        )
+    }
+
+    /// 实时状态判定（来自 `rows[].providers[]`，监控每 60 秒探一次）。
+    ///
+    /// ⚠️ 不按「任一 alive == false 就异常」：实测生产 162 个模型里有 133 个至少挂着一个
+    /// 已废弃的 provider（如「线路一」2026-11-16 后就没成功过，却仍挂在模型上），
+    /// 照字面判会把 82% 的模型涂红，其中大多数其实靠备用线路正常服务。
+    /// 所以按「**还有没有可用线路**」判：
+    /// - providers 为空              → 未监控（灰，绝不显示正常）
+    /// - 没有任何 provider alive      → 异常（红，真的没有路可走）
+    /// - 有 alive，但 alive 的 provider 有 fail_count → 波动（黄，最近失败过、正在恢复）
+    /// - 其余（至少一条 alive 且干净）→ 正常（绿）
+    /// 挂掉的冗余线路不直接决定颜色；它们的影响体现在「可用线路是否只剩 0 条」。
+    private func liveStatus(_ row: [String: Any]) -> LiveStatus {
+        let providers = (row["providers"] as? [[String: Any]]) ?? []
+        guard !providers.isEmpty else { return .unknown }
+
+        var aliveCount = 0
+        var aliveFailSum = 0
+        for p in providers {
+            guard (p["alive"] as? Bool) == true else { continue }
+            aliveCount += 1
+            aliveFailSum += (p["fail_count"] as? NSNumber)?.intValue ?? 0
+        }
+        if aliveCount == 0 { return .down }
+        return aliveFailSum > 0 ? .unstable : .ok
     }
 }
