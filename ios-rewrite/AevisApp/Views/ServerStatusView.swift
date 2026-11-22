@@ -438,12 +438,15 @@ struct ServerStatusView: View {
         return "不通"
     }
 
+    /// 延迟四档（与登录页线路选择同一套阈值）：
+    /// ≤80ms 绿 / 80–200ms 黄绿 / 200–500ms 橙 / >500ms 红；不通整段红。
     private func latencyColor(for line: APIClient.Line) -> Color {
         guard let ms = latencies[line.id] else {
             return probed ? badRed : AE.textSecondary
         }
-        if ms < 300 { return goodGreen }
-        if ms < 900 { return warnOrange }
+        if ms <= 80 { return goodGreen }
+        if ms <= 200 { return limeGreen }
+        if ms <= 500 { return warnOrange }
         return badRed
     }
 
@@ -498,6 +501,10 @@ struct ServerStatusView: View {
     // MARK: - 网络
 
     private func refreshAll() async {
+        // 先把「当前生效线路」对齐一次：APIClient.activeLine 现算 UserDefaults，
+        // 别处（登录页线路半窗 / request 自动回落）改过 apiLineId 后 SwiftUI 不会自动重绘，
+        // 所以每次进页 / 点刷新都重新读一遍，避免顶部卡还停在旧线路上。
+        activeID = APIClient.activeLine.id
         // 依次跑：先测线路，再按（可能已切换的）当前线路拉模型状态。
         // 用串行而不是 async let，避免在 View 里捕获 self 进并发闭包。
         await probeAll()

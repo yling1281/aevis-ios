@@ -182,9 +182,9 @@ struct LoginView: View {
 
     // MARK: - 顶部：线路入口 + 帮助（不再有发光装饰层）
 
-    /// 胶囊文案：`线路 · 北京 · 最快`。
-    /// name 是城市名（地址/base 一律不上屏）；带上 note 是因为会同时存在两条同名城市
-    /// （如「北京·最快」和「北京·默认」），只写城市名分不出当前是哪条。
+    /// 胶囊文案：`线路 · 陕西 · 最快`（note 为空时退回 `线路 · 城市`）。
+    /// name 是城市名（地址/base 一律不上屏）；带 note 是因为它本身有信息量（最快/默认/备用），
+    /// 而且将来若出现同名城市，这一段也能帮忙区分。
     private var currentLineChipText: String {
         let line = APIClient.lines.first { $0.id == lineID } ?? APIClient.activeLine
         return line.note.isEmpty
