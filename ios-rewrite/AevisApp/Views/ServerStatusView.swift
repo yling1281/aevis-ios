@@ -68,11 +68,14 @@ struct ServerStatusView: View {
         ("claude",   "Claude",   "claude")
     ]
 
-    private let goodGreen = Color.hex(0x36B36B)
-    /// 次优（80–200ms）：黄绿，与登录页线路胶囊同一套四档阈值
-    private let limeGreen = Color.hex(0x84B93A)
-    private let warnOrange = Color.hex(0xE2932F)
-    private let badRed = Color.hex(0xE0484D)
+    // 状态语义色：与登录页线路四档（LK）同一套色值，浅色/深色各一套。
+    // 两边都是「同一个意思同一种绿」，避免用户连着看发现两页配色不一致。
+    // （暂时各自复制在这里，没有抽公共常量；若以后统一到 AE / GlassComponents，两边一起换引用即可。）
+    private let goodGreen = Color.adaptive(dark: Color.hex(0x6FCF97), light: Color.hex(0x1E7A4E))
+    /// 次优（80–200ms）：黄绿
+    private let limeGreen = Color.adaptive(dark: Color.hex(0xB7D06A), light: Color.hex(0x6B8F1B))
+    private let warnOrange = Color.adaptive(dark: Color.hex(0xF0B36B), light: Color.hex(0xB26A00))
+    private let badRed = Color.adaptive(dark: Color.hex(0xF08A84), light: Color.hex(0xC0392B))
 
     var body: some View {
         ScrollView(showsIndicators: false) {
