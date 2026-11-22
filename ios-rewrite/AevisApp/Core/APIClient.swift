@@ -1,9 +1,12 @@
 import Foundation
+import UIKit
 
-/// 所有网络请求（2026-11-17，134 骨架）。
+/// 所有网络请求。
 ///
-/// BASE 用北京隧道 `https://q7m3ax.lingyan.cyou` —— 直连 54319 是自签证书，iOS 不认（安卓靠
-/// `network_security_config` 内置信任，iOS 要描述文件/ATS 例外，骨架阶段不做）。
+/// 默认走北京隧道 `https://q7m3ax.lingyan.cyou`；四条线路（北京 / 香港 / 直连 / 备用）
+/// 均已在 2026-11-23 生产实测可用。直连 `https://103.236.72.107:54319` 用自签证书，
+/// 靠 `PinDelegate` 精确放行 host:port 的 serverTrust + Info.plist 的 ATS 例外双保险，
+/// iOS 可正常使用（不再是"骨架阶段不做"）。线路地址一律不上屏，用户只见城市名。
 ///
 /// 契约与安卓完全一致；错误一律抛 `APIError`，由 View 决定怎么显示。
 enum APIError: LocalizedError {
@@ -30,19 +33,24 @@ struct APIClient {
 
     static let lines: [Line] = [
         Line(id: "bj",   name: "北京", base: "https://q7m3ax.lingyan.cyou",     pinning: false, note: "默认（隧道）"),
-        // 2026-11-22 实测：香港这条所有 /v1/* 都 404（nginx 没挂 API）、
-        // 直连是自签证书（iOS 报 SSL 错误）。两条都必须置空 = 不可用，
-        // 否则用户点选后微信/QQ/登录全挂（老板实测「直连点不动、微信 SSL 错误」）。
-        // 地址留在此处备注，待服务端 vhost/证书修好再放开。
-        Line(id: "hk",   name: "香港", base: "", pinning: false, note: "暂不可用（接口未挂载）"),
-        Line(id: "direct", name: "直连", base: "", pinning: true,  note: "暂不可用（自签证书）"),
-        Line(id: "spare", name: "备用", base: "", pinning: false, note: "暂不可用")
+        // 2026-11-23 生产实测（curl --noproxy '*'）：
+        //   直连 https://103.236.72.107:54319/v1/app/config       → 200 / 0.14s（最快，自签证书）
+        //   香港 https://lingyan.cyou/prod-api/aevis/v1/app/config → 200 / 1.37s
+        //   备用 https://aevis.cn/prod-api/aevis/v1/app/config     → 200 / 1.41s（配置与香港一致）
+        // 香港之前被判 404 是误测了不带 /prod-api/aevis 前缀的根路径，已恢复。
+        // 直连是自签证书（CN=103.236.72.107 / Aevis Direct CA，有效期至 2036），iOS 严格校验
+        // 会报 SSL 错误 → pinning=true 让 makeSession 挂 PinDelegate 放行该 host:port 的
+        // serverTrust，Info.plist 的 NSExceptionDomains 也列了该 IP，双保险。443 不通，只走 54319。
+        Line(id: "hk",   name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "已验证（2026-11-23）"),
+        Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319", pinning: true,  note: "最快·自签证书"),
+        Line(id: "spare", name: "备用", base: "https://aevis.cn/prod-api/aevis", pinning: false, note: "备用（已验证）")
     ]
 
     private static let activeKey = "apiLineId"
 
-    /// 当前生效线路（重启沿用）。若持久化的是已失效线路，自动回落到默认，
-    /// 避免「上次选了直连→这次启动就 SSL 错误」。
+    /// 当前生效线路（重启沿用）。若持久化的是真正失效线路（base 空 = 实测不可用），
+    /// 自动回落到默认，避免上次的选择导致这次启动连不上。
+    /// 直连已于 2026-11-23 恢复（base 非空 + PinDelegate），选中后不会被回落。
     static var activeLine: Line {
         let id = UserDefaults.standard.string(forKey: activeKey) ?? "bj"
         let picked = lines.first { $0.id == id } ?? lines[0]
@@ -316,10 +324,188 @@ struct APIClient {
         try await request("/v1/app/changelog")
     }
 
-    /// 发邮箱验证码（登录用）。
+    // MARK: - 商城（墨点 / 会员套餐）
+    //
+    // 字段严格对齐服务端源码：
+    //   aevis_points_shop.py:494 packages() → code/name/amountCents/amountYuan/points/pointsText
+    //   aevis_points_shop.py:769 points_home() → points/yuan/rate/items
+    //   aevis_shop.py:646 shop_products() → id/title/days/price_cents
+
+    /// 墨点充值档位。字段对齐 /v1/points/recharge/packages 的 items[]。
+    struct PointPackage: Identifiable {
+        let code: String
+        let name: String
+        let amountCents: Int
+        let amountYuan: String
+        let points: Int
+        let pointsText: String
+        var id: String { code }
+    }
+
+    /// 充值档位列表（公开接口，不需登录即可展示价格）。顶层 `items`。
+    static func pointPackages() async throws -> [PointPackage] {
+        let json = try await request("/v1/points/recharge/packages")
+        let d = (json["data"] as? [String: Any]) ?? json
+        let rows = (d["items"] as? [[String: Any]]) ?? (json["items"] as? [[String: Any]]) ?? []
+        return rows.compactMap { r in
+            guard let code = r["code"] as? String else { return nil }
+            let cents = (r["amountCents"] as? NSNumber)?.intValue ?? 0
+            return PointPackage(
+                code: code,
+                name: (r["name"] as? String) ?? "",
+                amountCents: cents,
+                amountYuan: (r["amountYuan"] as? String) ?? String(format: "%.2f", Double(cents) / 100),
+                points: (r["points"] as? NSNumber)?.intValue ?? 0,
+                pointsText: (r["pointsText"] as? String) ?? ""
+            )
+        }
+    }
+
+    /// 墨点余额（需登录）。取不到时调用方显示「—」，不要显示 0。
+    static func pointsBalance(token: String?) async throws -> Int {
+        let json = try await request("/v1/points", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return (d["points"] as? NSNumber)?.intValue ?? (json["points"] as? NSNumber)?.intValue ?? 0
+    }
+
+    /// 会员套餐。字段对齐 /v1/shop/products 的 items[]（注意 price_cents 带下划线）。
+    /// id 是字符串主键（aevis_shop.py：p_x / p_xl / p_xxl / p_xllll），**不是数字** ——
+    /// 旧版声明成 Int 会让 `as? NSNumber` 全部解析失败、会员列表恒空、下单 product_id 传错。
+    /// 2026-11-24 会员改「固定 30 天 + 按量 4 档」，新增 week_total / percent / label。
+    struct ShopProduct: Identifiable {
+        let id: String
+        let title: String
+        let days: Int
+        let priceCents: Int
+        var weekTotal: Int = 0      // 每周额度（墨点）：300/450/1050/2250
+        var percent: Int = 0        // 展示百分比：100/150/350/750
+        var label: String = ""      // 档位短名：X / XL / XXL / XLLLL
+    }
+
+    /// 会员套餐列表（公开接口）。顶层 `items`。
+    static func shopProducts() async throws -> [ShopProduct] {
+        let json = try await request("/v1/shop/products")
+        let d = (json["data"] as? [String: Any]) ?? json
+        let rows = (d["items"] as? [[String: Any]]) ?? (json["items"] as? [[String: Any]]) ?? []
+        return rows.compactMap { r in
+            // 服务端 id 为字符串；容错兜数字（个别老部署可能下发 NSNumber）
+            let ident: String
+            if let s = r["id"] as? String, !s.isEmpty { ident = s }
+            else if let n = r["id"] as? NSNumber { ident = n.stringValue }
+            else { return nil }
+            return ShopProduct(
+                id: ident,
+                title: (r["title"] as? String) ?? "",
+                days: (r["days"] as? NSNumber)?.intValue ?? 0,
+                priceCents: (r["price_cents"] as? NSNumber)?.intValue ?? 0,
+                // 新字段容错：老服务端缺这些键时给 0/空串，不让解析崩
+                weekTotal: (r["week_total"] as? NSNumber)?.intValue ?? 0,
+                percent: (r["percent"] as? NSNumber)?.intValue ?? 0,
+                label: (r["label"] as? String) ?? ""
+            )
+        }
+    }
+
+    // MARK: - 支付下单 / 查单（第 3 轮）
+    //
+    // 两套商品走各自的服务端接口，pay_url 都是易支付收银台（submit.php?...），
+    // platform=ios 时服务端把 return_url 设成 aevis://pay?order=<单号>，付完能回 App。
+    // 确认到账以「查单」为准，不信任前端跳转/回调：
+    //   墨点 POST /v1/points/recharge       → orderNo / payUrl
+    //        GET  /v1/points/recharge/<no>  → state(pending|paid|refunded) / points
+    //   会员 POST /v1/shop/order            → order_id / pay_url / channel
+    //        GET  /v1/shop/orders/<oid>     → state(pending|paid) / days
+
+    /// 下单结果（墨点 / 会员统一形态）。
+    struct PayOrder: Identifiable {
+        enum Kind: String { case points, member }
+        let orderID: String      // 查单用：墨点=orderNo，会员=order_id
+        let payURL: String       // 易支付收银台地址
+        let kind: Kind
+        var id: String { kind.rawValue + "-" + orderID }
+    }
+
+    /// 查单结果：paid 表示已到账；amount 是到账墨点数或天数；unit 是展示单位。
+    struct PayVerifyResult {
+        let paid: Bool
+        let amount: Int
+        let unit: String
+    }
+
+    /// 墨点充值下单。payType 只接受 alipay / wxpay（服务端其它值回落 wxpay）。
+    static func pointsRecharge(package code: String, payType: String, token: String) async throws -> PayOrder {
+        let json = try await request(
+            "/v1/points/recharge", method: "POST",
+            body: ["package": code, "payType": payType, "platform": "ios"],
+            token: token
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        guard let no = d["orderNo"] as? String, !no.isEmpty else {
+            throw APIError.decode("下单没有返回订单号")
+        }
+        return PayOrder(orderID: no, payURL: (d["payUrl"] as? String) ?? "", kind: .points)
+    }
+
+    /// 墨点查单：state == "paid" 即到账，points 为到账墨点数。
+    static func pointsOrderStatus(orderNo: String, token: String) async throws -> (paid: Bool, points: Int) {
+        let enc = orderNo.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderNo
+        let json = try await request("/v1/points/recharge/\(enc)", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return ((d["state"] as? String) == "paid",
+                (d["points"] as? NSNumber)?.intValue ?? 0)
+    }
+
+    /// 会员下单。productID 为字符串主键（p30/p90/p365），pay_type 只接受 alipay / wxpay。
+    static func memberOrder(productID: String, payType: String, token: String) async throws -> PayOrder {
+        let json = try await request(
+            "/v1/shop/order", method: "POST",
+            body: ["product_id": productID, "pay_type": payType],
+            token: token
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        guard let oid = d["order_id"] as? String, !oid.isEmpty else {
+            throw APIError.decode("下单没有返回订单号")
+        }
+        return PayOrder(orderID: oid, payURL: (d["pay_url"] as? String) ?? "", kind: .member)
+    }
+
+    /// 会员查单：state == "paid" 即到账，days 为到账天数。
+    static func memberOrderStatus(orderID: String, token: String) async throws -> (paid: Bool, days: Int) {
+        let enc = orderID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderID
+        let json = try await request("/v1/shop/orders/\(enc)", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return ((d["state"] as? String) == "paid",
+                (d["days"] as? NSNumber)?.intValue ?? 0)
+    }
+
+    /// 会员剩余天数（从 /v1/me 容错解析 membership.days_left；读不到返回 nil，界面显示占位）。
+    static func membershipDays(token: String) async throws -> Int? {
+        let json = try await request("/v1/me", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        guard let m = d["membership"] as? [String: Any] else { return nil }
+        return (m["days_left"] as? NSNumber)?.intValue
+    }
+
+    // MARK: - 设备标识（验证码限流按「设备 + 邮箱」）
+
+    /// 稳定的设备 ID：首次用 IDFV 生成后落 UserDefaults，之后每次都读同一个值。
+    /// 同一台设备多次调用（含重启 App）返回同一个 id，服务端的 60 秒冷却/每日次数
+    /// 才能按设备维度生效；卸载重装才会换（IDFV 本身的语义），可接受。
+    static var deviceID: String {
+        let key = "aevisDeviceID"
+        if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty {
+            return saved
+        }
+        let fresh = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: key)
+        return fresh
+    }
+
+    /// 发邮箱验证码（登录 / 找回共用）。带上 device_id 供服务端按设备+邮箱限流。
     static func sendEmailCode(email: String) async throws {
         _ = try await request(
-            "/v1/auth/email/code", method: "POST", body: ["email": email]
+            "/v1/auth/email/code", method: "POST",
+            body: ["email": email, "device_id": deviceID]
         )
     }
 
@@ -464,6 +650,44 @@ struct APIClient {
 
     /// 回调前缀（服务端 redirect_uri），WKWebView 拦到它就从 query 取 code
     static let qqCallbackPrefix = "https://aevis.cn/prod-api/aevis/v1/auth/qq/callback"
+
+    // MARK: - Web 扫码登录 / 支付（与网页版 unified_site/assets/qrlogin.js 同接口）
+
+    /// 网页版扫码登录/支付的二维码信息。
+    /// 字段对齐 qrlogin.js：qr_url 是相对路径（自带 query），mini_url 是小程序码，
+    /// ticket 用于轮询，code 是可选设备验证码，deep_link 用于「用 App 打开」。
+    struct WebQR {
+        let qrURL: String
+        let miniURL: String
+        let ticket: String
+        let code: String
+        let deepLink: String
+    }
+
+    /// 创建带登录态的二维码。POST /v1/web/auth/qr，body { device_id, scene }。
+    /// 传 token 走 Authorization: Bearer —— 二维码因此携带当前登录态（网页版靠 cookie，App 靠 token）。
+    /// token 由调用方从 Session 读取后传入，避免 APIClient 依赖 Session 单例。
+    static func webAuthQR(scene: String = "", token: String?) async throws -> WebQR {
+        let json = try await request(
+            "/v1/web/auth/qr", method: "POST",
+            body: ["device_id": deviceID, "scene": scene],
+            token: token
+        )
+        return WebQR(
+            qrURL: (json["qr_url"] as? String) ?? (json["qrUrl"] as? String) ?? "",
+            miniURL: (json["mini_url"] as? String) ?? (json["miniUrl"] as? String) ?? "",
+            ticket: (json["ticket"] as? String) ?? "",
+            code: (json["code"] as? String) ?? "",
+            deepLink: (json["deep_link"] as? String) ?? ""
+        )
+    }
+
+    /// 网页版扫码轮询结果。GET /v1/web/auth/poll?t=<ticket>。
+    /// status: pending / scanned / cancelled / expired / ok；ok 时带 token/uid/account/nickname。
+    static func webAuthPoll(ticket: String, token: String?) async throws -> [String: Any] {
+        let t = ticket.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ticket
+        return try await request("/v1/web/auth/poll?t=\(t)", token: token)
+    }
 
     // MARK: - 测速 / 自动切换（2026-11-17，147）
 

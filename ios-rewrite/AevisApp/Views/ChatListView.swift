@@ -129,8 +129,8 @@ struct ChatListView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(height: AE.rowHeight)
-        .background(AE.card)
-        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius, style: .continuous))
+        // 磨砂玻璃卡（.regular 更实）；内部头像/文字/未读徽标与点击热区全部保留
+        .glassCard(cornerRadius: AE.cardRadius, material: .regular)
         .shadow(color: AE.shadowColor, radius: 8, y: 3)
         .contentShape(Rectangle())
     }

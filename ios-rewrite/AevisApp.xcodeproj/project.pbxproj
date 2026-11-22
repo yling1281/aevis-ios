@@ -21,6 +21,15 @@
 		A1000000000000000000000E /* PaperIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* PaperIcons.swift */; };
 		A1000000000000000000000F /* UpdateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* UpdateSheet.swift */; };
 		A10000000000000000000010 /* AevisMascot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* AevisMascot.swift */; };
+		A10000000000000000000011 /* GlassComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* GlassComponents.swift */; };
+		A10000000000000000000012 /* PayQRView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* PayQRView.swift */; };
+		A10000000000000000000013 /* SegmentedTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* SegmentedTabs.swift */; };
+		A10000000000000000000014 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* HomeView.swift */; };
+		A10000000000000000000015 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* MainTabView.swift */; };
+		A10000000000000000000016 /* AppBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* AppBackground.swift */; };
+		A10000000000000000000017 /* ShopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* ShopView.swift */; };
+		A10000000000000000000018 /* PaySuccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* PaySuccessView.swift */; };
+		A10000000000000000000019 /* AnimatedNumber.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* AnimatedNumber.swift */; };
 		A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppIcon60x60@2x.png */; };
 		A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppIcon60x60@3x.png */; };
 		A20000000000000000000003 /* AppIcon1024.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* AppIcon1024.png */; };
@@ -43,6 +52,15 @@
 		B1000000000000000000000E /* PaperIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperIcons.swift; sourceTree = "<group>"; };
 		B1000000000000000000000F /* UpdateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSheet.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* AevisMascot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AevisMascot.swift; sourceTree = "<group>"; };
+		B10000000000000000000011 /* GlassComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassComponents.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* PayQRView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayQRView.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* SegmentedTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentedTabs.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		B10000000000000000000015 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* AppBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBackground.swift; sourceTree = "<group>"; };
+		B10000000000000000000017 /* ShopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopView.swift; sourceTree = "<group>"; };
+		B10000000000000000000018 /* PaySuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaySuccessView.swift; sourceTree = "<group>"; };
+		B10000000000000000000019 /* AnimatedNumber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedNumber.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,6 +103,7 @@
 				B10000000000000000000003 /* Session.swift */,
 				B1000000000000000000000B /* CloudBackup.swift */,
 				B1000000000000000000000D /* AppUpdate.swift */,
+				B10000000000000000000016 /* AppBackground.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -107,6 +126,14 @@
 				B10000000000000000000008 /* SettingsView.swift */,
 				B1000000000000000000000F /* UpdateSheet.swift */,
 				B10000000000000000000010 /* AevisMascot.swift */,
+				B10000000000000000000011 /* GlassComponents.swift */,
+				B10000000000000000000012 /* PayQRView.swift */,
+				B10000000000000000000013 /* SegmentedTabs.swift */,
+				B10000000000000000000014 /* HomeView.swift */,
+				B10000000000000000000015 /* MainTabView.swift */,
+				B10000000000000000000017 /* ShopView.swift */,
+				B10000000000000000000018 /* PaySuccessView.swift */,
+				B10000000000000000000019 /* AnimatedNumber.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -224,6 +251,15 @@
 				A1000000000000000000000E /* PaperIcons.swift in Sources */,
 				A1000000000000000000000F /* UpdateSheet.swift in Sources */,
 				A10000000000000000000010 /* AevisMascot.swift in Sources */,
+				A10000000000000000000011 /* GlassComponents.swift in Sources */,
+				A10000000000000000000012 /* PayQRView.swift in Sources */,
+				A10000000000000000000013 /* SegmentedTabs.swift in Sources */,
+				A10000000000000000000014 /* HomeView.swift in Sources */,
+				A10000000000000000000015 /* MainTabView.swift in Sources */,
+				A10000000000000000000016 /* AppBackground.swift in Sources */,
+				A10000000000000000000017 /* ShopView.swift in Sources */,
+				A10000000000000000000018 /* PaySuccessView.swift in Sources */,
+				A10000000000000000000019 /* AnimatedNumber.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -280,7 +316,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -289,7 +325,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aevis.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -303,7 +339,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -312,7 +348,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aevis.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

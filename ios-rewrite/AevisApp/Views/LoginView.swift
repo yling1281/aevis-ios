@@ -27,6 +27,11 @@ struct LoginView: View {
     @State private var agree = false
     @State private var busy = false
     @State private var tip = ""
+    /// 验证码重发冷却剩余秒数（>0 时禁点，倒计时到 0 恢复可发）
+    @State private var resendLeft = 0
+    /// 冷却的绝对到期时刻：App 切后台被挂起后回到前台，用它重算剩余秒数，
+    /// 避免逐秒递减的 Task 停摆导致本地冷却比服务端 60s 多挡好几分钟。
+    @State private var resendUntil: Date? = nil
 
     @State private var showRecover = false
     @State private var showQR = false
@@ -45,6 +50,34 @@ struct LoginView: View {
     private var buttonTitle: String {
         if register { return "注册并登录" }
         return mode == .code ? "验证并登录" : "登录"
+    }
+
+    /// 发送验证码按钮文案：倒计时中显示剩余秒数，禁用态与文案共用同一条件。
+    private var sendCodeTitle: String {
+        if busy { return "发送中" }
+        if resendLeft > 0 { return "重新发送 \(resendLeft)s" }
+        return "发送验证码"
+    }
+
+    /// 启动 60 秒重发冷却。保存绝对到期时刻，主线程 Task 每秒用它**重算**剩余秒数：
+    /// App 切后台 Task 被挂起，回来后 `timeIntervalSinceNow` 已反映真实流逝时间，
+    /// 若服务端 60s 早已过期则立刻得到 0、按钮马上可点，不会多挡几分钟。
+    @MainActor
+    private func startResendCountdown() {
+        let until = Date().addingTimeInterval(60)
+        resendUntil = until
+        resendLeft = 60
+        Task { @MainActor in
+            while true {
+                let left = max(0, Int(until.timeIntervalSinceNow.rounded(.up)))
+                resendLeft = left
+                if left <= 0 {
+                    resendUntil = nil       // 到期清空，标识冷却结束
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 
     var body: some View {
@@ -132,8 +165,8 @@ struct LoginView: View {
                 }
                 .foregroundStyle(AE.brandInk.opacity(0.72))
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(AE.brandCard.opacity(0.75))
-                .clipShape(Capsule())
+                // 磨砂胶囊（cornerRadius 超过高度一半会被 RoundedRectangle clamp 成胶囊）
+                .glassCard(cornerRadius: 20, material: .thin, strokeOpacity: 0.16)
             }
             Button("帮助") { tip = "如需帮助，请联系 aevis.cn 客服。" }
                 .font(.system(size: 12, weight: .medium))
@@ -176,8 +209,8 @@ struct LoginView: View {
             switchRow
         }
         .padding(14)
-        .background(AE.brandCard)
-        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius, style: .continuous))
+        // 磨砂玻璃卡（表单用 .thin 更轻透）；内部输入框 fieldBG 保持实心，保证输入可读
+        .glassCard(cornerRadius: AE.cardRadius, material: .thin)
         .shadow(color: AE.brandPurple.opacity(0.08), radius: 12, y: 4)
     }
 
@@ -236,16 +269,21 @@ struct LoginView: View {
             .background(fieldBG)
             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
-            Button { Task { await sendCode() } } label: {
-                Text(busy ? "发送中" : "发送验证码")
+            Button {
+                // 同步置位再起 Task：disabled 到 action 之间有极小窗口，先占住 busy 防连点并发。
+                guard !busy, resendLeft <= 0 else { return }
+                busy = true
+                Task { await sendCode() }
+            } label: {
+                Text(sendCodeTitle)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(AE.brandPurple)
                     .frame(width: 88, height: 50)
                     .background(AE.brandLilac)
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             }
-            .disabled(busy || !email.contains("@"))
-            .opacity(busy || !email.contains("@") ? 0.55 : 1)
+            .disabled(busy || resendLeft > 0 || !email.contains("@"))
+            .opacity(busy || resendLeft > 0 || !email.contains("@") ? 0.55 : 1)
             .buttonStyle(AevisPressStyle(scale: 0.96))
         }
     }
@@ -320,6 +358,10 @@ struct LoginView: View {
 
     private var agreementRow: some View {
         HStack(alignment: .top, spacing: 10) {
+            // 修复「勾选框点不动」：旧实现未勾选态只有 1.5pt 描边、内部全透明，
+            // SwiftUI hit-test 只认有绘制内容的像素，点圈中心打不中；20x20 也小于
+            // 44x44 的最小触控区。这里把可点击区域撑到 44x44 并用 contentShape
+            // 明确命中形状，同时对勾/空心两态都保留可绘制内容，保证 agree 可靠翻转。
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { agree.toggle() }
             } label: {
@@ -330,13 +372,18 @@ struct LoginView: View {
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.white)
                     } else {
+                        // 加一层透明可绘制底，避免空心圈中心 hit-test 落空
+                        Circle().fill(Color.clear).frame(width: 20, height: 20)
                         Circle().stroke(AE.brandInk.opacity(0.28), lineWidth: 1.5)
                             .frame(width: 20, height: 20)
                     }
                 }
+                .frame(width: 44, height: 44)          // 满足 44pt 最小触控区
+                .contentShape(Rectangle())             // 整块矩形都可点，不只认描边像素
             }
             .buttonStyle(.plain)
             .accessibilityLabel("同意用户协议和隐私政策")
+            .accessibilityAddTraits(agree ? [.isSelected] : [])
 
             HStack(spacing: 0) {
                 Text("已阅读并同意 ").foregroundStyle(AE.textSecondary)
@@ -450,13 +497,19 @@ struct LoginView: View {
     private func sendCode() async {
         tip = ""
         busy = true
+        defer { busy = false }
         do {
             try await APIClient.sendEmailCode(email: email)
             tip = "验证码已发送"
+            await startResendCountdown()
         } catch {
             tip = friendly(error)
+            // 服务端已在冷却中（例如刚在找回页发过）：同步本地 60 秒，避免用户狂点。
+            let msg = error.localizedDescription
+            if msg.contains("频繁") || msg.contains("60") {
+                await startResendCountdown()
+            }
         }
-        busy = false
     }
 
     private func submit() async {
@@ -529,6 +582,34 @@ struct RecoverView: View {
     @State private var email = ""
     @State private var tip = ""
     @State private var busy = false
+    /// 与登录页一致的 60 秒重发冷却（限流按设备+邮箱，跨页共享同一维度）
+    @State private var resendLeft = 0
+    /// 绝对到期时刻：切后台回来后重算剩余秒数，避免本地冷却比服务端多挡
+    @State private var resendUntil: Date? = nil
+
+    private var sendCodeTitle: String {
+        if busy { return "发送中" }
+        if resendLeft > 0 { return "重新发送 \(resendLeft)s" }
+        return "发送验证码"
+    }
+
+    @MainActor
+    private func startResendCountdown() {
+        let until = Date().addingTimeInterval(60)
+        resendUntil = until
+        resendLeft = 60
+        Task { @MainActor in
+            while true {
+                let left = max(0, Int(until.timeIntervalSinceNow.rounded(.up)))
+                resendLeft = left
+                if left <= 0 {
+                    resendUntil = nil
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -545,25 +626,32 @@ struct RecoverView: View {
                 Text(tip).font(.system(size: 12)).foregroundStyle(AE.textSecondary)
             }
             Button {
+                // 同步置位再起 Task，堵住 disabled 到 action 之间的连点窗口
+                guard !busy, resendLeft <= 0 else { return }
+                busy = true
                 Task {
-                    busy = true
                     do {
                         try await APIClient.sendEmailCode(email: email)
                         tip = "验证码已发送"
+                        await startResendCountdown()
                     } catch {
                         tip = error.localizedDescription
+                        let msg = error.localizedDescription
+                        if msg.contains("频繁") || msg.contains("60") {
+                            await startResendCountdown()
+                        }
                     }
                     busy = false
                 }
             } label: {
-                Text(busy ? "发送中" : "发送验证码")
+                Text(sendCodeTitle)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background(AE.brandPurple)
                     .clipShape(RoundedRectangle(cornerRadius: AE.buttonRadius, style: .continuous))
             }
-            .disabled(busy || !email.contains("@"))
+            .disabled(busy || resendLeft > 0 || !email.contains("@"))
             Spacer()
         }
         .padding(24)

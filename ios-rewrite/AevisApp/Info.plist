@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.1</string>
+	<string>2.2</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -61,6 +61,16 @@
 			<dict>
 				<key>NSIncludesSubdomains</key>
 				<true/>
+				<key>NSExceptionRequiresForwardSecrecy</key>
+				<false/>
+			</dict>
+			<!-- 直连 103.236.72.107:54319 是自签证书，ATS 层先放行，
+			     TLS 信任再由 APIClient.PinDelegate 精确校验 host/port 后放行（双保险）。
+			     443 不通，只走 54319。 -->
+			<key>103.236.72.107</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<false/>
 				<key>NSExceptionRequiresForwardSecrecy</key>
 				<false/>
 			</dict>

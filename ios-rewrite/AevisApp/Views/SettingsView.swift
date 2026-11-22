@@ -15,6 +15,23 @@ struct SettingsView: View {
     @AppStorage("msgSize") private var msgSize = 1
     @AppStorage("msgBanner") private var msgBanner = true
 
+    /// 背景（第 3 轮）：预设索引与 AppBackground.Preset 的 rawValue 对齐；模糊半径 pt。
+    @AppStorage("aevisBgStyle") private var bgStyle = 0
+    @AppStorage("aevisBgBlur") private var bgBlur = 0.0
+
+    /// 4 个背景预设的展示信息（顺序 / rawValue 必须与 AppBackground.Preset 一致）。
+    private struct BgPreset: Identifiable {
+        let id: Int
+        let name: String
+        let colors: [Color]
+    }
+    private let bgPresets: [BgPreset] = [
+        BgPreset(id: 0, name: "奶油", colors: [Color.hex(0xFFF8EC), Color.hex(0xFFF1DC)]),
+        BgPreset(id: 1, name: "柔紫", colors: [Color.hex(0xF3EEFF), Color.hex(0xE7DEFF)]),
+        BgPreset(id: 2, name: "海盐", colors: [Color.hex(0xEAF4F4), Color.hex(0xDCEDEF)]),
+        BgPreset(id: 3, name: "深空", colors: [Color.hex(0xD9DCE6), Color.hex(0xC2C7D4)])
+    ]
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -29,6 +46,51 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.segmented)
                         Text("跟随系统会适配设备的深浅模式。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(AE.textSecondary)
+                    }
+
+                    settingsCard(title: "背景", icon: "photo.fill") {
+                        // 4 预设缩略图：点选即写 aevisBgStyle，AppBackground 立即生效
+                        HStack(spacing: 10) {
+                            ForEach(bgPresets) { p in
+                                Button { withAnimation { bgStyle = p.id } } label: {
+                                    VStack(spacing: 5) {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .fill(LinearGradient(
+                                                    colors: p.colors,
+                                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                                ))
+                                                .frame(height: 46)
+                                            if bgStyle == p.id {
+                                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                    .stroke(AE.accent, lineWidth: 2.5)
+                                                    .frame(height: 46)
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .font(.system(size: 16, weight: .bold))
+                                                    .foregroundStyle(AE.accent)
+                                            }
+                                        }
+                                        Text(p.name)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(bgStyle == p.id ? AE.accent : AE.textSecondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        Divider().opacity(0.4)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("背景模糊").font(.system(size: 12)).foregroundStyle(AE.textSecondary)
+                                Spacer()
+                                Text("\(Int(bgBlur)) pt").font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+                            }
+                            Slider(value: $bgBlur, in: 0...12, step: 1)
+                                .tint(AE.accent)
+                        }
+                        Text("选中的背景和模糊度会立即应用到主页与商城。")
                             .font(.system(size: 11))
                             .foregroundStyle(AE.textSecondary)
                     }
@@ -131,8 +193,8 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(AE.card)
-        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius, style: .continuous))
+        // 磨砂玻璃卡（.regular 更实一点，保证 segmented/toggle 的可读性）；文字保持语义色
+        .glassCard(cornerRadius: AE.cardRadius, material: .regular)
         .shadow(color: AE.shadowColor, radius: 8, y: 3)
     }
 
@@ -151,8 +213,8 @@ struct SettingsView: View {
         .buttonStyle(AevisPressStyle(scale: 0.97))
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(AE.card)
-        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius, style: .continuous))
+        // 磨砂玻璃卡；内部「退出登录」按钮背景 AE.accentSoft 保持实心，保留按钮对比度
+        .glassCard(cornerRadius: AE.cardRadius, material: .regular)
         .shadow(color: AE.shadowColor, radius: 8, y: 3)
     }
 }

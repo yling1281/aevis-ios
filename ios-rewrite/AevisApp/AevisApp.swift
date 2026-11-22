@@ -7,6 +7,10 @@ struct AevisApp: App {
     /// shared 单例用 ObservedObject 即可（生命周期由单例自己管）。
     @ObservedObject private var update = AppUpdateCenter.shared
 
+    /// 冷启动上飘动效：进程启动时 false → onAppear 弹到 true，只飘一次。
+    /// 切后台回来 root 不重建，所以不会再飘。
+    @State private var appeared = false
+
     /// CI 截图模式（-demo）下不检查更新、不弹窗，避免网络和弹窗干扰截图。
     private var isDemo: Bool {
         #if DEBUG
@@ -31,7 +35,7 @@ struct AevisApp: App {
         )
     }
 
-    /// 正常入口：冷启动校验先占位（避免闪一下聊天列表），没登录去登录页，登录了进会话列表。
+    /// 正常入口：冷启动校验先占位（避免闪一下主界面），没登录去登录页，登录了进主 TabBar。
     @ViewBuilder private var root: some View {
         if session.validating {
             ProgressView()
@@ -39,7 +43,15 @@ struct AevisApp: App {
         } else if session.token == nil {
             LoginView()
         } else {
-            ChatListView()
+            MainTabView()
+                // 冷启动上飘：只在这里（已登录根视图）挂，进程启动飘一次
+                .offset(y: appeared ? 0 : 24)
+                .opacity(appeared ? 1 : 0)
+                .onAppear {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.8).delay(0.05)) {
+                        appeared = true
+                    }
+                }
         }
     }
 
@@ -104,6 +116,9 @@ struct AevisApp: App {
                     // 半屏；强制更新不可拖拽关闭（UpdateSheet 内部还有 interactiveDismissDisabled）
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.hidden)
+                    // 磨砂玻璃弹窗：让 sheet 背景透明，背后聊天界面才能透出模糊感。
+                    // 强制更新仍由 binding 的空 set + interactiveDismissDisabled 双重保证关不掉。
+                    .presentationBackground(.clear)
             }
         }
     }
