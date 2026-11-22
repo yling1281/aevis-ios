@@ -1,16 +1,27 @@
 import SwiftUI
+import UIKit
 
-/// 可自定义背景（第 1 轮：组件 + 预设，设置入口第 3 轮接）。
+/// 可自定义背景：预设渐变（奶油 / 柔紫 / 海盐 / 深空）或用户自选的相册图片。
 ///
-/// 由 `@AppStorage("aevisBgStyle")` 选预设（默认奶油 / 柔紫 / 海盐 / 深空），
-/// `@AppStorage("aevisBgBlur")` 调整体模糊半径。用渐变 + 顶部柔光铺最底层
-/// `ignoresSafeArea()`，让磨砂卡片之间透出底层背景、形成层次。
+/// 存储键（`ThemeSettingsView` 写入，这里只读）：
+/// - `aevisBgStyle`：预设索引（0 奶油 / 1 柔紫 / 2 海盐 / 3 深空）
+/// - `aevisBgBlur`：模糊半径 pt（0...20）
+/// - `aevisBgImagePath`：自定义图在沙盒里的绝对路径（空 = 用预设）
+/// - `aevisBgPos`：图片显示方式（0 填充 / 1 居中 / 2 拉伸）
+/// - `aevisBgRev`：写入计数器。因为图片文件名固定（aevis-bg.jpg），路径不变，
+///   换图后靠它触发本视图重新读盘（否则会一直显示缓存里的旧图）。
 ///
 /// 用法：在需要背景的视图最外层 `.background(AppBackground())`。
 struct AppBackground: View {
     @AppStorage("aevisBgStyle") private var style: Int = 0
     @AppStorage("aevisBgBlur") private var blurAmount: Double = 0
+    @AppStorage("aevisBgImagePath") private var imagePath = ""
+    @AppStorage("aevisBgPos") private var imagePos = 0
+    @AppStorage("aevisBgRev") private var revision = 0
     @Environment(\.colorScheme) private var scheme
+
+    /// 已解码的自定义图（nil = 没有自定义图 / 文件丢失 → 回落预设渐变）
+    @State private var customImage: UIImage?
 
     private enum Preset: Int, CaseIterable {
         case cream = 0, lilac, seaSalt, deepSpace
@@ -28,25 +39,77 @@ struct AppBackground: View {
             case (.deepSpace, true):  return [Color.hex(0x101218), Color.hex(0x191C26)]
             }
         }
+
     }
 
     var body: some View {
-        let preset = Preset(rawValue: style) ?? .cream
         ZStack(alignment: .top) {
-            LinearGradient(
-                colors: preset.colors(dark: scheme == .dark),
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
+            // 底层永远是预设渐变：自定义图读不到时自然回落，不会露出纯黑/透明底
+            gradientLayer
 
-            // 顶部一点柔光，层次靠材质不靠边框
-            RadialGradient(
-                gradient: Gradient(colors: [AE.brandLilac.opacity(0.35), Color.clear]),
-                center: .top, startRadius: 0, endRadius: 320
-            )
-            .frame(height: 360)
+            if let img = customImage {
+                imageLayer(img)
+            } else {
+                // 顶部一点柔光，层次靠材质不靠边框
+                RadialGradient(
+                    gradient: Gradient(colors: [AE.brandLilac.opacity(0.35), Color.clear]),
+                    center: .top, startRadius: 0, endRadius: 320
+                )
+                .frame(height: 360)
+            }
         }
-        .blur(radius: CGFloat(blurAmount))
         .ignoresSafeArea()
         .allowsHitTesting(false)
+        .onAppear { loadCustomImage() }
+        .onChange(of: revision) { _ in loadCustomImage() }
+        .onChange(of: imagePath) { _ in loadCustomImage() }
+    }
+
+    // MARK: - 图层
+
+    /// 自定义图：按位置模式铺满，模糊直接作用在图上。
+    /// `.blur` 会让边缘半透明，所以先按模糊量放大一点再裁掉，避免四周出现一圈灰边。
+    private func imageLayer(_ img: UIImage) -> some View {
+        GeometryReader { geo in
+            imageContent(img)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .scaleEffect(1 + CGFloat(blurAmount) * 0.02)
+                .blur(radius: CGFloat(blurAmount), opaque: true)
+                .clipped()
+        }
+    }
+
+    @ViewBuilder
+    private func imageContent(_ img: UIImage) -> some View {
+        switch imagePos {
+        case 1:
+            Image(uiImage: img).resizable().scaledToFit()
+        case 2:
+            Image(uiImage: img).resizable()
+        default:
+            Image(uiImage: img).resizable().scaledToFill()
+        }
+    }
+
+    /// 预设渐变（原逻辑不变，模糊仍整层生效）。
+    /// 先模糊再放大一点，把模糊产生的透明边缘推到屏幕外，避免四周出现一圈暗角。
+    private var gradientLayer: some View {
+        let preset = Preset(rawValue: style) ?? .cream
+        return LinearGradient(
+            colors: preset.colors(dark: scheme == .dark),
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+        .blur(radius: CGFloat(blurAmount))
+        .scaleEffect(1 + CGFloat(blurAmount) * 0.02)
+    }
+
+    // MARK: - 读图
+
+    private func loadCustomImage() {
+        guard !imagePath.isEmpty else {
+            customImage = nil
+            return
+        }
+        customImage = UIImage(contentsOfFile: imagePath)
     }
 }

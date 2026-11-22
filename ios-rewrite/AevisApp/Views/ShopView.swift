@@ -186,10 +186,19 @@ struct ShopView: View {
                         .frame(maxWidth: .infinity).padding(.top, 20)
                 }
 
-                payButton(
-                    title: "立即充值" + (selectedPackage.map { " ¥\($0.amountYuan)" } ?? ""),
-                    enabled: selectedPackage != nil
-                ) { showChannelPicker = true }
+                payButton(enabled: selectedPackage != nil, action: { showChannelPicker = true }) {
+                    HStack(spacing: 0) {
+                        Text("立即充值")
+                        if let sel = selectedPackage {
+                            Text(" ")
+                            AnimatedNumber(
+                                value: Double(sel.amountCents) / 100,
+                                specifier: sel.amountCents % 100 == 0 ? "¥%.0f" : "¥%.2f",
+                                font: .system(size: 15, weight: .semibold), color: .white
+                            )
+                        }
+                    }
+                }
             }
             .padding(18)
         }
@@ -225,31 +234,34 @@ struct ShopView: View {
 
     private var memberTab: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    AevisMascot(size: 56)
-                    VStack(alignment: .leading, spacing: 4) {
+                    AevisMascot(size: 52)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text("当前方案").font(.system(size: 12)).foregroundStyle(AE.textSecondary)
                         if let d = memberDays, d > 0 {
-                            AnimatedNumber(value: d, font: .system(size: 18, weight: .bold, design: .rounded), suffix: " 天")
+                            AnimatedNumber(value: d, font: .system(size: 19, weight: .bold, design: .rounded), suffix: " 天")
                                 .foregroundStyle(AE.textPrimary)
                         } else {
                             Text("未开通")
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .font(.system(size: 19, weight: .bold, design: .rounded))
                                 .foregroundStyle(AE.textPrimary)
                         }
                         Text("固定 30 天 · 每周一刷新额度")
-                            .font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+                            .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(14)
-                .glassCard(cornerRadius: AE.cardRadius, material: .regular)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 13)
+                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.18)
+                .shadow(color: AE.shadowColor, radius: 8, y: 3)
 
                 Text("用量越多越划算 · 固定 30 天 · 每周一刷新额度")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(AE.brandPurple)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 1)
 
                 ForEach(products) { prod in memberCell(prod) }
                 if products.isEmpty {
@@ -258,27 +270,66 @@ struct ShopView: View {
                         .frame(maxWidth: .infinity).padding(.top, 20)
                 }
 
-                payButton(
-                    title: selectedProduct.map { p in
-                        "开通 \(p.label.isEmpty ? "会员" : p.label) · \(p.days) 天 ¥\(String(format: "%.0f", Double(p.priceCents)/100))"
-                    } ?? "开通会员",
-                    enabled: selectedProduct != nil
-                ) { showChannelPicker = true }
+                // 底部开通按钮：价格用 AnimatedNumber，切档位时跟着流转
+                payButton(enabled: selectedProduct != nil, action: { showChannelPicker = true }) {
+                    HStack(spacing: 0) {
+                        if let p = selectedProduct {
+                            Text("开通 \(p.label.isEmpty ? "会员" : p.label) · \(p.days) 天 ¥")
+                            AnimatedNumber(
+                                value: Double(p.priceCents) / 100, specifier: "%.0f",
+                                font: .system(size: 15, weight: .semibold), color: .white
+                            )
+                        } else {
+                            Text("开通会员")
+                        }
+                    }
+                }
+                .padding(.top, 4)
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.top, 2)
+            .padding(.bottom, 20)
         }
     }
 
     /// 划线原价：现价 ÷ 0.9 向上取整再减 0.1，得到 16.9 / 24.9 / 49.9 / 97.9
     /// —— 对齐参考图「¥12.9 ¥11.61/月」那种「原价划线 + 现价」的写法。
-    private func origPrice(_ cents: Int) -> String {
+    /// 返回 Double 交给 `AnimatedNumber`，切换档位时原价也跟着滚动，不会突兀跳字。
+    private func origPriceValue(_ cents: Int) -> Double {
         let y = Double(cents) / 100.0
-        let o = (y / 0.9).rounded(.up) - 0.1
-        return String(format: "%.1f", o)
+        return (y / 0.9).rounded(.up) - 0.1
     }
 
-    private func ratioText(_ r: Double) -> String {
-        r == r.rounded() ? String(format: "%.0f", r) : String(format: "%.1f", r)
+    /// 用量说明行：倍数和百分比都用 `AnimatedNumber`，切档位时数字一起流动。
+    private func usageLine(_ prod: APIClient.ShopProduct, ratio: Double) -> some View {
+        let f = Font.system(size: 12.5)
+        let c = AE.textSecondary
+        return HStack(spacing: 0) {
+            if prod.percent > 100 {
+                Text("是基础用量的 ")
+                AnimatedNumber(value: ratio, specifier: "%.1f", font: f, color: c)
+                Text(" 倍 · ")
+            } else {
+                Text("基础用量")
+                if prod.percent > 0 { Text(" · ") }
+            }
+            if prod.percent > 0 {
+                AnimatedNumber(value: prod.percent, font: f, color: c, suffix: "%")
+            }
+        }
+        .font(f)
+        .foregroundStyle(c)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+    }
+
+    /// 手工划线：`AnimatedNumber` 是复合视图，拿不到 Text 的 strikethrough，
+    /// 用一条 0.8pt 的细线压在中线略偏上，视觉和 `strikethrough` 一致。
+    private var strikeLine: some View {
+        Rectangle()
+            .fill(AE.textSecondary.opacity(0.7))
+            .frame(height: 0.8)
+            .offset(y: -0.7)
     }
 
     /// 会员档位卡：照参考图版式 —— 大字档位名 + 推荐徽章 + 「是基础用量的 X 倍」
@@ -288,11 +339,9 @@ struct ShopView: View {
         let name = prod.label.isEmpty ? (prod.title.isEmpty ? "\(prod.days) 天会员" : prod.title) : prod.label
         let ratio = Double(prod.percent) / 100.0
         // 2026-11-22 用户要求：不写具体墨点数，只讲相对倍数 + 百分比
-        let baseText = prod.percent <= 100 ? "基础用量" : "是基础用量的 \(ratioText(ratio)) 倍"
-        let scaleText = prod.percent > 0 ? "\(baseText) · \(prod.percent)%" : baseText
         // 推荐位：第二档（XL）对齐参考图 Plus 的「推荐」徽章
         let recommended = prod.id == "p_xl"
-        let orig = origPrice(prod.priceCents)
+        let orig = origPriceValue(prod.priceCents)
 
         return Button { selectedProduct = prod } label: {
             HStack(alignment: .center, spacing: 10) {
@@ -309,15 +358,15 @@ struct ShopView: View {
                                 .background(Color.hex(0xE08A2E), in: Capsule())
                         }
                     }
-                    Text(scaleText)
-                        .font(.system(size: 12.5)).foregroundStyle(AE.textSecondary)
+                    usageLine(prod, ratio: ratio)
                 }
                 Spacer(minLength: 6)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("¥\(orig)")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AE.textSecondary)
-                        .strikethrough(true, color: AE.textSecondary.opacity(0.7))
+                    AnimatedNumber(
+                        value: orig, specifier: "¥%.1f",
+                        font: .system(size: 11.5), color: AE.textSecondary
+                    )
+                    .overlay(alignment: .center) { strikeLine }
                     AnimatedNumber(
                         value: Double(prod.priceCents) / 100, specifier: "¥%.0f",
                         font: .system(size: 25, weight: .heavy, design: .rounded), color: AE.accentDeep
@@ -325,15 +374,17 @@ struct ShopView: View {
                     Text("/月").font(.system(size: 10.5)).foregroundStyle(AE.textSecondary)
                 }
             }
-            .padding(.horizontal, 18).padding(.vertical, 17)
+            .padding(.horizontal, 17).padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassCard(cornerRadius: 22, material: .regular,
                        tint: on ? Color.hex(0xF2E2A8) : .white,
                        tintOpacity: on ? 0.72 : 0.10,
                        strokeColor: on ? Color.hex(0x8C8A80) : .white,
                        strokeOpacity: on ? 0.45 : 0.16)
+            .shadow(color: AE.shadowColor, radius: 9, y: 3)
         }
         .buttonStyle(AevisPressStyle(scale: 0.98))
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: on)
     }
 
     // MARK: - tab 2 重置卡
@@ -364,15 +415,19 @@ struct ShopView: View {
                 .padding(16)
                 .glassCard(cornerRadius: AE.cardRadius, material: .regular)
 
-                Button { } label: {
-                    Text("暂未开放购买")
-                        .font(.system(size: 15, weight: .semibold))
+                // 暂未开放：纯文字说明，不做成按钮（用户要求：没实现的不要能点的样子）
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12))
                         .foregroundStyle(AE.textSecondary)
-                        .frame(maxWidth: .infinity).frame(height: 48)
-                        .background(AE.accentSoft, in: Capsule())
+                        .padding(.top, 1)
+                    Text("重置卡暂未开放购买，开放后会直接出现在这里。")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(AE.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
-                .disabled(true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
             }
             .padding(18)
         }
@@ -420,13 +475,19 @@ struct ShopView: View {
 
     // MARK: - 通用按钮
 
-    private func payButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    /// 主操作按钮（通用）：内容由调用方给，价格之类的数字可以塞 `AnimatedNumber`。
+    private func payButton<L: View>(
+        enabled: Bool,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> L
+    ) -> some View {
         Button(action: action) {
-            Text(title)
+            label()
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(maxWidth: .infinity).frame(height: 48)
+                .frame(maxWidth: .infinity).frame(height: 50)
                 .background(enabled ? AE.accentDeep : AE.accentDeep.opacity(0.4), in: Capsule())
+                .shadow(color: enabled ? AE.accentDeep.opacity(0.24) : .clear, radius: 10, y: 4)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -500,59 +561,99 @@ struct ShopView: View {
 
     // MARK: - 支付：弹层
 
+    /// 支付方式：半屏 + 磨砂玻璃（照参考图 aa00e085 的浮起卡片式列表）。
+    /// 只改视觉，选完仍然走 `startPay(_:)` 原流程。
     private var channelPicker: some View {
-        VStack(spacing: 14) {
-            Text("选择支付方式")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(AE.accent)
-            if let a = activePay { Text(a.title).font(.system(size: 12)).foregroundStyle(AE.textSecondary) }
+        ZStack {
+            // 背后商城的档位卡透出模糊感（sheet 背景已在下方设为 clear）
+            GlassBackdrop()
 
-            Button { Task { await startPay(.alipay) } } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.hex(0x1677FF).opacity(0.16)).frame(width: 40, height: 40)
-                        Image(systemName: "a.circle.fill").font(.system(size: 20)).foregroundStyle(Color.hex(0x1677FF))
+            VStack(alignment: .leading, spacing: 13) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("选择支付方式")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .foregroundStyle(AE.accent)
+                        Text(activePay?.title ?? "到账后立即生效")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AE.textSecondary)
                     }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("支付宝").font(.system(size: 15, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                        Text("跳转支付宝收银台完成付款").font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+                    Spacer(minLength: 8)
+                    Button { showChannelPicker = false } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(AE.textSecondary)
+                            .frame(width: 28, height: 28)
+                            .background(AE.accentSoft, in: Circle())
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(AE.textSecondary)
+                    .buttonStyle(.plain)
                 }
-                .padding(12)
-                .glassCard(cornerRadius: 14, material: .thin, tintOpacity: 0.12)
-            }
-            .buttonStyle(.plain)
+                .padding(.bottom, 2)
 
-            Button { Task { await startPay(.wxpay) } } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.hex(0x1AAD19).opacity(0.16)).frame(width: 40, height: 40)
-                        Image(systemName: "message.circle.fill").font(.system(size: 20)).foregroundStyle(Color.hex(0x1AAD19))
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("微信支付").font(.system(size: 15, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                        Text("玻璃二维码，扫码付款").font(.system(size: 11)).foregroundStyle(AE.textSecondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 13)).foregroundStyle(AE.textSecondary)
-                }
-                .padding(12)
-                .glassCard(cornerRadius: 14, material: .thin, tintOpacity: 0.12)
-            }
-            .buttonStyle(.plain)
+                channelRow(
+                    title: "支付宝",
+                    note: "跳转支付宝收银台完成付款",
+                    glyph: "A",
+                    tint: Color.hex(0x1677FF)
+                ) { Task { await startPay(.alipay) } }
 
-            Button("取消") { showChannelPicker = false }
-                .font(.system(size: 14)).foregroundStyle(AE.textSecondary)
-                .padding(.top, 2)
+                channelRow(
+                    title: "微信支付",
+                    note: "玻璃二维码，扫码付款",
+                    glyph: "微",
+                    tint: Color.hex(0x1AAD19)
+                ) { Task { await startPay(.wxpay) } }
+
+                Text("付款完成后回到本页确认到账")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AE.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 6)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 22)
+            .padding(.bottom, 12)
         }
-        .padding(24)
         .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
         .glassSheetBackground()
         .onAppear { activePay = nil }
+    }
+
+    /// 支付方式行：彩色圆形字标 + 名称/说明 + 箭头，整行一张薄玻璃卡。
+    private func channelRow(
+        title: String, note: String, glyph: String, tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(tint).frame(width: 40, height: 40)
+                    Text(glyph)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(AE.textPrimary)
+                    Text(note)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AE.textSecondary)
+                }
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AE.textSecondary.opacity(0.45))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassCard(cornerRadius: 16, material: .thin, tintOpacity: 0.16)
+        }
+        .buttonStyle(AevisPressStyle(scale: 0.985))
     }
 
     private var weChatQRSheet: some View {
@@ -565,7 +666,8 @@ struct ShopView: View {
             onPaid(result)
         }
         .environmentObject(session)
-        .presentationDetents([.large])
+        // PayQRView 内部已是 .fraction(0.78) 半屏；外层必须一致，否则两层 detents 打架会退回整屏
+        .presentationDetents([.fraction(0.78)])
         .glassSheetBackground()
     }
 

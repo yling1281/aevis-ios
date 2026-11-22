@@ -1,15 +1,16 @@
 import SwiftUI
 
-/// 磨砂玻璃风格的半屏更新弹窗：强制模式关不掉、进不去；可选模式可「稍后」。
+/// 磨砂玻璃风格的半屏更新弹窗：强制模式关不掉、进不去；可选模式可「以后再说」。
 ///
-/// 视觉（2026-11-24 重做，照用户参考图）：整个弹窗磨砂玻璃、居中简笔猫脸 logo、
-/// 深藏青标题「新版本 X.X」、半透明磨砂说明卡、小灰字安装提示、深藏青实心胶囊主按钮。
+/// 视觉（2026-11-22 重做，照用户给的「忆伴」更新弹窗参考图）：
+/// 左对齐「自家狗 logo + 标题 + 版本行」→ 一张磨砂说明卡（顶部【更新内容】小标题 +
+/// 正文，行距 6，内容多可滚）→ 小灰字安装提示 → 底部深藏青实心大按钮「确定」。
 /// 层次靠材质与透明度区分，不靠边框；深色模式材质与文字语义色自适应。
 ///
 /// 行为完全保留：
 /// - 半屏由外层 `.sheet` 的 `.presentationDetents([.medium])` 决定（见 `AevisApp.swift`）；
-/// - 强制模式不显示「稍后」+ `.interactiveDismissDisabled(true)`，外层 Binding set 也被忽略；
-/// - 点「立即更新」走 `center.openInstall()`（OTA / ipa），文案诚实说明 iOS 安装限制。
+/// - 强制模式 `.interactiveDismissDisabled(true)`，且外层 Binding set 被忽略；
+/// - 点「确定」走 `center.openInstall()`（OTA / ipa），文案诚实说明 iOS 安装限制。
 struct UpdateSheet: View {
     @ObservedObject var center: AppUpdateCenter
 
@@ -23,40 +24,56 @@ struct UpdateSheet: View {
                 GlassBackdrop()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 13) {
-                        // MARK: 居中使用自家官网 logo（矢量狗，奶油底 + 柔紫光晕），与登录页同一只
-                        AevisMascot(size: 72)
-                            .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 14) {
+                        // MARK: 头部：logo + 「Aevis X.X 更新」+ 版本行（参考图左对齐版式）
+                        HStack(alignment: .center, spacing: 12) {
+                            AevisMascot(size: 46)
+                                .shadow(color: AE.shadowColor, radius: 6, y: 2)
 
-                        // MARK: 标题「新版本 X.X」——主视觉，深藏青粗体居中
-                        Text("新版本 \(info.latest)")
-                            .font(.system(size: 21, weight: .bold, design: .rounded))
-                            .foregroundStyle(ink)
-                            .multilineTextAlignment(.center)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Aevis \(info.latest) 更新")
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                                    .foregroundStyle(ink)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.85)
 
-                        // 强制 / 可选只用小字区分，不再用橙色警告三角当主视觉
-                        Text(info.force ? "需要更新后才能继续使用" : "有新版本可用")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AE.textSecondary)
+                                Text(info.force
+                                     ? "需要更新后才能继续使用"
+                                     : "当前 \(info.current) · 最新 \(info.latest)")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(AE.textSecondary)
+                                    .monospacedDigit()
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.top, 2)
 
-                        Text("当前 \(info.current) · 最新 \(info.latest)")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AE.textSecondary.opacity(0.85))
+                        // MARK: 正文：一张磨砂卡，顶部小标题 + 说明正文
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("【更新内容】")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(ink)
 
-                        // MARK: 更新说明——半透明白色磨砂卡片，深蓝灰字，行距舒服，内容多可滚
-                        if !info.notes.isEmpty {
-                            ScrollView(showsIndicators: false) {
-                                Text(info.notes)
+                            if info.notes.isEmpty {
+                                Text("本次更新包含稳定性改进与问题修复。")
                                     .font(.system(size: 14))
                                     .lineSpacing(6)
-                                    .foregroundStyle(ink)
+                                    .foregroundStyle(AE.textPrimary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(14)
+                            } else {
+                                ScrollView(showsIndicators: false) {
+                                    Text(info.notes)
+                                        .font(.system(size: 14))
+                                        .lineSpacing(6.5)
+                                        .foregroundStyle(AE.textPrimary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(maxHeight: 168)
                             }
-                            .frame(maxHeight: 140)
-                            .glassCard(cornerRadius: 16)
-                            .padding(.top, 2)
                         }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .glassCard(cornerRadius: 18, material: .thin, tintOpacity: 0.20)
 
                         // MARK: 底部小灰字安装提示（小爱心弱化点缀）
                         HStack(alignment: .top, spacing: 5) {
@@ -70,39 +87,36 @@ struct UpdateSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 1)
 
-                        // MARK: 操作按钮——主按钮深藏青实心胶囊；「稍后」低调幽灵样式
-                        HStack(spacing: 10) {
-                            if !info.force {
-                                Button { center.dismiss() } label: {
-                                    Text("稍后")
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundStyle(ink)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 50)
-                                        .glassCard(cornerRadius: 25, material: .thin,
-                                                   tintOpacity: 0.08, strokeOpacity: 0.18)
-                                }
-                                .buttonStyle(.plain)
-                            }
+                        // MARK: 主按钮：深藏青实心大按钮「确定」
+                        Button { center.openInstall() } label: {
+                            Text("确定")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                                .background(AE.accentDeep, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .shadow(color: AE.accentDeep.opacity(0.28), radius: 10, y: 4)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 6)
 
-                            Button { center.openInstall() } label: {
-                                Text("立即更新")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(.white)
+                        // 非强制更新保留一条低调的退出路径（强制更新必须更新完才能继续）
+                        if !info.force {
+                            Button { center.dismiss() } label: {
+                                Text("以后再说")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(AE.textSecondary)
                                     .frame(maxWidth: .infinity)
-                                    .frame(height: 50)
-                                    .background(AE.accentDeep, in: Capsule())
-                                    .shadow(color: AE.accentDeep.opacity(0.28), radius: 10, y: 4)
+                                    .frame(height: 34)
                             }
                             .buttonStyle(.plain)
                         }
-                        .padding(.top, 6)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 20)
-                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 20)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .interactiveDismissDisabled(info.force)

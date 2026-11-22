@@ -1,16 +1,15 @@
 import SwiftUI
 
-/// 主页（第 1 轮骨架，仿安卓 ShaChang）：用量额度卡 + 服务九宫格 + 发现九宫格。
+/// 主页：用量额度卡 + 服务入口（只放真正能跳的：商城 / 会员，都进 ShopView）。
 /// 整体可滚动（主页允许滚，登录页才禁止）；底部留 TabBar 高度 padding。
-/// 卡片全部磨砂（复用 GlassComponents），九宫格用彩色圆角图标底（按用户截图）。
-/// 未实现的入口统一 `showTip("「X」即将上线")` —— 绝不假装能进。
+/// 卡片全部磨砂（复用 GlassComponents），入口用彩色圆角图标底（按用户截图）。
+/// 没做的功能不加按钮 —— 用户明确要求「目前没有的功能先不加按钮」。
 struct HomeView: View {
     /// 商城入口回调：由 MainTabView 注入以全屏拉起 ShopView；单独预览时为 nil 用内部占位。
     var onShop: (() -> Void)? = nil
     @State private var showShop = false        // 仅在 onShop == nil 时用的占位
     @State private var tip = ""
     @State private var serviceExpanded = true
-    @State private var discoverExpanded = true
 
     /// 示例用量（第 1 轮先用展示值；后续接 balance/wallet API）。
     /// usedPercent 用 @State 从 0 起、onAppear 置目标值，触发 AnimatedNumber 的开屏滚动。
@@ -24,8 +23,6 @@ struct HomeView: View {
                 usageCard
                 sectionHeader("服务", expanded: $serviceExpanded)
                 if serviceExpanded { serviceGrid }
-                sectionHeader("发现", expanded: $discoverExpanded)
-                if discoverExpanded { discoverGrid }
                 if !tip.isEmpty { tipBanner }
             }
             .padding(.horizontal, 18)
@@ -166,37 +163,15 @@ struct HomeView: View {
         let badge: String = ""
     }
 
+    /// 只放真正能跳的入口（商城 / 会员都进 ShopView）；没做的功能不加按钮。
     private let serviceItems: [HomeEntry] = [
         HomeEntry(label: "商城", symbol: "bag.fill", color: Color.hex(0xE8913F)),
-        HomeEntry(label: "装扮", symbol: "paintbrush.fill", color: Color.hex(0x9B8AF0)),
-        HomeEntry(label: "日志", symbol: "book.closed.fill", color: Color.hex(0x4A90D9)),
-        HomeEntry(label: "表情包", symbol: "face.smiling.fill", color: Color.hex(0xE87FA6)),
-        HomeEntry(label: "工具", symbol: "wrench.fill", color: Color.hex(0x8A93A3)),
         HomeEntry(label: "会员", symbol: "crown.fill", color: Color.hex(0xE5484D)),
-        HomeEntry(label: "导入DeepSeek", symbol: "key.fill", color: Color.hex(0x2E86AB)),
-    ]
-
-    private let discoverItems: [HomeEntry] = [
-        HomeEntry(label: "论坛", symbol: "bubble.left.and.bubble.right.fill", color: Color.hex(0x5B8DEF)),
-        HomeEntry(label: "活动", symbol: "gift.fill", color: Color.hex(0xF0A63F)),
-        HomeEntry(label: "广场", symbol: "square.grid.2x2.fill", color: Color.hex(0x7B8CF0)),
-        HomeEntry(label: "签到", symbol: "calendar.badge.checkmark", color: Color.hex(0x4AB85C)),
-        HomeEntry(label: "加入群聊", symbol: "person.3.fill", color: Color.hex(0x9B8AF0)),
     ]
 
     private var serviceGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
             ForEach(serviceItems) { item in
-                gridCell(item)
-            }
-        }
-        .padding(12)
-        .glassCard(cornerRadius: AE.cardRadius, material: .thin)
-    }
-
-    private var discoverGrid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
-            ForEach(discoverItems) { item in
                 gridCell(item)
             }
         }

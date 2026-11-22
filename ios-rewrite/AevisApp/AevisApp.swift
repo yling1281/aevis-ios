@@ -106,7 +106,8 @@ struct AevisApp: App {
                 #endif
             }
             .environmentObject(session)
-            .preferredColorScheme(nil)   // 跟随系统（与安卓 1.1.10 一致）
+            // 跟随设置页的「外观」三档（themeMode）——挂在根视图上，全 App 一起变
+            .modifier(ThemeModeModifier())
             .task {
                 guard !isDemo else { return }   // CI 截图模式不发网络请求
                 await update.checkIfNeeded()    // 冷启动检查一次（6 小时节流）
@@ -121,5 +122,22 @@ struct AevisApp: App {
                     .glassSheetBackground()
             }
         }
+    }
+}
+
+// MARK: - 全局外观
+
+/// 外观三档（`themeMode` 0 跟随系统 / 1 浅色 / 2 深色），与设置页共用同一个 AppStorage 键。
+///
+/// 2026-11-22：原来 `preferredColorScheme` 只写在 `SettingsView` 自己身上，
+/// 设置里切浅色/深色只有设置页变、别处不变，等于假开关。提到根视图（这里）才对全 App 生效：
+/// 用 ViewModifier 而不是在 `App` 上挂 @AppStorage，保证切档位时这一层会重新求值。
+private struct ThemeModeModifier: ViewModifier {
+    @AppStorage("themeMode") private var themeMode = 0
+
+    func body(content: Content) -> some View {
+        content.preferredColorScheme(
+            themeMode == 1 ? .light : (themeMode == 2 ? .dark : nil)
+        )
     }
 }

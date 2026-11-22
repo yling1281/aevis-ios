@@ -11,6 +11,8 @@ import SwiftUI
 /// 功能保持不变：demo 分支（CI 截图）、reload()、lastText/timeText/abs、点行进 ChatView 都不动。
 struct ChatListView: View {
     @EnvironmentObject private var session: Session
+    /// 云端备份：恢复确认弹框、手动恢复入口都靠它。
+    @ObservedObject private var backup = CloudBackup.shared
 
     /// 140：CI 截图用（`-demo list`），Release 编不进去
     #if DEBUG
@@ -20,6 +22,10 @@ struct ChatListView: View {
     @State private var personas: [Persona] = []
     @State private var loading = false
     @State private var error = ""
+    /// 手动「从云端恢复」的结果提示（几秒后自动消失）。
+    @State private var restoreToast = ""
+    /// 长按菜单选中的「要打开角色设置」的角色。
+    @State private var settingsPersona: Persona?
 
     var body: some View {
         NavigationStack {
@@ -41,17 +47,85 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await reload() }
+                    Menu {
+                        Button {
+                            Task { await reload() }
+                        } label: {
+                            Label("刷新", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        // 手动补恢复入口（设置页不让改，这里给一个随时可用的入口）
+                        Button {
+                            Task { await manualRestore() }
+                        } label: {
+                            Label("从云端恢复", systemImage: "arrow.down.circle")
+                        }
                     } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 15, weight: .medium))
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(AE.accent)
                     }
                 }
             }
             .task { await reload() }
             .refreshable { await reload() }
+            // 「先问再恢复」确认框（检测到云端有数据时由 CloudBackup 置 pendingRestore）
+            .alert(
+                "检测到云端聊天记录",
+                isPresented: Binding(
+                    get: { backup.pendingRestore != nil },
+                    // alert 只能通过按钮关闭：「恢复」调 confirmRestore、「暂不恢复」调 declineRestore，
+                    // 两者都会把 pendingRestore 置 nil。这里 set 必须留空 —— 否则点「恢复」时
+                    // 系统触发的 dismiss 会抢在 confirmRestore 前把 pendingRestore 当成「拒绝」。
+                    set: { _ in }
+                ),
+                presenting: backup.pendingRestore
+            ) { _ in
+                Button("恢复") {
+                    Task {
+                        await backup.confirmRestore()
+                        await reload()
+                        showToast("已从云端恢复")
+                    }
+                }
+                Button("暂不恢复", role: .cancel) {
+                    backup.declineRestore()
+                }
+            } message: { p in
+                Text("云端有 \(p.convCount) 个会话、共 \(p.msgCount) 条聊天记录（来自安卓）。是否恢复到本机？恢复只补充不覆盖，本地已有记录不会丢。")
+            }
+            // 手动恢复结果提示
+            .overlay(alignment: .bottom) {
+                if !restoreToast.isEmpty {
+                    Text(restoreToast)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Capsule().fill(AE.accentDeep.opacity(0.92)))
+                        .padding(.bottom, 24)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+    }
+
+    /// 手动「从云端恢复」：清拒绝 flag → 拉取合并 → 提示 + 重载列表。
+    @MainActor
+    private func manualRestore() async {
+        guard let token = session.token, !token.isEmpty else {
+            showToast("请先登录")
+            return
+        }
+        await backup.restoreNow(token: token, email: session.email)
+        await reload()
+        showToast(backup.lastSyncText.isEmpty ? "已尝试从云端恢复" : backup.lastSyncText)
+    }
+
+    @MainActor
+    private func showToast(_ text: String) {
+        withAnimation { restoreToast = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run { withAnimation { restoreToast = "" } }
         }
     }
 
@@ -91,6 +165,20 @@ struct ChatListView: View {
                     row(p)
                 }
                 .buttonStyle(.plain)
+                // 长按 → 角色设置（不占用行内空间，不破坏现有布局）
+                .contextMenu {
+                    Button {
+                        settingsPersona = p
+                    } label: {
+                        Label("角色设置", systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
+        }
+        // 长按菜单选「角色设置」→ sheet 呈现（NavigationStack 包裹以支持标题）
+        .sheet(item: $settingsPersona) { p in
+            NavigationStack {
+                CharacterSettingsView(persona: p)
             }
         }
     }

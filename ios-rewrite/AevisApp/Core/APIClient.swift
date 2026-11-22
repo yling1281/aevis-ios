@@ -28,42 +28,98 @@ struct APIClient {
         let name: String      // 北京 / 香港 / 直连 / 备用
         let base: String      // 真实地址；留空 = 暂不可用
         let pinning: Bool     // 仅「直连」为 true（自签证书）
-        var note: String = "" // 半窗里的短注（默认/备用/最快（自签证书））
+        var note: String = "" // 半窗里的用户向短注（最快/默认/备用）
     }
 
+    /// 线路顺序（2026-11-24 用户拍板）：「默认直连，实在不行切北京，还有备用，再是香港。」
+    /// 数组顺序 = 回落顺序：直连 → 北京 → 备用 → 香港。UI 只显示名字，地址不上屏。
+    ///
+    /// 直连是自签证书（CN=103.236.72.107 / Aevis Direct CA，有效期至 2036），iOS 严格校验会
+    /// 报 SSL 错误 → pinning=true 让 makeSession 挂 PinDelegate 放行该 host:port 的 serverTrust，
+    /// Info.plist 的 NSExceptionDomains 也列了该 IP，双保险。443 不通，只走 54319。
+    /// 真机大概率 SSL 失败 → 失败后按本数组顺序自动回落，并把失败线路记进 `failedLines`（降权），
+    /// 下次启动直接跳过已知失败线路，不再每次先撞直连卡几秒。
     static let lines: [Line] = [
-        Line(id: "bj",   name: "北京", base: "https://q7m3ax.lingyan.cyou",     pinning: false, note: "默认（隧道）"),
-        // 2026-11-23 生产实测（curl --noproxy '*'）：
-        //   直连 https://103.236.72.107:54319/v1/app/config       → 200 / 0.14s（最快，自签证书）
-        //   香港 https://lingyan.cyou/prod-api/aevis/v1/app/config → 200 / 1.37s
-        //   备用 https://aevis.cn/prod-api/aevis/v1/app/config     → 200 / 1.41s（配置与香港一致）
-        // 香港之前被判 404 是误测了不带 /prod-api/aevis 前缀的根路径，已恢复。
-        // 直连是自签证书（CN=103.236.72.107 / Aevis Direct CA，有效期至 2036），iOS 严格校验
-        // 会报 SSL 错误 → pinning=true 让 makeSession 挂 PinDelegate 放行该 host:port 的
-        // serverTrust，Info.plist 的 NSExceptionDomains 也列了该 IP，双保险。443 不通，只走 54319。
-        Line(id: "hk",   name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "已验证（2026-11-23）"),
-        Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319", pinning: true,  note: "最快·自签证书"),
-        Line(id: "spare", name: "备用", base: "https://aevis.cn/prod-api/aevis", pinning: false, note: "备用（已验证）")
+        // name 用服务器 IP 的**所在地**（2026-11-24 用户拍板，纯地名，不带任何 IP/后缀）：
+        //   陕西 103.236.72.107（电信陕西云基地；.110 是同机另一入口，不单独成条）
+        //   北京 123.57.33.160（阿里云）
+        //   香港 38.76.168.61（aevis.cn 也解析到它，已合并成一条，避免出现两条「香港」）
+        // 不出现任何 IP 字符串、日期、「自签证书/隧道」等工程词。
+        // ⚠️ 数组顺序 = 回落顺序：陕西(直连) → 北京 → 香港，不要打乱。
+        Line(id: "direct", name: "陕西", base: "https://103.236.72.107:54319",     pinning: true,  note: "最快"),
+        Line(id: "bj",     name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "默认"),
+        Line(id: "hk",     name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "备用"),
     ]
 
     private static let activeKey = "apiLineId"
+    /// 已知失败线路的 id 集合（持久化）：失败后降权，下次启动不优先撞它。
+    private static let failedKey = "apiFailedLines"
 
-    /// 当前生效线路（重启沿用）。若持久化的是真正失效线路（base 空 = 实测不可用），
-    /// 自动回落到默认，避免上次的选择导致这次启动连不上。
-    /// 直连已于 2026-11-23 恢复（base 非空 + PinDelegate），选中后不会被回落。
+    /// 用户明确选择的线路（不经失败降权）。默认 `direct`（用户拍板）。
+    static var preferredLineID: String {
+        UserDefaults.standard.string(forKey: activeKey) ?? "direct"
+    }
+
+    /// 已知失败的线路 id（逗号分隔持久化）。用于降权排序，不永久删除。
+    static var failedLineIDs: Set<String> {
+        let raw = UserDefaults.standard.string(forKey: failedKey) ?? ""
+        return Set(raw.split(separator: ",").map(String.init).filter { !$0.isEmpty })
+    }
+
+    /// 标记某线路失败（降权）。下次 `activeLine` 会跳过它（除非全失败）。
+    static func markLineFailed(_ id: String) {
+        var s = failedLineIDs
+        s.insert(id)
+        UserDefaults.standard.set(s.joined(separator: ","), forKey: failedKey)
+    }
+
+    /// 清除某线路的失败标记（探测成功 / 用户手动切换时调用）。
+    static func clearLineFailed(_ id: String) {
+        var s = failedLineIDs
+        if s.contains(id) {
+            s.remove(id)
+            UserDefaults.standard.set(s.joined(separator: ","), forKey: failedKey)
+        }
+    }
+
+    /// 有效回落顺序：首选（用户选择）优先，其次按 `lines` 数组顺序，跳过已知失败线路；
+    /// 若所有线路都失败过，则回退到完整数组顺序（不能没有线路）。
+    static var orderedLines: [Line] {
+        let preferred = preferredLineID
+        let failed = failedLineIDs
+        var ordered: [Line] = []
+        if let first = lines.first(where: { $0.id == preferred }) { ordered.append(first) }
+        for l in lines where l.id != preferred { ordered.append(l) }
+        let healthy = ordered.filter { !failed.contains($0.id) && !$0.base.isEmpty }
+        return healthy.isEmpty ? ordered.filter { !$0.base.isEmpty } : healthy
+    }
+
+    /// 当前生效线路（重启沿用）。按回落顺序取第一条「地址非空且未标记失败」的线路。
+    /// 若持久化的是真正失效线路（base 空），自动回到顺序第一条。
     static var activeLine: Line {
-        let id = UserDefaults.standard.string(forKey: activeKey) ?? "bj"
-        let picked = lines.first { $0.id == id } ?? lines[0]
-        return picked.base.isEmpty ? lines[0] : picked
+        // orderedLines 已把首选排到第一、过滤掉空地址与已知失败线（全失败时回退完整非空列表）
+        orderedLines.first ?? lines[0]
     }
 
     static func setActiveLine(_ id: String) {
         UserDefaults.standard.set(id, forKey: activeKey)
+        // 用户主动选择 = 信任它，清掉失败标记
+        clearLineFailed(id)
+        trialLineID = nil            // 真实切换，取消回落试用态
         Self.session = makeSession(for: activeLine)
     }
 
+    /// 请求真正使用的线路：回落试用中（trialLineID）优先，否则用 activeLine。
+    /// `request`/`sendChatStream`/`base` 都必须用它，保证 host 与 session 对应同一条线路。
+    static var currentLine: Line {
+        if let tid = trialLineID, let t = lines.first(where: { $0.id == tid }) {
+            return t
+        }
+        return activeLine
+    }
+
     /// 兼容旧代码（头像相对路径拼接等）：默认线路的地址。
-    static var base: String { activeLine.base.isEmpty ? lines[0].base : activeLine.base }
+    static var base: String { currentLine.base.isEmpty ? lines[0].base : currentLine.base }
 
     // MARK: - 自签证书 pinning（仅 host:port 一处）
 
@@ -113,7 +169,49 @@ struct APIClient {
         token: String? = nil,
         account: String? = nil
     ) async throws -> [String: Any] {
-        let host = activeLine.base
+        // 默认走「自动回落」：按 orderedLines（直连→北京→备用→香港）逐条试，
+        // 只有线路级错误（SSL/连不上/超时/5xx）才换线；业务错误（401/402/4xx）立即抛。
+        // 成功后确立该线路为首选并持久化 —— 真机直连 SSL 失败一次后，下次启动直接走北京，
+        // 不再每次先撞直连卡几秒。所有调用方无需改动即获得回落能力。
+        let ordered = orderedLines
+        guard !ordered.isEmpty else { throw APIError.http(0, "线路暂不可用") }
+        var lastError: Error?
+        for (idx, line) in ordered.enumerated() {
+            do {
+                let json = try await attemptRequest(
+                    path, method: method, body: body, token: token, account: account, line: line)
+                clearLineFailed(line.id)
+                if preferredLineID != line.id {
+                    // 记住更优线路（例如直连失败后落到北京），下次启动直接用
+                    UserDefaults.standard.set(line.id, forKey: activeKey)
+                }
+                if trialLineID != nil { trialLineID = nil }
+                Self.session = makeSession(for: line)
+                if idx > 0 { lastSwitchNote = "已切换到 \(line.name)" }
+                return json
+            } catch {
+                lastError = error
+                if Self.isLineError(error) {
+                    markLineFailed(line.id)     // 降权，下次不再优先撞
+                    continue
+                }
+                throw error                     // 业务错误不换线
+            }
+        }
+        trialLineID = nil
+        throw lastError ?? APIError.http(0, "所有线路不可用")
+    }
+
+    /// 单次请求（指定线路，不改全局状态）。`request` 的回落循环用它。
+    private static func attemptRequest(
+        _ path: String,
+        method: String,
+        body: [String: Any]?,
+        token: String?,
+        account: String?,
+        line: Line
+    ) async throws -> [String: Any] {
+        let host = line.base
         guard !host.isEmpty else { throw APIError.http(0, "线路暂不可用") }
         guard let url = URL(string: host + path) else {
             throw APIError.decode("bad url: \(path)")
@@ -126,7 +224,8 @@ struct APIClient {
         if let account { req.setValue(account, forHTTPHeaderField: "X-Account") }
         if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
 
-        let (data, resp) = try await session.data(for: req)
+        let sess = makeSession(for: line)       // 直连带 PinDelegate，其它用 shared
+        let (data, resp) = try await sess.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
         let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200..<300).contains(code) else {
@@ -210,11 +309,14 @@ struct APIClient {
     static func sendChat(
         token: String,
         model: String,
-        messages: [[String: String]]
+        messages: [[String: String]],
+        temperature: Double? = nil
     ) async throws -> String {
+        var body: [String: Any] = ["model": model, "messages": messages, "stream": false]
+        if let temperature { body["temperature"] = temperature }
         let json = try await request(
             "/v1/llm/chat", method: "POST",
-            body: ["model": model, "messages": messages, "stream": false],
+            body: body,
             token: token
         )
         let d = (json["data"] as? [String: Any]) ?? json
@@ -240,9 +342,59 @@ struct APIClient {
         token: String,
         model: String,
         messages: [[String: String]],
+        temperature: Double? = nil,
         onDelta: @escaping (String) -> Void
     ) async throws -> String {
-        let host = activeLine.base
+        // 线路回落：按 orderedLines（直连→北京→备用→香港）逐条试，线路级错误才换线。
+        // 注意流式一旦开始吐字就不能中途换线，否则会出现半截回复 —— 故回落只在
+        // 「连接阶段失败（一个增量都没出）」时进行；已出字后失败由上层原地提示重发。
+        let ordered = orderedLines
+        guard !ordered.isEmpty else { throw APIError.http(0, "线路暂不可用") }
+        var lastError: Error?
+        for (idx, line) in ordered.enumerated() {
+            // emitted 记录本条线路是否已经吐过字 —— 已出字后绝不换线重来（会重复内容）
+            var emitted = false
+            do {
+                let (full, gotAny) = try await attemptChatStream(
+                    line: line, token: token, model: model, messages: messages,
+                    temperature: temperature,
+                    onDelta: { d in emitted = true; onDelta(d) })
+                clearLineFailed(line.id)
+                if preferredLineID != line.id {
+                    UserDefaults.standard.set(line.id, forKey: activeKey)
+                }
+                trialLineID = nil
+                Self.session = makeSession(for: line)
+                if idx > 0 { lastSwitchNote = "已切换到 \(line.name)" }
+                // 没吐出任何增量（服务端没流式）：回退非流式补一次，避免空白
+                if !gotAny {
+                    let whole = try await sendChat(token: token, model: model, messages: messages)
+                    if !whole.isEmpty { onDelta(whole) }
+                    return whole
+                }
+                return full
+            } catch {
+                lastError = error
+                // 已经吐过字：不换线（否则新线路的内容会重复拼到同一气泡），直接抛给上层
+                if emitted { throw error }
+                if Self.isLineError(error) {
+                    markLineFailed(line.id)
+                    continue
+                }
+                throw error
+            }
+        }
+        trialLineID = nil
+        throw lastError ?? APIError.http(0, "所有线路不可用")
+    }
+
+    /// 单次 SSE 流式请求（指定线路）。返回 (完整文本, 是否收到过增量)。
+    private static func attemptChatStream(
+        line: Line, token: String, model: String,
+        messages: [[String: String]], temperature: Double?,
+        onDelta: @escaping (String) -> Void
+    ) async throws -> (String, Bool) {
+        let host = line.base
         guard !host.isEmpty else { throw APIError.http(0, "线路暂不可用") }
         guard let url = URL(string: host + "/v1/llm/chat") else {
             throw APIError.decode("bad url: /v1/llm/chat")
@@ -254,39 +406,33 @@ struct APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": model, "messages": messages, "stream": true
-        ])
+        var body: [String: Any] = ["model": model, "messages": messages, "stream": true]
+        if let temperature { body["temperature"] = temperature }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        // 用当前线路的 session（直连走自签证书 pinning），与底层 request 保持一致
-        let (bytes, resp) = try await session.bytes(for: req)
+        // 该线路独立 session（直连走自签 pinning）
+        let sess = makeSession(for: line)
+        let (bytes, resp) = try await sess.bytes(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
         guard (200..<300).contains(code) else { throw APIError.http(code, "") }
 
         var full = ""
         var gotAny = false
-        for try await line in bytes.lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        for try await raw in bytes.lines {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.hasPrefix("data:") else { continue }
             let payload = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
             if payload == "[DONE]" { break }
             guard !payload.isEmpty,
-                  let raw = payload.data(using: .utf8),
-                  let obj = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any],
+                  let data = payload.data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let delta = Self.streamDelta(from: obj),
                   !delta.isEmpty else { continue }
             gotAny = true
             full += delta
             onDelta(delta)
         }
-
-        // 一个增量都没有：服务端多半没做流式，回退非流式补上，避免空白卡死
-        if !gotAny {
-            let whole = try await sendChat(token: token, model: model, messages: messages)
-            if !whole.isEmpty { onDelta(whole) }
-            return whole
-        }
-        return full
+        return (full, gotAny)
     }
 
     /// 从一段 SSE JSON 里挖出文本增量；挖不到返回 nil（调用方 `continue`）。
@@ -545,6 +691,63 @@ struct APIClient {
         }
     }
 
+    // MARK: - 模型列表（2026-11-24 每角色独立选模型）
+
+    /// 一个可对话模型（字段对齐 `GET /v1/llm/models` 的 data.models[]）。
+    /// 该接口是**公开**的（无需登录也能拿），所以 `llmModels()` 不传 token。
+    struct LLMModel: Identifiable, Equatable {
+        let id: String          // 模型 id（deepseek-flash 等），发送时用
+        let label: String       // 展示名（DeepSeek V4.1 Flash）
+        let note: String        // 说明（可为空）
+        let billing: String     // per_token / per_call
+        let isDefault: Bool     // 服务端默认模型
+
+        /// 计费方式的中文短标（给选择列表用）。
+        var billingText: String {
+            switch billing {
+            case "per_token": return "按 token"
+            case "per_call":  return "按次"
+            default:          return billing.isEmpty ? "" : billing
+            }
+        }
+
+        /// 右上角按钮用的短名：label 取不到就退回 id。
+        var shortLabel: String {
+            // 尽量短：优先括号前的部分，仍过长就截断
+            let base = label.isEmpty ? id : label
+            return base.count > 12 ? String(base.prefix(12)) + "…" : base
+        }
+    }
+
+    /// 模型列表 + 服务端默认模型 id。公开接口，失败抛 `APIError`。
+    struct LLMModelList {
+        let defaultID: String
+        let models: [LLMModel]
+    }
+
+    /// GET /v1/llm/models —— 公开接口（无需登录）。返回默认 id + 模型数组。
+    static func llmModels() async throws -> LLMModelList {
+        // 走 request（已内置线路回落）；该接口公开，不传 token 也能拿
+        let json = try await request("/v1/llm/models")
+        let d = (json["data"] as? [String: Any]) ?? json
+        let defaultID = (d["default"] as? String) ?? "deepseek-flash"
+        let arr = (d["models"] as? [[String: Any]])
+            ?? (d["rows"] as? [[String: Any]])
+            ?? (json["models"] as? [[String: Any]])
+            ?? []
+        let models: [LLMModel] = arr.compactMap { r in
+            guard let id = (r["id"] as? String) ?? (r["name"] as? String), !id.isEmpty else { return nil }
+            return LLMModel(
+                id: id,
+                label: (r["label"] as? String) ?? (r["name"] as? String) ?? id,
+                note: (r["note"] as? String) ?? "",
+                billing: (r["billing"] as? String) ?? "",
+                isDefault: (r["default"] as? Bool) ?? (id == defaultID)
+            )
+        }
+        return LLMModelList(defaultID: defaultID, models: models)
+    }
+
     static func balance(token: String) async throws -> Int {
         let json = try await request("/v1/llm/balance", token: token)
         let d = (json["data"] as? [String: Any]) ?? json
@@ -699,6 +902,30 @@ struct APIClient {
         case unavailable      // 地址为空
     }
 
+    /// 单次轻量探测，返回毫秒延迟；失败/超时返回 nil。供登录页线路选择 UI 显示延迟。
+    ///
+    /// 走 `GET {base}/v1/app/config`，超时 **3 秒**；每条线路独立 session（直连带 pinning）。
+    /// 用户要求的方法名/签名固定为 `lineLatency(_:) async -> Int?`，LoginView 只调用它。
+    static func lineLatency(_ line: Line) async -> Int? {
+        guard !line.base.isEmpty, let url = URL(string: line.base + "/v1/app/config") else {
+            return nil
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 3
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let sess = makeSession(for: line)     // 直连这条带 PinDelegate
+        let t0 = Date()
+        do {
+            let (_, resp) = try await sess.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            guard (200..<400).contains(code) else { return nil }
+            return Int(Date().timeIntervalSince(t0) * 1000)
+        } catch {
+            return nil
+        }
+    }
+
     /// 探一条线路：`GET {base}/v1/app/config`，2s 超时，3 次取中位数。
     static func probe(_ line: Line) async -> LineState {
         if line.base.isEmpty { return .unavailable }
@@ -728,21 +955,41 @@ struct APIClient {
         return .ok(samples.sorted()[samples.count / 2])
     }
 
-    /// 带一次自动切换的请求：失败就换下一条可用线路重试一次，并记住。
+    /// 兼容旧调用名：`request` 本身已内置回落，这里直接转发。
     static func requestWithFailover(
         _ path: String, method: String = "GET",
         body: [String: Any]? = nil, token: String? = nil, account: String? = nil
     ) async throws -> [String: Any] {
-        do {
-            return try await request(path, method: method, body: body, token: token, account: account)
-        } catch {
-            let current = activeLine
-            guard let next = lines.first(where: { $0.id != current.id && !$0.base.isEmpty }) else {
-                throw error
-            }
-            setActiveLine(next.id)
-            lastSwitchNote = "当前线路不可用，已切到 \(next.name)"
-            return try await request(path, method: method, body: body, token: token, account: account)
+        try await request(path, method: method, body: body, token: token, account: account)
+    }
+
+    /// 回落试用态：非 nil 时 `currentLine` 优先用它（`request` 回落循环里不直接依赖它，
+    /// 保留给未来单次试探场景；`request` 走的是 attemptRequest(line:) 不会污染全局）。
+    private static var trialLineID: String?
+
+    /// 判断是否「线路级错误」（值得换线）：SSL / 连不上 / 超时 / 线路不可用 / 5xx。
+    /// 业务错误（401/402/403/4xx）不换线，直接抛给上层处理。
+    static func isLineError(_ error: Error) -> Bool {
+        if let api = error as? APIError, case let .http(code, _) = api {
+            return code == 0 || (500...599).contains(code)
+        }
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        switch ns.code {
+        case NSURLErrorServerCertificateUntrusted,
+             NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid,
+             NSURLErrorClientCertificateRejected,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorTimedOut,
+             NSURLErrorNetworkConnectionLost,
+             NSURLErrorCannotFindHost,
+             NSURLErrorDNSLookupFailed:
+            return true
+        default:
+            return false
         }
     }
 

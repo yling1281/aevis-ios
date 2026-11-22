@@ -15,10 +15,117 @@ final class CloudBackup: ObservableObject {
     @Published private(set) var lastRestoreAt: Date?
     @Published private(set) var lastRestoreCount: Int = 0
 
+    /// 待用户确认的云端恢复请求（登录后探测到云端有数据时置位，UI 弹框）。
+    /// 2026-11-24 用户要求：**先问再恢复**，不再静默直接恢复。
+    @Published var pendingRestore: PendingRestore?
+    /// 用户点过「暂不恢复」后置 true，之后不再自动弹框（设置页手动入口仍可用）。
+    @Published private(set) var restoreDeclined = false
+
+    /// 待确认的恢复信息（云端有多少条会话/多少条消息）。
+    struct PendingRestore: Identifiable {
+        let id = UUID()
+        let token: String
+        let convCount: Int      // 会话数
+        let msgCount: Int       // 消息总条数
+    }
+
+    /// 「暂不恢复」的持久化 flag（按 token 前缀存，换号后会重新问）。
+    private var declineKey: String {
+        let t = (Session.shared.token ?? "").prefix(8)
+        return "cloudRestoreDeclined_\(t)"
+    }
+
     /// 发消息后的去抖推送任务：新调用先 cancel 旧的，2 秒后执行。
     private var pushTask: Task<Void, Never>?
 
-    // MARK: - 恢复（登录后静默执行）
+    // MARK: - 恢复（登录后先探测 → 用户确认）
+
+    /// 登录后调用：**只探测**云端是否有数据，有则置 `pendingRestore` 让 UI 弹确认框。
+    /// 不再直接合并落盘。若用户此前已「暂不恢复」，则不再弹。
+    func probeForRestoreConfirm(token: String, email: String) async {
+        // 已经明确拒绝过 → 不再打扰（设置页手动入口仍可调 restoreNow）
+        if UserDefaults.standard.bool(forKey: declineKey) {
+            await MainActor.run { self.restoreDeclined = true }
+            NSLog("[CloudBackup] restore declined earlier, skip prompt")
+            return
+        }
+        do {
+            let json = try await APIClient.request("/v1/chat/backup", token: token)
+            let data = (json["data"] as? [String: Any]) ?? json
+            let cloud = Self.parseConvMap(data)
+            guard !cloud.isEmpty else {
+                NSLog("[CloudBackup] cloud backup empty, nothing to prompt")
+                return
+            }
+            let msgCount = cloud.values.reduce(0) { $0 + $1.count }
+            await MainActor.run {
+                self.pendingRestore = PendingRestore(
+                    token: token, convCount: cloud.count, msgCount: msgCount)
+            }
+            NSLog("[CloudBackup] cloud has \(cloud.count) convs / \(msgCount) msgs, ask user")
+        } catch {
+            NSLog("[CloudBackup] probe failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 用户点「恢复」：真正合并云端到本地（合并语义不变：只补本地没有的，不删本地）。
+    func confirmRestore() async {
+        guard let p = pendingRestore else { return }
+        await MainActor.run { self.pendingRestore = nil }
+        do {
+            let json = try await APIClient.request("/v1/chat/backup", token: p.token)
+            let data = (json["data"] as? [String: Any]) ?? json
+            let cloud = Self.parseConvMap(data)
+            guard !cloud.isEmpty else { return }
+            let added = LocalStore.merge(cloud: cloud)
+            await MainActor.run {
+                self.lastRestoreAt = Date()
+                self.lastRestoreCount = added
+                self.lastSyncText = "已从云端恢复 \(added) 条消息（\(cloud.count) 个会话）"
+            }
+            NSLog("[CloudBackup] user confirmed, restored \(added) msgs / \(cloud.count) convs")
+        } catch {
+            NSLog("[CloudBackup] confirm restore failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 用户点「暂不恢复」：记 flag，之后不再自动问。（@Published 赋值需主线程）
+    @MainActor
+    func declineRestore() {
+        UserDefaults.standard.set(true, forKey: declineKey)
+        restoreDeclined = true
+        pendingRestore = nil
+        NSLog("[CloudBackup] user declined restore")
+    }
+
+    /// 设置页手动「从云端恢复」：清掉拒绝 flag、直接探测并恢复（不弹框，用户已主动点）。
+    func restoreNow(token: String, email: String) async {
+        UserDefaults.standard.set(false, forKey: declineKey)
+        restoreDeclined = false
+        do {
+            let json = try await APIClient.request("/v1/chat/backup", token: token)
+            let data = (json["data"] as? [String: Any]) ?? json
+            let cloud = Self.parseConvMap(data)
+            guard !cloud.isEmpty else {
+                await MainActor.run { self.lastSyncText = "云端暂无聊天记录可恢复" }
+                return
+            }
+            let added = LocalStore.merge(cloud: cloud)
+            await MainActor.run {
+                self.lastRestoreAt = Date()
+                self.lastRestoreCount = added
+                self.lastSyncText = "已从云端恢复 \(added) 条消息（\(cloud.count) 个会话）"
+            }
+            NSLog("[CloudBackup] manual restore: \(added) msgs / \(cloud.count) convs")
+        } catch {
+            await MainActor.run { self.lastSyncText = "从云端恢复失败：\(error.localizedDescription)" }
+            NSLog("[CloudBackup] manual restore failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - 旧接口（保留兼容，不再被 applyLogin 调用）
+
+    /// 旧版静默恢复。保留供别的调用方兼容，但登录流程已改为先确认（probeForRestoreConfirm）。
 
     /// 登录后调用：凭登录 token GET 直拉自己账号的云端备份 → 解析 → 合并进本地。
     ///
