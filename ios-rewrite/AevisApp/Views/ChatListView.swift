@@ -44,7 +44,7 @@ struct ChatListView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 32)
             }
-            .background(Color.paper)
+            .background(Color.clear)   // 背景统一由 MainTabView 最底层提供
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -237,26 +237,38 @@ struct ChatListView: View {
         .clipShape(Capsule())
     }
 
+    /// 角色头像：磁盘硬缓存优先（`CachedRemoteImage`），没有缓存才显示渐变底 + 首字；
+    /// 后台带 ETag 条件请求，服务器说变了才换图，断网一直用旧图。
     private func avatar(_ p: Persona) -> some View {
-        AsyncImage(url: URL(string: abs(p.avatar))) { img in
-            img.resizable().scaledToFill()
-        } placeholder: {
-            ZStack {
-                Circle().fill(
-                    LinearGradient(
-                        colors: [AE.accentLift, AE.accentDeep],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                )
-                Text(String(p.name.prefix(1)))
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(.white)
-            }
+        CachedRemoteImage(url: avatarURL(p)) {
+            avatarPlaceholder(p)
         }
         .frame(width: 52, height: 52)
         .clipShape(Circle())
         .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
         .shadow(color: AE.shadowColor, radius: 4, y: 2)
+    }
+
+    private func avatarPlaceholder(_ p: Persona) -> some View {
+        ZStack {
+            Circle().fill(
+                LinearGradient(
+                    colors: [AE.accentLift, AE.accentDeep],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+            Text(String(p.name.prefix(1)))
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 52, height: 52)
+    }
+
+    /// 头像地址：空 → nil（走占位）。`abs()` 已把相对路径拼成绝对地址。
+    private func avatarURL(_ p: Persona) -> URL? {
+        let s = abs(p.avatar).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        return URL(string: s)
     }
 
     // MARK: - 空态

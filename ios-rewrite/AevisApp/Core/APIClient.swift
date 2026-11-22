@@ -40,24 +40,22 @@ struct APIClient {
     /// 真机大概率 SSL 失败 → 失败后按本数组顺序自动回落，并把失败线路记进 `failedLines`（降权），
     /// 下次启动直接跳过已知失败线路，不再每次先撞直连卡几秒。
     static let lines: [Line] = [
-        // name 用服务器 IP 的**所在地**（2026-11-24 用户拍板，纯地名，不带任何 IP/后缀）：
-        //   陕西 103.236.72.107（电信陕西云基地；.110 是同机另一入口，不单独成条）
-        //   北京 123.57.33.160（阿里云）
-        //   香港 38.76.168.61（aevis.cn 也解析到它，已合并成一条，避免出现两条「香港」）
-        // 不出现任何 IP 字符串、日期、「自签证书/隧道」等工程词。
-        // ⚠️ 数组顺序 = 回落顺序：陕西(直连) → 北京 → 香港，不要打乱。
-        Line(id: "direct", name: "陕西", base: "https://103.236.72.107:54319",     pinning: true,  note: "最快"),
-        Line(id: "bj",     name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "默认"),
-        Line(id: "hk",     name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "备用"),
+        // name 用服务器**所在地**（2026-11-24 用户拍板，纯地名）：北京 123.57.33.160（阿里云）、
+        // 香港 38.76.168.61（aevis.cn 也解析到它）。不出现 IP、日期、「自签证书/隧道」等工程词。
+        // 2026-11-24 用户拍板：**只保留北京和香港**，删掉陕西（直连自签证书在 iOS 上
+        // 会被严格校验拒绝，用户端表现为"不通"；实测网络本身是通的 0.23s，但证书过不了）。
+        // 顺序 = 回落顺序：北京 → 香港（香港约 1.4s，仅作备用）。
+        Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "默认"),
+        Line(id: "hk", name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "备用"),
     ]
 
     private static let activeKey = "apiLineId"
     /// 已知失败线路的 id 集合（持久化）：失败后降权，下次启动不优先撞它。
     private static let failedKey = "apiFailedLines"
 
-    /// 用户明确选择的线路（不经失败降权）。默认 `direct`（用户拍板）。
+    /// 用户明确选择的线路（不经失败降权）。默认 `bj`（北京，2026-11-24 删掉陕西后）。
     static var preferredLineID: String {
-        UserDefaults.standard.string(forKey: activeKey) ?? "direct"
+        UserDefaults.standard.string(forKey: activeKey) ?? "bj"
     }
 
     /// 已知失败的线路 id（逗号分隔持久化）。用于降权排序，不永久删除。

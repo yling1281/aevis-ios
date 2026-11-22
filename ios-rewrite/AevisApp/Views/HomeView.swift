@@ -21,11 +21,13 @@ struct HomeView: View {
     @State private var quota: APIClient.QuotaState? = nil
     @State private var points: APIClient.PointsHome? = nil
 
-    /// 问候区（2026-11-24）：昵称 / 头像来自 `/v1/me`，天气来自 wttr.in（10 分钟缓存）。
+    /// 问候区（2026-11-24）：昵称 / 头像来自 `/v1/me`，天气来自 wttr.in（定位优先，南昌兜底）。
     /// 全部默认为空 —— 拿不到就不显示，不用狗 logo 冒充用户头像。
     @State private var nickname = ""
     @State private var avatarPath = ""
     @State private var weather: APIClient.WeatherNow? = nil
+    /// 天气的获取时间（持久化），用于「更新于 X 分钟前」
+    @State private var weatherAt: Date? = nil
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -41,8 +43,10 @@ struct HomeView: View {
             // 底部留 TabBar 高度 + 安全区
             .padding(.bottom, 96)
         }
-        .background(AppBackground())
+        .background(Color.clear)   // 背景统一由 MainTabView 最底层提供，这里不能再铺不透明底
         .onAppear {
+            // 冷启动先显示上次的天气（不等定位/网络），再拉最新数据
+            restoreLastWeather()
             // 进页面 / 从聊天详情返回 / 切回本 tab 都重新拉一次（不做轮询）
             Task {
                 await loadGreeting()
@@ -111,19 +115,13 @@ struct HomeView: View {
 
     // MARK: - 头像（用户自己的）
 
-    /// 头像：有图走 AsyncImage，空/失败 → 渐变圆底 + 首字占位（与 ChatView / ChatListView 同一套）。
+    /// 头像：磁盘硬缓存优先（`CachedRemoteImage`），没有缓存才显示渐变圆底 + 首字占位；
+    /// 后台带 ETag 条件请求，服务器说变了才换图（断网一直用旧图）。
     @ViewBuilder
     private var avatarView: some View {
         if let avatarURL {
-            AsyncImage(url: avatarURL) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().scaledToFill()
-                case .empty:
-                    avatarPlaceholder
-                default:
-                    avatarPlaceholder
-                }
+            CachedRemoteImage(url: avatarURL) {
+                avatarPlaceholder
             }
             .frame(width: 44, height: 44)
             .clipShape(Circle())
@@ -168,8 +166,9 @@ struct HomeView: View {
         return URL(string: s.hasPrefix("/") ? APIClient.base + s : APIClient.base + "/" + s)
     }
 
-    /// 天气小胶囊：上行城市名（定位得到的 `nearest_area`，南昌兜底时是「南昌」），
-    /// 下行「多云 18°」。城市名拿不到就只显示天气那行，不留空行。
+    /// 天气小胶囊：城市名（定位得到的 `nearest_area`，南昌兜底时是「南昌」）/
+    /// 「多云 18°」/ 第三行小字「更新于 X 分钟前」（刚刷新完不显示）。
+    /// 城市名拿不到就少一行，不留空行。
     private func weatherChip(_ w: APIClient.WeatherNow) -> some View {
         VStack(alignment: .trailing, spacing: 1) {
             if !w.place.isEmpty {
@@ -185,12 +184,30 @@ struct HomeView: View {
                     .font(.system(size: 11.5, weight: .medium))
             }
             .foregroundStyle(AE.accent)
+
+            if let age = weatherAgeText {
+                Text(age)
+                    .font(.system(size: 8.5))
+                    .foregroundStyle(AE.textSecondary.opacity(0.85))
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
         .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(w.place) \(w.descCN) \(w.tempC) 度")
+        .accessibilityLabel("\(w.place) \(w.descCN) \(w.tempC) 度" + (weatherAgeText.map { "，\($0)" } ?? ""))
+    }
+
+    /// 「更新于 X 分钟前」：<1 分钟不显示（刚刷新完没必要提醒），超过 1 小时按小时/天换算
+    private var weatherAgeText: String? {
+        guard let weatherAt else { return nil }
+        let seconds = Date().timeIntervalSince(weatherAt)
+        guard seconds >= 60 else { return nil }
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "更新于 \(minutes) 分钟前" }
+        let hours = minutes / 60
+        return hours < 24 ? "更新于 \(hours) 小时前" : "更新于 \(hours / 24) 天前"
     }
 
     private func weatherSymbol(_ desc: String) -> String {
@@ -351,8 +368,37 @@ struct HomeView: View {
             w = try? await APIClient.weatherNanchang(force: refreshWeather)
         }
         if let w {
-            await MainActor.run { weather = w }
+            // 同时落盘：下次冷启动直接显示这条，不用等定位
+            await MainActor.run { rememberWeather(w) }
         }
+    }
+
+    // MARK: - 天气持久化（冷启动先显示上次的）
+
+    private static let lastWeatherKey = "aevis.weather.last.v1"
+
+    /// 冷启动/切回主页时先把上次的天气摆上去（含时间戳 → 显示「更新于 X 分钟前」）。
+    /// 已经有本次会话拿到的天气就不覆盖（切 tab 回来时内存里那份更新）。
+    private func restoreLastWeather() {
+        guard weather == nil else { return }
+        guard let d = UserDefaults.standard.dictionary(forKey: Self.lastWeatherKey),
+              let t = d["temp"] as? Int,
+              let desc = d["desc"] as? String, !desc.isEmpty else { return }
+        let at = Date(timeIntervalSince1970: (d["at"] as? Double) ?? 0)
+        weather = APIClient.WeatherNow(tempC: t, descCN: desc, place: (d["place"] as? String) ?? "")
+        // 时间戳坏了就不显示「更新于」，但天气本身仍然摆出来
+        weatherAt = at.timeIntervalSince1970 > 0 ? at : nil
+    }
+
+    /// 每次成功拿到天气都写盘：`{temp, desc, place, at}`。断网时下次启动仍能显示。
+    private func rememberWeather(_ w: APIClient.WeatherNow) {
+        let now = Date()
+        weather = w
+        weatherAt = now
+        UserDefaults.standard.set(
+            ["temp": w.tempC, "desc": w.descCN, "place": w.place, "at": now.timeIntervalSince1970],
+            forKey: Self.lastWeatherKey
+        )
     }
 
     private func capsule(_ text: String) -> some View {

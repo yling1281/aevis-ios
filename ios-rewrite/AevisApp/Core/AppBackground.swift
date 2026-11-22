@@ -6,16 +6,18 @@ import UIKit
 /// 存储键（`ThemeSettingsView` 写入，这里只读）：
 /// - `aevisBgStyle`：预设索引（0 奶油 / 1 柔紫 / 2 海盐 / 3 深空）
 /// - `aevisBgBlur`：模糊半径 pt（0...20）
-/// - `aevisBgImagePath`：自定义图在沙盒里的绝对路径（空 = 用预设）
+/// - `aevisBgImageName`：自定义图的文件名（固定 `aevis-bg.jpg`），空 = 用预设
 /// - `aevisBgPos`：图片显示方式（0 填充 / 1 居中 / 2 拉伸）
 /// - `aevisBgRev`：写入计数器。因为图片文件名固定（aevis-bg.jpg），路径不变，
 ///   换图后靠它触发本视图重新读盘（否则会一直显示缓存里的旧图）。
+/// - `aevisBgImagePath`：旧键（绝对路径），重装后失效；迁移到 `aevisBgImageName` 后清掉。
 ///
 /// 用法：在需要背景的视图最外层 `.background(AppBackground())`。
 struct AppBackground: View {
     @AppStorage("aevisBgStyle") private var style: Int = 0
     @AppStorage("aevisBgBlur") private var blurAmount: Double = 0
-    @AppStorage("aevisBgImagePath") private var imagePath = ""
+    @AppStorage("aevisBgImageName") private var imageName = ""
+    @AppStorage("aevisBgImagePath") private var legacyImagePath = ""  // 旧键，迁移后清掉
     @AppStorage("aevisBgPos") private var imagePos = 0
     @AppStorage("aevisBgRev") private var revision = 0
     @Environment(\.colorScheme) private var scheme
@@ -106,10 +108,28 @@ struct AppBackground: View {
     // MARK: - 读图
 
     private func loadCustomImage() {
-        guard !imagePath.isEmpty else {
-            customImage = nil
-            return
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+        // 新键优先：按文件名拼路径（重装后路径 UUID 变化，文件名固定）
+        if !imageName.isEmpty {
+            let url = docs.appendingPathComponent(imageName)
+            if let img = UIImage(contentsOfFile: url.path) {
+                customImage = img
+                return
+            }
         }
-        customImage = UIImage(contentsOfFile: imagePath)
+
+        // 兼容旧数据：绝对路径迁移到文件名
+        if !legacyImagePath.isEmpty {
+            if let img = UIImage(contentsOfFile: legacyImagePath) {
+                customImage = img
+                // 迁移：写入新键，清掉旧键
+                imageName = "aevis-bg.jpg"
+                legacyImagePath = ""
+                return
+            }
+        }
+
+        customImage = nil
     }
 }

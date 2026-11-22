@@ -10,7 +10,7 @@ import UIKit
 /// → 「预设背景」分组（跟设置页原有 4 个色块同一套 `aevisBgStyle`）。
 ///
 /// 存储（`AppBackground` 直接读这几个键，改完立刻全局生效）：
-/// - `aevisBgImagePath`：沙盒里 `Documents/aevis-bg.jpg` 的绝对路径，空 = 用预设色
+/// - `aevisBgImageName`：固定文件名 `aevis-bg.jpg`（重装后路径 UUID 变化，用文件名拼路径）
 /// - `aevisBgPos`：0 填充 / 1 居中 / 2 拉伸
 /// - `aevisBgBlur`：0...20
 /// - `aevisBgStyle`：预设索引（0 奶油 / 1 柔紫 / 2 海盐 / 3 深空）
@@ -18,7 +18,7 @@ import UIKit
 struct ThemeSettingsView: View {
     @AppStorage("aevisBgStyle") private var bgStyle = 0
     @AppStorage("aevisBgBlur") private var bgBlur = 0.0
-    @AppStorage("aevisBgImagePath") private var imagePath = ""
+    @AppStorage("aevisBgImageName") private var imageName = ""
     @AppStorage("aevisBgPos") private var imagePos = 0
     @AppStorage("aevisBgRev") private var revision = 0
 
@@ -403,7 +403,7 @@ struct ThemeSettingsView: View {
         presets.first(where: { $0.id == bgStyle }) ?? presets[0]
     }
 
-    /// 自定义图固定存 `Documents/aevis-bg.jpg`（覆盖写），路径写进 `aevisBgImagePath`。
+    /// 自定义图固定存 `Documents/aevis-bg.jpg`（覆盖写），文件名写进 `aevisBgImageName`。
     private var bgFileURL: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return dir.appendingPathComponent("aevis-bg.jpg")
@@ -453,7 +453,7 @@ struct ThemeSettingsView: View {
             try jpg.write(to: bgFileURL, options: .atomic)
 
             await MainActor.run {
-                imagePath = bgFileURL.path
+                imageName = "aevis-bg.jpg"
                 previewImage = img
                 revision += 1
                 saving = false

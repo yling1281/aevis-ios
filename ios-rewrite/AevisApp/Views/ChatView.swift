@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Speech
 
 /// 聊天（2026-11-17 骨架；2026-11-22 升级为流式 SSE）。
 ///
@@ -37,8 +38,20 @@ struct ChatView: View {
 
     /// 表情包面板（最小可用：静态占位说明，不做上传）。
     @State private var showStickerSheet = false
-    /// 是否正在朗读。
-    @State private var speaking = false
+
+    // MARK: - 语音输入（本地 ASR，2026-11-24；替代原来的 TTS）
+    /// 录音/识别/权限全在这里，视图只读它的状态。
+    @StateObject private var speech = SpeechInput()
+    /// 手指是否按在麦克风上（判断一次「按住→松开」的完整手势）。
+    @State private var micPressed = false
+    /// 当前是否落在「上滑取消」区（松手就丢弃这段识别）。
+    @State private var cancelZone = false
+
+    // MARK: - 微信式滚动（2026-11-24）
+    /// 当前是否贴在底部附近。只有贴底时才自动跟随新消息，用户翻历史时绝不拽回。
+    @State private var atBottom = true
+    /// 首次进入是否已经做过「无动画定位到底」。
+    @State private var didInitialScroll = false
 
     /// 每角色独立的 UserDefaults key。
     private var modelKey: String { "aevisModel_\(persona.id)" }
@@ -57,26 +70,60 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(msgs) { m in
-                            row(m).id(m.id)
-                        }
-                        if sending {
-                            HStack {
-                                Text("正在输入…").font(.footnote).foregroundStyle(.secondary)
-                                Spacer()
+                // 用 GeometryReader 拿视口高度，配合底部哨兵算出「离底部多远」→ 判断是否贴底。
+                // iOS 16 没有 onScrollGeometryChange，只能用坐标对比这一套。
+                GeometryReader { geo in
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(msgs) { m in
+                                row(m).id(m.id)
                             }
-                            .padding(.horizontal, 14)
+                            if sending {
+                                HStack {
+                                    Text("正在输入…").font(.footnote).foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 14)
+                            }
+                            // 底部哨兵：取它的**上沿 minY**。
+                            //   · 贴底：minY ≈ 视口高 → minY-vh ≈ 0
+                            //   · 上翻：minY > 视口高（哨兵被推到屏幕下方）
+                            //   · 内容比屏幕短：minY < 视口高 → 负数
+                            // 用 (minY - vh) < 80 判定：贴底和「短内容」都算贴底，上翻多了才算离开。
+                            Color.clear
+                                .frame(height: 1)
+                                .id("__BOTTOM__")
+                                .background(
+                                    GeometryReader { g in
+                                        Color.clear.preference(
+                                            key: BottomEdgeKey.self,
+                                            value: g.frame(in: .named("chatScroll")).minY
+                                        )
+                                    }
+                                )
                         }
+                        .padding(.vertical, 10)
                     }
-                    .padding(.vertical, 10)
+                    .coordinateSpace(name: "chatScroll")
+                    .onPreferenceChange(BottomEdgeKey.self) { bottomMinY in
+                        atBottom = (bottomMinY - geo.size.height) < 80
+                    }
                 }
+                // 首次进入：定位到最后一条，**不带动画**（用户明确不要「直接滑到底」的动效）
                 .onChange(of: msgs.count) { _ in
-                    if let last = msgs.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    guard let last = msgs.last else { return }
+                    if !didInitialScroll {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                        didInitialScroll = true
+                    } else if atBottom {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
                 }
+                // 流式增量（msgs.count 不变、content 变）：只在贴底时才跟随，
+                // 用户往上翻历史看的时候绝不把他拽回底部。
                 .onChange(of: scrollTick) { _ in
-                    if let last = msgs.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    guard let last = msgs.last, atBottom else { return }
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
 
@@ -93,6 +140,22 @@ struct ChatView: View {
                 .transition(.opacity)
             }
 
+            // 语音提示条（录音中「松开结束·上滑取消」；不可用/未授权时一行红字）
+            if !speech.hint.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: speech.recording ? "waveform" : "exclamationmark.circle")
+                        .font(.system(size: 12))
+                    Text(cancelZone ? "松开手指取消" : speech.hint)
+                        .font(.system(size: 12))
+                    Spacer()
+                }
+                .foregroundStyle(speech.recording ? AE.accent : Color.red)
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(.regularMaterial)
+                .transition(.opacity)
+            }
+
             HStack(spacing: 8) {
                 // 左：表情包面板（最小可用：静态占位）
                 Button { showStickerSheet = true } label: {
@@ -102,18 +165,35 @@ struct ChatView: View {
                 }
                 .accessibilityLabel("表情包")
 
-                TextField("说点什么…", text: $input, axis: .vertical)
+                TextField(speech.recording ? "正在听你说…" : "说点什么…", text: $input, axis: .vertical)
                     .lineLimit(1...4)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(speech.recording)
 
-                // 右：朗读最近一条助手回复（本地 TTS）
-                Button { toggleSpeakLastReply() } label: {
-                    Image(systemName: speaking ? "stop.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(hasAssistantReply ? AE.accent : AE.textSecondary.opacity(0.4))
-                }
-                .disabled(!hasAssistantReply)
-                .accessibilityLabel(speaking ? "停止朗读" : "朗读")
+                // 右：语音输入（按住说话，微信式）—— 取代原来的 TTS 朗读按钮
+                Image(systemName: speech.recording ? "mic.fill" : "mic")
+                    .font(.system(size: 20))
+                    .foregroundStyle(micPressed ? (cancelZone ? AE.textSecondary : .red) : AE.accent)
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        // minimumDistance 0 = 按下即触发；用 translation 判断上滑取消
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { v in
+                                if !micPressed {
+                                    micPressed = true
+                                    speech.baseText = input     // 保留输入框已有内容
+                                    speech.start()
+                                }
+                                cancelZone = v.translation.height < -60
+                            }
+                            .onEnded { _ in
+                                micPressed = false
+                                if cancelZone { speech.cancel() } else { speech.finish() }
+                                cancelZone = false
+                            }
+                    )
+                    .accessibilityLabel("按住说话")
 
                 Button {
                     Task { await send() }
@@ -125,6 +205,7 @@ struct ChatView: View {
             .padding(10)
             .background(.regularMaterial)
         }
+        .background(Color.clear)
         .navigationTitle(persona.name)
         .navigationBarTitleDisplayMode(.inline)
         // 进聊天详情时收起底部 Dock：系统原生 tab bar 在 push 时不会自动隐藏，
@@ -144,6 +225,10 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: $showStickerSheet) { stickerSheet }
+        // 语音识别结果实时写进输入框（不自动发送，让用户确认/编辑）
+        .onChange(of: speech.transcript) { text in
+            if !text.isEmpty { input = text }
+        }
         .onAppear { reloadPersonaConfig() }
         .task {
             #if DEBUG
@@ -181,34 +266,6 @@ struct ChatView: View {
             if let list = try? await APIClient.llmModels() {
                 await MainActor.run { modelDefaultID = list.defaultID }
             }
-        }
-    }
-
-    // MARK: - 朗读（本地 TTS，无网络无权限）
-
-    /// 是否存在可朗读的助手回复（决定语音按钮是否可点）。
-    private var hasAssistantReply: Bool {
-        msgs.last(where: { $0.role == "assistant" && !$0.content.isEmpty }) != nil
-    }
-
-    /// 朗读最近一条助手回复；正在朗读则停止（再点一下停止）。
-    private func toggleSpeakLastReply() {
-        if speaking {
-            ChatTTS.shared.stop()
-            speaking = false
-            return
-        }
-        guard let reply = msgs.last(where: { $0.role == "assistant" && !$0.content.isEmpty }) else { return }
-        // 括号里的动作描写（（xxx）/ (xxx)）朗读时去掉，只读台词更自然
-        let spoken = reply.content
-            .replacingOccurrences(of: "（[^）]*）", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = spoken.isEmpty ? reply.content : spoken
-        speaking = true
-        ChatTTS.shared.speak(text) { [self] in
-            // 朗读结束（播完/被打断）回调在主线程，复位按钮
-            DispatchQueue.main.async { self.speaking = false }
         }
     }
 
@@ -328,21 +385,13 @@ struct ChatView: View {
         }
     }
 
+    /// 头像：硬缓存（磁盘 + 条件请求 304），AsyncImage 会每次重新下载且断网就没了。
+    /// 空URL直接出占位（渐变圆底 + 首字）。
     @ViewBuilder
     private func avatar(_ url: URL?, name: String) -> some View {
-        // 有 URL 才走 AsyncImage；空 URL 直接出占位（AsyncImage(url:nil) 永不回调成功，
-        // 会一直停在 placeholder，这里显式分流，占位也做成矢量感渐变圆底 + 首字）。
         if let url {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().scaledToFill()
-                case .empty:
-                    avatarPlaceholder(name)
-                        .overlay(ProgressView().scaleEffect(0.5))
-                default:               // .failure / @unknown
-                    avatarPlaceholder(name)
-                }
+            CachedRemoteImage(url: url) {
+                avatarPlaceholder(name)
             }
             .frame(width: 32, height: 32)
             .clipShape(Circle())
@@ -410,6 +459,7 @@ struct ChatView: View {
             return
         }
         input = ""
+        atBottom = true                     // 用户主动发送 → 允许回到底部跟随
         await performSend(text: text, allowLineRetry: true)
     }
 
@@ -589,59 +639,177 @@ struct ChatView: View {
     }
 }
 
-/// 本地朗读（AVSpeechSynthesizer，iOS 7+，无需网络/权限）。
-/// 单例：全局只有一个合成器，避免多次朗读叠音。
-final class ChatTTS: NSObject, AVSpeechSynthesizerDelegate {
-    static let shared = ChatTTS()
-    private let synth = AVSpeechSynthesizer()
-    /// 播完/取消的回调（主线程）。
-    private var onFinish: (() -> Void)?
-
-    private override init() {
-        super.init()
-        synth.delegate = self
+/// 底部哨兵的位置偏好键（判断「是否贴底」用）。
+private struct BottomEdgeKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
+}
 
-    /// 朗读一段文本；开始前先停掉上一段。`onFinish` 在结束（含被打断）时回调。
-    func speak(_ text: String, onFinish: (() -> Void)? = nil) {
-        stopInternal(notify: false)
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { onFinish?(); return }
-        self.onFinish = onFinish
-        // 中文语音：优先 zh-CN，取系统默认中文嗓音（没有就用默认嗓音）
-        let u = AVSpeechUtterance(string: trimmed)
-        u.voice = AVSpeechSynthesisVoice(language: "zh-CN")
-        u.rate = AVSpeechUtteranceDefaultSpeechRate
-        synth.speak(u)
-    }
+/// 本地语音输入（ASR，2026-11-24）。替代原来的 TTS。
+///
+/// 流程（微信式「按住说话」）：
+///   按下麦克风 → 请求麦克风+语音识别权限 → 起 AVAudioEngine 录音 + 实时识别，
+///   partial 结果经 `transcript` 冒给界面写进输入框；松手 `finish()` 结束并保留最终文字；
+///   上滑 `cancel()` 丢弃。
+///
+/// 防崩要点（最常见的内存/崩溃点，逐条处理）：
+///   · 每次开始前先 `engine.stop()` + `removeTap` + `request.endAudio()`，绝不复用旧 tap/request；
+///   · `removeTap` 只在确实装过 tap 时调（没装还调会抛 NSException，Swift 抓不住）；
+///   · 结束时严格顺序：stop engine → removeTap → endAudio → 会话失活；
+///   · 识别结束（isFinal）后把 `task`/`request` 置 nil，不复用。
+final class SpeechInput: ObservableObject {
+    @Published var transcript = ""      // 实时识别文本（base + partial）
+    @Published var recording = false    // 是否正在录音
+    @Published var hint = ""            // 顶部提示（录音中 / 不可用原因）
 
-    /// 主动停止（按钮再点一下）。
-    func stop() {
-        stopInternal(notify: true)
-    }
+    /// 录音开始前输入框里已有的文字，识别结果拼在它后面。
+    var baseText = ""
 
-    private func stopInternal(notify: Bool) {
-        if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
-        if notify {
-            let cb = onFinish
-            onFinish = nil
-            DispatchQueue.main.async { cb?() }
-        } else {
-            onFinish = nil
+    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var tapInstalled = false
+    /// 松手早于权限返回时的「待停」标记：权限一通过就立刻收尾，避免卡在录音态。
+    private var stopRequested = false
+
+    // MARK: - 权限
+
+    /// 先语音识别、再麦克风，都通过才算可用。全部主线程回调。
+    private func ensurePermission(_ done: @escaping (Bool) -> Void) {
+        SFSpeechRecognizer.requestAuthorization { status in
+            DispatchQueue.main.async {
+                guard status == .authorized else { done(false); return }
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    DispatchQueue.main.async { done(granted) }
+                }
+            }
         }
     }
 
-    // MARK: - AVSpeechSynthesizerDelegate
+    // MARK: - 开始 / 结束 / 取消
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        let cb = onFinish
-        onFinish = nil
-        DispatchQueue.main.async { cb?() }
+    func start() {
+        stopRequested = false
+        hint = ""
+        guard let recognizer, recognizer.isAvailable else {
+            hint = "语音输入不可用"
+            return
+        }
+        ensurePermission { [weak self] ok in
+            guard let self else { return }
+            guard ok else {
+                self.hint = "语音输入不可用（未授权麦克风或语音识别）"
+                return
+            }
+            // 权限弹窗期间用户已松手 → 直接收尾，别起录音
+            if self.stopRequested { self.stopRequested = false; return }
+            do {
+                try self.beginSession()
+            } catch {
+                self.hint = "语音输入不可用"
+                self.teardown()
+            }
+        }
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        let cb = onFinish
-        onFinish = nil
-        DispatchQueue.main.async { cb?() }
+    private func beginSession() throws {
+        // 先彻底清干净上一次（含 task/request 置 nil），避免复用崩溃
+        teardown()
+
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        request = req
+
+        let node = engine.inputNode
+        let fmt = node.outputFormat(forBus: 0)
+        node.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
+            self?.request?.append(buffer)
+        }
+        tapInstalled = true
+
+        engine.prepare()
+        try engine.start()
+
+        task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                if let result {
+                    let text = result.bestTranscription.formattedString
+                    self.transcript = self.baseText + text
+                    // 识别结束：彻底清理 task/request（用户要的「别复用」）。
+                    // 在自己的回调里只置 nil、不 cancel 自己。
+                    if result.isFinal { self.teardown(cancelTask: false) }
+                }
+                if error != nil {
+                    // 识别出错：若还在录音就彻底收尾；已有部分结果则保留，别把用户说的吞掉
+                    if self.recording { self.teardown(cancelTask: false) }
+                }
+            }
+        }
+        recording = true
+        hint = "松开结束，上滑取消"
+    }
+
+    /// 松手：结束录音、保留最终文字（不自动发送）。
+    func finish() {
+        if !recording { stopRequested = true; return }   // 还没真正开始（权限未回），标记待停
+        finishInternal()
+    }
+
+    /// 上滑取消：丢弃这段识别，还原到录音前的输入。
+    func cancel() {
+        stopRequested = true
+        if recording {
+            task?.cancel()
+            transcript = baseText
+            finishInternal(cancelled: true)
+        }
+        hint = ""
+    }
+
+    /// 停止引擎 + 摘 tap + endAudio + 会话失活；`task` 交给自然收尾或取消。
+    private func finishInternal(cancelled: Bool = false) {
+        teardownEngineOnly()
+        recording = false
+        hint = ""
+        if cancelled {
+            task?.cancel()
+            task = nil
+            request = nil
+        }
+        // 非取消：等 recognitionTask 的 isFinal 回调里再彻底置 nil（见下）
+    }
+
+    /// 只停录音链路，不动 task/request 的收尾（开始前 & 结束时都用）。
+    private func teardownEngineOnly() {
+        if engine.isRunning { engine.stop() }
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        request?.endAudio()
+        do {
+            try AVAudioSession.sharedInstance()
+                .setActive(false, options: .notifyOthersOnDeactivation)
+        } catch { /* 忽略：失活失败不影响下次 */ }
+    }
+
+    /// 彻底清理。`cancelTask=false` 用于「isFinal 回调里」——不要在识别任务自己的
+    /// 回调栈里 cancel 自己（只是置 nil 让它自然结束即可）。
+    private func teardown(cancelTask: Bool = true) {
+        teardownEngineOnly()
+        if cancelTask { task?.cancel() }
+        task = nil
+        request = nil
+        tapInstalled = false
+        recording = false
+        hint = ""
     }
 }

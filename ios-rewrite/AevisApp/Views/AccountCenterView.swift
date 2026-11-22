@@ -48,7 +48,7 @@ struct AccountCenterView: View {
                 .padding(.top, 10)
                 .padding(.bottom, 40)
             }
-            .background(AppBackground())
+            .background(Color.clear)
             .navigationTitle("账号中心")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -90,15 +90,12 @@ struct AccountCenterView: View {
         .shadow(color: AE.shadowColor, radius: 10, y: 4)
     }
 
+    /// 头像：硬缓存（磁盘 + 条件请求 304），AsyncImage 会每次重新下载且断网就没了。
     private var avatarView: some View {
         Group {
             if let url = avatarURL {
-                AsyncImage(url: url) { phase in
-                    if let img = phase.image {
-                        img.resizable().scaledToFill()
-                    } else {
-                        avatarPlaceholder
-                    }
+                CachedRemoteImage(url: url) {
+                    avatarPlaceholder
                 }
             } else {
                 avatarPlaceholder

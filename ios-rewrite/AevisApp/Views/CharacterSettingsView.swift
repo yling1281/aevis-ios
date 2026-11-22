@@ -152,18 +152,13 @@ struct CharacterSettingsView: View {
     }
 
     @ViewBuilder
+    /// 头像：硬缓存（磁盘 + 条件请求 304），AsyncImage 会每次重新下载且断网就没了。
     private var brandAvatar: some View {
         let url = avatarURL(persona.avatar)
         if let url {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img): img.resizable().scaledToFill()
-                case .empty: avatarPlaceholder
-                default: avatarPlaceholder
-                }
-            }
-            .clipShape(Circle())
-            .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
+            CachedRemoteImage(url: url) { avatarPlaceholder }
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
         } else {
             avatarPlaceholder
         }

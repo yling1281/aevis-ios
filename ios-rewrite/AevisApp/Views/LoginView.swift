@@ -54,7 +54,6 @@ struct LoginView: View {
 
     enum Mode { case code, password }
     @State private var mode: Mode = .code
-    @State private var register = false
 
     @State private var email = ""
     @State private var password = ""
@@ -70,6 +69,7 @@ struct LoginView: View {
 
     @State private var showRecover = false
     @State private var showLines = false
+    @State private var showRegister = false
     @State private var qqSheet = false
     @State private var wxQR: APIClient.WXQR? = nil
     /// 顶部胶囊用的线路 id 镜像。`apiLineId` 存在 UserDefaults 里，**变化不会触发 SwiftUI 重绘**，
@@ -86,7 +86,6 @@ struct LoginView: View {
     }
 
     private var buttonTitle: String {
-        if register { return "注册并登录" }
         return mode == .code ? "验证并登录" : "登录"
     }
 
@@ -157,6 +156,7 @@ struct LoginView: View {
         .background(Color.paper.ignoresSafeArea())
         .sheet(isPresented: $showRecover) { RecoverView() }
         .sheet(isPresented: $showLines) { LineSheet() }
+        .fullScreenCover(isPresented: $showRegister) { RegisterView() }
         .sheet(isPresented: $qqSheet) {
             QQSheet { token in
                 qqSheet = false
@@ -238,12 +238,10 @@ struct LoginView: View {
         HStack(alignment: .center, spacing: 12) {
             AevisMascot(size: compact ? 36 : 40)
             VStack(alignment: .leading, spacing: 3) {
-                Text(register ? "创建账号" : "登录")
+                Text("登录")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(AE.brandInk)
-                Text(register
-                     ? "设置密码后，用邮箱验证码完成注册。"
-                     : "验证码会发送到你的邮箱，未注册的邮箱自动创建账号。")
+                Text("验证码会发送到你的邮箱，未注册的邮箱自动创建账号。")
                     .font(.system(size: 13))
                     .foregroundStyle(AE.textSecondary)
                     .lineSpacing(2)
@@ -259,8 +257,8 @@ struct LoginView: View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
                 emailField
-                if mode == .password || register { passwordField }
-                if mode == .code || register { codeRow }
+                if mode == .password { passwordField }
+                if mode == .code { codeRow }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -398,11 +396,8 @@ struct LoginView: View {
             }
             .buttonStyle(.plain)
             Spacer(minLength: 0)
-            Button(register ? "已有账号，去登录" : "没有账号，去注册") {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    register.toggle()
-                    tip = ""
-                }
+            Button("没有账号，去注册") {
+                showRegister = true
             }
             .font(.system(size: 13))
             .foregroundStyle(AE.textSecondary)
@@ -616,9 +611,7 @@ struct LoginView: View {
         busy = true
         do {
             let r: APIClient.LoginResult
-            if register {
-                r = try await APIClient.register(email: email, password: password, code: code)
-            } else if mode == .code {
+            if mode == .code {
                 r = try await APIClient.loginByCode(email: email, code: code)
             } else {
                 r = try await APIClient.login(email: email, password: password)

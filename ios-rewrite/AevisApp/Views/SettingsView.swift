@@ -3,7 +3,7 @@ import SwiftUI
 /// 设置 /「我的」（2026-11-22 视觉重做，照用户给的「忆伴」设置页参考图）。
 ///
 /// 只放**真实生效**的功能（用户要求：没实现的先不要放按钮）：
-/// - 品牌卡（自家狗 logo + 标语，点击进账号中心）
+/// - 顶部用户卡片（头像 + 昵称 + 账号/会员状态，点击进账号中心）
 /// - 外观：跟随系统 / 浅色 / 深色 —— 写 `themeMode`，由 `AevisApp` 根视图统一读取生效
 /// - 配置：服务器状态（真实探测四条线路 + `/v1/models/status`）、主题配置（背景图/位置/模糊）
 /// - 消息大小：小 / 标准 / 大（`msgSize`，ChatView 里 `AE.chatFont(msgSize)` 在用）
@@ -11,7 +11,7 @@ import SwiftUI
 /// - 退出登录
 ///
 /// 存储键保持不变：themeMode / msgSize / aevisBgStyle / aevisBgBlur / aevisBgImagePath。
-/// 卡片统一磨砂玻璃 + 20 圆角，层次靠材质和留白，不靠重边框。
+/// 页面铺 `AppBackground()`，卡片统一磨砂玻璃 + 20 圆角，层次靠材质和留白，不靠重边框。
 struct SettingsView: View {
     @EnvironmentObject private var session: Session
 
@@ -26,13 +26,19 @@ struct SettingsView: View {
     @AppStorage("aevisBgStyle") private var bgStyle = 0
     @AppStorage("aevisBgImagePath") private var bgImagePath = ""
 
-    /// 账号中心（2026-11-22 新增）：点顶部品牌卡打开。
+    /// 账号中心：点顶部用户卡片打开（sheet）。
     @State private var showAccount = false
 
     /// 手动云端恢复的进行中 / 结果提示。
     @State private var restoring = false
     @State private var restoreMessage = ""
     @State private var showRestoreAlert = false
+
+    /// 顶部用户卡片：昵称 / 会员状态来自 `/v1/me`（Session 上只有 avatar，没有昵称）。
+    @State private var nickname = ""
+    @State private var memberActive = false
+    @State private var memberDays = 0
+    @State private var profileLoaded = false
 
     /// 4 个背景预设的名字（顺序 / rawValue 必须与 AppBackground.Preset 一致）。
     private let bgNames = ["奶油", "柔紫", "海盐", "深空"]
@@ -41,7 +47,7 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
-                    brandCard
+                    userCard
 
                     sectionCard(title: "外观", icon: "paintbrush.fill") {
                         SettingsSegment(items: ["跟随系统", "浅色", "深色"], index: $themeMode)
@@ -86,9 +92,11 @@ struct SettingsView: View {
                 // 原生 TabView 已把底栏安全区让出来，这里只留一点呼吸感
                 .padding(.bottom, 40)
             }
-            .background(Color.paper)
+            // 铺 AppBackground：ScrollView 自身透明，卡片都是玻璃材质，背景能透上来
+            .background(Color.clear)
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
+            .task { await loadProfile() }
             .sheet(isPresented: $showAccount) {
                 AccountCenterView()
                     .environmentObject(session)
@@ -101,23 +109,37 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 品牌卡（点击进账号中心）
+    // MARK: - 顶部用户卡片（点击进账号中心）
 
-    private var brandCard: some View {
+    /// 用户卡片：头像 + 昵称 + 「账号 xxx」/ 会员徽章 + 「账号中心 ›」。
+    /// 头像走 `Session.avatar`（登录/冷启动从 `/v1/me` 取），昵称与会员状态在本页拉一次 `/v1/me`。
+    /// 底色用品牌主色系（accentDeep → accentLift），深浅模式都是深底白字，对比度稳定。
+    private var userCard: some View {
         Button { showAccount = true } label: {
             HStack(spacing: 14) {
-                AevisMascot(size: 54)
+                userAvatar
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Aevis")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                    Text(displayName)
+                        .font(.system(size: 19, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("把想说的话，留给懂你的人。")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Color.white.opacity(0.72))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.9)
+
+                    HStack(spacing: 6) {
+                        if profileLoaded {
+                            memberBadge
+                        }
+                        Text(accountLine)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Color.white.opacity(0.72))
+                            .lineLimit(1)
+                            // 邮箱长了从中间截断，保留域名，别把 @ 后面切没
+                            .truncationMode(.middle)
+                    }
                 }
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 6)
 
                 HStack(spacing: 4) {
                     Text("账号中心")
@@ -125,21 +147,143 @@ struct SettingsView: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .foregroundStyle(Color.white.opacity(0.6))
+                .foregroundStyle(Color.white.opacity(0.62))
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
+            .background(userCardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius + 4, style: .continuous))
+            .shadow(color: AE.accentDeep.opacity(0.26), radius: 12, y: 6)
+        }
+        .buttonStyle(AevisPressStyle(scale: 0.985))
+    }
+
+    /// 卡片底色：品牌主色渐变 + 右上一点白色柔光（不靠边框分层）。
+    /// ⚠️ 浅色模式下 `AE.accent` 与 `AE.accentDeep` 是同一个 #2F3A56，渐变会没有层次，
+    /// 所以另一端固定用同色系的 `AE.accentLift`（#4A5676），深色模式也不会变成浅蓝底白字。
+    private var userCardBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [AE.accentLift, AE.accentDeep],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                gradient: Gradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0)]),
+                center: UnitPoint(x: 0.82, y: 0.12),
+                startRadius: 0, endRadius: 190
+            )
+        }
+    }
+
+    /// 头像 56pt：硬缓存（磁盘 + 条件请求 304），AsyncImage 会每次重新下载且断网就没了。
+    /// 空/失败回落「渐变圆底 + 昵称首字」（与 ChatView 同一套视觉）。
+    private var userAvatar: some View {
+        Group {
+            if let url = myAvatarURL {
+                CachedRemoteImage(url: url) {
+                    avatarPlaceholder
+                }
+            } else {
+                avatarPlaceholder
+            }
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.55), lineWidth: 1.2))
+        .shadow(color: Color.black.opacity(0.18), radius: 4, y: 2)
+    }
+
+    private var avatarPlaceholder: some View {
+        ZStack {
+            Circle().fill(
                 LinearGradient(
-                    colors: [Color.hex(0x3B4768), AE.accentDeep],
+                    colors: [AE.accentLift, AE.accentDeep],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 )
             )
-            .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius + 4, style: .continuous))
-            .shadow(color: AE.accentDeep.opacity(0.22), radius: 12, y: 6)
+            Text(initialChar)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
         }
-        .buttonStyle(AevisPressStyle(scale: 0.985))
+        .frame(width: 56, height: 56)
+    }
+
+    /// 会员徽章：半透明白胶囊（深底白字，不用 accentSoft，避免深色模式下糊在卡里）。
+    private var memberBadge: some View {
+        Text(badgeText)
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2.5)
+            .background(Color.white.opacity(0.18), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.6))
+    }
+
+    // MARK: - 用户卡片的文案 / 头像地址
+
+    /// 昵称：`/v1/me` 的 nickname → 邮箱前缀 → 「Aevis 用户」。
+    private var displayName: String {
+        if !nickname.isEmpty { return nickname }
+        if !emailPrefix.isEmpty { return emailPrefix }
+        return "Aevis 用户"
+    }
+
+    private var initialChar: String {
+        for ch in displayName where !ch.isWhitespace {
+            return String(ch)
+        }
+        return "A"
+    }
+
+    /// 邮箱 @ 前的部分，用作昵称兜底。
+    private var emailPrefix: String {
+        let e = session.email
+        guard !e.isEmpty else { return "" }
+        return String(e.split(separator: "@").first ?? "")
+    }
+
+    private var accountLine: String {
+        session.email.isEmpty ? "账号 —" : "账号 \(session.email)"
+    }
+
+    private var badgeText: String {
+        guard memberActive else { return "普通用户" }
+        return memberDays > 0 ? "会员 · \(memberDays) 天" : "会员"
+    }
+
+    /// 头像地址：`Session.avatar` 可能是相对路径，补成当前线路的绝对地址。
+    private var myAvatarURL: URL? {
+        let s = session.avatar.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if s.hasPrefix("http") { return URL(string: s) }
+        let joined = s.hasPrefix("/") ? APIClient.base + s : APIClient.base + "/" + s
+        return URL(string: joined)
+    }
+
+    /// 拉一次 `/v1/me`：昵称 + 会员剩余天数。失败不写任何状态（下次进设置页再试），不阻塞 UI。
+    private func loadProfile() async {
+        guard !profileLoaded, let token = session.token, !token.isEmpty else { return }
+        guard let json = try? await APIClient.me(token: token) else { return }
+
+        var nick = (json["nickname"] as? String) ?? ""
+        if nick.isEmpty {
+            let d = (json["data"] as? [String: Any]) ?? json
+            nick = (d["nickname"] as? String) ?? ""
+        }
+        var active = false
+        var days = 0
+        if let mm = json["membership"] as? [String: Any] {
+            active = (mm["active"] as? Bool) ?? false
+            days = (mm["days_left"] as? NSNumber)?.intValue ?? 0
+        }
+        await MainActor.run {
+            nickname = nick
+            memberActive = active
+            memberDays = days
+            profileLoaded = true
+        }
     }
 
     // MARK: - 组件
