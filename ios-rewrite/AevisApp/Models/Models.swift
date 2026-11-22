@@ -25,6 +25,23 @@ enum AE {
     /// 柔和阴影
     static let shadowColor = Color.adaptive(dark: Color.black.opacity(0.32), light: Color.black.opacity(0.07))
 
+    // MARK: - 品牌色（登录页专用；对齐官网 icon-new.svg / 安卓 V2 / 小程序）
+    // 只新增，不覆盖上面任何常量——ChatView / SettingsView 仍在用旧的墨靛蓝体系。
+    /// 奶油底 #FFF8EC（官网 logo 底色）；深色模式落到暖黑，不再是阴冷的深蓝黑
+    static let brandCream = Color.adaptive(dark: Color.hex(0x1E1B24), light: Color.hex(0xFFF8EC))
+    /// 主柔紫 #9B8AF0（= 安卓 V2.accent / 小程序 btn-primary），按钮与链接统一用它
+    static let brandPurple = Color.hex(0x9B8AF0)
+    /// 柔紫浅底 #F1EAFF（logo 狗耳填充 / 分组胶囊底）；深色模式降为深紫
+    static let brandLilac = Color.adaptive(dark: Color.hex(0x2E2A3E), light: Color.hex(0xF1EAFF))
+    /// 暖橙 #FFC6A6（logo 暖色光晕点缀）
+    static let brandPeach = Color.hex(0xFFC6A6)
+    /// 墨色描边/主文字 #1F2D3F（官网 logo 同色）；深色模式提亮保证可读
+    static let brandInk = Color.adaptive(dark: Color.hex(0xF5F2EC), light: Color.hex(0x1F2D3F))
+    /// 输入格暖灰底 #F5F0E6（≈ 安卓 V2.wellLight #F2EDE3）
+    static let brandWell = Color.adaptive(dark: Color.hex(0x2A2733), light: Color.hex(0xF5F0E6))
+    /// 登录页卡片：浅色纯白 / 深色暖黑（比旧的 #1E2028 少一分蓝）
+    static let brandCard = Color.adaptive(dark: Color.hex(0x262230), light: .white)
+
     /// 浅色底 #F7F5F0（更干净的奶油底）
     static let bgLight = Color.hex(0xF7F5F0)
     /// 深色底 #141416

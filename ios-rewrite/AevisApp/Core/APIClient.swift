@@ -30,18 +30,23 @@ struct APIClient {
 
     static let lines: [Line] = [
         Line(id: "bj",   name: "北京", base: "https://q7m3ax.lingyan.cyou",     pinning: false, note: "默认（隧道）"),
-        Line(id: "hk",   name: "香港", base: "https://lingyan.cyou",            pinning: false, note: "备用"),
-        Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319",  pinning: true,  note: "最快（自签证书）"),
-        // 148：第 4 条先留空位（服务端 vhost 未修好），点了给「暂不可用」，不指向 404 地址
-        Line(id: "spare", name: "备用", base: "",                               pinning: false, note: "暂不可用")
+        // 2026-11-22 实测：香港这条所有 /v1/* 都 404（nginx 没挂 API）、
+        // 直连是自签证书（iOS 报 SSL 错误）。两条都必须置空 = 不可用，
+        // 否则用户点选后微信/QQ/登录全挂（老板实测「直连点不动、微信 SSL 错误」）。
+        // 地址留在此处备注，待服务端 vhost/证书修好再放开。
+        Line(id: "hk",   name: "香港", base: "", pinning: false, note: "暂不可用（接口未挂载）"),
+        Line(id: "direct", name: "直连", base: "", pinning: true,  note: "暂不可用（自签证书）"),
+        Line(id: "spare", name: "备用", base: "", pinning: false, note: "暂不可用")
     ]
 
     private static let activeKey = "apiLineId"
 
-    /// 当前生效线路（重启沿用）。
+    /// 当前生效线路（重启沿用）。若持久化的是已失效线路，自动回落到默认，
+    /// 避免「上次选了直连→这次启动就 SSL 错误」。
     static var activeLine: Line {
         let id = UserDefaults.standard.string(forKey: activeKey) ?? "bj"
-        return lines.first { $0.id == id } ?? lines[0]
+        let picked = lines.first { $0.id == id } ?? lines[0]
+        return picked.base.isEmpty ? lines[0] : picked
     }
 
     static func setActiveLine(_ id: String) {
@@ -115,10 +120,26 @@ struct APIClient {
 
         let (data, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard (200..<300).contains(code) else {
-            let msg = (json["msg"] as? String) ?? ""
+            let msg = (raw["msg"] as? String) ?? ""
             throw APIError.http(code, msg)
+        }
+
+        // 业务信封（2026-11-22 修）：服务端 ok()={code:200,data:{...},msg}、
+        // err()={code:4111,data:null,msg}，且 **HTTP 恒 200**。以前只看 HTTP 状态、
+        // 又从顶层读 json["token"]（实际在 data 里）→ 所有账号操作都报「数据解析失败」。
+        // 这里统一：① 业务 code 非 200/0 就按 msg 抛；② 把 data 的键补到顶层（不覆盖），
+        // 于是 json["token"] 和 json["data"]["token"] 两种写法都能取到，全线兼容。
+        var json = raw
+        if let biz = (raw["code"] as? NSNumber)?.intValue {
+            if biz != 200 && biz != 0 {
+                let msg = (raw["msg"] as? String) ?? "请求失败（\(biz)）"
+                throw APIError.http(biz, msg)
+            }
+        }
+        if let envelope = raw["data"] as? [String: Any] {
+            for (k, v) in envelope where json[k] == nil { json[k] = v }
         }
         return json
     }
@@ -467,7 +488,9 @@ struct APIClient {
             do {
                 let (_, resp) = try await sess.data(for: req)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                if (200..<500).contains(code) {
+                // 只认 2xx/3xx；404（香港那种"nginx 在但没挂 API"）以前被算成可用，
+                // 导致坏线路进了自动切换候选，必须排除。
+                if (200..<400).contains(code) {
                     samples.append(Int(Date().timeIntervalSince(t0) * 1000))
                 }
             } catch {
