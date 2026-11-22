@@ -196,6 +196,91 @@ struct APIClient {
         throw APIError.decode("没有回复正文")
     }
 
+    /// 流式发一轮对话（SSE）：逐段把增量文本回调给 `onDelta`，返回拼好的完整文本。
+    ///
+    /// SSE 格式容错点（服务端实现不统一，逐个兜）：
+    /// - 只认 `data:` 开头的行，`event:` / `:` 注释 / 空行等非 data 行一律忽略；
+    /// - `data: [DONE]` 视为结束；
+    /// - 每段 JSON 先剥一层信封 `data`，再按优先级找
+    ///   `choices[0].delta.content` / `choices[0].message.content` / 顶层 `content`（另兼容 `text`）；
+    /// - 最后一帧 `choices: []` 只带 usage、没有 content，必须跳过，不当成回复正文；
+    /// - 某段解析失败（非 JSON、字段缺失）只 `continue`，不让整轮对话挂掉；
+    /// - **兜底**：整条流没吐出任何增量（服务端忽略 `stream:true` 或只回非 SSE）时，
+    ///   回退到非流式 `sendChat` 拿整段并补一次 `onDelta`，保证界面不会空白卡死。
+    static func sendChatStream(
+        token: String,
+        model: String,
+        messages: [[String: String]],
+        onDelta: @escaping (String) -> Void
+    ) async throws -> String {
+        let host = activeLine.base
+        guard !host.isEmpty else { throw APIError.http(0, "线路暂不可用") }
+        guard let url = URL(string: host + "/v1/llm/chat") else {
+            throw APIError.decode("bad url: /v1/llm/chat")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        // 首字节可能较慢，给足超时；只要持续有数据就不会触发
+        req.timeoutInterval = 60
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": model, "messages": messages, "stream": true
+        ])
+
+        // 用当前线路的 session（直连走自签证书 pinning），与底层 request 保持一致
+        let (bytes, resp) = try await session.bytes(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(code) else { throw APIError.http(code, "") }
+
+        var full = ""
+        var gotAny = false
+        for try await line in bytes.lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("data:") else { continue }
+            let payload = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if payload == "[DONE]" { break }
+            guard !payload.isEmpty,
+                  let raw = payload.data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any],
+                  let delta = Self.streamDelta(from: obj),
+                  !delta.isEmpty else { continue }
+            gotAny = true
+            full += delta
+            onDelta(delta)
+        }
+
+        // 一个增量都没有：服务端多半没做流式，回退非流式补上，避免空白卡死
+        if !gotAny {
+            let whole = try await sendChat(token: token, model: model, messages: messages)
+            if !whole.isEmpty { onDelta(whole) }
+            return whole
+        }
+        return full
+    }
+
+    /// 从一段 SSE JSON 里挖出文本增量；挖不到返回 nil（调用方 `continue`）。
+    /// 优先级对齐生产契约（aevis_llm.py:2573-2637）：先 `choices[0].delta.content`，
+    /// 兼容 `choices[0].message.content` 与顶层 `content`；`choices: []` 的 usage 帧会落到最后返回 nil。
+    private static func streamDelta(from obj: [String: Any]) -> String? {
+        let d = (obj["data"] as? [String: Any]) ?? obj
+        let choices = (d["choices"] as? [[String: Any]]) ?? (obj["choices"] as? [[String: Any]])
+        if let first = choices?.first {
+            if let delta = first["delta"] as? [String: Any],
+               let s = delta["content"] as? String, !s.isEmpty { return s }
+            if let msg = first["message"] as? [String: Any],
+               let s = msg["content"] as? String, !s.isEmpty { return s }
+            if let s = first["text"] as? String, !s.isEmpty { return s }
+        }
+        // 兼容非标准实现：顶层 content/text。usage 帧（choices 为空）走到这里也取不到，返回 nil。
+        for key in ["content", "text"] {
+            if let s = d[key] as? String, !s.isEmpty { return s }
+            if let s = obj[key] as? String, !s.isEmpty { return s }
+        }
+        return nil
+    }
+
     // MARK: - P0 其余（139 E-1）
     //
     // 只补第一版真正会用到的：配置 / 更新日志 / 邮箱验证码登录 / 模型列表 / 余额 /

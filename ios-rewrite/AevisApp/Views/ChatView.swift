@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// 聊天（2026-11-17，134 骨架）。
+/// 聊天（2026-11-17 骨架；2026-11-22 升级为流式 SSE）。
 ///
-/// 这一版只保证：本地历史能看、能发、括号变浅、头像/字号跟设置。
-/// 流式（SSE）留到下一版 —— 现在用非流式接口拿到整段再一次性插入，
-/// 先把编译链和接口跑通，别在骨架上做半套流式。
+/// 本地历史能看、能发、括号变浅、头像/字号跟设置；回复走 SSE 逐字显示，
+/// 增量到达即刷新气泡并滚动贴底；网络/格式异常有兜底与「重发」。
 struct ChatView: View {
     @EnvironmentObject private var session: Session
     let persona: Persona
@@ -17,6 +16,8 @@ struct ChatView: View {
     @State private var input = ""
     @State private var sending = false
     @State private var error = ""
+    /// 流式时 msgs.count 不变、content 变，靠这个 tick 触发滚动贴底。
+    @State private var scrollTick = 0
 
     @AppStorage("msgSize") private var msgSize = 1          // 0 小 / 1 标准 / 2 大
     @AppStorage("annotDim") private var annotDim = true
@@ -46,12 +47,21 @@ struct ChatView: View {
                 .onChange(of: msgs.count) { _ in
                     if let last = msgs.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
+                .onChange(of: scrollTick) { _ in
+                    if let last = msgs.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                }
             }
 
             if !error.isEmpty {
-                Text(error).font(.caption).foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
+                HStack(spacing: 8) {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("重发") { Task { await resend() } }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .disabled(sending)
+                }
+                .padding(.horizontal, 14)
             }
 
             HStack(spacing: 8) {
@@ -150,10 +160,28 @@ struct ChatView: View {
         return path
     }
 
+    /// 输入框发送。
     private func send() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let token = session.token else { return }
+        guard !text.isEmpty, session.token != nil else { return }
         input = ""
+        await performSend(text: text)
+    }
+
+    /// 失败后重发：删掉最后一条 user 及其后的回复，把那条 user 的原文重新送一遍。
+    private func resend() async {
+        guard let lastUser = msgs.last(where: { $0.role == "user" }) else { return }
+        let text = lastUser.content
+        if let idx = msgs.lastIndex(where: { $0.role == "user" }) {
+            msgs = Array(msgs.prefix(upTo: idx))
+        }
+        LocalStore.save(pid: persona.id, msgs: msgs)
+        await performSend(text: text)
+    }
+
+    /// 发送一段文本：落盘用户消息 → SSE 逐字收增量 → 落盘完整回复。
+    private func performSend(text: String) async {
+        guard let token = session.token else { return }
         var mine = Msg(role: "user", content: text)
         mine.id = UUID()
         msgs.append(mine)
@@ -161,26 +189,59 @@ struct ChatView: View {
 
         #if DEBUG
         if demo {
-            // 截图模式：假装回一句，让气泡样式能被拍到
+            // 截图模式：假的延时回一句，保持非流式（CI 截图靠它）
             sending = true
             try? await Task.sleep(nanoseconds: 300_000_000)
             msgs.append(Msg(role: "assistant", content: "（她笑了笑）我在听。"))
+            LocalStore.save(pid: persona.id, msgs: msgs)
             sending = false
             return
         }
         #endif
 
-        sending = true; error = ""
+        // 先插一条空 assistant，后续每个 delta 按 id 增量拼到它上面（不是替换）
+        let assistantID = UUID()
+        var placeholder = Msg(role: "assistant", content: "")
+        placeholder.id = assistantID
+        msgs.append(placeholder)
+
+        sending = true
+        error = ""
         do {
-            // 只带最近 20 条，骨架阶段够用；真正的上下文窗口策略跟安卓一致再补
-            let payload = msgs.suffix(20).map { ["role": $0.role, "content": $0.content] }
-            let reply = try await APIClient.sendChat(
-                token: token, model: "deepseek-flash", messages: payload
+            // 只带最近 20 条；dropLast 去掉刚插入的空 assistant，别把空内容发给模型
+            let payload = msgs.dropLast().suffix(20).map { ["role": $0.role, "content": $0.content] }
+            let full = try await APIClient.sendChatStream(
+                token: token, model: "deepseek-flash", messages: payload,
+                onDelta: { delta in
+                    // onDelta 在 URLSession 后台线程回调，切回主线程改 @State 并触发滚动
+                    DispatchQueue.main.async {
+                        guard let i = msgs.firstIndex(where: { $0.id == assistantID }) else { return }
+                        msgs[i].content += delta
+                        scrollTick += 1
+                    }
+                }
             )
-            msgs.append(Msg(role: "assistant", content: reply))
-            LocalStore.save(pid: persona.id, msgs: msgs)
+            // 收尾：用完整文本校准（防止增量回调排队丢帧），落盘 + 触发云备份
+            DispatchQueue.main.async {
+                if let i = msgs.firstIndex(where: { $0.id == assistantID }) {
+                    msgs[i].content = full
+                    scrollTick += 1
+                }
+                LocalStore.save(pid: persona.id, msgs: msgs)
+                CloudBackup.shared.pushIfNeeded(token: token)
+            }
         } catch {
-            self.error = error.localizedDescription
+            DispatchQueue.main.async {
+                self.error = error.localizedDescription
+                if let i = msgs.firstIndex(where: { $0.id == assistantID }) {
+                    if msgs[i].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        msgs.remove(at: i)          // 一个字都没出：撤掉空气泡，可点「重发」
+                    } else {
+                        msgs[i].content += "\n（回复中断，可点「重发」）"
+                        LocalStore.save(pid: persona.id, msgs: msgs)
+                    }
+                }
+            }
         }
         sending = false
     }

@@ -1,9 +1,15 @@
 import SwiftUI
 
-/// 设置（2026-11-17，134 骨架）：主题跟随系统 / 字号 / 弹窗开关。
+/// 设置 /「我的」（2026-11-22 视觉重做）。
 /// 与安卓 120/126/133 的口径一致：主题三档、字号三档、消息弹窗独立开关。
+/// 视觉：个人头部卡 + 三张设置卡 + 云端备份卡 + 独立退出卡。
+/// @AppStorage 键名（themeMode/msgSize/msgBanner）保持不变。
 struct SettingsView: View {
     @EnvironmentObject private var session: Session
+
+    /// 云端备份状态（Core/CloudBackup.swift 由另一位 worker 提供：
+    /// `CloudBackup.shared` + `@Published var lastSyncText: String`）
+    @ObservedObject private var backup = CloudBackup.shared
 
     @AppStorage("themeMode") private var themeMode = 0   // 0 跟随系统 / 1 浅色 / 2 深色
     @AppStorage("msgSize") private var msgSize = 1
@@ -11,39 +17,142 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("主题") {
-                    Picker("主题", selection: $themeMode) {
-                        Text("跟随系统").tag(0)
-                        Text("浅色").tag(1)
-                        Text("深色").tag(2)
-                    }
-                    .pickerStyle(.segmented)
-                }
+            ScrollView {
+                VStack(spacing: AE.groupGap + 4) {
+                    profileHeader
 
-                Section("消息大小") {
-                    Picker("字号", selection: $msgSize) {
-                        Text("小").tag(0)
-                        Text("标准").tag(1)
-                        Text("大").tag(2)
+                    settingsCard(title: "外观", icon: "paintbrush.fill") {
+                        Picker("主题", selection: $themeMode) {
+                            Text("跟随系统").tag(0)
+                            Text("浅色").tag(1)
+                            Text("深色").tag(2)
+                        }
+                        .pickerStyle(.segmented)
+                        Text("跟随系统会适配设备的深浅模式。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(AE.textSecondary)
                     }
-                    .pickerStyle(.segmented)
-                }
 
-                Section("通知") {
-                    Toggle("新消息弹窗", isOn: $msgBanner)
-                }
-
-                Section {
-                    Button("退出登录", role: .destructive) {
-                        session.signOut()
+                    settingsCard(title: "消息大小", icon: "textformat.size") {
+                        Picker("字号", selection: $msgSize) {
+                            Text("小").tag(0)
+                            Text("标准").tag(1)
+                            Text("大").tag(2)
+                        }
+                        .pickerStyle(.segmented)
                     }
+
+                    settingsCard(title: "通知", icon: "bell.fill") {
+                        Toggle("新消息弹窗", isOn: $msgBanner)
+                            .tint(AE.accent)
+                    }
+
+                    settingsCard(title: "云端备份", icon: "icloud.fill") {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(AE.accent)
+                            Text(backup.lastSyncText.isEmpty ? "尚未同步" : backup.lastSyncText)
+                                .font(.system(size: 12))
+                                .foregroundStyle(AE.textSecondary)
+                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                        }
+                    }
+
+                    logoutCard
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 36)
             }
+            .background(Color.paper)
             .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
             .preferredColorScheme(
                 themeMode == 1 ? .light : (themeMode == 2 ? .dark : nil)
             )
         }
+    }
+
+    // MARK: - 组件
+
+    private var profileHeader: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(
+                    LinearGradient(
+                        colors: [AE.accentLift, AE.accentDeep],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                ).frame(width: 68, height: 68)
+                Image(systemName: "dog.fill")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .shadow(color: AE.accent.opacity(0.28), radius: 10, y: 5)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Aevis")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("把想说的话，留给懂你的人。")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Color.white.opacity(0.75))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .background(
+            LinearGradient(
+                colors: [Color.hex(0x36415E), AE.accentDeep],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius + 4, style: .continuous))
+        .shadow(color: AE.shadowColor, radius: 10, y: 4)
+    }
+
+    @ViewBuilder
+    private func settingsCard<Content: View>(
+        title: String, icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AE.accent)
+                Text(title)
+                    .font(.system(size: AE.sectionTitle, weight: .semibold))
+                    .foregroundStyle(AE.textPrimary)
+            }
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(AE.card)
+        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius, style: .continuous))
+        .shadow(color: AE.shadowColor, radius: 8, y: 3)
+    }
+
+    private var logoutCard: some View {
+        Button {
+            session.signOut()
+        } label: {
+            Text("退出登录")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AE.accent)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(AE.accentSoft)
+                .clipShape(RoundedRectangle(cornerRadius: AE.buttonRadius, style: .continuous))
+        }
+        .buttonStyle(AevisPressStyle(scale: 0.97))
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(AE.card)
+        .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius, style: .continuous))
+        .shadow(color: AE.shadowColor, radius: 8, y: 3)
     }
 }

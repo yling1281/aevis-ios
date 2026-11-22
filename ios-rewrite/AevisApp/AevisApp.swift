@@ -4,9 +4,12 @@ import SwiftUI
 struct AevisApp: App {
     @StateObject private var session = Session.shared
 
-    /// 正常入口：没登录去登录页，登录了进会话列表。
+    /// 正常入口：冷启动校验先占位（避免闪一下聊天列表），没登录去登录页，登录了进会话列表。
     @ViewBuilder private var root: some View {
-        if session.token == nil {
+        if session.validating {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if session.token == nil {
             LoginView()
         } else {
             ChatListView()

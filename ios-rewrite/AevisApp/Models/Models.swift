@@ -2,27 +2,50 @@ import Foundation
 import SwiftUI
 import UIKit
 
-/// 视觉常量（2026-11-17，140）：与安卓 `V2` 一一对应，改这里就够，别在 View 里写魔法数。
+/// 视觉常量（2026-11-22 视觉重做）：与安卓 `V2` 一一对应，改这里就够，别在 View 里写魔法数。
+/// 配色：去掉旧紫，改用「高级中性色 + 深墨靛蓝」的克制强调色；明暗两套各自好看。
 enum AE {
-    /// 主色 #7664E2
-    static let accent = Color(red: 0x76 / 255.0, green: 0x64 / 255.0, blue: 0xE2 / 255.0)
-    /// 浅色底 #F6F3EC
-    static let bgLight = Color(red: 0xF6 / 255.0, green: 0xF3 / 255.0, blue: 0xEC / 255.0)
-    /// 深色底（与安卓 bgDark 一致）
-    static let bgDark = Color(red: 0x16 / 255.0, green: 0x15 / 255.0, blue: 0x1A / 255.0)
+    // MARK: - 品牌色
+    /// 主强调色（文字/图标/描边）：浅色深墨靛蓝 #2F3A56，深色提亮成 #A9B7D8 保证可读（替代旧紫）
+    static let accent = Color.adaptive(dark: Color.hex(0xA9B7D8), light: Color.hex(0x2F3A56))
+    /// 强调色高光：实色渐变用，固定值，增加质感
+    static let accentLift = Color.hex(0x4A5676)
+    /// 强调色实底：按钮/头图等白字场景固定深墨靛蓝，避免深色模式糊成一片
+    static let accentDeep = Color.hex(0x2F3A56)
+    /// 强调色柔和底：卡片内分组 / 未读胶囊 / 头像底
+    static let accentSoft = Color.adaptive(dark: Color.hex(0x2B3346), light: Color.hex(0xEAEDF4))
+    /// 卡片背景：浅色纯白 / 深色 #1E2028
+    static let card = Color.adaptive(dark: Color.hex(0x1E2028), light: .white)
+    /// 主文字
+    static let textPrimary = Color.adaptive(dark: Color.hex(0xF2F1EC), light: Color.hex(0x1C2231))
+    /// 次文字
+    static let textSecondary = Color.adaptive(dark: Color.hex(0x9EA2AE), light: Color.hex(0x73798A))
+    /// 暖色点缀（只用于未读小圆点等极少处）
+    static let warm = Color.hex(0xC9743F)
+    /// 柔和阴影
+    static let shadowColor = Color.adaptive(dark: Color.black.opacity(0.32), light: Color.black.opacity(0.07))
 
-    static let cardRadius: CGFloat = 18
-    static let bubbleRadius: CGFloat = 14
-    static let buttonRadius: CGFloat = 12
-    static let sheetRadius: CGFloat = 24
+    /// 浅色底 #F7F5F0（更干净的奶油底）
+    static let bgLight = Color.hex(0xF7F5F0)
+    /// 深色底 #141416
+    static let bgDark = Color.hex(0x141416)
+
+    static let cardRadius: CGFloat = 20
+    static let bubbleRadius: CGFloat = 16
+    static let buttonRadius: CGFloat = 14
+    static let sheetRadius: CGFloat = 28
 
     static let cardPadding: CGFloat = 16
-    static let rowHeight: CGFloat = 56
+    static let rowHeight: CGFloat = 76
     static let groupGap: CGFloat = 12
 
     static let title: CGFloat = 17
     static let body: CGFloat = 15
     static let caption: CGFloat = 11
+    /// 页面大标题
+    static let heroTitle: CGFloat = 34
+    /// 分组卡片标题
+    static let sectionTitle: CGFloat = 16
 
     /// 聊天三档字号（与安卓 msgSize 对齐）
     static func chatFont(_ size: Int) -> CGFloat {
