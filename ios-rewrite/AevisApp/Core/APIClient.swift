@@ -3,10 +3,11 @@ import UIKit
 
 /// 所有网络请求。
 ///
-/// 默认走北京隧道 `https://q7m3ax.lingyan.cyou`；四条线路（北京 / 香港 / 直连 / 备用）
-/// 均已在 2026-11-23 生产实测可用。直连 `https://103.236.72.107:54319` 用自签证书，
-/// 靠 `PinDelegate` 精确放行 host:port 的 serverTrust + Info.plist 的 ATS 例外双保险，
-/// iOS 可正常使用（不再是"骨架阶段不做"）。线路地址一律不上屏，用户只见城市名。
+/// 默认走直连 `https://103.236.72.107:54319`（2026-11-24 用户拍板恢复）：NAT 端口映射，
+/// 实测 ~0.13s，比北京隧道（~0.15s）更快、比香港（0.5~1.4s 且不稳）快一个数量级。
+/// 直连自签证书，靠 `PinDelegate` 放行该 host:port 的 serverTrust + Info.plist ATS 例外；
+/// 万一某台设备证书就是过不了，`request` 会自动回落到北京（见下方 orderedLines），
+/// 不会卡死。线路地址一律不上屏，用户只见城市名。
 ///
 /// 契约与安卓完全一致；错误一律抛 `APIError`，由 View 决定怎么显示。
 enum APIError: LocalizedError {
@@ -31,31 +32,31 @@ struct APIClient {
         var note: String = "" // 半窗里的用户向短注（最快/默认/备用）
     }
 
-    /// 线路顺序（2026-11-24 用户拍板）：「默认直连，实在不行切北京，还有备用，再是香港。」
-    /// 数组顺序 = 回落顺序：直连 → 北京 → 备用 → 香港。UI 只显示名字，地址不上屏。
+    /// 线路顺序（2026-11-24 用户拍板恢复直连）：「默认直连，不行切北京，再退香港。」
+    /// 数组顺序 = 回落顺序：直连 → 北京 → 香港。UI 只显示名字，地址不上屏。
     ///
-    /// 直连是自签证书（CN=103.236.72.107 / Aevis Direct CA，有效期至 2036），iOS 严格校验会
-    /// 报 SSL 错误 → pinning=true 让 makeSession 挂 PinDelegate 放行该 host:port 的 serverTrust，
-    /// Info.plist 的 NSExceptionDomains 也列了该 IP，双保险。443 不通，只走 54319。
-    /// 真机大概率 SSL 失败 → 失败后按本数组顺序自动回落，并把失败线路记进 `failedLines`（降权），
-    /// 下次启动直接跳过已知失败线路，不再每次先撞直连卡几秒。
+    /// 直连是自签证书（CN=103.236.72.107 / O=Aevis，有效期至 2036），pinning=true 让
+    /// makeSession 挂 PinDelegate、按 host+port 精确放行该 serverTrust；Info.plist 的
+    /// NSExceptionDomains 也列了该 IP，双保险。443 不通，只走 54319。
+    /// 证书万一仍过不了（个别真机）：`request` 会自动按数组顺序回落到北京，并把直连记进
+    /// `failedLines` 降权，下次启动跳过它——所以「恢复直连」不会把所有用户卡死在自签证书上。
+    /// 2026-11-24 实测：直连 /v1/app/config 返回 200、0.13s（本机 curl 验证）。
     static let lines: [Line] = [
-        // name 用服务器**所在地**（2026-11-24 用户拍板，纯地名）：北京 123.57.33.160（阿里云）、
-        // 香港 38.76.168.61（aevis.cn 也解析到它）。不出现 IP、日期、「自签证书/隧道」等工程词。
-        // 2026-11-24 用户拍板：**只保留北京和香港**，删掉陕西（直连自签证书在 iOS 上
-        // 会被严格校验拒绝，用户端表现为"不通"；实测网络本身是通的 0.23s，但证书过不了）。
-        // 顺序 = 回落顺序：北京 → 香港（香港约 1.4s，仅作备用）。
-        Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "默认"),
-        Line(id: "hk", name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "备用"),
+        // name 用纯地名，不出现 IP、日期、「自签证书/隧道」等工程词。
+        // 顺序 = 回落顺序：直连 → 北京 → 香港，不要打乱。
+        Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319",     pinning: true,  note: "最快"),
+        Line(id: "bj",     name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "备用"),
+        Line(id: "hk",     name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "备用"),
     ]
 
     private static let activeKey = "apiLineId"
     /// 已知失败线路的 id 集合（持久化）：失败后降权，下次启动不优先撞它。
     private static let failedKey = "apiFailedLines"
 
-    /// 用户明确选择的线路（不经失败降权）。默认 `bj`（北京，2026-11-24 删掉陕西后）。
+    /// 用户明确选择的线路（不经失败降权）。默认 `direct`（2026-11-24 恢复直连）。
+    /// 注意老用户本地可能存着 "bj"，那沿用其选择；只有从未选过的用户才默认直连。
     static var preferredLineID: String {
-        UserDefaults.standard.string(forKey: activeKey) ?? "bj"
+        UserDefaults.standard.string(forKey: activeKey) ?? "direct"
     }
 
     /// 已知失败的线路 id（逗号分隔持久化）。用于降权排序，不永久删除。
@@ -78,6 +79,20 @@ struct APIClient {
             s.remove(id)
             UserDefaults.standard.set(s.joined(separator: ","), forKey: failedKey)
         }
+    }
+
+    /// 一次性迁移（2026-11-24 恢复直连）：老用户本地 `apiLineId` 存着 "bj"，
+    /// 失败集里可能还留着 "direct"（上次删线前的 SSL 失败标记）——不处理就永远走不到
+    /// 刚恢复的直连。这里重置为直连并清掉其失败标记；只做一次，之后用户在服务器状态页
+    /// 手动选过就尊重其选择。
+    private static let directRestoreKey = "apiDirectRestored20261124"
+    static func migrateToDirectIfNeeded() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: directRestoreKey) else { return }
+        d.set(true, forKey: directRestoreKey)
+        d.set("direct", forKey: activeKey)
+        clearLineFailed("direct")
+        Self.session = makeSession(for: activeLine)
     }
 
     /// 有效回落顺序：首选（用户选择）优先，其次按 `lines` 数组顺序，跳过已知失败线路；

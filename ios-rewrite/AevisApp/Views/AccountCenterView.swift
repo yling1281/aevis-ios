@@ -28,6 +28,8 @@ struct AccountCenterView: View {
     }
 
     @State private var info = MeInfo()
+    /// `/v1/me` 失败时给一行明确提示（占位仍在），可下拉重试；不再静默空白。
+    @State private var loadFailed = false
 
     private let dangerRed = Color.hex(0xE5484D)
 
@@ -36,6 +38,13 @@ struct AccountCenterView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     headerCard
+
+                    if loadFailed {
+                        Text("账号信息暂时取不到，下拉可重试")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AE.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
                     groupBlock("系统") {
                         aboutRow
@@ -59,6 +68,7 @@ struct AccountCenterView: View {
                 }
             }
             .task { await load() }
+            .refreshable { await load() }
         }
         .tint(AE.accent)
     }
@@ -238,8 +248,15 @@ struct AccountCenterView: View {
     // MARK: - 加载
 
     private func load() async {
-        guard let token = session.token, !token.isEmpty else { return }
-        guard let json = try? await APIClient.me(token: token) else { return }
+        guard let token = session.token, !token.isEmpty else {
+            // 未登录：页面靠占位文案显示，不发 /v1/me
+            await MainActor.run { loadFailed = false }
+            return
+        }
+        guard let json = try? await APIClient.me(token: token) else {
+            await MainActor.run { loadFailed = true }
+            return
+        }
 
         var m = MeInfo()
         if let n = json["uid"] as? NSNumber { m.uid = n.stringValue }
@@ -251,6 +268,9 @@ struct AccountCenterView: View {
             m.memberActive = (mm["active"] as? Bool) ?? false
             m.memberDays = (mm["days_left"] as? NSNumber)?.intValue ?? 0
         }
-        await MainActor.run { info = m }
+        await MainActor.run {
+            info = m
+            loadFailed = false
+        }
     }
 }

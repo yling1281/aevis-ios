@@ -47,16 +47,19 @@ struct HomeView: View {
         .onAppear {
             // 冷启动先显示上次的天气（不等定位/网络），再拉最新数据
             restoreLastWeather()
-            // 进页面 / 从聊天详情返回 / 切回本 tab 都重新拉一次（不做轮询）
-            Task {
-                await loadGreeting()
-                await loadUsage()
-            }
+            // 用量额度优先级最高，必须独立 Task。
+            // 之前是 `await loadGreeting(); await loadUsage()` 串行——loadGreeting 内含
+            // 1.5s 延迟 + 最长 5s 定位 + 两次天气请求（最坏 10s+），
+            // 导致进主页好几秒用量卡都是「—」，用户以为"卡住 / 啥都没有"。
+            // 拆成两个独立 Task 后额度 ~0.3s 就显示，不被问候/天气链路拖住。
+            Task { await loadUsage() }
+            Task { await loadGreeting() }
         }
         .refreshable {
-            // 下拉刷新：天气跳过 10 分钟缓存，昵称/头像/额度一起重取
-            await loadGreeting(refreshWeather: true)
-            await loadUsage()
+            // 下拉刷新：额度与问候/天气并发，谁先回来谁先显示，不让天气拖住额度
+            async let usage: Void = loadUsage()
+            async let greeting: Void = loadGreeting(refreshWeather: true)
+            _ = await (usage, greeting)
         }
         .sheet(isPresented: $showShop) {
             // 第 2 轮接 ShopView；这轮先明确提示，不假装能进
@@ -325,12 +328,15 @@ struct HomeView: View {
             }
             return
         }
-        let q = try? await APIClient.quotaState(token: token)
-        let p = try? await APIClient.pointsHome(token: token)
+        // 两个接口并发：原来串行时 points 一慢就把 quota 一起拖住。
+        async let q: APIClient.QuotaState? = try? APIClient.quotaState(token: token)
+        async let p: APIClient.PointsHome? = try? APIClient.pointsHome(token: token)
+        let quotaValue = await q
+        let pointsValue = await p
         await MainActor.run {
             withAnimation(.easeOut(duration: 0.25)) {
-                quota = q
-                points = p
+                quota = quotaValue
+                points = pointsValue
             }
         }
     }

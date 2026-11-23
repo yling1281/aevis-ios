@@ -114,6 +114,9 @@ struct AevisApp: App {
             .modifier(ThemeModeModifier())
             .task {
                 guard !isDemo else { return }        // CI 截图模式不发网络请求
+                // 恢复直连的一次性迁移：老用户 apiLineId=bj / apiFailedLines 含 direct 时，
+                // 重置到直连并清掉旧失败标记（只做一次，之后用户手动选择优先）。
+                APIClient.migrateToDirectIfNeeded()
                 // 冷启动**强制**查一次（无视节流），保证「进程刚起就一定检查强更」。
                 await update.checkIfNeeded(force: true)
                 // 协议内容热更新：本地硬缓存先显示，云端有新版本才覆盖（失败保留旧缓存）。
