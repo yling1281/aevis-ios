@@ -384,7 +384,7 @@ struct AgreementWebView: View {
                     .padding(16)
             }
             .background(Color.paper.ignoresSafeArea())
-            .navigationTitle(store.name.displayName)
+            .navigationTitle(name.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

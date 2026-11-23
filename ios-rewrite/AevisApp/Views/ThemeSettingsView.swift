@@ -82,7 +82,7 @@ struct ThemeSettingsView: View {
             guard let item else { return }
             Task { await importImage(item) }
         }
-        .onChange(of: imagePath) { _ in loadPreview() }
+        .onChange(of: imageName) { _ in loadPreview() }
         .onAppear { loadPreview() }
         .alert("操作失败", isPresented: $showError) {
             Button("好", role: .cancel) { }
@@ -207,7 +207,7 @@ struct ThemeSettingsView: View {
                 if saving {
                     ProgressView().controlSize(.small)
                 } else {
-                    Text(imagePath.isEmpty ? "未设置" : "已设置")
+                    Text(imageName.isEmpty ? "未设置" : "已设置")
                         .font(.system(size: 12.5))
                         .foregroundStyle(AE.textSecondary)
                     Image(systemName: "chevron.right")
@@ -288,7 +288,7 @@ struct ThemeSettingsView: View {
     // MARK: - 预设色块
 
     private func swatch(_ p: BgPreset) -> some View {
-        let on = imagePath.isEmpty && bgStyle == p.id
+        let on = imageName.isEmpty && bgStyle == p.id
         return Button {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                 bgStyle = p.id
@@ -410,18 +410,18 @@ struct ThemeSettingsView: View {
     }
 
     private func loadPreview() {
-        guard !imagePath.isEmpty else {
+        guard !imageName.isEmpty else {
             previewImage = nil
             return
         }
-        previewImage = UIImage(contentsOfFile: imagePath)
+        previewImage = UIImage(contentsOfFile: bgFileURL.path)
     }
 
     private func clearCustomImage() {
         if FileManager.default.fileExists(atPath: bgFileURL.path) {
             try? FileManager.default.removeItem(at: bgFileURL)
         }
-        imagePath = ""
+        imageName = ""
         previewImage = nil
         revision += 1
     }

@@ -10,7 +10,7 @@ import AuthenticationServices
 //   · 不用渐变、不用发光、不用多层阴影；层次靠留白、描边、字重；
 //   · 圆角只用 16（卡片）/ 12（输入框、按钮）/ 10（小按钮）；不用 Capsule 药丸；
 //   · 字号只用 22 / 16 / 13 / 12 四档；不用 .rounded 设计，不用 27+ 的夸大头图字。
-private enum LK {
+enum LK {
     /// 唯一强调色：主按钮实底、选中标记
     static let accent = AE.accentDeep
     /// 输入框内底（比卡片深一档，保证输入区有边界感）
@@ -70,6 +70,8 @@ struct LoginView: View {
     @State private var showRecover = false
     @State private var showLines = false
     @State private var showRegister = false
+    @State private var showTerms = false
+    @State private var showPrivacy = false
     @State private var qqSheet = false
     @State private var wxQR: APIClient.WXQR? = nil
     /// 顶部胶囊用的线路 id 镜像。`apiLineId` 存在 UserDefaults 里，**变化不会触发 SwiftUI 重绘**，
@@ -157,6 +159,8 @@ struct LoginView: View {
         .sheet(isPresented: $showRecover) { RecoverView() }
         .sheet(isPresented: $showLines) { LineSheet() }
         .fullScreenCover(isPresented: $showRegister) { RegisterView() }
+        .sheet(isPresented: $showTerms) { AgreementWebView(name: .terms) }
+        .sheet(isPresented: $showPrivacy) { AgreementWebView(name: .privacy) }
         .sheet(isPresented: $qqSheet) {
             QQSheet { token in
                 qqSheet = false
@@ -478,13 +482,15 @@ struct LoginView: View {
 
             HStack(spacing: 0) {
                 Text("已阅读并同意 ").foregroundStyle(AE.textSecondary)
-                Link("用户协议", destination: URL(string: "https://aevis.cn/terms.html")!)
-                    .foregroundStyle(AE.brandInk)
-                    .underline()
+                Button { showTerms = true } label: {
+                    Text("用户协议").underline()
+                }
+                .foregroundStyle(AE.brandInk)
                 Text(" 和 ").foregroundStyle(AE.textSecondary)
-                Link("隐私政策", destination: URL(string: "https://aevis.cn/privacy.html")!)
-                    .foregroundStyle(AE.brandInk)
-                    .underline()
+                Button { showPrivacy = true } label: {
+                    Text("隐私政策").underline()
+                }
+                .foregroundStyle(AE.brandInk)
             }
             .font(.system(size: 13))
             .fixedSize(horizontal: false, vertical: true)

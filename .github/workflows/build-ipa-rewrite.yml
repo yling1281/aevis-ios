@@ -170,44 +170,10 @@ jobs:
             ios-rewrite/build.log
             ios-rewrite/api-smoke.log
 
-      - name: Upload to server & update version
-        if: steps.build.outcome == 'success'
-        env:
-          SSH_KEY: ${{ secrets.SSH_KEY_4_4 }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          RUN_NUM: ${{ github.run_number }}
-        run: |
-          set -eux
-          # IPA 文件名带版本号
-          IPA_NAME="Aevis-${VERSION}-build${RUN_NUM}.ipa"
-          mv Aevis-rewrite-unsigned.ipa "$IPA_NAME"
-          
-          # 通过香港跳板机上传到 4-4
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # 上传到 4-4 的下载目录
-          scp -o StrictHostKeyChecking=no -P 2222 "$IPA_NAME" root@38.76.168.61:/tmp/
-          ssh -o StrictHostKeyChecking=no -p 2222 root@38.76.168.61 "
-            ssh -o StrictHostKeyChecking=no root@103.236.72.107 -p 56181 '
-              mkdir -p /var/www/dl
-              mv /tmp/$IPA_NAME /var/www/dl/
-              ls -la /var/www/dl/
-            '
-          "
-          
-          # 更新数据库版本信息
-          ssh -o StrictHostKeyChecking=no -p 2222 root@38.76.168.61 "
-            ssh -o StrictHostKeyChecking=no root@103.236.72.107 -p 56181 '
-              sqlite3 /opt/aevis/data/aevis.db \"DELETE FROM aevis_app_release WHERE platform=\\\"ios\\\";\"
-              sqlite3 /opt/aevis/data/aevis.db \"INSERT INTO aevis_app_release(platform,latest_version,min_version,force,notes,ipa_url,ota_url,updated_at) VALUES(\\\"ios\\\",\\\"$VERSION\\\",\\\"1.0\\\",0,\\\"新版本已发布，请更新以获得最新功能和修复。\\\",\\\"https://aevis.cn/dl/$IPA_NAME\\\",\\\"\\\",datetime(\\\"now\\\"));\"
-              sqlite3 /opt/aevis/data/aevis.db \"SELECT * FROM aevis_app_release WHERE platform=\\\"ios\\\";\"
-            '
-          "
-          
-          echo "✅ 已上传到 https://aevis.cn/dl/$IPA_NAME"
-          echo "✅ 已更新版本信息到数据库"
+      # 打包产物发布到 GitHub Release（见上一步 Publish rewrite ipa）。
+      # 服务器推送 + 更新提醒由本地一键脚本 build_user/publish_rewrite_ipa.py 完成：
+      # 它会从 Release 下载最新 IPA，走 paramiko 上传到 4-4 并更新 aevis_app_release 表。
+      # 不放进 CI 的原因：4-4 只接受密码登录，且经香港跳板，凭据不能明文进 workflow。
 
       - name: Push logs to ci-log branch
         if: always()

@@ -64,7 +64,7 @@ struct AppBackground: View {
         .allowsHitTesting(false)
         .onAppear { loadCustomImage() }
         .onChange(of: revision) { _ in loadCustomImage() }
-        .onChange(of: imagePath) { _ in loadCustomImage() }
+        .onChange(of: imageName) { _ in loadCustomImage() }
     }
 
     // MARK: - 图层

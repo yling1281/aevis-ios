@@ -116,6 +116,8 @@ struct AevisApp: App {
                 guard !isDemo else { return }        // CI 截图模式不发网络请求
                 // 冷启动**强制**查一次（无视节流），保证「进程刚起就一定检查强更」。
                 await update.checkIfNeeded(force: true)
+                // 协议内容热更新：本地硬缓存先显示，云端有新版本才覆盖（失败保留旧缓存）。
+                await AgreementContentStore.shared.checkAndUpdateAll()
             }
             // 回到前台（含从后台切回）也查一次 —— 受 30 分钟节流约束，避免频繁请求。
             // 之前只在冷启动查 + 6 小时节流，「切走再切回」进程没重启就永远不查 → 强更不弹。
