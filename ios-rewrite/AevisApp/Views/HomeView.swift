@@ -14,8 +14,12 @@ struct HomeView: View {
     /// 商城 / 会员入口回调：由 MainTabView 注入以全屏拉起对应页面；单独预览时为 nil 用内部占位。
     var onShop: (() -> Void)? = nil
     var onMember: (() -> Void)? = nil
-    /// 「用量提升」入口：由 MainTabView 注入，跳购买用量页（当前复用会员页）
+    /// 「用量提升」入口：由 MainTabView 注入，跳套餐页 MemberView
     var onBuyQuota: (() -> Void)? = nil
+    /// 「按次计费」入口：由 MainTabView 注入，跳商城按次 tab
+    var onPerUse: (() -> Void)? = nil
+    /// 用量卡是否展开（标题旁 chevron 可折叠）
+    @State private var usageExpanded = true
     @State private var showShop = false        // 仅在 onShop == nil 时用的占位
     @State private var showMember = false      // 仅在 onMember == nil 时用的占位
     @State private var showPlaza = false       // 人设/表情包广场（本页内 sheet 即可）
@@ -246,84 +250,150 @@ struct HomeView: View {
 
     // MARK: - 用量额度卡
 
-    /// 免费用户默认可聊条数。产品口径「约 14、15 条」，取 15；改这里即可配置，
-    /// 这是**产品常量**（不是服务端返回值），所以断网时也照常展示，不写「—」。
-    private static let freeMessages = 15
-
+    /// 旧版「6% 已用」是写死的假进度；现在只显示服务端 quota 的真实百分比。
     private var usageCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("本周免费额度")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(AE.textSecondary)
-                Spacer()
-                // 两个小胶囊：「用量提升」是真跳转，不是装饰
+        VStack(alignment: .leading, spacing: 10) {
+            Button { withAnimation(.easeInOut(duration: 0.18)) { usageExpanded.toggle() } } label: {
                 HStack(spacing: 6) {
-                    Button { onBuyQuota?() } label: { capsule("用量提升") }
-                        .buttonStyle(.plain)
-                    capsule("按次计费")
+                    Text("用量额度")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AE.textSecondary)
+                    Image(systemName: usageExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(AE.textSecondary)
+                    Spacer(minLength: 0)
                 }
             }
+            .buttonStyle(.plain)
 
-            HStack(alignment: .bottom, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    // 去掉旧版「6% 已用」大数字：改成用户能理解的「约 15 条免费消息」
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text("约 \(Self.freeMessages)")
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
+            HStack(spacing: 8) {
+                Button { onBuyQuota?() } label: {
+                    quotaCapsule("用量提升", symbol: "crown.fill", showNew: false)
+                }
+                .buttonStyle(.plain)
+                Button { onPerUse?() } label: {
+                    quotaCapsule("按次计费", symbol: nil, showNew: true)
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
+            }
+
+            if usageExpanded {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let q = quota {
+                        AnimatedNumber(
+                            value: q.leftPct,
+                            font: .system(size: 42, weight: .bold, design: .rounded),
+                            color: AE.textPrimary, suffix: "%"
+                        )
+                        Text("已用 \(q.percent)%")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AE.textSecondary)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
                             .foregroundStyle(AE.textPrimary)
-                        Text("条")
+                        Text("已用 —")
                             .font(.system(size: 12))
                             .foregroundStyle(AE.textSecondary)
                     }
-                    // 百分比口径单独一行：取不到显示「—」，不写死 6%/92%
-                    Text(quotaPercentLine)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AE.textSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                    Divider().opacity(0.5)
-                    // 墨点是独立单位，单独一行，不参与本周额度计算
-                    Text(balanceLine)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AE.textSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
                 }
 
-                Spacer(minLength: 8)
-
-                // 额度卡大图：无底矢量狗头（宽 96pt，实际高度 ≈ 80pt）。
-                // 本周额度用完时换成打盹姿态（.sleep），比干巴巴的「—」更有情绪；
-                // 纯装饰，不参与无障碍朗读。
-                AevisMascotMark(
-                    pose: quota?.hasQuota == false ? .sleep : .front,
-                    size: 96
-                )
-                .accessibilityHidden(true)
-            }
-
-            // 进度条（没拿到数据就只画空槽，不画假进度；狗头已移到右上大图）
-            ZStack(alignment: .leading) {
-                Capsule().fill(AE.textPrimary.opacity(0.08)).frame(height: 8)
+                // 横条：灰 = 已用，蓝渐变 = 剩余；猫头随剩余量停在交界处
                 GeometryReader { geo in
-                    let pct = CGFloat(quota?.percent ?? 0)
-                    Capsule()
-                        .fill(LinearGradient(
-                            colors: [Color.hex(0xFFD66B), AE.brandPurple],
-                            startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * min(max(pct, 0), 100) / 100, height: 8)
+                    let width = max(geo.size.width, 1)
+                    let left = CGFloat(min(max(quota?.leftPct ?? 0, 0), 100))
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.18)).frame(height: 10)
+                        if quota != nil {
+                            Capsule()
+                                .fill(LinearGradient(
+                                    colors: [Color.hex(0x8FD0FF), Color.hex(0x2F6FE4)],
+                                    startPoint: .leading, endPoint: .trailing))
+                                .frame(width: width * left / 100, height: 10)
+                            AevisMascotMark(pose: quota?.hasQuota == false ? .sleep : .front, size: 28)
+                                .offset(x: max(0, width * left / 100 - 14), y: -2)
+                                .accessibilityHidden(true)
+                        }
+                    }
                 }
-                .frame(height: 8)
-            }
+                .frame(height: 16)
 
-            Text(quotaLine)
-                .font(.system(size: 11.5))
-                .foregroundStyle(AE.textSecondary)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(remainingMessagesLine)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AE.textSecondary)
+                    Spacer(minLength: 6)
+                    if let reset = resetTimeLine {
+                        Text(reset)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AE.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Divider().opacity(0.4)
+                // 墨点是独立单位，单独一行，不参与本周额度计算
+                Text(balanceLine)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AE.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
         }
         .padding(16)
         .glassCard(cornerRadius: AE.cardRadius, material: .regular)
     }
+
+    /// 黄底胶囊：用量提升带猫头，按次计费带 NEW 红标（照参考图）
+    private func quotaCapsule(_ text: String, symbol: String?, showNew: Bool) -> some View {
+        HStack(spacing: 3) {
+            if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .bold)) }
+            Text(text)
+                .font(.system(size: 10.5, weight: .semibold))
+            if showNew {
+                Text("NEW")
+                    .font(.system(size: 7.5, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 3).padding(.vertical, 1)
+                    .background(Color.hex(0xE5484D), in: Capsule())
+            }
+        }
+        .foregroundStyle(AE.accentDeep)
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Color.hex(0xFFD86B), in: Capsule())
+    }
+
+    /// 剩余消息条数：优先服务端 points.estMessages；没有则用免费基线 × 剩余百分比估算。
+    private var remainingMessagesLine: String {
+        if let p = points { return "您大约还有 \(p.estMessages.formatted()) 条消息额度" }
+        if let q = quota {
+            let n = Int((Double(APIClient.freeMessageBaseline) * Double(q.leftPct) / 100.0).rounded())
+            return "您大约还有 \(n) 条消息额度"
+        }
+        return "您大约还有 — 条消息额度"
+    }
+
+    /// 重置时间只认服务端下发字段；没有就不显示这一行，绝不写死日期。
+    private var resetTimeLine: String? {
+        guard let raw = quota?.resetAt, !raw.isEmpty else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M'月'd'日' HH:mm"
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = iso.date(from: raw)
+            ?? ISO8601DateFormatter().date(from: raw)
+            ?? Self.plainDateFormatter.date(from: raw)
+        guard let d = date else { return nil }
+        return f.string(from: d) + " 重置"
+    }
+
+    private static let plainDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
 
     /// 墨点余额：独立单位，只讲墨点，不再和本周额度混在一行。
     /// 拿不到就「—」，不显示 0、不用 /35 估算。
@@ -339,16 +409,6 @@ struct HomeView: View {
         }
         if session.token == nil { return "登录后可查看本周额度百分比" }
         return "额度百分比暂时取不到，下拉可重试"
-    }
-
-    private var quotaLine: String {
-        if let quota {
-            return quota.hasQuota
-                ? "本周还剩 \(quota.leftPct)% 额度 · 用完后可在「商城」补充"
-                : "本周额度已用完，可到「商城」补充"
-        }
-        if session.token == nil { return "登录后可查看本周额度" }
-        return "额度暂时取不到，下拉可重试"
     }
 
     // MARK: - 真实用量数据

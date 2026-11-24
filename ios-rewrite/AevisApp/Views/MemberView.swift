@@ -196,6 +196,24 @@ struct MemberView: View {
     private var memberTab: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 12) {
+                // 先给免费用量基线，让用户知道不开套餐也有约 15 条/周
+                HStack(spacing: 8) {
+                    Image(systemName: "gift.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(AE.brandPurple)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("免费用量基线")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AE.textPrimary)
+                        Text("不开套餐也有约 \(APIClient.freeMessageBaseline) 条消息 / 周")
+                            .font(.system(size: 11))
+                            .foregroundStyle(AE.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(13)
+                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.14)
+
                 // R2.7：未开通（nil 或 <=0）时整块「当前方案」不渲染
                 if let d = memberDays, d > 0 {
                     HStack(spacing: 12) {
@@ -249,11 +267,38 @@ struct MemberView: View {
                         .frame(maxWidth: .infinity).padding(.top, 20)
                 }
 
+                // 选中档位的用量/倍数：数字用 AnimatedNumber 翻动，与档位名 spring 联动
+                if let p = selectedProduct {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(p.label.isEmpty ? "套餐" : p.label) 用量")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AE.textPrimary)
+                            .animation(.spring(response: 0.32, dampingFraction: 0.82),
+                                       value: selectedProduct?.id)
+                        AnimatedNumber(
+                            value: p.percent,
+                            font: .system(size: 18, weight: .bold, design: .rounded),
+                            color: AE.memberAccent, suffix: "%"
+                        )
+                        Text("· 基础用量的 ")
+                            .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
+                        AnimatedNumber(
+                            value: Double(p.percent) / 100.0, specifier: "%.1f",
+                            font: .system(size: 12.5, weight: .medium), color: AE.textSecondary
+                        )
+                        Text(" 倍")
+                            .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .glassCard(cornerRadius: 14, material: .thin, tintOpacity: 0.12)
+                }
+
                 // 底部开通按钮：现价 %.1f 保住 .9 尾数，切档位时随 priceCents 联动
                 payButton(enabled: selectedProduct != nil, action: { showChannelPicker = true }) {
                     HStack(spacing: 0) {
                         if let p = selectedProduct {
-                            Text("开通 \(p.label.isEmpty ? "套餐" : p.label) · \(p.days) 天 ¥")
+                            Text("开通 \(p.label.isEmpty ? "套餐" : p.label) 用量 · \(p.days) 天 ¥")
                             AnimatedNumber(
                                 value: Double(p.priceCents) / 100, specifier: "%.1f",
                                 font: .system(size: 15, weight: .semibold), color: .white
@@ -310,7 +355,8 @@ struct MemberView: View {
     /// + 右侧划线原价 / 大号现价（%.1f）/ 月；选中态用 AE 会员语义色深色适配。
     private func memberCell(_ prod: APIClient.ShopProduct) -> some View {
         let on = selectedProduct?.id == prod.id
-        let name = prod.label.isEmpty ? (prod.title.isEmpty ? "\(prod.days) 天套餐" : prod.title) : prod.label
+        let label = prod.label.isEmpty ? (prod.title.isEmpty ? "\(prod.days) 天" : prod.title) : prod.label
+        let name = "\(label) 用量"
         let ratio = Double(prod.percent) / 100.0
         let recommended = prod.id == "p_xl"
         let orig = origPriceValue(prod.priceCents)
@@ -403,7 +449,7 @@ struct MemberView: View {
             let order = try await APIClient.memberOrder(
                 productID: prod.id, payType: channel.rawValue, token: token)
             guard !order.payURL.isEmpty else { showTip("支付链接为空，请稍后重试"); return }
-            activePay = ActivePay(order: order, title: "开通 \(prod.label.isEmpty ? "套餐" : prod.label) · \(prod.days) 天")
+            activePay = ActivePay(order: order, title: "开通 \(prod.label.isEmpty ? "套餐" : prod.label) 用量 · \(prod.days) 天")
             if channel == .alipay {
                 showAlipayConfirm = true
                 if let url = URL(string: order.payURL) {

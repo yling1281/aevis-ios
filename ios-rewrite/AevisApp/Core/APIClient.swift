@@ -611,7 +611,14 @@ struct APIClient {
         let percent: Int        // 本周已用百分比 0–100
         let leftPct: Int        // 本周剩余百分比 0–100
         let hasQuota: Bool      // 还有没有可用额度
+        /// 重置时刻（ISO-8601 字符串）。服务端当前 `/v1/quota/state` **尚未下发**，
+        /// 为 nil 时主页不显示「重置」那一行 —— 不写死、不自己编日期。
+        let resetAt: String?
     }
+
+    /// 免费用户默认可聊条数。产品口径「约 14、15 条」取 15；改这里即可配置。
+    /// 这是产品常量（不是服务端返回值），断网时也能展示基线。
+    static let freeMessageBaseline = 15
 
     static func quotaState(token: String?) async throws -> QuotaState {
         let json = try await request("/v1/quota/state", token: token)
@@ -622,7 +629,9 @@ struct APIClient {
             active: (q["active"] as? Bool) ?? false,
             percent: (q["percent"] as? NSNumber)?.intValue ?? 0,
             leftPct: (q["left_pct"] as? NSNumber)?.intValue ?? 0,
-            hasQuota: (q["has_quota"] as? Bool) ?? false
+            hasQuota: (q["has_quota"] as? Bool) ?? false,
+            resetAt: (q["reset_at"] as? String) ?? (q["next_reset"] as? String)
+                ?? (d["reset_at"] as? String)
         )
     }
 

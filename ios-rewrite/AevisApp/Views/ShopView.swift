@@ -18,8 +18,16 @@ struct ShopView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: Session
 
-    @State private var tab = 0
-    @State private var prevTab = 0
+    /// 入口可指定初始 tab：主页「按次计费」直接落到第 3 个 tab（index 2）。
+    private let initialTab: Int
+    @State private var tab
+    @State private var prevTab
+
+    init(initialTab: Int = 0) {
+        self.initialTab = min(max(initialTab, 0), 2)
+        _tab = State(initialValue: self.initialTab)
+        _prevTab = State(initialValue: self.initialTab)
+    }
     @State private var balance: Int? = nil          // nil = 取不到，显示「—」不显示 0
     @State private var quota: APIClient.QuotaState? = nil // 本周剩余额度%，与墨点余额分开
     @State private var packages: [APIClient.PointPackage] = []

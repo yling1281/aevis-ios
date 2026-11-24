@@ -18,6 +18,8 @@ import SwiftUI
 struct MainTabView: View {
     @State private var selected = 0
     @State private var showShop = false
+    /// 商城初始 tab：主页「按次计费」进来时直接落到按次 tab（index 2）
+    @State private var shopInitialTab = 0
     /// 会员独立页（2026-11-23 拆页）：与商城各自一张 fullScreenCover，返回层级不串。
     @State private var showMember = false
 
@@ -28,9 +30,10 @@ struct MainTabView: View {
 
             TabView(selection: $selected) {
                 HomeView(
-                    onShop: { showShop = true },
+                    onShop: { shopInitialTab = 0; showShop = true },
                     onMember: { showMember = true },
-                    onBuyQuota: { showMember = true }   // 购买用量页当前复用会员页（见报告）
+                    onBuyQuota: { showMember = true },  // 「用量提升」→ 套餐页 MemberView
+                    onPerUse: { shopInitialTab = 2; showShop = true }  // 「按次计费」→ 商城按次 tab
                 )
                     .modifier(ClearTabBarBackground())
                     .tabItem { Label("主页", systemImage: "house.fill") }
@@ -48,7 +51,7 @@ struct MainTabView: View {
             }
             .tint(AE.accent)   // 选中项跟随品牌墨靛蓝（深色模式自动提亮，不用固定 accentDeep）
         }
-        .fullScreenCover(isPresented: $showShop) { ShopView() }
+        .fullScreenCover(isPresented: $showShop) { ShopView(initialTab: shopInitialTab) }
         .fullScreenCover(isPresented: $showMember) { MemberView() }
     }
 }
