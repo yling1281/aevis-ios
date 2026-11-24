@@ -14,6 +14,8 @@ struct HomeView: View {
     /// 商城 / 会员入口回调：由 MainTabView 注入以全屏拉起对应页面；单独预览时为 nil 用内部占位。
     var onShop: (() -> Void)? = nil
     var onMember: (() -> Void)? = nil
+    /// 「用量提升」入口：由 MainTabView 注入，跳购买用量页（当前复用会员页）
+    var onBuyQuota: (() -> Void)? = nil
     @State private var showShop = false        // 仅在 onShop == nil 时用的占位
     @State private var showMember = false      // 仅在 onMember == nil 时用的占位
     @State private var showPlaza = false       // 人设/表情包广场（本页内 sheet 即可）
@@ -244,39 +246,44 @@ struct HomeView: View {
 
     // MARK: - 用量额度卡
 
+    /// 免费用户默认可聊条数。产品口径「约 14、15 条」，取 15；改这里即可配置，
+    /// 这是**产品常量**（不是服务端返回值），所以断网时也照常展示，不写「—」。
+    private static let freeMessages = 15
+
     private var usageCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("本周额度")
+                Text("本周免费额度")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(AE.textSecondary)
                 Spacer()
-                // 两个小胶囊
+                // 两个小胶囊：「用量提升」是真跳转，不是装饰
                 HStack(spacing: 6) {
-                    capsule("用量提升")
+                    Button { onBuyQuota?() } label: { capsule("用量提升") }
+                        .buttonStyle(.plain)
                     capsule("按次计费")
                 }
             }
 
             HStack(alignment: .bottom, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
+                    // 去掉旧版「6% 已用」大数字：改成用户能理解的「约 15 条免费消息」
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        if let quota {
-                            AnimatedNumber(
-                                value: quota.percent,
-                                font: .system(size: 34, weight: .bold, design: .rounded),
-                                color: AE.textPrimary, suffix: "%"
-                            )
-                        } else {
-                            // 没数据就是「—」，不回落到 92%
-                            Text("—")
-                                .font(.system(size: 34, weight: .bold, design: .rounded))
-                                .foregroundStyle(AE.textPrimary)
-                        }
-                        Text("已用")
+                        Text("约 \(Self.freeMessages)")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(AE.textPrimary)
+                        Text("条")
                             .font(.system(size: 12))
                             .foregroundStyle(AE.textSecondary)
                     }
+                    // 百分比口径单独一行：取不到显示「—」，不写死 6%/92%
+                    Text(quotaPercentLine)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AE.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Divider().opacity(0.5)
+                    // 墨点是独立单位，单独一行，不参与本周额度计算
                     Text(balanceLine)
                         .font(.system(size: 11.5))
                         .foregroundStyle(AE.textSecondary)
@@ -318,10 +325,20 @@ struct HomeView: View {
         .glassCard(cornerRadius: AE.cardRadius, material: .regular)
     }
 
-    /// 墨点余额 + 还能聊多少条：拿不到就「—」，不显示 0、不用 /35 估算
+    /// 墨点余额：独立单位，只讲墨点，不再和本周额度混在一行。
+    /// 拿不到就「—」，不显示 0、不用 /35 估算。
     private var balanceLine: String {
-        guard let points else { return "墨点 — · 约还能聊 — 条" }
-        return "墨点 \(points.points.formatted()) · 约还能聊 \(points.estMessages.formatted()) 条"
+        guard let points else { return "墨点余额 —（独立单位，不计入本周额度）" }
+        return "墨点余额 \(points.points.formatted()) · 约还能聊 \(points.estMessages.formatted()) 条（独立单位）"
+    }
+
+    /// 本周额度百分比口径（与墨点彻底分开）
+    private var quotaPercentLine: String {
+        if let quota {
+            return "本周已用 \(quota.percent)% · 剩余 \(quota.leftPct)%"
+        }
+        if session.token == nil { return "登录后可查看本周额度百分比" }
+        return "额度百分比暂时取不到，下拉可重试"
     }
 
     private var quotaLine: String {

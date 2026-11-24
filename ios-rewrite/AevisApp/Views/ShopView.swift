@@ -223,7 +223,7 @@ struct ShopView: View {
             .padding(.vertical, 16)
             .glassCard(cornerRadius: 14, material: .thin,
                        tintOpacity: on ? 0.22 : 0.08,
-                       strokeColor: on ? AE.brandPurple : .white,
+                       strokeColor: on ? AE.brandPurple : AE.cardStroke,
                        strokeOpacity: on ? 0.9 : 0.18)
         }
         .buttonStyle(AevisPressStyle(scale: 0.97))
@@ -278,43 +278,74 @@ struct ShopView: View {
         }
     }
 
-    // MARK: - tab 2 按次（热更新开关）
+    // MARK: - tab 2 按次（DeepSeek 按次，价格全部明面）
+
+    /// 按次套餐（2026-11-24 用户口径：DeepSeek 按次，1 元 = 50 次、2 元 = 100 次，
+    /// 默认 100 次起卖）。后端目前没有按次下单接口，本 tab 先做**明示价格 UI**，
+    /// 不做假的「立即购买」按钮；需后端补 product/order 接口后才能真正下单。
+    private struct PerUsePackage: Identifiable {
+        let id = UUID()
+        let yuan: String
+        let times: Int
+        let isDefault: Bool
+    }
+
+    private let perUsePackages: [PerUsePackage] = [
+        PerUsePackage(yuan: "1.00", times: 50, isDefault: false),
+        PerUsePackage(yuan: "2.00", times: 100, isDefault: true),
+    ]
 
     private var perUseTab: some View {
-        Group {
-            if perUseEnabled {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("按次包").font(.system(size: 16, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                        Text("选择次数包，即用即扣。").font(.system(size: 12)).foregroundStyle(AE.textSecondary)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                            ForEach([100, 500, 1000, 3000], id: \.self) { n in
-                                VStack(spacing: 4) {
-                                    Text("\(n) 次").font(.system(size: 16, weight: .bold)).foregroundStyle(AE.textPrimary)
-                                    Text("按次包").font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("DeepSeek 按次").font(.system(size: 16, weight: .semibold)).foregroundStyle(AE.textPrimary)
+                Text("默认 100 次起卖 · 即用即扣，所有价格明面展示")
+                    .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+                    ForEach(perUsePackages) { pack in
+                        VStack(spacing: 5) {
+                            HStack(spacing: 4) {
+                                Text("¥\(pack.yuan)")
+                                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                                    .foregroundStyle(AE.accent)
+                                if pack.isDefault {
+                                    Text("默认")
+                                        .font(.system(size: 9.5, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 5).padding(.vertical, 2)
+                                        .background(AE.brandPurple, in: Capsule())
                                 }
-                                .frame(maxWidth: .infinity).padding(.vertical, 16)
-                                .glassCard(cornerRadius: 14, material: .thin)
                             }
+                            Text("\(pack.times) 次")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AE.textPrimary)
+                            Text(String(format: "内部价 ¥%.2f / 次", Double(pack.yuan) ?? 0 / Double(pack.times)))
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(AE.textSecondary)
                         }
-                    }.padding(18)
-                }
-            } else {
-                VStack(spacing: 14) {
-                    Spacer(minLength: 60)
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(AE.accentSoft.opacity(0.5)).frame(width: 60, height: 60)
-                        Image(systemName: "hourglass").font(.system(size: 28)).foregroundStyle(AE.accent)
+                        .frame(maxWidth: .infinity).padding(.vertical, 16)
+                        .glassCard(cornerRadius: 14, material: .thin,
+                                   tintOpacity: pack.isDefault ? 0.20 : 0.08,
+                                   strokeColor: pack.isDefault ? AE.brandPurple : AE.cardStroke,
+                                   strokeOpacity: pack.isDefault ? 0.8 : 0.18)
                     }
-                    Text("按次包 · 暂未上线")
-                        .font(.system(size: 18, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                    Text("上线后自动开放，无需更新 App")
-                        .font(.system(size: 13)).foregroundStyle(AE.textSecondary)
-                    Spacer(minLength: 60)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("token 限量说明").font(.system(size: 12.5, weight: .medium)).foregroundStyle(AE.textPrimary)
+                    Text("每一轮对话最多计入 2000 token，超出部分按服务端实际口径另计；设置上限是为了防止次数包被少量高消耗对话吃穿。具体上限以服务端配置为准。")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AE.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(14)
+                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.12)
+
+                Text("下单入口待后端补齐按次商品与订单接口后开放。")
+                    .font(.system(size: 11)).foregroundStyle(AE.textSecondary)
             }
+            .padding(18)
         }
     }
 
@@ -425,14 +456,14 @@ struct ShopView: View {
                     title: "支付宝",
                     note: "跳转支付宝收银台完成付款",
                     glyph: "A",
-                    tint: Color.hex(0x1677FF)
+                    tint: AE.payAlipay
                 ) { Task { await startPay(.alipay) } }
 
                 channelRow(
                     title: "微信支付",
                     note: "玻璃二维码，扫码付款",
                     glyph: "微",
-                    tint: Color.hex(0x1AAD19)
+                    tint: AE.payWechat
                 ) { Task { await startPay(.wxpay) } }
 
                 Text("付款完成后回到本页确认到账")
@@ -503,8 +534,8 @@ struct ShopView: View {
     private var alipayConfirmSheet: some View {
         VStack(spacing: 16) {
             ZStack {
-                Circle().fill(Color.hex(0x1677FF).opacity(0.16)).frame(width: 62, height: 62)
-                Image(systemName: "hand.raised.fill").font(.system(size: 26)).foregroundStyle(Color.hex(0x1677FF))
+                Circle().fill(AE.payAlipay.opacity(0.16)).frame(width: 62, height: 62)
+                Image(systemName: "hand.raised.fill").font(.system(size: 26)).foregroundStyle(AE.payAlipay)
             }
             Text("已跳转支付宝")
                 .font(.system(size: 19, weight: .bold, design: .rounded))

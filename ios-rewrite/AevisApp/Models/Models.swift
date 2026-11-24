@@ -25,6 +25,14 @@ enum AE {
     static let memberCardStroke = Color.adaptive(dark: Color.hex(0x6F6A57), light: Color.hex(0x8C8A80))
     /// 「推荐」徽章底
     static let memberBadge = Color.adaptive(dark: Color.hex(0xE8A353), light: Color.hex(0xE08A2E))
+
+    // MARK: - 商城/支付卡语义色（R6 夜间配色，替代 ShopView/MemberView 里的裸色值）
+    /// 未选中卡片描边：浅色白、深色暖灰，避免夜间白边像发光框
+    static let cardStroke = Color.adaptive(dark: Color.hex(0x3A404E), light: .white)
+    /// 支付宝品牌色（深色提亮一档，保持辨识度又不刺眼）
+    static let payAlipay = Color.adaptive(dark: Color.hex(0x5AA0FF), light: Color.hex(0x1677FF))
+    /// 微信支付品牌色（深色提亮一档）
+    static let payWechat = Color.adaptive(dark: Color.hex(0x5FD07A), light: Color.hex(0x1AAD19))
     /// 强调色柔和底：卡片内分组 / 未读胶囊 / 头像底
     static let accentSoft = Color.adaptive(dark: Color.hex(0x2B3346), light: Color.hex(0xEAEDF4))
     /// 卡片背景：浅色纯白 / 深色 #1E2028

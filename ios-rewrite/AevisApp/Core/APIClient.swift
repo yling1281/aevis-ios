@@ -294,7 +294,7 @@ struct APIClient {
 
     /// 人设广场条目（对齐 `GET /v1/psquare/list` 的 data.rows[]）。
     /// 该接口公开，返回 published/listing 的人设，最多 200 条；不上报 X-Account 也能看。
-    struct SquarePersona: Identifiable {
+    struct SquarePersona: Identifiable, Codable {
         let id: String
         let name: String
         let tagline: String
@@ -320,6 +320,41 @@ struct APIClient {
                 isOfficial: (r["is_official"] as? NSNumber)?.intValue == 1
             )
         }
+    }
+
+    /// 创建人设并投稿广场。后端 `POST /v1/psquare/publish` 已存在（需 X-Account）：
+    /// AI 审核通过 → status="listing"（广场可见、非推荐位）；未过 → "rejected" + reason。
+    struct PersonaCreateResult {
+        let id: String
+        let status: String
+        let reason: String
+        var listed: Bool { status == "listing" || status == "published" }
+    }
+
+    static func createPersona(
+        name: String,
+        tagline: String,
+        personality: String,
+        avatarURL: String,
+        account: String
+    ) async throws -> PersonaCreateResult {
+        let json = try await request(
+            "/v1/psquare/publish", method: "POST",
+            body: [
+                "name": name,
+                "tagline": tagline,
+                "personality": personality,
+                "avatar_url": avatarURL,
+                "relation": "lover"
+            ],
+            account: account
+        )
+        let d = (json["data"] as? [String: Any]) ?? json
+        return PersonaCreateResult(
+            id: (d["id"] as? String) ?? "",
+            status: (d["status"] as? String) ?? "",
+            reason: (d["reason"] as? String) ?? (json["msg"] as? String) ?? ""
+        )
     }
 
     /// 采用（喜欢）广场人设：公开接口，返回最新 adoptCount。
@@ -968,7 +1003,7 @@ struct APIClient {
 
     /// 表情包广场条目（对齐 `GET /v1/emoji/list` 的 data.rows[]）。
     /// items 是图片相对/绝对 URL 数组；接口只返回 status=published，按 use_count 排序。
-    struct EmojiPack: Identifiable {
+    struct EmojiPack: Identifiable, Codable {
         let id: String
         let name: String
         let intro: String

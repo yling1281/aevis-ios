@@ -37,8 +37,10 @@
 		A10000000000000000000024 /* AevisMascotMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* AevisMascotMark.swift */; };
 		A10000000000000000000025 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* RegisterView.swift */; };
 		A10000000000000000000026 /* AgreementContentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000026 /* AgreementContentStore.swift */; };
+		A10000000000000000000029 /* PlazaCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000029 /* PlazaCacheStore.swift */; };
 		A10000000000000000000027 /* MemberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* MemberView.swift */; };
 		A10000000000000000000028 /* PlazaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000028 /* PlazaView.swift */; };
+		A1000000000000000000002A /* PersonaCreateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002A /* PersonaCreateView.swift */; };
 		A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppIcon60x60@2x.png */; };
 		A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppIcon60x60@3x.png */; };
 		A20000000000000000000003 /* AppIcon1024.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* AppIcon1024.png */; };
@@ -77,8 +79,10 @@
 		B10000000000000000000024 /* AevisMascotMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AevisMascotMark.swift; sourceTree = "<group>"; };
 		B10000000000000000000025 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		B10000000000000000000026 /* AgreementContentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgreementContentStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000029 /* PlazaCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlazaCacheStore.swift; sourceTree = "<group>"; };
 		B10000000000000000000027 /* MemberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberView.swift; sourceTree = "<group>"; };
 		B10000000000000000000028 /* PlazaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlazaView.swift; sourceTree = "<group>"; };
+		B1000000000000000000002A /* PersonaCreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaCreateView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,6 +123,7 @@
 			children = (
 				B10000000000000000000002 /* APIClient.swift */,
 				B10000000000000000000003 /* Session.swift */,
+				B10000000000000000000029 /* PlazaCacheStore.swift */,
 				B1000000000000000000000B /* CloudBackup.swift */,
 				B1000000000000000000000D /* AppUpdate.swift */,
 				B10000000000000000000016 /* AppBackground.swift */,
@@ -161,6 +166,7 @@
 				B10000000000000000000025 /* RegisterView.swift */,
 				B10000000000000000000027 /* MemberView.swift */,
 				B10000000000000000000028 /* PlazaView.swift */,
+				B1000000000000000000002A /* PersonaCreateView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -296,6 +302,8 @@
 				A10000000000000000000026 /* AgreementContentStore.swift in Sources */,
 				A10000000000000000000027 /* MemberView.swift in Sources */,
 				A10000000000000000000028 /* PlazaView.swift in Sources */,
+				A10000000000000000000029 /* PlazaCacheStore.swift in Sources */,
+				A1000000000000000000002A /* PersonaCreateView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

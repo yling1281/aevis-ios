@@ -20,6 +20,11 @@ struct PlazaView: View {
     @State private var adopted: Set<String> = []
     @State private var expandedPack: String? = nil
     @State private var tip = ""
+    /// 创建人设（后端 `/v1/psquare/publish` 已存在，之前广场页缺入口 → 用户「添加不了」）
+    @State private var showCreate = false
+    /// 硬缓存：连不上服务器时为 true，页面顶部提示，但列表照常显示本地缓存
+    @State private var offline = false
+    @State private var cacheHint = ""
 
     init(initialTab: Int = 0) {
         _tab = State(initialValue: initialTab)
@@ -37,10 +42,34 @@ struct PlazaView: View {
                 Spacer()
                 Text("广场").font(.system(size: 17, weight: .semibold)).foregroundStyle(AE.textPrimary)
                 Spacer()
-                Color.clear.frame(width: 24, height: 24)
+                // 人设页才有「创建」：这就是用户反馈「添加不了」的根因——之前只有采用按钮
+                if tab == 0 {
+                    Button { showCreate = true } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(AE.brandPurple)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("创建人设")
+                } else {
+                    Color.clear.frame(width: 24, height: 24)
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 8)
+
+            if offline {
+                HStack(spacing: 6) {
+                    Image(systemName: "wifi.exclamationmark").font(.system(size: 11))
+                    Text("连不上服务器，当前显示本地缓存\(cacheHint)")
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(AE.textSecondary)
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+            }
 
             SegmentedTabs(tabs: tabs, selected: Binding(
                 get: { tab },
@@ -85,25 +114,69 @@ struct PlazaView: View {
         }
         .background(AppBackground())
         .task { await load() }
+        .sheet(isPresented: $showCreate) {
+            PersonaCreateView { _ in
+                Task { await load() }
+            }
+            .environmentObject(session)
+        }
     }
 
-    // MARK: - 加载
+    // MARK: - 加载（磁盘硬缓存优先）
 
     private func load() async {
-        await MainActor.run { loading = true; failed = false }
+        // 1) 同步读磁盘：冷启动立刻有内容，不转圈；失败也不影响后续云端拉取
+        let disk = PlazaCacheStore.load()
+        let hadCache = !disk.personas.isEmpty || !disk.packs.isEmpty
+        await MainActor.run {
+            personas = disk.personas
+            packs = disk.packs
+            offline = false
+            cacheHint = disk.checkedAt > 0
+                ? "（更新于 \(Self.timeText(disk.checkedAt))）" : ""
+            loading = !hadCache
+            failed = false
+        }
+
+        // 2) 云端拉取；任一成功就按内容签名决定是否覆盖缓存
         async let p = APIClient.squarePersonas()
         async let e = APIClient.emojiPacks(token: session.token)
         let ps = try? await p
         let es = try? await e
-        await MainActor.run {
-            loading = false
-            if ps == nil && es == nil {
-                failed = true
-            } else {
-                personas = ps ?? []
-                packs = es ?? []
+        guard ps != nil || es != nil else {
+            await MainActor.run {
+                // 连不上：保留本地缓存，只有完全没有缓存时才显示失败页
+                loading = false
+                failed = !hadCache
+                offline = hadCache
             }
+            return
         }
+        let newPersonas = ps ?? disk.personas
+        let newPacks = es ?? disk.packs
+        let sig = PlazaCacheStore.signature(personas: newPersonas, packs: newPacks)
+        let changed = sig != disk.signature
+        if changed {
+            PlazaCacheStore.save(PlazaCacheStore.Payload(
+                personas: newPersonas, packs: newPacks,
+                signature: sig, checkedAt: Date().timeIntervalSince1970))
+        }
+        await MainActor.run {
+            personas = newPersonas
+            packs = newPacks
+            loading = false
+            failed = false
+            // 一半接口失败时也提示，但列表仍是缓存+另一半的新数据
+            offline = ps == nil || es == nil
+            if !changed { cacheHint = "（内容未变）" }
+        }
+    }
+
+    private static func timeText(_ epoch: Double) -> String {
+        let d = Date(timeIntervalSince1970: epoch)
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f.string(from: d)
     }
 
     // MARK: - 人设广场

@@ -27,7 +27,11 @@ struct MainTabView: View {
             AppBackground()
 
             TabView(selection: $selected) {
-                HomeView(onShop: { showShop = true }, onMember: { showMember = true })
+                HomeView(
+                    onShop: { showShop = true },
+                    onMember: { showMember = true },
+                    onBuyQuota: { showMember = true }   // 购买用量页当前复用会员页（见报告）
+                )
                     .modifier(ClearTabBarBackground())
                     .tabItem { Label("主页", systemImage: "house.fill") }
                     .tag(0)
@@ -49,15 +53,17 @@ struct MainTabView: View {
     }
 }
 
-/// 让 tab bar 背景透明（iOS 16.0 可用的 `toolbarBackground`），使 `MainTabView` 底层的
-/// `AppBackground()` 一直透上来；iOS 26+ 保留系统 Liquid Glass 玻璃 Dock，不做任何处理。
+/// Dock 背景（2026-11-24 修「底部框怪怪的」）：iOS 16–18 原来把 tab bar 背景强行
+/// `.hidden`，自定义背景从底下透上来但系统分隔线/边框还在，看起来像一条突兀的框。
+/// 改成原生 `Material.regular` 磨砂底：明暗自动适配、边框自然消失，与全局
+/// `AppBackground()` 同一质感；iOS 26+ 保留系统 Liquid Glass Dock 不动。
 private struct ClearTabBarBackground: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
         } else {
-            content.toolbarBackground(.hidden, for: .tabBar)
+            content.toolbarBackground(Material.regular, for: .tabBar)
         }
     }
 }

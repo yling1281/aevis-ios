@@ -205,7 +205,9 @@ struct ChatView: View {
             .padding(10)
             .background(.regularMaterial)
         }
-        .background(Color.clear)
+        // 默认跟随全局背景；设置里打开「聊天页单独设置背景」后只铺聊天专用渐变，
+        // 避免花哨全局图片压住气泡文字（2026-11-24）
+        .background(ChatBackground())
         .navigationTitle(persona.name)
         .navigationBarTitleDisplayMode(.inline)
         // 进聊天详情时收起底部 Dock：系统原生 tab bar 在 push 时不会自动隐藏，

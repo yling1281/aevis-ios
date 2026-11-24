@@ -38,6 +38,17 @@ struct MemberView: View {
     @State private var successResult: APIClient.PayVerifyResult? = nil
     @State private var alipayConfirming = false
 
+    /// 会员权益（2026-11-24 产品文案先上 UI）。后端 `/v1/shop/products` 目前只有
+    /// id/title/days/price_cents/week_total/percent/label，**没有结构化权益字段**；
+    /// 这里先按用户口述列出，需后端补 `benefits[]` / `signin_bonus` / `free_minutes` 后再改成动态读取。
+    private let benefitItems = [
+        "开通立得墨点",
+        "月卡 · 固定 30 天",
+        "本周用量一次回满",
+        "每天签到翻倍",
+        "免费时长",
+    ]
+
     /// 本地日期（yyyy-MM-dd），用于九折键；POSIX locale 只为固定格式，时区仍用本地。
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -204,6 +215,27 @@ struct MemberView: View {
                     .shadow(color: AE.shadowColor, radius: 8, y: 3)
                 }
 
+                // 会员权益清单（后端字段待补，当前按产品文案展示）
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("会员权益")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AE.textSecondary)
+                    ForEach(benefitItems, id: \.self) { item in
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(AE.brandPurple)
+                            Text(item)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(AE.textPrimary)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.14)
+
                 Text("用量越多越划算 · 固定 30 天 · 每周一刷新额度")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(AE.brandPurple)
@@ -323,9 +355,9 @@ struct MemberView: View {
             .padding(.horizontal, 17).padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassCard(cornerRadius: 22, material: .regular,
-                       tint: on ? AE.memberCardTint : .white,
+                       tint: on ? AE.memberCardTint : AE.card,
                        tintOpacity: on ? 0.72 : 0.10,
-                       strokeColor: on ? AE.memberCardStroke : .white,
+                       strokeColor: on ? AE.memberCardStroke : AE.cardStroke,
                        strokeOpacity: on ? 0.45 : 0.16)
             .shadow(color: AE.shadowColor, radius: 9, y: 3)
         }
@@ -435,9 +467,9 @@ struct MemberView: View {
                 .padding(.bottom, 2)
 
                 channelRow(title: "支付宝", note: "跳转支付宝收银台完成付款",
-                           glyph: "A", tint: Color.hex(0x1677FF)) { Task { await startPay(.alipay) } }
+                           glyph: "A", tint: AE.payAlipay) { Task { await startPay(.alipay) } }
                 channelRow(title: "微信支付", note: "玻璃二维码，扫码付款",
-                           glyph: "微", tint: Color.hex(0x1AAD19)) { Task { await startPay(.wxpay) } }
+                           glyph: "微", tint: AE.payWechat) { Task { await startPay(.wxpay) } }
 
                 Text("付款完成后回到本页确认到账")
                     .font(.system(size: 11))
@@ -502,8 +534,8 @@ struct MemberView: View {
     private var alipayConfirmSheet: some View {
         VStack(spacing: 16) {
             ZStack {
-                Circle().fill(Color.hex(0x1677FF).opacity(0.16)).frame(width: 62, height: 62)
-                Image(systemName: "hand.raised.fill").font(.system(size: 26)).foregroundStyle(Color.hex(0x1677FF))
+                Circle().fill(AE.payAlipay.opacity(0.16)).frame(width: 62, height: 62)
+                Image(systemName: "hand.raised.fill").font(.system(size: 26)).foregroundStyle(AE.payAlipay)
             }
             Text("已跳转支付宝")
                 .font(.system(size: 19, weight: .bold, design: .rounded))

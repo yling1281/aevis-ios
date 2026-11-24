@@ -133,3 +133,52 @@ struct AppBackground: View {
         customImage = nil
     }
 }
+
+/// 聊天页**独立背景**（2026-11-24）：默认跟随全局背景；用户在设置里打开
+/// 「聊天背景单独设置」后，聊天页只用这里的高对比纯色/渐变，不铺全局自定义图，
+/// 保证聊天气泡文字在花哨背景上仍可读。存储键与全局完全分离，互不覆盖。
+struct ChatBackground: View {
+    @AppStorage("aevisChatBgIndependent") private var independent = false
+    @AppStorage("aevisChatBgStyle") private var style = 0
+    @Environment(\.colorScheme) private var scheme
+
+    private enum Preset: Int, CaseIterable {
+        case ink = 0, cream, mist
+
+        var label: String {
+            switch self {
+            case .ink: return "深墨"
+            case .cream: return "奶油"
+            case .mist: return "雾蓝"
+            }
+        }
+
+        func colors(dark: Bool) -> [Color] {
+            switch (self, dark) {
+            case (.ink, false):   return [Color.hex(0xE8EAF0), Color.hex(0xDDE1EA)]
+            case (.ink, true):    return [Color.hex(0x14161C), Color.hex(0x1C2029)]
+            case (.cream, false): return [Color.hex(0xFFF8EC), Color.hex(0xFFF0D9)]
+            case (.cream, true):  return [Color.hex(0x241F1A), Color.hex(0x302820)]
+            case (.mist, false):  return [Color.hex(0xEAF2F7), Color.hex(0xD8E7F0)]
+            case (.mist, true):   return [Color.hex(0x141E26), Color.hex(0x1B2A35)]
+            }
+        }
+    }
+
+    static var presetLabels: [String] { Preset.allCases.map { $0.label } }
+
+    var body: some View {
+        Group {
+            if independent {
+                LinearGradient(
+                    colors: (Preset(rawValue: style) ?? .ink).colors(dark: scheme == .dark),
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            } else {
+                AppBackground()
+            }
+        }
+    }
+}

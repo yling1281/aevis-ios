@@ -21,6 +21,9 @@ struct ThemeSettingsView: View {
     @AppStorage("aevisBgImageName") private var imageName = ""
     @AppStorage("aevisBgPos") private var imagePos = 0
     @AppStorage("aevisBgRev") private var revision = 0
+    /// 聊天背景独立开关：与全局背景键完全分离，互不覆盖
+    @AppStorage("aevisChatBgIndependent") private var chatIndependent = false
+    @AppStorage("aevisChatBgStyle") private var chatStyle = 0
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var previewImage: UIImage?
@@ -65,7 +68,35 @@ struct ThemeSettingsView: View {
                         }
                     }
                     .padding(.top, 2)
-                    hint("选预设会替换掉自定义图片。背景与模糊会立即应用到主页、商城与账号中心（聊天页用自己的气泡底色，不铺背景）。")
+                    hint("选预设会替换掉自定义图片。背景与模糊会立即应用到主页、商城、广场与会员等所有页面。")
+                }
+
+                sectionCard(title: "聊天背景", icon: "bubble.left.and.bubble.right") {
+                    Toggle("聊天页单独设置背景", isOn: $chatIndependent)
+                        .font(.system(size: 13))
+                        .foregroundStyle(AE.textPrimary)
+                        .tint(AE.brandPurple)
+                    if chatIndependent {
+                        HStack(spacing: 10) {
+                            ForEach(Array(ChatBackground.presetLabels.enumerated()), id: \.offset) { pair in
+                                Button {
+                                    chatStyle = pair.offset
+                                } label: {
+                                    Text(pair.element)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(chatStyle == pair.offset ? .white : AE.textSecondary)
+                                        .padding(.horizontal, 12).padding(.vertical, 7)
+                                        .background(chatStyle == pair.offset ? AE.brandPurple : AE.accentSoft,
+                                                    in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                    hint(chatIndependent
+                         ? "聊天页使用上面单独选的背景，不受全局背景图影响。"
+                         : "关闭时聊天页跟随全局背景（默认）。")
                 }
             }
             .padding(.horizontal, 18)
