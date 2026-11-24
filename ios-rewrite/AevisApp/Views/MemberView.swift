@@ -49,6 +49,15 @@ struct MemberView: View {
         "免费时长",
     ]
 
+    /// 后端 `/v1/shop/products` 已下发 `benefits[]`（字符串数组），优先用服务端文案；
+    /// 老服务端缺字段时回落本地占位，不让权益区空白。
+    private var displayedBenefits: [String] {
+        let list = selectedProduct?.benefits.isEmpty == false
+            ? selectedProduct?.benefits
+            : products.first?.benefits
+        return (list?.isEmpty == false) ? list! : benefitItems
+    }
+
     /// 本地日期（yyyy-MM-dd），用于九折键；POSIX locale 只为固定格式，时区仍用本地。
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -238,7 +247,7 @@ struct MemberView: View {
                     Text("会员权益")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(AE.textSecondary)
-                    ForEach(benefitItems, id: \.self) { item in
+                    ForEach(displayedBenefits, id: \.self) { item in
                         HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 13))
@@ -383,6 +392,10 @@ struct MemberView: View {
                         }
                     }
                     usageLine(prod, ratio: ratio)
+                    // 服务端明面价：list_price_cents / discount_percent（未虚标则与现价一致）
+                    Text("面价 ¥\(String(format: "%.2f", Double(prod.listPriceCents > 0 ? prod.listPriceCents : prod.priceCents) / 100)) · \(prod.discountPercent)%")
+                        .font(.system(size: 10))
+                        .foregroundStyle(AE.textSecondary)
                 }
                 Spacer(minLength: 6)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {

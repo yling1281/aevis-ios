@@ -32,6 +32,10 @@ struct ShopView: View {
     @State private var quota: APIClient.QuotaState? = nil // 本周剩余额度%，与墨点余额分开
     @State private var packages: [APIClient.PointPackage] = []
     @State private var selectedPackage: APIClient.PointPackage? = nil
+    /// 后端 /v1/shop/products 的按次商品（kind=="uses"）
+    @State private var useProducts: [APIClient.ShopProduct] = []
+    @State private var selectedUse: APIClient.ShopProduct? = nil
+    @State private var usesLeft: Int? = nil
     @State private var tip = ""
 
     // 支付流程状态（本页只处理墨点充值；会员支付在 MemberView 内自成一套）
@@ -137,14 +141,22 @@ struct ShopView: View {
         async let p = APIClient.pointPackages()
         async let b = APIClient.pointsBalance(token: session.token)
         async let q = APIClient.quotaState(token: session.token)
+        async let sp = APIClient.shopProducts()
+        async let ub = session.token.map { APIClient.dsUses(token: $0) }
         let pkgs = (try? await p) ?? []
         let bal = (try? await b)         // 失败保持 nil → 显示「—」
         let qt = (try? await q)          // 失败保持 nil → 显示「—」
+        let allProducts = (try? await sp) ?? []
+        let uses = (try? await ub)?.left
+        let useList = allProducts.filter { $0.kind == "uses" }
         await MainActor.run {
             packages = pkgs
             balance = bal
             quota = qt
+            useProducts = useList
+            usesLeft = uses
             if selectedPackage == nil { selectedPackage = pkgs.first }
+            if selectedUse == nil { selectedUse = useList.first }
         }
     }
 
@@ -222,6 +234,8 @@ struct ShopView: View {
                 }
                 Text(pkg.name)
                     .font(.system(size: 12)).foregroundStyle(AE.textSecondary).lineLimit(1)
+                Text("面价 \(pkg.listPriceYuan.isEmpty ? String(format: "¥%.2f", Double(pkg.listPriceCents) / 100) : pkg.listPriceYuan) · \(pkg.discountPercent)%")
+                    .font(.system(size: 10)).foregroundStyle(AE.textSecondary)
                 AnimatedNumber(
                     value: Double(pkg.amountCents) / 100, specifier: "¥%.2f",
                     font: .system(size: 14, weight: .semibold), color: AE.accent
@@ -286,72 +300,74 @@ struct ShopView: View {
         }
     }
 
-    // MARK: - tab 2 按次（DeepSeek 按次，价格全部明面）
-
-    /// 按次套餐（2026-11-24 用户口径：DeepSeek 按次，1 元 = 50 次、2 元 = 100 次，
-    /// 默认 100 次起卖）。后端目前没有按次下单接口，本 tab 先做**明示价格 UI**，
-    /// 不做假的「立即购买」按钮；需后端补 product/order 接口后才能真正下单。
-    private struct PerUsePackage: Identifiable {
-        let id = UUID()
-        let yuan: String
-        let times: Int
-        let isDefault: Bool
-    }
-
-    private let perUsePackages: [PerUsePackage] = [
-        PerUsePackage(yuan: "1.00", times: 50, isDefault: false),
-        PerUsePackage(yuan: "2.00", times: 100, isDefault: true),
-    ]
+    // MARK: - tab 2 按次（后端下发商品 + 明面价 + 动态 token 上限）
 
     private var perUseTab: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("DeepSeek 按次").font(.system(size: 16, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                Text("默认 100 次起卖 · 即用即扣，所有价格明面展示")
+                if let left = usesLeft {
+                    Text("剩余 \(left) 次").font(.system(size: 12)).foregroundStyle(AE.brandPurple)
+                }
+                Text("1 元 = 50 次 · 默认 100 次起卖 · 所有价格明面展示")
                     .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                    ForEach(perUsePackages) { pack in
-                        VStack(spacing: 5) {
-                            HStack(spacing: 4) {
-                                Text("¥\(pack.yuan)")
-                                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                ForEach(useProducts) { pack in
+                    let on = selectedUse?.id == pack.id
+                    Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { selectedUse = pack } } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text("¥\(String(format: "%.2f", Double(pack.priceCents) / 100))")
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
                                     .foregroundStyle(AE.accent)
-                                if pack.isDefault {
-                                    Text("默认")
-                                        .font(.system(size: 9.5, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 5).padding(.vertical, 2)
-                                        .background(AE.brandPurple, in: Capsule())
-                                }
+                                Text("\(pack.uses) 次")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(AE.textPrimary)
+                                Spacer()
+                                Text("面价 ¥\(String(format: "%.2f", Double(pack.listPriceCents > 0 ? pack.listPriceCents : pack.priceCents) / 100)) · \(pack.discountPercent)%")
+                                    .font(.system(size: 10.5)).foregroundStyle(AE.textSecondary)
                             }
-                            Text("\(pack.times) 次")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(AE.textPrimary)
-                            Text(String(format: "内部价 ¥%.2f / 次", Double(pack.yuan) ?? 0 / Double(pack.times)))
-                                .font(.system(size: 10.5))
-                                .foregroundStyle(AE.textSecondary)
+                            ForEach(pack.benefits, id: \.self) { line in
+                                Text(line).font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+                            }
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
                         .glassCard(cornerRadius: 14, material: .thin,
-                                   tintOpacity: pack.isDefault ? 0.20 : 0.08,
-                                   strokeColor: pack.isDefault ? AE.brandPurple : AE.cardStroke,
-                                   strokeOpacity: pack.isDefault ? 0.8 : 0.18)
+                                   tintOpacity: on ? 0.20 : 0.08,
+                                   strokeColor: on ? AE.brandPurple : AE.cardStroke,
+                                   strokeOpacity: on ? 0.8 : 0.18)
+                    }
+                    .buttonStyle(AevisPressStyle(scale: 0.97))
+                }
+                if useProducts.isEmpty {
+                    Text("按次商品加载中或暂不可用").font(.system(size: 12))
+                        .foregroundStyle(AE.textSecondary).frame(maxWidth: .infinity).padding(.top, 20)
+                }
+
+                payButton(enabled: selectedUse != nil, action: { showChannelPicker = true }) {
+                    HStack(spacing: 0) {
+                        Text("购买 \(selectedUse?.uses ?? 0) 次 · ¥")
+                        AnimatedNumber(
+                            value: Double(selectedUse?.priceCents ?? 0) / 100,
+                            specifier: "%.2f", font: .system(size: 15, weight: .semibold), color: .white
+                        )
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("token 限量说明").font(.system(size: 12.5, weight: .medium)).foregroundStyle(AE.textPrimary)
-                    Text("每一轮对话最多计入 2000 token，超出部分按服务端实际口径另计；设置上限是为了防止次数包被少量高消耗对话吃穿。具体上限以服务端配置为准。")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AE.textSecondary)
+                    let caps = selectedUse?.tokenCaps ?? [:]
+                    let flash = (caps["deepseek-flash"]?["max_tokens"] as? NSNumber)?.intValue ?? 0
+                    let chat = (caps["deepseek-chat"]?["max_tokens"] as? NSNumber)?.intValue ?? 0
+                    Text(flash > 0 && chat > 0
+                         ? "Flash 每轮最多 \(flash) token、Chat \(chat) token，超出不计费；全局硬顶 4096 token。"
+                         : "按次仅 DeepSeek Flash / Chat 可用；具体 token 上限以服务端为准。")
+                        .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(14)
                 .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.12)
-
-                Text("下单入口待后端补齐按次商品与订单接口后开放。")
-                    .font(.system(size: 11)).foregroundStyle(AE.textSecondary)
             }
             .padding(18)
         }
@@ -392,11 +408,18 @@ struct ShopView: View {
         showChannelPicker = false
         guard let token = session.token, !token.isEmpty else { showTip("请先登录"); return }
         do {
-            guard let pkg = selectedPackage else { return }
-            let order = try await APIClient.pointsRecharge(
-                package: pkg.code, payType: channel.rawValue, token: token)
+            let order: APIClient.PayOrder
+            let title: String
+            if tab == 2, let use = selectedUse {
+                order = try await APIClient.memberOrder(productID: use.id, payType: channel.rawValue, token: token)
+                title = "购买 \(use.uses) 次"
+            } else if let pkg = selectedPackage {
+                order = try await APIClient.pointsRecharge(
+                    package: pkg.code, payType: channel.rawValue, token: token)
+                title = "充值 \(pkg.points) 墨点"
+            } else { return }
             guard !order.payURL.isEmpty else { showTip("支付链接为空，请稍后重试"); return }
-            activePay = ActivePay(order: order, title: "充值 \(pkg.points) 墨点")
+            activePay = ActivePay(order: order, title: title)
             if channel == .alipay {
                 showAlipayConfirm = true
                 if let url = URL(string: order.payURL) {
@@ -420,6 +443,10 @@ struct ShopView: View {
             let r = try await APIClient.pointsOrderStatus(orderNo: active.order.orderID, token: token)
             return APIClient.PayVerifyResult(paid: r.paid, amount: r.points, unit: "墨点")
         case .member:
+            if active.order.uses > 0 {
+                let r = try await APIClient.usesOrderStatus(orderID: active.order.orderID, token: token)
+                return APIClient.PayVerifyResult(paid: r.paid, amount: r.uses, unit: "次")
+            }
             let r = try await APIClient.memberOrderStatus(orderID: active.order.orderID, token: token)
             return APIClient.PayVerifyResult(paid: r.paid, amount: r.days, unit: "天会员")
         }
@@ -605,7 +632,7 @@ struct ShopView: View {
                 PaySuccessView(
                     amount: r.amount,
                     unit: r.unit,
-                    subtitle: "墨点余额已更新",
+                    subtitle: r.unit == "次" ? "DeepSeek 按次次数已到账" : "墨点余额已更新",
                     onDone: { Task { await load() } }
                 )
             }

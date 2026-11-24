@@ -571,6 +571,10 @@ struct APIClient {
         let amountYuan: String
         let points: Int
         let pointsText: String
+        var listPriceCents: Int = 0
+        var listPriceYuan: String = ""
+        var originalPriceCents: Int = 0
+        var discountPercent: Int = 100
         var id: String { code }
     }
 
@@ -588,7 +592,11 @@ struct APIClient {
                 amountCents: cents,
                 amountYuan: (r["amountYuan"] as? String) ?? String(format: "%.2f", Double(cents) / 100),
                 points: (r["points"] as? NSNumber)?.intValue ?? 0,
-                pointsText: (r["pointsText"] as? String) ?? ""
+                pointsText: (r["pointsText"] as? String) ?? "",
+                listPriceCents: (r["listPriceCents"] as? NSNumber)?.intValue ?? cents,
+                listPriceYuan: (r["listPriceYuan"] as? String) ?? String(format: "¥%.2f", Double(cents) / 100),
+                originalPriceCents: (r["originalPriceCents"] as? NSNumber)?.intValue ?? cents,
+                discountPercent: (r["discountPercent"] as? NSNumber)?.intValue ?? 100
             )
         }
     }
@@ -630,8 +638,8 @@ struct APIClient {
             percent: (q["percent"] as? NSNumber)?.intValue ?? 0,
             leftPct: (q["left_pct"] as? NSNumber)?.intValue ?? 0,
             hasQuota: (q["has_quota"] as? Bool) ?? false,
-            resetAt: (q["reset_at"] as? String) ?? (q["next_reset"] as? String)
-                ?? (d["reset_at"] as? String)
+            resetAt: (q["reset_at"] as? String) ?? (q["resetAt"] as? String)
+                ?? (q["next_reset"] as? String) ?? (d["reset_at"] as? String)
         )
     }
 
@@ -776,6 +784,21 @@ struct APIClient {
         var weekTotal: Int = 0      // 每周额度（墨点）：300/450/1050/2250
         var percent: Int = 0        // 展示百分比：100/150/350/750
         var label: String = ""      // 档位短名：X / XL / XXL / XLLLL
+        // 2026-11-24 后端新增：商品类型（member/uses）、面价、权益服务端下发
+        var kind: String = "member"
+        var uses: Int = 0
+        var listPriceCents: Int = 0
+        var discountPercent: Int = 100
+        var benefits: [String] = []
+        var grantPoints: Int = 0
+        var freeMinutes: Int = 0
+        var signinBonus: Int = 0
+        var checkinBonusMultiplier: Int = 0
+        var usesPerYuan: Int = 0
+        var minSellUses: Int = 0
+        var chargeModels: [String] = []
+        /// DeepSeek 按次 token 上限：{model: ["max_tokens": n, "input_chars": n]}
+        var tokenCaps: [String: [String: Any]] = [:]
     }
 
     /// 会员套餐列表（公开接口）。顶层 `items`。
@@ -797,7 +820,20 @@ struct APIClient {
                 // 新字段容错：老服务端缺这些键时给 0/空串，不让解析崩
                 weekTotal: (r["week_total"] as? NSNumber)?.intValue ?? 0,
                 percent: (r["percent"] as? NSNumber)?.intValue ?? 0,
-                label: (r["label"] as? String) ?? ""
+                label: (r["label"] as? String) ?? "",
+                kind: (r["kind"] as? String) ?? "member",
+                uses: (r["uses"] as? NSNumber)?.intValue ?? 0,
+                listPriceCents: (r["list_price_cents"] as? NSNumber)?.intValue ?? 0,
+                discountPercent: (r["discount_percent"] as? NSNumber)?.intValue ?? 100,
+                benefits: (r["benefits"] as? [String]) ?? [],
+                grantPoints: (r["grant_points"] as? NSNumber)?.intValue ?? 0,
+                freeMinutes: (r["free_minutes"] as? NSNumber)?.intValue ?? 0,
+                signinBonus: (r["signin_bonus"] as? NSNumber)?.intValue ?? 0,
+                checkinBonusMultiplier: (r["checkin_bonus_multiplier"] as? NSNumber)?.intValue ?? 0,
+                usesPerYuan: (r["uses_per_yuan"] as? NSNumber)?.intValue ?? 0,
+                minSellUses: (r["min_sell_uses"] as? NSNumber)?.intValue ?? 0,
+                chargeModels: (r["charge_models"] as? [String]) ?? [],
+                tokenCaps: (r["token_caps"] as? [String: [String: Any]]) ?? [:]
             )
         }
     }
@@ -818,6 +854,7 @@ struct APIClient {
         let orderID: String      // 查单用：墨点=orderNo，会员=order_id
         let payURL: String       // 易支付收银台地址
         let kind: Kind
+        var uses: Int = 0        // 按次订单：购买的次数（后端 order 响应新增）
         var id: String { kind.rawValue + "-" + orderID }
     }
 
@@ -862,7 +899,34 @@ struct APIClient {
         guard let oid = d["order_id"] as? String, !oid.isEmpty else {
             throw APIError.decode("下单没有返回订单号")
         }
-        return PayOrder(orderID: oid, payURL: (d["pay_url"] as? String) ?? "", kind: .member)
+        return PayOrder(orderID: oid, payURL: (d["pay_url"] as? String) ?? "", kind: .member,
+                        uses: (d["uses"] as? NSNumber)?.intValue ?? 0)
+    }
+
+    /// 按次余额：`GET /v1/shop/ds-uses` → data.balance.uses_left
+    struct UsesBalance {
+        let total: Int
+        let left: Int
+        let used: Int
+    }
+    static func dsUses(token: String) async throws -> UsesBalance {
+        let json = try await request("/v1/shop/ds-uses", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        let b = (d["balance"] as? [String: Any]) ?? [:]
+        return UsesBalance(
+            total: (b["uses_total"] as? NSNumber)?.intValue ?? 0,
+            left: (b["uses_left"] as? NSNumber)?.intValue ?? 0,
+            used: (b["uses_used"] as? NSNumber)?.intValue ?? 0
+        )
+    }
+
+    /// 按次订单查单（复用 /v1/shop/orders/<id>）：state=paid 且 uses>0 即到账。
+    static func usesOrderStatus(orderID: String, token: String) async throws -> (paid: Bool, uses: Int) {
+        let enc = orderID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderID
+        let json = try await request("/v1/shop/orders/\(enc)", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return ((d["state"] as? String) == "paid",
+                (d["uses"] as? NSNumber)?.intValue ?? 0)
     }
 
     /// 会员查单：state == "paid" 即到账，days 为到账天数。
