@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- App 内下载 APK 后调系统安装器（2026-11-24）：Android 8+ 安装未知来源应用必须声明 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 扫一扫（2026-11-13）：扫码登录网页用 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Android 16 的 Live Updates（状态栏胶囊）要先有通知权限（13+ 是运行时权限） -->

@@ -234,8 +234,74 @@ internal fun UpdateDialog(info: com.aevis.android.data.Api.UpdateInfo, onDismiss
             runCatching { com.aevis.android.data.Api.changeLog() }.getOrDefault(emptyList())
         }
     }
+
+    // ---------- App 内下载安装 APK（2026-11-24）----------
+    // 之前 confirmButton 是 openUrl(ctx, info.url) 跳浏览器，用户还得自己去下载目录找包。
+    // 现在 App 内下载完直接调系统安装器。
+    // phase：0 空闲 / 1 下载中 / 2 已拉起安装器 / 3 失败 / 4 等待开启「安装未知应用」权限
+    var phase by remember { mutableIntStateOf(0) }
+    var progress by remember { mutableIntStateOf(-1) } // -1 = 服务端没给长度，用不确定进度
+    var errMsg by remember { mutableStateOf("") }
+    var apkRef by remember { mutableStateOf<java.io.File?>(null) }
+    val scope = rememberCoroutineScope()
+
+    // 从「安装未知应用」设置页返回后接着装：权限开了就装，没开就留在错误态给人话
+    val unknownSrcLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val apk = apkRef
+        if (apk != null && com.aevis.android.core.ApkInstaller.canInstallUnknownApps(ctx)) {
+            try {
+                com.aevis.android.core.ApkInstaller.install(ctx, apk)
+                phase = 2
+            } catch (e: Exception) {
+                errMsg = e.message ?: tr("安装失败")
+                phase = 3
+            }
+        } else {
+            errMsg = tr("未允许本 App 安装未知应用，无法安装更新")
+            phase = 3
+        }
+    }
+
+    /** 起下载协程：不阻塞主线程；进度和失败都留在弹窗里，不 Toast 一下就消失。 */
+    fun startDownload() {
+        if (phase == 1 || phase == 4) return // 下载中 / 等权限时禁重复点击
+        phase = 1
+        progress = -1
+        errMsg = ""
+        apkRef = null
+        scope.launch {
+            try {
+                val file = com.aevis.android.core.ApkInstaller.download(ctx, info.url) { p ->
+                    progress = p
+                }
+                apkRef = file
+                if (!com.aevis.android.core.ApkInstaller.canInstallUnknownApps(ctx)) {
+                    // 包先下好，再引导授权；回来在 launcher 回调里安装
+                    phase = 4
+                    try {
+                        unknownSrcLauncher.launch(
+                            com.aevis.android.core.ApkInstaller.unknownAppsSettingsIntent(ctx)
+                        )
+                    } catch (e: Exception) {
+                        errMsg = tr("打不开设置页：%s", e.message ?: "请手动开启安装权限")
+                        phase = 3
+                    }
+                } else {
+                    com.aevis.android.core.ApkInstaller.install(ctx, file)
+                    phase = 2
+                }
+            } catch (e: Exception) {
+                errMsg = e.message ?: tr("下载失败")
+                phase = 3
+            }
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = { if (!info.force) onDismiss() },
+        // 下载中 / 等权限时不允许关弹窗，避免下载完找不到界面
+        onDismissRequest = { if (!info.force && phase != 1 && phase != 4) onDismiss() },
         title = { Text(tr("发现新版本 %s", info.latest)) },
         text = {
             Column {
@@ -268,13 +334,65 @@ internal fun UpdateDialog(info: com.aevis.android.data.Api.UpdateInfo, onDismiss
                         }
                     }
                 }
+                // 下载进度 / 结果（2026-11-24）：所有状态都留在弹窗内，失败可就地重试
+                when (phase) {
+                    1 -> {
+                        Spacer(Modifier.height(12.dp))
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = V2.accent,
+                            trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (progress >= 0) tr("正在下载更新 %d%%", progress)
+                            else tr("正在连接服务器下载更新…"),
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                    2 -> {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            tr("已开始安装，请按系统提示完成"),
+                            fontSize = 11.5.sp, color = V2.accent
+                        )
+                    }
+                    3 -> {
+                        Spacer(Modifier.height(10.dp))
+                        Text(errMsg, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.error)
+                    }
+                    4 -> {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            tr("安装包已就绪，请在系统设置里允许本 App 安装未知应用，返回后会自动安装"),
+                            fontSize = 11.5.sp, color = V2.accent
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                openUrl(ctx, info.url)
-                if (!info.force) onDismiss()
-            }) { Text(tr("去下载"), color = V2.accent) }
+            when (phase) {
+                1 -> TextButton(onClick = {}, enabled = false) {
+                    Text(
+                        if (progress >= 0) tr("下载中 %d%%", progress) else tr("下载中…"),
+                        color = V2.accent
+                    )
+                }
+                2 -> TextButton(onClick = {}, enabled = false) {
+                    Text(tr("安装中"), color = V2.accent)
+                }
+                4 -> TextButton(onClick = {}, enabled = false) {
+                    Text(tr("等待授权"), color = V2.accent)
+                }
+                3 -> TextButton(onClick = { startDownload() }) {
+                    Text(tr("重试"), color = V2.accent)
+                }
+                else -> TextButton(onClick = { startDownload() }) {
+                    Text(tr("去下载"), color = V2.accent)
+                }
+            }
         },
         dismissButton = if (info.force) {
             null
