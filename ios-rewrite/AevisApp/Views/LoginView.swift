@@ -186,7 +186,7 @@ struct LoginView: View {
 
     // MARK: - 顶部：线路入口 + 帮助（不再有发光装饰层）
 
-    /// 胶囊文案：`线路 · 陕西 · 最快`（note 为空时退回 `线路 · 城市`）。
+    /// 胶囊文案：`线路 · 直连 · 最快`（note 为空时退回 `线路 · 城市`）。
     /// name 是城市名（地址/base 一律不上屏）；带 note 是因为它本身有信息量（最快/默认/备用），
     /// 而且将来若出现同名城市，这一段也能帮忙区分。
     private var currentLineChipText: String {
@@ -640,12 +640,14 @@ struct LoginView: View {
 // MARK: - 通用组件（本文件内两个文件共用，internal 供 SettingsView 复用）
 
 /// 按压回弹：比系统默认高亮更克制，iOS 16 可用（不依赖新 API）。
+/// 2026-11-23 统一 spring 手感（response 0.32 / damping 0.82）与商城、会员档位卡一致；
+/// 各调用点的 scale 仍是「小控件越轻、大卡片越明显」，只调参数不改结构。
 struct AevisPressStyle: ButtonStyle {
     var scale: CGFloat = 0.97
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? scale : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.65), value: configuration.isPressed)
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: configuration.isPressed)
     }
 }
 
@@ -1133,7 +1135,7 @@ struct QQWebView: UIViewRepresentable {
 
 // MARK: - 线路选择
 //
-// 行内容：名称 + 当前延迟 + 选中标记。name 是城市名（陕西/北京/香港，地址/base 一律不上屏），
+// 行内容：名称 + 当前延迟 + 选中标记。name 是城市名（直连/北京/香港，地址/base 一律不上屏），
 // 名字下面那行小字是 note（最快/默认/备用），作为补充信息（同名城市时也靠它区分）。
 // 行数与名字全部来自 `APIClient.lines`，这里不硬编码条数。
 // 点一行立即切换并关窗；当前生效线路用「对勾 + 深描边」双标记，不只靠颜色区分。

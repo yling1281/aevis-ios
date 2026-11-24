@@ -37,6 +37,8 @@
 		A10000000000000000000024 /* AevisMascotMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* AevisMascotMark.swift */; };
 		A10000000000000000000025 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* RegisterView.swift */; };
 		A10000000000000000000026 /* AgreementContentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000026 /* AgreementContentStore.swift */; };
+		A10000000000000000000027 /* MemberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* MemberView.swift */; };
+		A10000000000000000000028 /* PlazaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000028 /* PlazaView.swift */; };
 		A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppIcon60x60@2x.png */; };
 		A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppIcon60x60@3x.png */; };
 		A20000000000000000000003 /* AppIcon1024.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* AppIcon1024.png */; };
@@ -75,6 +77,8 @@
 		B10000000000000000000024 /* AevisMascotMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AevisMascotMark.swift; sourceTree = "<group>"; };
 		B10000000000000000000025 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		B10000000000000000000026 /* AgreementContentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgreementContentStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000027 /* MemberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberView.swift; sourceTree = "<group>"; };
+		B10000000000000000000028 /* PlazaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlazaView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -155,6 +159,8 @@
 				B10000000000000000000023 /* CharacterSettingsView.swift */,
 				B10000000000000000000024 /* AevisMascotMark.swift */,
 				B10000000000000000000025 /* RegisterView.swift */,
+				B10000000000000000000027 /* MemberView.swift */,
+				B10000000000000000000028 /* PlazaView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -288,6 +294,8 @@
 				A10000000000000000000024 /* AevisMascotMark.swift in Sources */,
 				A10000000000000000000025 /* RegisterView.swift in Sources */,
 				A10000000000000000000026 /* AgreementContentStore.swift in Sources */,
+				A10000000000000000000027 /* MemberView.swift in Sources */,
+				A10000000000000000000028 /* PlazaView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

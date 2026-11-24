@@ -5,8 +5,8 @@ import Foundation
 /// 服务器状态（2026-11-22 新增，照用户给的「服务器状态」参考图做）。
 ///
 /// 两块内容都是**真实数据**，没有假按钮：
-/// 1. 服务器：`APIClient.lines` 的每条线路（陕西 / 北京 / 香港，名字和条数都直接读 APIClient），
-///    逐条 `APIClient.lineLatency(_:)` 实测延迟；
+/// 1. 服务器：`APIClient.lines` 的每条线路（直连 / 北京 / 香港，名字和条数都直接读 APIClient），
+///    逐条 `APIClient.lineLatency(_:)` 实测延迟，列表按实测毫秒升序展示（不通置后）；
 ///    点某行 = `APIClient.setActiveLine(id)`（持久化键 `apiLineId`，与 APIClient 内部一致）。
 ///    「自动选择」= 按 `APIClient.lines` 的回落顺序自动切，标记存 `apiAutoLine`。
 /// 2. 模型：`GET /v1/models/status`（服务端 `srv_edit/aevis_providers.py` 里就是给官网
@@ -59,6 +59,8 @@ struct ServerStatusView: View {
         let total: Int          // 时间范围内的总请求数（用于排序）
         let probes: Int         // 服务端探测次数
         let hasData: Bool       // false = 没有任何时间序列数据
+        let coverageMinutes: Int // 服务端 coverage_minutes：实际有探测数据的分钟数（老服务端 0）
+        let recentSource: String // 服务端 recent_source："provider_aggregate"（老服务端空串）
     }
 
     /// 实时状态。**不用 history 推**：history 是 30 分钟聚合，模型刚挂时那一桶还是绿的，
@@ -122,7 +124,7 @@ struct ServerStatusView: View {
 
                 groupCard(title: "服务器") {
                     autoRow
-                    ForEach(APIClient.lines) { line in
+                    ForEach(displayLines) { line in
                         divider
                         lineRow(line)
                     }
@@ -131,6 +133,9 @@ struct ServerStatusView: View {
                 modelsBlock
 
                 hint("模型左侧标签（正常 / 波动 / 异常 / 未监控）按服务端最近一次探测的 providers 判定，是「此刻还能不能用」；右侧百分比与竖条是时间范围内的成功率（有 recent 用近 30 分钟，否则回落 history 的近 24 小时），两者不是一回事。延迟超过 3 秒记为不通。")
+                if usesProviderAggregate {
+                    hint("百分比与竖条为 provider 级聚合：按模型挂载渠道的探测逐分钟合并，非逐模型对话探测。")
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
@@ -309,8 +314,16 @@ struct ServerStatusView: View {
                     .font(.system(size: 15.5))
                     .foregroundStyle(AE.textPrimary)
 
-                // 短注（最快/默认/备用）：与登录页线路胶囊文案保持一致
-                if !line.note.isEmpty {
+                // 「最快」按实测动态判定 displayLines.first；不写回 line.note（它保持静态语义）。
+                // 其余短注（备用等）照旧显示，与登录页线路胶囊文案保持一致。
+                if isFastest(line) {
+                    Text("最快")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(goodGreen)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(goodGreen.opacity(0.14), in: Capsule())
+                } else if !line.note.isEmpty && line.note != "最快" {
                     Text(line.note)
                         .font(.system(size: 11))
                         .foregroundStyle(AE.textSecondary)
@@ -646,14 +659,39 @@ struct ServerStatusView: View {
         autoLine ? "自动选择 · \(currentLine.name)" : currentLine.name
     }
 
+    /// 展示排序（纯视图语义，与回落顺序完全解耦 —— 不改 `APIClient.orderedLines` 一行）：
+    /// 1. 有实测延迟（`latencies`）的按毫秒升序；同毫秒按 `APIClient.lines` 原序，稳定不跳；
+    /// 2. 不通/未测的排在后面，彼此仍保持 `APIClient.lines` 原序。
+    /// 只喂给线路列表的 `ForEach`；`select(_:)` / `currentLine` / `activeID` / 失败记忆全部按 id
+    /// 工作，不受展示顺序影响 —— 用户手动选择不会被「最快」标识覆盖。
+    private var displayLines: [APIClient.Line] {
+        APIClient.lines.enumerated().sorted { a, b in
+            let ma = latencies[a.element.id]
+            let mb = latencies[b.element.id]
+            switch (ma, mb) {
+            case let (la?, lb?):
+                return la == lb ? a.offset < b.offset : la < lb
+            case (.some, .none): return true
+            case (.none, .some): return false
+            case (.none, .none): return a.offset < b.offset
+            }
+        }.map { $0.element }
+    }
+
+    /// 动态「最快」：只有排在第一且确有实测延迟的行才显示，不改写 `line.note`。
+    private func isFastest(_ line: APIClient.Line) -> Bool {
+        guard latencies[line.id] != nil else { return false }
+        return displayLines.first?.id == line.id
+    }
+
     /// 地域描述按线路**名字**匹配（不写死 id，线路表改名/增删这里自动跟上）
+    /// 只出纯地名：直连 / 北京 / 香港，不上屏 IP 或工程词；无匹配时原样返回名字。
     private func regionText(for line: APIClient.Line) -> String {
         let n = line.name
         if n.contains("香港") { return "中国·香港" }
-        if n.contains("陕西") { return "中国·陕西" }
         if n.contains("北京") { return "中国·北京" }
         if n.contains("直连") { return "直连" }
-        return line.note.isEmpty ? n : line.note
+        return n
     }
 
     private var statusDotColor: Color {
@@ -697,6 +735,12 @@ struct ServerStatusView: View {
         if labels.isEmpty { return "近 24 小时" }
         if labels.count == 1 { return labels.first ?? "近 24 小时" }
         return "近 30 分钟 / 近 24 小时"
+    }
+
+    /// 服务端是否下发了「provider 级聚合」口径（方案 A 新增可选字段）。
+    /// 老服务端缺字段时不显示这条说明，保持向后兼容。
+    private var usesProviderAggregate: Bool {
+        groups.flatMap { $0.models }.contains { $0.recentSource == "provider_aggregate" }
     }
 
     /// 我们实际在用的三个模型（probes 常为 0，但必须列出来）
@@ -958,6 +1002,9 @@ struct ServerStatusView: View {
         }
 
         let probes = (row["probes"] as? NSNumber)?.intValue ?? total
+        // 方案 A 新增可选字段：老服务端没有这两个键时给 0 / ""，客户端照旧降级，不崩、不 forcing update。
+        let coverageMinutes = (row["coverage_minutes"] as? NSNumber)?.intValue ?? 0
+        let recentSource = (row["recent_source"] as? String) ?? ""
 
         return ModelStatus(
             id: model,
@@ -968,7 +1015,9 @@ struct ServerStatusView: View {
             avgLatency: avg,
             total: total,
             probes: probes,
-            hasData: !samples.isEmpty
+            hasData: !samples.isEmpty,
+            coverageMinutes: coverageMinutes,
+            recentSource: recentSource
         )
     }
 

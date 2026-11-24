@@ -292,6 +292,44 @@ struct APIClient {
         return rows.compactMap { Persona(json: $0) }
     }
 
+    /// 人设广场条目（对齐 `GET /v1/psquare/list` 的 data.rows[]）。
+    /// 该接口公开，返回 published/listing 的人设，最多 200 条；不上报 X-Account 也能看。
+    struct SquarePersona: Identifiable {
+        let id: String
+        let name: String
+        let tagline: String
+        let avatar: String
+        let cover: String
+        let adoptCount: Int
+        let isOfficial: Bool
+    }
+
+    static func squarePersonas() async throws -> [SquarePersona] {
+        let json = try await request("/v1/psquare/list")
+        let d = (json["data"] as? [String: Any]) ?? json
+        let rows = (d["rows"] as? [[String: Any]]) ?? []
+        return rows.compactMap { r in
+            guard let id = r["id"] as? String, !id.isEmpty else { return nil }
+            return SquarePersona(
+                id: id,
+                name: (r["name"] as? String) ?? "未命名人设",
+                tagline: (r["tagline"] as? String) ?? (r["personality"] as? String) ?? "",
+                avatar: (r["avatar_url"] as? String) ?? "",
+                cover: (r["cover_url"] as? String) ?? "",
+                adoptCount: (r["adopt_count"] as? NSNumber)?.intValue ?? 0,
+                isOfficial: (r["is_official"] as? NSNumber)?.intValue == 1
+            )
+        }
+    }
+
+    /// 采用（喜欢）广场人设：公开接口，返回最新 adoptCount。
+    @discardableResult
+    static func adoptPersona(id: String) async throws -> Int {
+        let json = try await request("/v1/psquare/adopt", method: "POST", body: ["id": id])
+        let d = (json["data"] as? [String: Any]) ?? json
+        return (d["adoptCount"] as? NSNumber)?.intValue ?? 0
+    }
+
     // MARK: - 聊天
 
     static func backupMeta(token: String) async throws -> (count: Int, bytes: Int, at: String) {
@@ -926,6 +964,39 @@ struct APIClient {
         let json = try await request("/v1/emoji/list", token: token)
         let d = (json["data"] as? [String: Any]) ?? json
         return (d["rows"] as? [[String: Any]]) ?? (d["items"] as? [[String: Any]]) ?? []
+    }
+
+    /// 表情包广场条目（对齐 `GET /v1/emoji/list` 的 data.rows[]）。
+    /// items 是图片相对/绝对 URL 数组；接口只返回 status=published，按 use_count 排序。
+    struct EmojiPack: Identifiable {
+        let id: String
+        let name: String
+        let intro: String
+        let cover: String
+        let useCount: Int
+        let items: [String]
+        var count: Int { items.count }
+    }
+
+    static func emojiPacks(token: String?) async throws -> [EmojiPack] {
+        let json = try await request("/v1/emoji/list", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        let rows = (d["rows"] as? [[String: Any]]) ?? (d["items"] as? [[String: Any]]) ?? []
+        return rows.compactMap { r in
+            let ident: String
+            if let s = r["id"] as? String, !s.isEmpty { ident = s }
+            else if let n = r["id"] as? NSNumber { ident = n.stringValue }
+            else { return nil }
+            let urls = (r["items"] as? [String]) ?? []
+            return EmojiPack(
+                id: ident,
+                name: (r["name"] as? String) ?? "未命名表情包",
+                intro: (r["intro"] as? String) ?? "",
+                cover: (r["cover_url"] as? String) ?? (urls.first ?? ""),
+                useCount: (r["use_count"] as? NSNumber)?.intValue ?? 0,
+                items: urls
+            )
+        }
     }
 
     /// 上传图片，返回服务端相对路径（安卓同接口、同字段）。

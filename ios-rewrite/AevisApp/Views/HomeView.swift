@@ -1,7 +1,8 @@
 import SwiftUI
 import CoreLocation
 
-/// 主页：用量额度卡 + 服务入口（只放真正能跳的：商城 / 会员，都进 ShopView）。
+/// 主页：用量额度卡 + 服务入口（商城 → ShopView、会员 → MemberView、
+/// 人设广场 / 表情包广场 → PlazaView，均为独立页面，不串返回层级）。
 /// 用量卡是真实数据：本周额度百分比来自 `GET /v1/quota/state`，
 /// 墨点余额 / 还能聊多少条来自 `GET /v1/points`；未登录或请求失败一律显示「—」，不写死数字。
 /// 整体可滚动（主页允许滚，登录页才禁止）；底部留 TabBar 高度 padding。
@@ -10,9 +11,13 @@ import CoreLocation
 struct HomeView: View {
     @EnvironmentObject private var session: Session
 
-    /// 商城入口回调：由 MainTabView 注入以全屏拉起 ShopView；单独预览时为 nil 用内部占位。
+    /// 商城 / 会员入口回调：由 MainTabView 注入以全屏拉起对应页面；单独预览时为 nil 用内部占位。
     var onShop: (() -> Void)? = nil
+    var onMember: (() -> Void)? = nil
     @State private var showShop = false        // 仅在 onShop == nil 时用的占位
+    @State private var showMember = false      // 仅在 onMember == nil 时用的占位
+    @State private var showPlaza = false       // 人设/表情包广场（本页内 sheet 即可）
+    @State private var plazaTab = 0
     @State private var tip = ""
     @State private var serviceExpanded = true
 
@@ -62,7 +67,7 @@ struct HomeView: View {
             _ = await (usage, greeting)
         }
         .sheet(isPresented: $showShop) {
-            // 第 2 轮接 ShopView；这轮先明确提示，不假装能进
+            // 仅预览态（无 MainTabView 注入回调）时用；真机走 fullScreenCover
             VStack(spacing: 14) {
                 Image(systemName: "bag").font(.system(size: 34)).foregroundStyle(AE.accent)
                 Text("商城即将上线").font(.system(size: 18, weight: .semibold))
@@ -71,6 +76,19 @@ struct HomeView: View {
             }
             .padding(30)
             .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showMember) {
+            VStack(spacing: 14) {
+                Image(systemName: "crown").font(.system(size: 34)).foregroundStyle(AE.accent)
+                Text("会员页请在主页入口打开").font(.system(size: 18, weight: .semibold))
+                Button("知道了") { showMember = false }.foregroundStyle(AE.accent)
+            }
+            .padding(30)
+            .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showPlaza) {
+            PlazaView(initialTab: plazaTab)
+                .environmentObject(session)
         }
     }
 
@@ -444,10 +462,12 @@ struct HomeView: View {
         let badge: String = ""
     }
 
-    /// 只放真正能跳的入口（商城 / 会员都进 ShopView）；没做的功能不加按钮。
+    /// 只放真正能跳的入口：商城 / 会员 / 人设广场 / 表情包广场；没做的功能不加按钮。
     private let serviceItems: [HomeEntry] = [
         HomeEntry(label: "商城", symbol: "bag.fill", color: Color.hex(0xE8913F)),
         HomeEntry(label: "会员", symbol: "crown.fill", color: Color.hex(0xE5484D)),
+        HomeEntry(label: "人设广场", symbol: "person.2.fill", color: Color.hex(0x6C7BC4)),
+        HomeEntry(label: "表情包", symbol: "face.smiling.fill", color: Color.hex(0x48A88B)),
     ]
 
     private var serviceGrid: some View {
@@ -462,9 +482,16 @@ struct HomeView: View {
 
     private func gridCell(_ item: HomeEntry) -> some View {
         Button {
-            if item.label == "商城" || item.label == "会员" {
+            switch item.label {
+            case "商城":
                 if let onShop { onShop() } else { showShop = true }
-            } else {
+            case "会员":
+                if let onMember { onMember() } else { showMember = true }
+            case "人设广场":
+                plazaTab = 0; showPlaza = true
+            case "表情包":
+                plazaTab = 1; showPlaza = true
+            default:
                 showTip("「\(item.label)」即将上线")
             }
         } label: {

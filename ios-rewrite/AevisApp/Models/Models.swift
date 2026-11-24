@@ -10,8 +10,21 @@ enum AE {
     static let accent = Color.adaptive(dark: Color.hex(0xA9B7D8), light: Color.hex(0x2F3A56))
     /// 强调色高光：实色渐变用，固定值，增加质感
     static let accentLift = Color.hex(0x4A5676)
-    /// 强调色实底：按钮/头图等白字场景固定深墨靛蓝，避免深色模式糊成一片
+    /// 强调色实底：按钮/头图等白字场景固定深墨靛蓝，避免深色模式糊成一片。
+    /// ⚠️ 全 App 大量把它当「白字按钮的深底」用，故意不改成 adaptive —— 改浅会毁掉对比度。
     static let accentDeep = Color.hex(0x2F3A56)
+
+    // MARK: - 会员页语义色（R2.10 夜间配色，集中收敛此处）
+    // 会员卡原来写死 0xF2E2A8 / 0x8C8A80 / 0xE08A2E，文字直接用 accentDeep；
+    // 深色下淡黄底 + 深墨字会糊成一片。这里统一改为 Color.adaptive，浅色值保持原 hex 不回退。
+    /// 会员档位名 / 现价文字（accentDeep 在会员卡里的深色适配替代）
+    static let memberAccent = Color.adaptive(dark: Color.hex(0xF0D48A), light: Color.hex(0x2F3A56))
+    /// 选中档位卡的淡黄磨砂底（深色改为暖褐，不刺眼）
+    static let memberCardTint = Color.adaptive(dark: Color.hex(0x4A4026), light: Color.hex(0xF2E2A8))
+    /// 选中档位卡描边
+    static let memberCardStroke = Color.adaptive(dark: Color.hex(0x6F6A57), light: Color.hex(0x8C8A80))
+    /// 「推荐」徽章底
+    static let memberBadge = Color.adaptive(dark: Color.hex(0xE8A353), light: Color.hex(0xE08A2E))
     /// 强调色柔和底：卡片内分组 / 未读胶囊 / 头像底
     static let accentSoft = Color.adaptive(dark: Color.hex(0x2B3346), light: Color.hex(0xEAEDF4))
     /// 卡片背景：浅色纯白 / 深色 #1E2028

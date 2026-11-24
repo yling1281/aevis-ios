@@ -18,6 +18,8 @@ import SwiftUI
 struct MainTabView: View {
     @State private var selected = 0
     @State private var showShop = false
+    /// 会员独立页（2026-11-23 拆页）：与商城各自一张 fullScreenCover，返回层级不串。
+    @State private var showMember = false
 
     var body: some View {
         ZStack {
@@ -25,7 +27,7 @@ struct MainTabView: View {
             AppBackground()
 
             TabView(selection: $selected) {
-                HomeView { showShop = true }
+                HomeView(onShop: { showShop = true }, onMember: { showMember = true })
                     .modifier(ClearTabBarBackground())
                     .tabItem { Label("主页", systemImage: "house.fill") }
                     .tag(0)
@@ -43,6 +45,7 @@ struct MainTabView: View {
             .tint(AE.accent)   // 选中项跟随品牌墨靛蓝（深色模式自动提亮，不用固定 accentDeep）
         }
         .fullScreenCover(isPresented: $showShop) { ShopView() }
+        .fullScreenCover(isPresented: $showMember) { MemberView() }
     }
 }
 
