@@ -37,7 +37,9 @@ class MainActivity : ComponentActivity() {
         // 只落盘 + 交回系统 handler，不吞异常。
         runCatching { com.aevis.android.core.CrashReporter.install(this) }
         // 签名校验（2026-11-16，106）：证书 MD5 不匹配直接退出（防二次打包）。
-        if (!verifySignature()) return
+        // 2026-11-24：debug 包由 CI 用 debug key 签名，MD5 必然 ≠ 正式证书，侧载会直接
+        // finish()。只在 release 走校验（原逻辑完全不变）；debug 构建整段跳过。
+        if (!com.aevis.android.BuildConfig.DEBUG && !verifySignature()) return
         // 多语言：读 assets 里的共用词表，跟随系统语言
         I18n.init(this)
         enableEdgeToEdge()
