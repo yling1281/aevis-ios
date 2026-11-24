@@ -104,8 +104,11 @@ class CameraScanActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCal
         val sv = preview
         if (pv != null && sv != null && pv.width > 0 && pv.height > 0) {
             val screenW = resources.displayMetrics.widthPixels
-            // 竖屏时预览宽高要对调（相机输出是横向的）
-            val shownH = (screenW * pv.height.toFloat() / pv.width).toInt()
+            // ⚠️ 竖屏 + setDisplayOrientation(90) 之后，屏幕上看到的高度对应
+            //    预览的**宽度**，所以比例是 pv.width / pv.height。
+            //    上一次这里写反了（pv.height / pv.width），叠加上没转的 90°，
+            //    就成了用户看到的"畸形"。
+            val shownH = (screenW * pv.width.toFloat() / pv.height).toInt()
             sv.layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 maxOf(shownH, resources.displayMetrics.heightPixels),
@@ -148,6 +151,31 @@ class CameraScanActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCal
                 params.focusMode = Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE
             }
             cam.parameters = params
+
+            // 🔴 2026-11-15 用户：「扫码你变畸形了」——
+            //    真机一看根本不是拉伸，是**整个画面躺倒了 90 度**。
+            //    Camera1 的传感器是横向的，竖屏 App 不显式转就会这样。
+            //    这里按官方推荐算法算：后置 = (传感器角度 - 屏幕旋转 + 360) % 360。
+            //    （Activity 锁了 portrait，屏幕旋转恒为 0，所以结果就是传感器角度，
+            //      但保留完整公式，以后放开横屏也不会错。）
+            runCatching {
+                val info = Camera.CameraInfo()
+                Camera.getCameraInfo(0, info)
+                val deg = when (windowManager.defaultDisplay.rotation) {
+                    android.view.Surface.ROTATION_0 -> 0
+                    android.view.Surface.ROTATION_90 -> 90
+                    android.view.Surface.ROTATION_180 -> 180
+                    android.view.Surface.ROTATION_270 -> 270
+                    else -> 0
+                }
+                val result = if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                    val r = (info.orientation + deg) % 360
+                    (360 - r) % 360
+                } else {
+                    (info.orientation - deg + 360) % 360
+                }
+                cam.setDisplayOrientation(result)
+            }
             cam.setPreviewCallback(this)
             cam.startPreview()
         } catch (e: Exception) {

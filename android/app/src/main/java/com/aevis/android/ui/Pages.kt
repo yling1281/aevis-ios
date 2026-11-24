@@ -12,6 +12,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.activity.compose.BackHandler
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.text.BasicTextField
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -64,7 +67,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.aevis.android.BuildConfig
 import com.aevis.android.R
 import com.aevis.android.core.LiveUpdate
+import com.aevis.android.core.LocalPersonaStore
 import com.aevis.android.core.NativeCore
+import com.aevis.android.core.PersonaLib
 import com.aevis.android.core.NeteaseAuth
 import com.aevis.android.core.I18n.tr
 import com.aevis.android.data.Api
@@ -87,9 +92,10 @@ import kotlinx.coroutines.withContext
 private fun PageScaffold(
     title: String,
     onBack: () -> Unit,
-    content: @Composable () -> Unit
+    // 2026-11-16：给 `ColumnScope` —— 商城页要在标题下面放一个 `weight(1f)` 的内容区，
+    // 不然分段内容会按内容高度撑开、把整页顶出屏幕（用户报的「直接全屏了，会员什么都看不到」）。
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
-    val ink = MaterialTheme.colorScheme.onSurface
     Column(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
@@ -98,26 +104,9 @@ private fun PageScaffold(
             // 商城 / 网易云 / 浏览器 / 通知 / 关于 全都会顶到状态栏下面。
             .statusBarsPadding()
     ) {
-        // 顶栏：返回箭头 + 标题（iOS 二级页是这种左对齐的窄顶栏，不是大标题）
-        Row(
-            Modifier.fillMaxWidth()
-                .padding(horizontal = V2.gutter, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(34.dp).clip(CircleShape)
-                    .tapable { onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_row_chevron), null,
-                    tint = ink.copy(alpha = 0.7f),
-                    modifier = Modifier.size(18.dp).rotate(180f)
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-            Text(tr(title), fontSize = V2.title, fontWeight = FontWeight.SemiBold)
-        }
+        // 顶栏（2026-11-16）：换成公共的 `SubPageHeader` ——
+        // 商城 / 网易云 / 浏览器 / 通知 / 关于 五个页面都走这里，换一次就全统一了。
+        SubPageHeader(title = title, onBack = onBack)
         content()
     }
 }
@@ -130,148 +119,361 @@ private fun PageScaffold(
  * 后端 `/v1/psquare/list` 是真人设广场（`persona_public`，已过审的才上）。
  * 之前「商城」是个紫色渐变卡片，点了弹「正在接入」。
  */
+/**
+ * 广场 / 商城（2026-11-16 重排成两套分段，同一个页面两个入口）。
+ *
+ * 用户把两块分得很清楚：
+ *   · **广场**（`plaza`）= 逛：「人设」「表情包」—— 人设来自 `/v1/psquare/list`
+ *     全站公共人设（**不是** `mine=true`，那是"我发布的"），表情包来自 `/v1/emoji/list`；
+ *   · **商城**（`mall`）= 买：「会员」「音色包」「墨点」—— 会员和墨点**能真买**，
+ *     走 `payOrder` → 服务端一次性收银台链接。
+ *
+ * `startTab` 让首页的「充值」直接落到墨点那一段（`mallpt`），少点一次。
+ */
 @Composable
-fun MallScreen(onBack: () -> Unit, onOpenPersona: (String) -> Unit = {}) {
-    var tab by remember { mutableIntStateOf(0) }
+fun MallScreen(
+    onBack: () -> Unit,
+    onOpenPersona: (String) -> Unit = {},
+    title: String = "广场",
+    isPlaza: Boolean = true,
+    startTab: Int = 0
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val tabNames = if (isPlaza) listOf(tr("人设"), tr("表情包"))
+    else listOf(tr("会员"), tr("音色包"), tr("墨点"))
+
+    var tab by remember { mutableIntStateOf(startTab.coerceIn(0, tabNames.size - 1)) }
     var list by remember { mutableStateOf<List<Api.Persona>?>(null) }
     var err by remember { mutableStateOf("") }
-    val ink = MaterialTheme.colorScheme.onSurface
-
-    // 表情包：切到这个 tab 才拉，拉过一次就不重复打接口
     var packs by remember { mutableStateOf<List<Api.EmojiPack>?>(null) }
+    // 余额（只有商城显示；拿不到就不显示，不占位）
+    var points by remember { mutableIntStateOf(-1) }
+    // 广场里点表情 → 大图预览（跟表情页同一个 sheet）
+    var preview by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(tab) {
-        if (tab == 0) {
-            list = null
+    LaunchedEffect(Unit) {
+        if (!isPlaza) {
+            points = withContext(Dispatchers.IO) {
+                runCatching { Api.balance() }.getOrNull() ?: -1
+            }
+        }
+    }
+
+    // 只有广场这两段需要网络；商城三段本地就能画
+    LaunchedEffect(tab, isPlaza) {
+        if (!isPlaza) return@LaunchedEffect
+        if (tab == 0 && list == null) {
             err = ""
+            // 公共广场：`Api.personas()` 走 `/v1/psquare/list`（全站），**不加 mine**
             val r = withContext(Dispatchers.IO) { runCatching { Api.personas() } }
             r.onSuccess { list = it }
                 .onFailure { err = it.message ?: "加载失败"; list = emptyList() }
-        } else if (packs == null) {
+        }
+        if (tab == 1 && packs == null) {
             packs = withContext(Dispatchers.IO) {
                 runCatching { Api.emojiPacks() }.getOrElse { emptyList() }
             }
         }
     }
 
-    PageScaffold("商城", onBack) {
-        // 分段：人设 / 表情包
-        Row(
-            Modifier.padding(horizontal = V2.gutter, vertical = 4.dp)
-                .clip(squircle(13.dp))
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-                .padding(4.dp)
-        ) {
-            listOf("人设", "表情包").forEachIndexed { i, name ->
-                val on = tab == i
+    PageScaffold(title, onBack) {
+        // ---------- 余额（商城顶部一行）----------
+        if (!isPlaza && points >= 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(tr("墨点余额"), fontSize = V2.micro, color = ink.copy(alpha = 0.42f))
+                Spacer(Modifier.weight(1f))
                 Text(
-                    name,
-                    fontSize = V2.sub,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (on) ink else ink.copy(alpha = 0.5f),
-                    modifier = Modifier
-                        .clip(squircle(10.dp))
-                        .background(
-                            if (on) MaterialTheme.colorScheme.surface
-                            else Color.Transparent
-                        )
-                        .tapable { tab = i }
-                        .padding(horizontal = 22.dp, vertical = 7.dp)
+                    "$points", fontSize = V2.body, fontWeight = FontWeight.SemiBold,
+                    color = V2.accent
                 )
             }
         }
 
+        // ---------- 分段（2026-11-16 换成公共的 SegmentedTabs：有滑动指示块 + 内容过渡）----------
+        SegmentedTabs(tabs = tabNames, selected = tab, onSelect = { tab = it })
+
         Spacer(Modifier.height(10.dp))
 
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            if (tab == 0) {
-                val items = list
-                when {
-                    items == null -> Box(
-                        Modifier.fillMaxWidth().padding(vertical = 60.dp),
-                        contentAlignment = Alignment.Center
-                    ) { Text(tr("正在加载…"), fontSize = V2.tiny, color = ink.copy(alpha = 0.45f)) }
+        // 2026-11-16 修布局（用户报「直接全屏了，会员什么都看不到」）：
+        //   ① 内容区自己吃 `weight(1f)`，撑满标题下面的剩余高度；
+        //   ② **滚动放进每个分支里面** —— 以前是外层 `Column(fillMaxSize + verticalScroll)`
+        //      套 AnimatedContent，子内容在"无界高度"下测量，整页被顶出屏幕；
+        //   ③ AnimatedContent 用 `SizeTransform(clip = false)`，切换时不被裁切。
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            SegmentedContent(selected = tab) { seg ->
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            if (isPlaza) {
+                if (seg == 0) {
+                    // ---------- 广场 · 人设 ----------
+                    val items = list
+                    when {
+                        items == null -> Box(
+                            Modifier.fillMaxWidth().padding(vertical = 60.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text(tr("正在加载…"), fontSize = V2.tiny,
+                                color = ink.copy(alpha = 0.45f)) }
 
-                    items.isEmpty() -> Box(
-                        Modifier.fillMaxWidth().padding(vertical = 60.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            err.ifEmpty { "广场上还没有人设" },
-                            fontSize = V2.tiny, color = ink.copy(alpha = 0.45f)
-                        )
-                    }
+                        items.isEmpty() -> Box(
+                            Modifier.fillMaxWidth().padding(vertical = 60.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // 措辞要让人看出这是**公共广场**（不是"我的人设"）
+                            Text(
+                                err.ifEmpty { tr("公共广场上还没有人设") },
+                                fontSize = V2.tiny, color = ink.copy(alpha = 0.45f)
+                            )
+                        }
 
-                    else -> {
-                        V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
+                        else -> V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
                             items.forEachIndexed { i, p ->
                                 if (i > 0) RowDividerPublic()
-                                PersonaCardRow(p) { onOpenPersona(p.id) }
-                            }
-                        }
-                    }
-                }
-            } else {
-                val ps = packs
-                when {
-                    ps == null -> Box(
-                        Modifier.fillMaxWidth().padding(vertical = 60.dp),
-                        contentAlignment = Alignment.Center
-                    ) { Text(tr("正在加载…"), fontSize = V2.tiny,
-                            color = ink.copy(alpha = 0.45f)) }
-
-                    ps.isEmpty() -> Box(
-                        Modifier.fillMaxWidth().padding(vertical = 60.dp),
-                        contentAlignment = Alignment.Center
-                    ) { Text(tr("暂时没有表情包"), fontSize = V2.tiny,
-                            color = ink.copy(alpha = 0.45f)) }
-
-                    else -> V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
-                        ps.forEachIndexed { i, pk ->
-                            if (i > 0) RowDividerPublic()
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .padding(horizontal = V2.gutter, vertical = 11.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Avatar(pk.cover, pk.name, 48.dp)
-                                Spacer(Modifier.width(13.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(pk.name, fontSize = V2.body,
-                                            fontWeight = FontWeight.Medium, maxLines = 1)
-                                        if (pk.official) {
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                tr("官方"), fontSize = 9.5.sp, color = V2.accent,
-                                                modifier = Modifier.clip(squircle(5.dp))
-                                                    .background(V2.accent.copy(alpha = 0.13f))
-                                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
-                                            )
-                                        }
-                                    }
-                                    if (pk.intro.isNotEmpty()) {
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(pk.intro, fontSize = V2.tiny, maxLines = 2,
-                                            color = ink.copy(alpha = 0.45f))
-                                    }
-                                    Spacer(Modifier.height(3.dp))
-                                    Text("${pk.count} " + tr("张"), fontSize = V2.micro,
-                                        color = ink.copy(alpha = 0.32f))
+                                // 首屏错峰淡入（2026-11-16）：key 用人设 id，滚动/刷新不重播
+                                EnterOnce(p.id, i) {
+                                    PersonaCardRow(p) { onOpenPersona(p.id) }
                                 }
                             }
                         }
                     }
+                } else {
+                    // ---------- 广场 · 表情包 ----------
+                    val ps = packs
+                    when {
+                        ps == null -> Box(
+                            Modifier.fillMaxWidth().padding(vertical = 60.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text(tr("正在加载…"), fontSize = V2.tiny,
+                                color = ink.copy(alpha = 0.45f)) }
+
+                        ps.isEmpty() -> Box(
+                            Modifier.fillMaxWidth().padding(vertical = 60.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text(tr("暂时没有表情包"), fontSize = V2.tiny,
+                                color = ink.copy(alpha = 0.45f)) }
+
+                        else -> EmojiGallery(ps, onTap = { preview = it })
+                    }
+                }
+            } else {
+                when (seg) {
+                    // ---------- 商城 · 会员 ----------
+                    0 -> {
+                        MemberCard(
+                            price = "¥15",
+                            days = tr("/ 30 天"),
+                            // 30 天 = 4 周，1200 点摊成每周 300
+                            weeklyPoints = 300,
+                            bestValue = false,
+                            onBuy = { payOrder(ctx, scope, "member_15") }
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        MemberCard(
+                            price = "¥29",
+                            days = tr("/ 30 天"),
+                            // 30 天 = 4 周，2500 点摊成每周 625
+                            weeklyPoints = 625,
+                            bestValue = true,
+                            // ⚠️ SKU 是 `member_29`（服务端清单里的真值）。
+                            //    别写成 `member_30`：那个 SKU 不存在；`member_30d` 是老的"只续期不发额度"，
+                            //    买错用户拿不到 2500 点。
+                            onBuy = { payOrder(ctx, scope, "member_29") }
+                        )
+                    }
+
+                    // ---------- 商城 · 音色包（还没接，禁用）----------
+                    1 -> {
+                        V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
+                            listOf(
+                                Triple("voice_10", "10 元", "1 万字"),
+                                Triple("voice_30", "30 元", "3 万字"),
+                                Triple("voice_70", "70 元", "7 万字")
+                            ).forEachIndexed { i, (_, price, amount) ->
+                                if (i > 0) Box(
+                                    Modifier.fillMaxWidth().height(0.5.dp)
+                                        .background(ink.copy(alpha = 0.07f))
+                                )
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .padding(horizontal = V2.gutter, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "$price · $amount", fontSize = V2.body,
+                                            fontWeight = FontWeight.Medium,
+                                            color = ink.copy(alpha = 0.55f)
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            tr("音色包"), fontSize = 11.5.sp,
+                                            color = ink.copy(alpha = 0.35f)
+                                        )
+                                    }
+                                    // 禁用态：**不给 tapable** —— 点了没反应比点了弹"敬请期待"更诚实
+                                    Text(
+                                        tr("即将开放"), fontSize = 12.sp,
+                                        color = ink.copy(alpha = 0.38f),
+                                        modifier = Modifier.clip(squircle(9.dp))
+                                            .background(ink.copy(alpha = 0.05f))
+                                            .padding(horizontal = 11.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            tr("正在接入 TTS 计费。"),
+                            fontSize = V2.micro, color = ink.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(horizontal = V2.gutter)
+                        )
+                    }
+
+                    // ---------- 商城 · 墨点（真能买）----------
+                    else -> PointPacks()
                 }
             }
-            Spacer(Modifier.height(30.dp))
-        }
+                    Spacer(Modifier.height(30.dp))
+                }   // Column（每个分支自己的滚动容器）
+            }       // SegmentedContent
+        }           // Box(weight(1f))
+    }
+
+    // 广场里点表情 → 预览（跟表情包页共用同一个 sheet）
+    val pv = preview
+    if (pv != null) {
+        EmojiPreviewSheet(url = pv, onDismiss = { preview = null })
     }
 }
 
+/**
+ * 会员卡（2026-11-16 重做）。
+ *
+ * 用户：「会员这个你可以重新改一下」—— 上一版就一行「15 元 · 30 天会员 + 1200 点额度」，
+ * 信息太薄，看不出买的是什么。现在按商品卡排：
+ *   角标（月卡 / 更划算）→ 大字价格 + 周期 → 三条权益（带对勾）→ 通栏按钮 → 灰字说明。
+ *
+ * 两张卡只差价格/额度/角标，所以参数化，不写两遍。
+ * 「立即开通」走 `payOrder`（服务端一次性收银台链接），SKU 由调用方传，别在这里写死。
+ */
+@Composable
+private fun MemberCard(
+    price: String,          // "¥15"
+    days: String,           // "/ 30 天"
+    weeklyPoints: Int,      // 每周刷新的额度（300 / 625）
+    bestValue: Boolean,     // 右上「更划算」
+    onBuy: () -> Unit
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    V2Card(Modifier.padding(horizontal = V2.gutter)) {
+        // 角标行
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                tr("月卡"), fontSize = 10.sp, color = V2.accent,
+                modifier = Modifier.clip(squircle(6.dp))
+                    .background(V2.accent.copy(alpha = 0.13f))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            )
+            Spacer(Modifier.weight(1f))
+            if (bestValue) {
+                Text(
+                    tr("更划算"), fontSize = 10.sp, color = V2.accent,
+                    modifier = Modifier.clip(squircle(6.dp))
+                        .background(V2.accent.copy(alpha = 0.13f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
+        // 价格
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                price, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                color = ink, letterSpacing = (-1).sp
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                days, fontSize = 12.sp, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // 权益（2026-11-16 改成「按周」口径：30 天 = 4 周，每周一刷新）
+        BenefitLine(tr("每周 %d 点额度，每周一 0 点刷新（共 4 周）", weeklyPoints))
+        BenefitLine(tr("会员期内不限次对话"))
+        BenefitLine(tr("到期不自动续费"))
+
+        Spacer(Modifier.height(14.dp))
+        // 通栏按钮
+        Box(
+            Modifier.fillMaxWidth()
+                .clip(squircle(14.dp))
+                .background(V2.accent)
+                .tapable { onBuy() }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                tr("立即开通"), fontSize = V2.body, fontWeight = FontWeight.Medium,
+                color = Color.White
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            // 旧文案「等额折成墨点」从按周发放这一刻起是错的，换成不累计的说明
+            tr("额度按周发放，没用完不累计。"),
+            fontSize = V2.micro, color = ink.copy(alpha = 0.4f)
+        )
+    }
+}
+
+/** 会员权益的一行：对勾 + 文案。*/
+@Composable
+private fun BenefitLine(text: String) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier.padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_login_check), null,
+            tint = ink.copy(alpha = 0.7f), modifier = Modifier.size(14.dp)
+        )
+        Spacer(Modifier.width(7.dp))
+        Text(text, fontSize = V2.tiny, color = ink.copy(alpha = 0.75f))
+    }
+}
+
+/**
+ * 广场列表一行（2026-11-16 加右侧「下载」）。
+ *
+ * 用户：「人设广场下载去哪了」—— 以前必须点进详情页才看得到「下载到本地」，
+ * 列表上完全没有入口。现在行尾直接给一颗胶囊：
+ *   · 未下载 → 主色「下载」，点了**同步落本地**（不等网络）+ 后台只给服务端加个计数
+ *   · 已下载 → 灰底「已下载」，不可点
+ *
+ * 两个点击区不打架：整行的 `tapable` 挂在 Row 上，按钮是 Row 的最后一个子项、
+ * 自己再套一个 `tapable` —— Compose 里子项先命中，点按钮不会顺带触发整行。
+ */
 @Composable
 private fun PersonaCardRow(p: Api.Persona, onClick: () -> Unit = {}) {
     val ink = MaterialTheme.colorScheme.onSurface
+    val scope = rememberCoroutineScope()
+    // 有没有下载过（BUG-A）：先按 id 比，**再按同名兜底** ——
+    // 以前只比 id，广场 id 和早期「下载到本地」存下的 id 不一致时就显示成「下载」，
+    // 点一下又多出一条同名角色（用户截图里两个「沈砚之」就是这么来的）。
+    var downloaded by remember(p.id, p.name) {
+        mutableStateOf(
+            LocalPersonaStore.has(p.id) ||
+                LocalPersonaStore.all().any { it.name.trim() == p.name.trim() }
+        )
+    }
     Row(
         Modifier.fillMaxWidth().tapable { onClick() }
             .padding(horizontal = V2.gutter, vertical = 12.dp),
@@ -303,6 +505,53 @@ private fun PersonaCardRow(p: Api.Persona, onClick: () -> Unit = {}) {
                 Text("编号 ${p.id}", fontSize = V2.micro,
                     color = ink.copy(alpha = 0.32f), maxLines = 1)
             }
+        }
+
+        // ---- 「下载」胶囊 ----
+        Spacer(Modifier.width(10.dp))
+        Box(
+            // 44dp = iOS 的最小可点高度，比行内文字高一点才戳得准。
+            // 116：`heightIn(min)` + 上下 6dp —— 大字号下「已下载 / 下载」不会被裁。
+            Modifier.heightIn(min = 44.dp)
+                .clip(squircle(14.dp))
+                .background(if (downloaded) ink.copy(alpha = 0.06f) else V2.accent)
+                .tapable(enabled = !downloaded) {
+                    // 本地立刻落盘：点完就该显示「已下载」，不该等网络回来才变色。
+                    // BUG-A：**upsert** —— 已有的只更新字段，绝不新建第二条。
+                    val exist = LocalPersonaStore.find(p.id)
+                        ?: LocalPersonaStore.all().firstOrNull { it.name.trim() == p.name.trim() }
+                    if (exist != null) {
+                        LocalPersonaStore.update(
+                            exist.id,
+                            name = p.name,
+                            avatar = p.avatar,
+                            persona = if (p.tagline.isBlank()) exist.persona else p.tagline
+                        )
+                    } else {
+                        LocalPersonaStore.save(
+                            LocalPersonaStore.Item(
+                                id = p.id,
+                                name = p.name,
+                                avatar = p.avatar,
+                                persona = p.tagline,
+                                style = "",
+                                origin = "square",
+                                updatedAt = 0L   // save() 内部会补成当前时间
+                            )
+                        )
+                    }
+                    downloaded = true
+                    // 服务端那侧只做计数（+1），失败不影响本地这份
+                    scope.launch(Dispatchers.IO) { runCatching { Api.adopt(p.id) } }
+                }
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                if (downloaded) tr("已下载") else tr("下载"),
+                fontSize = V2.tiny, fontWeight = FontWeight.Medium, maxLines = 1,
+                color = if (downloaded) ink.copy(alpha = 0.45f) else Color.White
+            )
         }
     }
 }
@@ -355,10 +604,11 @@ fun BrowserScreen(onBack: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
     ) {
-        // 地址栏
+        // 地址栏（2026-11-16）：这页的顶栏中间是地址输入框，没法直接换 `SubPageHeader`，
+        // 但左右留白和返回箭头的尺寸统一到同一套（18dp 箭头 + V2.gutter）
         Row(
             Modifier.fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = V2.gutter, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -368,7 +618,7 @@ fun BrowserScreen(onBack: () -> Unit) {
                 Icon(
                     painterResource(R.drawable.ic_row_chevron), null,
                     tint = ink.copy(alpha = 0.7f),
-                    modifier = Modifier.size(17.dp).rotate(180f)
+                    modifier = Modifier.size(18.dp).rotate(180f)
                 )
             }
             Spacer(Modifier.width(6.dp))
@@ -458,6 +708,8 @@ fun InboxScreen(onBack: () -> Unit) {
         list = withContext(Dispatchers.IO) {
             runCatching { Api.inbox().first }.getOrElse { emptyList() }
         }
+        // 打开就把「已读」上报、红点消失（2026-11-16，104）
+        withContext(Dispatchers.IO) { runCatching { com.aevis.android.core.InboxBadge.clear() } }
     }
 
     PageScaffold("通知", onBack) {
@@ -528,12 +780,15 @@ fun InboxScreen(onBack: () -> Unit) {
  * 第一版是个死页面：一个字母 A 当图标、线路是一串只读文字、没有任何操作。
  */
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onBack: () -> Unit, onOpenChangelog: () -> Unit = {}) {
     val ink = MaterialTheme.colorScheme.onSurface
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var line by remember { mutableStateOf(Api.lineName()) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
+    // 关于页里点「检查更新」查到的结果（有新版就弹同一个 UpdateDialog）
+    var update by remember { mutableStateOf<Api.UpdateInfo?>(null) }
 
     PageScaffold("关于", onBack) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -541,20 +796,83 @@ fun AboutScreen(onBack: () -> Unit) {
                 Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 自己的 logo（之前是个字母 A）
-                Image(
-                    painterResource(R.drawable.ic_brand_aevis),
-                    contentDescription = "Aevis",
-                    modifier = Modifier.size(72.dp)
-                )
+                // Logo（2026-11-16）：用户说「logo 也没有」——以前那块是自绘的字母 A。
+                // 现在直接**用 App 的启动图标**（圆角裁切），哪怕图标是纯色块也不会是空白。
+                Box(
+                    Modifier.size(64.dp).clip(squircle(18.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painterResource(R.mipmap.ic_launcher),
+                        contentDescription = "Aevis",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 Text("Aevis", fontSize = V2.title, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
+                    // 2026-11-16（112）：版本号改成 `1.1.02` 这种语义化格式，
+                    // **不再拼 build 号**（用户明确要求）。versionCode 只做内部单调递增。
+                    "v${BuildConfig.VERSION_NAME}",
                     fontSize = V2.tiny, color = ink.copy(alpha = 0.45f)
                 )
             }
+
+            // ---------- 官方链接（2026-11-16 补齐：用户说「隐私政策也没有、官网打不开」）----------
+                        // 更新日志（2026-11-16，104）：内容全在服务端，客户端不写死
+            V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 5.dp), pad = 0.dp) {
+                Row(
+                    Modifier.fillMaxWidth().tapable { onOpenChangelog() }
+                        .padding(horizontal = V2.gutter, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(tr("更新日志"), fontSize = V2.body)
+                    Spacer(Modifier.weight(1f))
+                    Text("›", fontSize = 18.sp, color = ink.copy(alpha = 0.3f))
+                }
+            }
+
+V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
+                AboutLink("官网", "https://aevis.cn")
+                RowDividerPublic()
+                AboutLink("隐私政策", "https://aevis.cn/privacy")
+                RowDividerPublic()
+                AboutLink("服务条款", "https://aevis.cn/terms")
+                RowDividerPublic()
+                AboutRow(
+                    "检查更新",
+                    if (busy) "检查中…" else (msg.ifEmpty { "点一下检查" }),
+                    onClick = {
+                        if (!busy) {
+                            busy = true
+                            msg = ""
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) {
+                                    runCatching { Api.checkUpdate() }.getOrNull()
+                                }
+                                busy = false
+                                if (r == null) {
+                                    msg = "检查失败，稍后再试"
+                                } else if (r.update) {
+                                    msg = "有新版本 ${r.latest}"
+                                    update = r
+                                } else {
+                                    msg = "已是最新版本"
+                                    android.widget.Toast.makeText(
+                                        ctx, "已是最新版本", android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    },
+                    hint = "v${BuildConfig.VERSION_NAME}"
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
 
             V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
                 AboutRow("核心版本", runCatching { NativeCore.version() }.getOrDefault("—"))
@@ -566,34 +884,6 @@ fun AboutScreen(onBack: () -> Unit) {
                 )
                 RowDividerPublic()
                 AboutRow("账号", Api.email().ifEmpty { "未登录" })
-                RowDividerPublic()
-                AboutRow(
-                    "检测更新",
-                    if (busy) "检查中…" else (msg.ifEmpty { "点一下检查" }),
-                    onClick = {
-                        if (!busy) {
-                            busy = true
-                            msg = ""
-                            scope.launch {
-                                val r = withContext(Dispatchers.IO) {
-                                    runCatching { Api.latestRelease() }.getOrNull()
-                                }
-                                busy = false
-                                if (r == null) {
-                                    msg = "检查失败，稍后再试"
-                                } else {
-                                    val their = r[1].toIntOrNull() ?: 0
-                                    msg = if (their > BuildConfig.VERSION_CODE) {
-                                        "有新版本 " + r[0]
-                                    } else {
-                                        "已是最新"
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    hint = "当前 build ${BuildConfig.VERSION_CODE}"
-                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -605,6 +895,21 @@ fun AboutScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(30.dp))
         }
     }
+
+    // 有新版 → 同一个更新弹窗（跟冷启动那处共用一份实现）
+    update?.let { u ->
+        UpdateDialog(u) {
+            com.aevis.android.core.ChatPrefs.markUpdateSkipped(u.latest)
+            update = null
+        }
+    }
+}
+
+/** 关于页里的外链行：点了用系统浏览器打开（没有浏览器会 Toast，不崩）。*/
+@Composable
+private fun AboutLink(label: String, url: String) {
+    val ctx = LocalContext.current
+    AboutRow(label, url.removePrefix("https://"), onClick = { openUrl(ctx, url) })
 }
 
 @Composable
@@ -825,7 +1130,14 @@ fun MusicScreen(onBack: () -> Unit) {
                         .tapable { play(c) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(if (playing) "❚❚" else "▶", fontSize = 22.sp, color = Color.White)
+                    Icon(
+                        painterResource(
+                            if (playing) R.drawable.ic_pause else R.drawable.ic_play
+                        ),
+                        contentDescription = if (playing) "暂停" else "播放",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
                 Spacer(Modifier.height(40.dp))
             }
@@ -1015,7 +1327,14 @@ fun MusicScreen(onBack: () -> Unit) {
                             .tapable { play(c) },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(if (playing) "❚❚" else "▶", fontSize = 13.sp, color = V2.accent)
+                        Icon(
+                        painterResource(
+                            if (playing) R.drawable.ic_pause else R.drawable.ic_play
+                        ),
+                        contentDescription = if (playing) "暂停" else "播放",
+                        tint = V2.accent,
+                        modifier = Modifier.size(14.dp)
+                    )
                     }
                 }
             }
@@ -1030,6 +1349,19 @@ private fun BigImage(url: String, name: String, modifier: Modifier) {
     var bmp by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(url) {
         if (url.isEmpty()) return@LaunchedEffect
+        // 2026-11-16：只有**真·本地路径**（`isLocalFile`）才读文件。
+        // 这里原来判的是 `startsWith("/")` —— 服务端相对路径 `/v1/media/xxx.jpg`
+        // 也以 / 开头，于是详情页大图被当成本地文件 decodeFile → null → 显示首字母。
+        if (isLocalFile(url)) {
+            bmp = withContext(Dispatchers.IO) {
+                val b = runCatching {
+                    android.graphics.BitmapFactory.decodeFile(localImagePath(url))
+                }.getOrNull()
+                if (b == null) android.util.Log.w("AevisAvatar", "local decode null: $url")
+                b
+            }
+            return@LaunchedEffect
+        }
         bmp = withContext(Dispatchers.IO) {
             val ck = "img:" + url
             val cached = com.aevis.android.core.SecureCache.getBytes(appCtx, ck)
@@ -1073,28 +1405,45 @@ private fun fmtMs(ms: Int): String {
 // ------------------------------------------------------------------ 人设详情
 
 /**
- * 人设详情（2026-11-14）。
+ * 人设详情（2026-11-14，2026-11-16 改成「广场只浏览 / 下载才进我的」）。
  *
- * 用户：「人设点进去应该是有个大图展示的…还能添加到联系人里面」。
- * 商城列表只能看名字和一句话，点进去什么都没有 —— 这页补上：
- * 大图 / 名字 / 编号 / 各项设定 / 一句话 / 性格，底部一颗「领养」。
+ * 用户：「人设点进去应该是有个大图展示的…还能添加到联系人里面」，
+ * 后面又把流程定死：**广场只用来浏览**，看到喜欢的点「下载到本地」，
+ * 下载下来的才进「我的 / 聊天」，之后还能改（头像、性格、说话风格）。
  *
- * ⚠️ 领养关系目前只记在本地（后端 `/psquare/adopt` 只加计数，没有关系表）。
+ * 所以这颗底部按钮只有两种状态：
+ *   · 没下载 → 「下载到本地」（落到 `LocalPersonaStore`，服务端只 +1 计数）
+ *   · 下载过 → 「开始聊天」（进对话，不再重复下载）
+ *
+ * ⚠️ 领养关系始终只记在本地（后端 `/psquare/adopt` 只加计数，没有关系表）。
  */
 @Composable
-fun PersonaDetailScreen(pid: String, onBack: () -> Unit) {
+fun PersonaDetailScreen(
+    pid: String,
+    onBack: () -> Unit,
+    onStartChat: (String) -> Unit = {},
+    onEdit: (String) -> Unit = {}
+) {
     val ink = MaterialTheme.colorScheme.onSurface
-    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var p by remember { mutableStateOf<Api.Persona?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var adopted by remember { mutableStateOf(Api.isAdopted(pid)) }
-    var note by remember { mutableStateOf("") }
+    var p by remember(pid) { mutableStateOf<Api.Persona?>(null) }
+    var busy by remember(pid) { mutableStateOf(false) }
+    // 「下载过没有」= 本地库里有没有这一条。
+    // 以前判断的是 `Api.isAdopted`（老那套领养记录），跟用户嘴里的「下载」不是一回事。
+    var downloaded by remember(pid) { mutableStateOf(LocalPersonaStore.has(pid)) }
+    // 说话风格只在本地有（服务端没这个字段），单独拿出来，避免在组合里反复读盘
+    var localStyle by remember(pid) { mutableStateOf("") }
 
     LaunchedEffect(pid) {
         p = withContext(Dispatchers.IO) {
-            runCatching { Api.personas().firstOrNull { it.id == pid } }.getOrNull()
+            // 本地这份优先：下载过的角色，用户改过的名字/头像/性格要立刻反映在详情页。
+            // 没下载过（从广场点进来）就按老路子查广场列表 —— 一次网络就能命中，
+            // `merged()` 只留作兜底（「我在服务端发布的、但本地还没下载」这种）。
+            PersonaLib.localOf(pid)?.let { PersonaLib.toPersona(it) }
+                ?: runCatching { Api.personas() }.getOrNull()?.firstOrNull { it.id == pid }
+                ?: PersonaLib.localList().firstOrNull { it.id == pid }
         }
+        localStyle = withContext(Dispatchers.IO) { PersonaLib.styleText(pid) }
     }
 
     BackHandler { onBack() }
@@ -1104,24 +1453,8 @@ fun PersonaDetailScreen(pid: String, onBack: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
     ) {
-        // 顶栏
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(34.dp).clip(CircleShape).tapable { onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_row_chevron), null,
-                    tint = ink.copy(alpha = 0.7f),
-                    modifier = Modifier.size(18.dp).rotate(180f)
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-            Text(tr("人设详情"), fontSize = V2.title, fontWeight = FontWeight.SemiBold)
-        }
+        // 顶栏：换成公共的 `SubPageHeader`（2026-11-16「视觉统一」的第一步）
+        SubPageHeader(title = "人设详情", onBack = onBack)
 
         val cur = p
         if (cur == null) {
@@ -1177,58 +1510,114 @@ fun PersonaDetailScreen(pid: String, onBack: () -> Unit) {
                         Spacer(Modifier.height(10.dp))
                     }
                     InfoLine("性格", cur.tagline.ifEmpty { "—" })
+                    // 说话风格是本地的二改内容，广场上本来没有这一项 ——
+                    // 有才显示，没有就不要摆一个空的「—」出来占位
+                    if (localStyle.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        InfoLine("说话风格", localStyle)
+                    }
                 }
 
-                Spacer(Modifier.height(90.dp))
+                // 「编辑这个角色」只给下载过的。
+                // 广场上没下载的角色没有本地副本，点进去也没有能改的东西 ——
+                // 后端没有「改别人发布的角色」这条通道，硬给入口就是骗人。
+                if (downloaded) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.padding(horizontal = V2.gutter).fillMaxWidth()
+                            .clip(squircle(V2.cardRadius))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(
+                                0.5.dp,
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                                squircle(V2.cardRadius)
+                            )
+                            .tapable { onEdit(cur.id) }
+                            .padding(horizontal = V2.gutter, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            tr("编辑这个角色"), fontSize = V2.body,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            painterResource(R.drawable.ic_row_chevron), null,
+                            tint = ink.copy(alpha = 0.28f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(110.dp))
             }
 
-            // 底部领养
-            Row(
+            // 底部主按钮：**「下载到本地」**（2026-11-16）
+            //
+            // 用户把流程定死了：广场只浏览 → 点下载 → 才进「我的 / 聊天」。
+            // 所以不再是以前「领养 + 已在聊天列表里了」那套自造文案，就两种状态：
+            //   没下载 → 「下载到本地」（落本地库，服务端只做计数）
+            //   下载过 → 「开始聊天」（进对话，不再重复下载）
+            Column(
                 Modifier.align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .navigationBarsPadding()
                     .padding(horizontal = V2.gutter, vertical = 14.dp)
-                    .clip(squircle(16.dp))
-                    .background(if (adopted) ink.copy(alpha = 0.06f) else V2.accent)
-                    .tapable {
-                        if (adopted || busy) return@tapable
-                        busy = true
-                        note = ""
-                        scope.launch {
-                            val ok = withContext(Dispatchers.IO) {
-                                runCatching { Api.adopt(cur.id) }.getOrDefault(false)
-                            }
+            ) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(squircle(16.dp))
+                        .background(V2.accent)
+                        .tapable {
+                            if (busy) return@tapable
+                            if (downloaded) { onStartChat(cur.id); return@tapable }
+                            busy = true
+                            // 本地**立刻**落盘：用户点完就该能在「聊天」里看到，
+                            // 不该等网络。服务端那颗计数（adopt）失败也不影响本地这份。
+                            LocalPersonaStore.save(
+                                LocalPersonaStore.Item(
+                                    id = cur.id,
+                                    name = cur.name,
+                                    avatar = cur.avatar,
+                                    persona = cur.tagline,
+                                    style = "",
+                                    origin = "square",
+                                    updatedAt = 0L   // save() 内部会补成当前时间
+                                )
+                            )
+                            downloaded = true
                             busy = false
-                            if (ok) {
-                                Api.markAdopted(cur.id)
-                                adopted = true
-                                note = "已添加到通讯录"
-                            } else {
-                                note = "领养失败，稍后再试"
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    runCatching { Api.adopt(cur.id) }
+                                }
                             }
                         }
-                    }
-                    .padding(vertical = 15.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    when {
-                        busy -> tr("处理中…")
-                        adopted -> tr("已在通讯录")
-                        else -> tr("领养 TA")
-                    },
-                    fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                    color = if (adopted) ink.copy(alpha = 0.45f) else Color.White
-                )
-            }
-
-            if (note.isNotEmpty()) {
-                Text(
-                    note, fontSize = V2.tiny, color = V2.accent,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                        .padding(bottom = 78.dp)
-                )
+                        .padding(vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        when {
+                            busy -> tr("正在下载…")
+                            downloaded -> tr("开始聊天")
+                            else -> tr("下载到本地")
+                        },
+                        fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+                // 下载完的那一句提示 —— 让用户知道这事**已经成了**，
+                // 而不是盯着按钮猜「我刚才点的是下载还是开始聊天」
+                if (downloaded) {
+                    Spacer(Modifier.height(7.dp))
+                    Text(
+                        tr("已加入我的角色"),
+                        fontSize = V2.micro, color = ink.copy(alpha = 0.45f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
@@ -1260,6 +1649,27 @@ private fun relationCn(r: String): String = when (r) {
  * 这页放：身份（昵称/邮箱/UID/会员）、登录设备（能踢）、退出登录。
  */
 @Composable
+
+/**
+ * 会员等级转人话（2026-11-15）。
+ *
+ * 用户：「会员那里你再用的是英文，你用中文啊…很多东西不要用内部符号，要用中文代表这个意思」。
+ * 服务端给的是 `free` / `monthly` / `yearly` 这种内部枚举，直接显示出去很难看。
+ */
+private fun membershipLabel(raw: String?): String {
+    val v = (raw ?: "").trim().lowercase()
+    return when {
+        v.isEmpty() || v == "free" || v == "none" || v == "basic" || v == "0" -> "普通用户"
+        v.startsWith("month") || v == "m" -> "月卡会员"
+        v.startsWith("year") || v == "y" || v == "annual" -> "年卡会员"
+        v.contains("forever") || v.contains("life") || v.contains("permanent") -> "永久会员"
+        v == "pro" || v == "premium" || v == "vip" -> "会员"
+        // 认不出来就原样显示，别硬翻成错的
+        else -> raw ?: "普通用户"
+    }
+}
+
+@Composable
 fun AccountScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     val scope = rememberCoroutineScope()
@@ -1288,23 +1698,8 @@ fun AccountScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(34.dp).clip(CircleShape).tapable { onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_row_chevron), null,
-                    tint = ink.copy(alpha = 0.7f),
-                    modifier = Modifier.size(18.dp).rotate(180f)
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-            Text(tr("账号与安全"), fontSize = V2.title, fontWeight = FontWeight.SemiBold)
-        }
+        // 顶栏（2026-11-16）：换成公共 `SubPageHeader`
+        SubPageHeader(title = "账号与安全", onBack = onBack)
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             // 名片
@@ -1315,7 +1710,11 @@ fun AccountScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                 ) {
                     val name = me?.nickname?.takeIf { it.isNotBlank() }
                         ?: Api.email().substringBefore("@").ifEmpty { "A" }
-                    Avatar(me?.avatar.orEmpty(), name, 56.dp)
+                    // 175：头像**真入口** —— 点击选图 → AvatarStore.import → bumpUi 立即生效
+                    MyAvatarPicker(
+                        url = com.aevis.android.core.AvatarStore.displayOf("me", me?.avatar),
+                        name = name
+                    )
                     Spacer(Modifier.width(13.dp))
                     Column(Modifier.weight(1f)) {
                         Text(name, fontSize = V2.title, fontWeight = FontWeight.SemiBold,
@@ -1329,7 +1728,7 @@ fun AccountScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
                 RowDividerPublic()
                 AboutRow("UID", Api.uid().ifEmpty { "—" })
                 RowDividerPublic()
-                AboutRow("会员", me?.membership?.ifEmpty { tr("普通用户") } ?: tr("普通用户"))
+                AboutRow("会员", membershipLabel(me?.membership))
             }
 
             // 登录设备
@@ -1438,17 +1837,196 @@ fun AccountScreen(onBack: () -> Unit, onSignOut: () -> Unit) {
 // ------------------------------------------------------------------ 网易云登录
 
 /**
- * 网易云扫码登录（2026-11-14）。
+ * 网易云登录（2026-11-15 第三版，对齐 iOS）。
  *
- * 用户：「网易云的登录要做」。iOS 那边早就有了（扫码 → 拿 MUSIC_U → 存在钥匙串），
- * 安卓一直没有 —— 因为要移植 weapi 加密（AES-CBC 两层 + RSA）。
+ * iOS 那边（`Aevis/Core/NeteaseLogin.swift`）就是 **WKWebView 内嵌 + 监听 cookie 存储
+ * 自动 harvest `MUSIC_U`**，一步都不用手抄。安卓按同一套做，三种方式并存：
  *
- * 流程：`/weapi/login/qrcode/unikey` 拿 key → 把
- * `https://music.163.com/scan_qrcode?codekey=<key>` 画成二维码 → 用户用网易云 App 扫 →
- * 每 2 秒轮询 `/weapi/login/qrcode/client/login`，803 那次响应里带 `MUSIC_U`。
+ *  ① **登录**（默认）：全屏 WebView 打开网易云登录页，手机号/验证码/扫码都行。
+ *     登录一完成，`CookieManager` 里就会出现 `MUSIC_U`，这里每 1.5 秒扫一次，
+ *     拿到就自动关页面、直接可用。
+ *  ② **扫码**：App 内生成二维码，用**另一台设备**扫（同一台扫自己会被风控）。
+ *  ③ **Token**：从电脑浏览器复制 `MUSIC_U` 贴进来，兜底用。
+ *
+ * ⚠️ 为什么不能用系统浏览器：cookie 是**按进程 + 域名隔离**的，
+ *    浏览器里登完，App 读不到（除非 root）。只有 WebView 在 App 进程内，
+ *    cookie 才归我们。用户说的「授权登录后返回就能读登录态」需要对方开放 OAuth，
+ *    网易云没开放。
  */
 @Composable
 fun NeteaseLoginDialog(onClose: () -> Unit, onDone: () -> Unit) {
+    var mode by remember { mutableIntStateOf(0) }
+    if (mode == 0) {
+        NeteaseWebLogin(onClose = onClose, onDone = onDone, onSwitchToQr = { mode = 1 })
+    } else {
+        val ink = MaterialTheme.colorScheme.onSurface
+        Dialog(onDismissRequest = onClose) {
+            Column(
+                Modifier.clip(squircle(24.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = V2.gutter, vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(tr("登录网易云"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(squircle(12.dp))
+                        .background(ink.copy(alpha = 0.05f))
+                        .padding(3.dp)
+                ) {
+                    listOf("账号登录", "扫码", "Token").forEachIndexed { i, label ->
+                        val on = mode == i
+                        Text(
+                            tr(label), fontSize = 13.sp, textAlign = TextAlign.Center,
+                            color = if (on) ink else ink.copy(alpha = 0.45f),
+                            fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                                .clip(squircle(10.dp))
+                                .background(
+                                    if (on) MaterialTheme.colorScheme.surface
+                                    else androidx.compose.ui.graphics.Color.Transparent
+                                )
+                                .tapable { mode = i }
+                                .padding(vertical = 8.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                when (mode) {
+                    1 -> QrLoginPane(onDone = onDone)
+                    else -> TokenLoginPane(onDone = onDone)
+                }
+                Spacer(Modifier.height(10.dp))
+                TextButton(onClick = onClose) {
+                    Text(tr("取消"), fontSize = 14.sp, color = ink.copy(alpha = 0.5f))
+                }
+            }
+        }
+    }
+}
+
+/** 内嵌 WebView 登录（主力）。*/
+@androidx.annotation.RequiresApi(21)
+@androidx.compose.runtime.Composable
+private fun NeteaseWebLogin(onClose: () -> Unit, onDone: () -> Unit, onSwitchToQr: () -> Unit) {
+    val ctx = LocalContext.current
+    val ink = MaterialTheme.colorScheme.onSurface
+    var loading by remember { mutableStateOf(true) }
+    var got by remember { mutableStateOf(false) }
+
+    // 登录态一出现就收工。WebView 的 cookie 在 App 进程里，读得到。
+    LaunchedEffect(Unit) {
+        while (!got) {
+            delay(1500)
+            // 🔴 必须在**主线程**调 —— CookieManager 是 WebView 的 API，
+            // 切到 IO 线程读会拿到 null（而且还被 runCatching 吃掉，看起来像"登录成功但读不到"）。
+            // 之前就是栽在这里：用户说"读取登录太失败了"。
+            val c = readNeteaseCookies()
+            if (c != null && c.contains("MUSIC_U=")) {
+                got = true
+                NeteaseAuth.saveLogin(ctx, c, "", "")
+                val acc = withContext(Dispatchers.IO) {
+                    runCatching { NeteaseAuth.fetchAccount(ctx) }.getOrNull()
+                }
+                if (acc != null) NeteaseAuth.saveLogin(ctx, c, acc.first, acc.second)
+                onDone()
+            }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Column(
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                .statusBarsPadding()
+        ) {
+            // 顶栏：关 + 标题 + 扫一扫切换
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(tr("关闭"), fontSize = 14.sp, color = ink.copy(alpha = 0.6f),
+                    modifier = Modifier.tapable { onClose() }.padding(6.dp))
+                Spacer(Modifier.weight(1f))
+                Text(tr("登录网易云"), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.weight(1f))
+                Text(tr("扫码"), fontSize = 14.sp, color = V2.accent,
+                    modifier = Modifier.tapable { onSwitchToQr() }.padding(6.dp))
+            }
+            if (loading) {
+                androidx.compose.material3.LinearProgressIndicator(
+                    Modifier.fillMaxWidth().height(2.dp),
+                    color = V2.accent,
+                    trackColor = ink.copy(alpha = 0.06f)
+                )
+            }
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { c ->
+                    android.webkit.WebView(c).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.userAgentString =
+                            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
+                                "(KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+                        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                        android.webkit.CookieManager.getInstance()
+                            .setAcceptThirdPartyCookies(this, true)
+                        webViewClient = object : android.webkit.WebViewClient() {
+                            override fun onPageStarted(
+                                view: android.webkit.WebView?, url: String?,
+                                favicon: android.graphics.Bitmap?
+                            ) { loading = true }
+
+                            override fun onPageFinished(
+                                view: android.webkit.WebView?, url: String?
+                            ) {
+                                loading = false
+                                // 页面加载完再读一次（有些 cookie 是 JS 后写的）
+                                view?.postDelayed({
+                                    val ck = readNeteaseCookies()
+                                    if (ck != null && ck.contains("MUSIC_U=")) {
+                                        NeteaseAuth.saveLogin(ctx, ck, "", "")
+                                    }
+                                }, 800)
+                            }
+
+                            // 🔴 2026-11-15 关键：拦截**每一个子请求**的 Cookie 头。
+                            // 网易云网页是 SPA（`#/login` hash 路由），登录成功后页面**不会重新加载**，
+                            // onPageFinished 只触发一次，所以等回调拿 cookie 永远是空的。
+                            // 改成从这里捞：只要页面发出任何带上 MUSIC_U 的请求，立刻存下来。
+                            override fun shouldInterceptRequest(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): android.webkit.WebResourceResponse? {
+                                runCatching {
+                                    val ck = request?.requestHeaders?.get("Cookie").orEmpty()
+                                    if (ck.contains("MUSIC_U=")) {
+                                        NeteaseAuth.saveLogin(ctx, ck, "", "")
+                                    }
+                                }
+                                return null
+                            }
+                        }
+                        loadUrl("https://music.163.com/#/login")
+                    }
+                }
+            )
+        }
+    }
+}
+
+/** 扫码：二维码 + 轮询。*/
+@Composable
+private fun QrLoginPane(onDone: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     val ctx = LocalContext.current
     var qr by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -1469,9 +2047,8 @@ fun NeteaseLoginDialog(onClose: () -> Unit, onDone: () -> Unit) {
             return@LaunchedEffect
         }
         qr = bmp
-        status = "打开网易云 App → 右上角扫一扫"
+        status = "用「另一台设备」的网易云 App 扫（别用这台手机扫自己）"
 
-        // 90 × 2s = 3 分钟（网易的 unikey 就是这个寿命）
         repeat(90) {
             delay(2000)
             val (st, ck) = withContext(Dispatchers.IO) { NeteaseAuth.qrPoll(k.key) }
@@ -1484,81 +2061,231 @@ fun NeteaseLoginDialog(onClose: () -> Unit, onDone: () -> Unit) {
                                 NeteaseAuth.fetchAccount(ctx)
                             }.getOrNull()
                         }
-                        if (acc != null) {
-                            NeteaseAuth.saveLogin(ctx, ck, acc.first, acc.second)
-                        }
-                        status = "登录成功"
+                        if (acc != null) NeteaseAuth.saveLogin(ctx, ck, acc.first, acc.second)
                         onDone()
                     } else {
-                        status = "登录返回异常（没拿到凭证），再试一次"
+                        status = "没拿到凭证，改用「账号登录」试试"
                     }
                     return@LaunchedEffect
                 }
-                "scanned" -> status = "已扫码，请在手机上点确认"
+                "scanned" -> status = "已扫码，请在另一台设备上点确认"
                 "expired" -> { status = "二维码过期了"; return@LaunchedEffect }
-                "err" -> { status = "轮询失败，换个网络试试"; return@LaunchedEffect }
+                "err" -> { status = "轮询失败，换个网络或改用账号登录"; return@LaunchedEffect }
             }
         }
         status = "二维码过期了"
     }
 
-    Dialog(onDismissRequest = onClose) {
-        Column(
-            Modifier.clip(squircle(24.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 22.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(status, fontSize = 12.5.sp, color = ink.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center)
+        Spacer(Modifier.height(12.dp))
+        Box(
+            Modifier.size(200.dp).clip(squircle(14.dp)).background(ink.copy(alpha = 0.04f)),
+            contentAlignment = Alignment.Center
         ) {
-            Text(tr("登录网易云"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                status, fontSize = 12.5.sp, color = ink.copy(alpha = 0.5f),
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(16.dp))
-            Box(
-                Modifier.size(220.dp).clip(squircle(16.dp))
-                    .background(ink.copy(alpha = 0.04f)),
-                contentAlignment = Alignment.Center
-            ) {
-                val b = qr
-                if (b != null) {
-                    Image(
-                        bitmap = b.asImageBitmap(), contentDescription = "网易云登录二维码",
-                        modifier = Modifier.size(200.dp)
-                    )
-                } else {
-                    Text(
-                        tr("正在加载…"), fontSize = 13.sp,
-                        color = ink.copy(alpha = 0.4f)
-                    )
-                }
+            val b = qr
+            if (b != null) {
+                Image(bitmap = b.asImageBitmap(), contentDescription = "二维码",
+                    modifier = Modifier.size(184.dp))
+            } else {
+                Text(tr("正在加载…"), fontSize = 13.sp, color = ink.copy(alpha = 0.4f))
             }
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { round++ }) {
-                    Text(tr("换一张"), fontSize = 14.sp, color = V2.accent)
-                }
-                TextButton(onClick = onClose) {
-                    Text(tr("取消"), fontSize = 14.sp, color = ink.copy(alpha = 0.5f))
-                }
-            }
+        }
+        TextButton(onClick = { round++ }) {
+            Text(tr("换一张"), fontSize = 13.sp, color = V2.accent)
         }
     }
 }
 
-/** 把内容画成二维码 Bitmap。用 zxing 的 core（扫一扫那边已经在用同一个库）。*/
+/** Token：从电脑浏览器复制 MUSIC_U 贴进来。*/
+@Composable
+private fun TokenLoginPane(onDone: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    val ctx = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf("") }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            "在电脑上登录 music.163.com → F12 → Application → Cookies → "
+                + "复制 MUSIC_U 的值，发到手机粘进来。只贴值就行，前缀会自动补。",
+            fontSize = 12.5.sp, color = ink.copy(alpha = 0.55f), lineHeight = 19.sp
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(squircle(11.dp))
+                .background(ink.copy(alpha = 0.05f))
+                .tapable {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                    val clip = cm.primaryClip
+                    val raw = if (clip != null && clip.itemCount > 0)
+                        clip.getItemAt(0).coerceToText(ctx).toString() else ""
+                    if (raw.isNotBlank()) { text = raw; err = "" }
+                    else err = "剪贴板是空的"
+                }
+                .padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(tr("从剪贴板粘贴"), fontSize = 13.sp, color = ink.copy(alpha = 0.66f))
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier.fillMaxWidth().heightIn(min = 70.dp).clip(squircle(12.dp))
+                .background(ink.copy(alpha = 0.05f))
+                .padding(horizontal = 11.dp, vertical = 9.dp)
+        ) {
+            BasicTextField(
+                value = text, onValueChange = { text = it; err = "" },
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.5.sp, color = ink),
+                decorationBox = { inner ->
+                    if (text.isEmpty()) {
+                        Text("粘贴 MUSIC_U 的值", fontSize = 12.5.sp,
+                            color = ink.copy(alpha = 0.32f))
+                    }
+                    inner()
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        if (err.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text(err, fontSize = 12.sp, color = V2.alert)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(squircle(13.dp)).background(V2.accent)
+                .tapable {
+                    val t = text.trim()
+                    when {
+                        t.isEmpty() -> err = "先粘贴登录凭证"
+                        t.contains("MUSIC_U=") -> { NeteaseAuth.saveLogin(ctx, t, "", ""); onDone() }
+                        t.length >= 20 && !t.contains("=") -> {
+                            NeteaseAuth.saveLogin(ctx, "MUSIC_U=" + t, "", ""); onDone()
+                        }
+                        else -> err = "没识别出 MUSIC_U，检查一下是不是粘错了"
+                    }
+                }
+                .padding(vertical = 13.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(tr("完成登录"), fontSize = 14.sp,
+                color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+
+/**
+ * 从 WebView 的 CookieManager 里把网易云的登录凭证捞出来。
+ *
+ * ⚠️ 三个要点，少一个就读不到：
+ *   ① **必须主线程**（CookieManager 不是线程安全的，IO 线程读返回 null）
+ *   ② 按**域名逐个问** —— `getCookie` 只返回该 URL 可见的那些；
+ *      登录后 cookie 可能挂在 `.163.com` / `.music.163.com` / `music.163.com` 上，
+ *      只问一个域名会漏。
+ *   ③ 读完调 `flush()`，不然进程被杀就丢了。
+ */
+private fun readNeteaseCookies(): String? {
+    val cm = android.webkit.CookieManager.getInstance()
+    val out = LinkedHashMap<String, String>()
+    listOf(
+        "https://music.163.com",
+        "https://.music.163.com",
+        "https://163.com",
+        "https://.163.com",
+        "https://interface.music.163.com"
+    ).forEach { url ->
+        val raw = runCatching { cm.getCookie(url) }.getOrNull() ?: return@forEach
+        raw.split(";").forEach { kv ->
+            val t = kv.trim()
+            if (t.isEmpty()) return@forEach
+            val i = t.indexOf('=');
+            if (i <= 0) return@forEach
+            val k = t.substring(0, i)
+            if (k !in out) out[k] = t.substring(i + 1)
+        }
+    }
+    runCatching { cm.flush() }
+    if (out.isEmpty()) return null
+    return out.entries.joinToString("; ") { "${it.key}=${it.value}" }
+}
+
+/** 把内容画成二维码 Bitmap。*/
 private fun qrBitmap(text: String, size: Int): android.graphics.Bitmap? = runCatching {
     val m = com.google.zxing.qrcode.QRCodeWriter()
         .encode(text, com.google.zxing.BarcodeFormat.QR_CODE, size, size)
     val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
     for (x in 0 until size) {
         for (y in 0 until size) {
-            bmp.setPixel(
-                x, y,
-                if (m[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
-            )
+            bmp.setPixel(x, y, if (m[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         }
     }
     bmp
 }.getOrNull()
+
+/**
+ * 我页头像 + 选图入口（2026-11-17，175，BUG-02）。
+ *
+ * 之前这个头像**完全没有点击处理**（QA 实测：点了没任何反应），所以"设置不了头像"。
+ * 现在：点头像/相机角标 → 系统相册（`PickVisualMedia`，13+ 不需要存储权限）→
+ * `AvatarStore.import(uri, "me")` → `ChatPrefs.bumpUi()`。
+ * 失败弹 Toast 带原因（不静默）；取消什么都不做。
+ */
+@Composable
+fun MyAvatarPicker(url: String, name: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var shown by remember(url) { mutableStateOf(url) }
+    var busy by remember { mutableStateOf(false) }
+
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult   // 取消：静默
+        busy = true
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ok = runCatching { com.aevis.android.core.AvatarStore.import(ctx, "me", uri) }
+                .getOrDefault(false)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                busy = false
+                if (ok) {
+                    // 本地路径优先（AvatarStore 返回的就是文件路径）
+                    shown = com.aevis.android.core.AvatarStore.file("me").absolutePath
+                    com.aevis.android.core.ChatPrefs.bumpUi()
+                } else {
+                    android.widget.Toast.makeText(
+                        ctx, "头像保存失败：图片无法读取", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    Box(
+        Modifier.clip(androidx.compose.foundation.shape.CircleShape)
+            .tapable { picker.launch(
+                androidx.activity.result.PickVisualMediaRequest(
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                )
+            ) }
+    ) {
+        Avatar(shown, name, 56.dp)
+        // 右下角相机角标（20dp），提示"这里能点"
+        Box(
+            Modifier.align(Alignment.BottomEnd)
+                .size(20.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center
+        ) {
+            androidx.compose.material3.Icon(
+                painterResource(R.drawable.ic_att_camera),
+                contentDescription = "更换头像",
+                tint = V2.accent,
+                modifier = Modifier.size(13.dp)
+            )
+        }
+    }
+}

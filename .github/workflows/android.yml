@@ -7,7 +7,8 @@ name: Android
 # 发到 Release（public 仓库的 Release 资源不用登录就能下）。
 on:
   push:
-    branches: [ main ]
+    # 安卓 rewrite 分支开发期间也要能触发云打包（本机内存不足，靠 CI 验证）
+    branches: [ main, rewrite ]
     paths:
       - 'android/**'
       - '.github/workflows/android.yml'
@@ -63,11 +64,15 @@ jobs:
           gradle-version: '8.13'
 
       # 第一次跑要下 AGP / Compose 那一堆依赖，慢是正常的
-      - name: Build release APK
+      # 出**可安装的 debug APK**：跳过 R8 minify / shrinkResources，
+      # 既符合「侧载安装」目标，也少一个内存/规则出错的环节。
+      - name: Build debug APK
         run: |
           set -o pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          gradle assembleDebug --no-daemon --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx3072m -XX:ReservedCodeCacheSize=256m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" \
+            2>&1 | tee build.log
 
       # 失败时把日志发到 Release，否则 Actions 日志要登录才看得到
       - name: Upload build log on failure
@@ -83,7 +88,7 @@ jobs:
       - name: Collect APK
         run: |
           set -e
-          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
           echo "产物：$APK"
           test -s "$APK" || { echo "没有 APK"; exit 1; }
           cp "$APK" Aevis-android-debug.apk

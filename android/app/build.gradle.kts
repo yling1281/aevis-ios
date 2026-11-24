@@ -24,8 +24,10 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 27
-        versionName = "1.0.0"
+        versionCode = 190
+        // 2026-11-16（113）：版本名跟着 build 走（112 → 1.1.02，113 → 1.1.03）；
+        // 界面上只显示 versionName，versionCode 只给系统覆盖安装用。
+        versionName = "1.1.90"
     }
 
     signingConfigs {
@@ -73,6 +75,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.annotation:annotation:1.8.2")
+    // QQ 登录（2026-11-16，97）：坐标 3.53.0（3.52.0 用 apache http，Android 9+ 必崩），只在阿里云镜像上有。
+    // 客户端只需要 AppID；AppKey 在服务端 .env（进 APK 等于泄漏）。
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     // 扫码（2026-11-13）：只引解码核心，相机用系统 `android.hardware.Camera`，
     // 不再拉 CameraX 那一串依赖 —— 包体只涨 ~500KB。

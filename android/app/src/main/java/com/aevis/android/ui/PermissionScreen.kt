@@ -93,28 +93,17 @@ fun PermissionScreen(onBack: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(34.dp).clip(CircleShape).tapable { onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_row_chevron), null,
-                    tint = ink.copy(alpha = 0.7f),
-                    modifier = Modifier.size(18.dp)
+        // 顶栏（2026-11-16）：公共 SubPageHeader，右侧的「已给 N 项」搬到 trailing
+        SubPageHeader(
+            title = "权限",
+            onBack = onBack,
+            trailing = {
+                Text(
+                    "$grantedCount / ${items.size}",
+                    fontSize = V2.tiny, color = ink.copy(alpha = 0.4f)
                 )
             }
-            Spacer(Modifier.width(6.dp))
-            Text(tr("权限"), fontSize = V2.title, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            Text(
-                "$grantedCount / ${items.size}",
-                fontSize = V2.tiny, color = ink.copy(alpha = 0.4f)
-            )
-        }
+        )
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Text(
@@ -125,6 +114,43 @@ fun PermissionScreen(onBack: () -> Unit) {
             )
 
             Spacer(Modifier.height(6.dp))
+
+            // 后台陪伴（2026-11-15）：前台服务开关 + 电池优化状态
+            V2Card(Modifier.padding(horizontal = V2.gutter)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("后台陪伴"), fontSize = V2.body, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            tr("开启后它在后台也会主动找你，40–90 分钟随机一次。"
+                                + "关掉就只在打开 App 时出现。"),
+                            fontSize = V2.micro, color = ink.copy(alpha = 0.45f),
+                            lineHeight = 15.sp
+                        )
+                        if (!com.aevis.android.core.ProactiveService.isIgnoringBattery(ctx)) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                tr("建议同时开启上面的「忽略电池优化」，否则会被系统杀掉"),
+                                fontSize = 10.5.sp, color = V2.alert.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    androidx.compose.material3.Switch(
+                        checked = com.aevis.android.core.ProactiveService.isOn(ctx),
+                        onCheckedChange = {
+                            com.aevis.android.core.ProactiveService.setOn(ctx, it)
+                            tick++
+                        },
+                        colors = androidx.compose.material3.SwitchDefaults.colors(
+                            checkedThumbColor = androidx.compose.ui.graphics.Color.White,
+                            checkedTrackColor = V2.accent
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
             V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
                 items.forEachIndexed { i, it ->
                     if (i > 0) {

@@ -1,18 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  直连线路的证书信任（2026-11-14）
+<!-- 2026-11-16：仅对自建线路信任内置的自签证书。
+     其他域名一律走系统 CA，不开放用户证书，不降低全局安全性。
 
-  只对 103.236.72.107 这一个 IP 生效：
-    · 额外信任我们自建的 CA（res/raw/aevis_direct_ca.crt，私钥只在服务器上）
-    · 同时保留系统 CA —— 以后这条口换成公网证书也不用改代码
-
-  别的域名一律不适用这份配置，仍然按系统默认走。
--->
+     118：**补回直连线路（103.236.72.107:54319）的信任**。
+     它的证书是 `Aevis Direct CA` 自签的（`res/raw/aevis_direct_ca.crt`，CN=Aevis Direct CA，
+     有效期到 2036），但这份配置在 106 那轮只剩了 api2，于是直连一直是
+     `SSLHandshakeException` → 被兜底链路顶掉，所以才"以前几十毫秒那条没了"。
+     现在直连升为首选，这条信任必须补上，否则首选一条也打不通。 -->
 <network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- 直连（机房 IP 直通，最快那条） -->
     <domain-config>
         <domain includeSubdomains="false">103.236.72.107</domain>
         <trust-anchors>
             <certificates src="@raw/aevis_direct_ca" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- 备用自签线路 -->
+    <domain-config>
+        <domain includeSubdomains="false">api2.lingyan.cyou</domain>
+        <trust-anchors>
+            <certificates src="@raw/api2_cert" />
             <certificates src="system" />
         </trust-anchors>
     </domain-config>

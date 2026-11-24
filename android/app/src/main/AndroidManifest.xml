@@ -29,6 +29,11 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 
     <!-- 电池优化：锁屏后还能收消息 / 通话不断线 -->
+    <!-- 后台陪伴：前台服务（2026-11-15）。14+ 必须声明具体类型 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 开机自启，重启后继续陪伴 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- 使用情况访问：统计你每天用了哪些 App（只在「报告」里展示，不上传） -->
@@ -41,6 +46,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
+    
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -49,6 +55,18 @@
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Aevis">
+    <!-- 导出聊天记录（2026-11-16）：把 cacheDir 里的 json 通过系统分享发出去，
+         必须走 FileProvider（file:// uri 从 7.0 起直接抛 FileUriExposedException）。 -->
+    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+    </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -88,5 +106,26 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Aevis" />
-    </application>
+        <!-- 后台陪伴服务（2026-11-15）。specialUse：不是音乐/定位/数据同步，
+             属于「其他持续任务」，Android 14+ 必须这么声明并写清楚用途。 -->
+        <service
+            android:name=".core.ProactiveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="AI 陪伴消息，按随机间隔主动发一条" />
+        </service>
+        <!-- 常驻通知（2026-11-16）：只挂通知，不跑后台逻辑 -->
+        <service
+            android:name=".core.AeviService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="展示一条常驻聊天提醒，不做后台计算" />
+        </service>
+
+
+</application>
 </manifest>

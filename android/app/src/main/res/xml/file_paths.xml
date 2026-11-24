@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 路径（2026-11-16）：导出聊天记录时把 cacheDir 里的 json 通过系统分享发出去。 -->
+<paths>
+    <cache-path name="cache" path="." />
+    <files-path name="files" path="." />
+</paths>

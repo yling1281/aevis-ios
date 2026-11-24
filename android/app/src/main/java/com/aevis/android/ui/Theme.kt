@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
@@ -78,20 +79,50 @@ object V2 {
 
 @Composable
 fun AevisTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val scheme = if (dark) {
+    // 主题（2026-11-16）：从写死深色改成可切换。
+    // ⚠️ 这里**必须**读一次 `ThemePrefs.version`：`mode` 是普通 getter，
+    //    改了不会自己触发重组 —— 把它当 `remember` 的 key 读，就同时完成了
+    //    "订阅变化"和"拿到新值"两件事（不用再写一个没人用的局部变量）。
+    val mode = remember(com.aevis.android.core.ThemePrefs.version) {
+        com.aevis.android.core.ThemePrefs.mode
+    }
+    // 跟随系统时要读系统的值；另外两档固定。读 `isSystemInDarkTheme()` 放在外面，
+    // 这样系统在后台切深/浅时，「跟随系统」这一档也会跟着变。
+    val systemDark = isSystemInDarkTheme()
+    val dark = when (mode) {
+        com.aevis.android.core.ThemePrefs.LIGHT -> false
+        com.aevis.android.core.ThemePrefs.DARK -> true
+        else -> systemDark
+    }
+    val scheme0 = if (dark) {
         darkColorScheme(
             primary = V2.accent, background = V2.bgDark, surface = V2.cardDark,
             onBackground = Color(0xFFF3F1EE), onSurface = Color(0xFFF3F1EE),
             surfaceVariant = V2.wellDark, outline = V2.lineDark
         )
     } else {
+        // 浅色：米白底 + 纯白卡片 + 近黑的字。三个值都在 `V2` 里定死了，
+        // 别在这儿另调 —— iOS / 小程序用的是同一支米白。
         lightColorScheme(
             primary = V2.accent, background = V2.bgLight, surface = V2.cardLight,
             onBackground = Color(0xFF1D1B17), onSurface = Color(0xFF1D1B17),
             surfaceVariant = V2.wellLight, outline = V2.lineLight
         )
     }
+
+    // 主背景（2026-11-16，112；125 改成"每页各画一张"）：
+    // 玻璃模式下 `background` 仍然给透明 —— 但**不再靠根容器垫图**，
+    // 改成每个页面根部包一层 `PageBackdrop {}`（见 AppBackdrop.kt）。
+    // 这样各页自己的 `.background(colorScheme.background)` 变成"透出本页背景"，
+    // 切页时背景跟着该页重绘（解码结果走进程级缓存，不会每页解一次）。
+    // 前景色跟着实际背景主色走：卡片里的字和直接铺在背景上的字用同一支色。
+    val bgVer = com.aevis.android.core.ChatPrefs.bgVersion
+    val skin = if (com.aevis.android.core.ChatPrefs.appBgType == "default") null else appSkinFor(dark)
+    val scheme = if (skin == null) scheme0 else scheme0.copy(
+        background = Color.Transparent,
+        onBackground = skin.text,
+        onSurface = skin.text
+    )
     MaterialTheme(colorScheme = scheme, typography = zeroSpacing()) {
         content()
     }
@@ -168,3 +199,30 @@ class SquircleShape(private val radius: Dp) : Shape {
 
 /** 随手用：`clip(squircle(26.dp))`。*/
 fun squircle(radius: Dp): Shape = SquircleShape(radius)
+
+/**
+ * 背景色 → 可读的前景色（2026-11-16，112）。
+ *
+ * 用**线性化**之后的相对亮度：`0.2126R + 0.7152G + 0.0722B`。
+ * ⚠️ 直接用 sRGB 分量加权会低估深色（0.5 灰的实际观感比数值亮），
+ *    所以先做 gamma 还原（`c<=0.03928 ? c/12.92 : ((c+0.055)/1.055)^2.4`）再加权，
+ *    这也是 WCAG 里那套算法。
+ *
+ * 深底（>0.5）返回 #F5F6F8，浅底返回 #1B1D22。
+ */
+fun onColorFor(bg: Color): Color {
+    fun lin(c: Float): Float =
+        if (c <= 0.03928f) c / 12.92f
+        else Math.pow(((c + 0.055f) / 1.055f).toDouble(), 2.4).toFloat()
+
+    // Compose 的 `Color.r/g/b` 就是 sRGB 编码的 0–1 分量，先 gamma 还原再加权
+    val r = lin(bg.red.coerceIn(0f, 1f))
+    val g = lin(bg.green.coerceIn(0f, 1f))
+    val b = lin(bg.blue.coerceIn(0f, 1f))
+    val l = 0.2126f * r + 0.7152f * g + 0.0722f * b
+    return if (l > 0.5f) Color(0xFF1B1D22) else Color(0xFFF5F6F8)
+}
+
+/** `onColorFor` 返回的那两个前景色，单独拎出来方便比较。*/
+val OnLightBg = Color(0xFF1B1D22)
+val OnDarkBg = Color(0xFFF5F6F8)

@@ -1,5 +1,6 @@
 package com.aevis.android.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -306,7 +307,8 @@ fun LoginScreen(onDone: () -> Unit) {
             Spacer(Modifier.width(14.dp))
             CircleEntry("QQ", R.drawable.ic_brand_qq,
                 Color(0xFF428CF0), !working) {
-                // 真跳：系统浏览器 → QQ 授权 → 服务端 302 回 aevis://login
+                // 2026-11-16（103）：SDK 那条路放弃（点一次崩一次），
+                // 回退成服务端拼好的 authorize 地址 → 系统浏览器 → 服务端 302 回 aevis://login。
                 if (working) return@CircleEntry
                 working = true
                 scope.launch {

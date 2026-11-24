@@ -7,7 +7,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import com.aevis.android.core.I18n
 import com.aevis.android.data.Api
 import com.aevis.android.ui.AevisTheme
@@ -30,43 +33,82 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 崩溃上报（2026-11-16，101）：**必须最先装**，否则早期崩溃抓不到。
+        // 只落盘 + 交回系统 handler，不吞异常。
+        runCatching { com.aevis.android.core.CrashReporter.install(this) }
+        // 签名校验（2026-11-16，106）：证书 MD5 不匹配直接退出（防二次打包）。
+        if (!verifySignature()) return
         // 多语言：读 assets 里的共用词表，跟随系统语言
         I18n.init(this)
         enableEdgeToEdge()
         Api.init(this)
+        com.aevis.android.core.ChatPrefs.init(this)
+        com.aevis.android.core.DiaryStore.init(this)
+        com.aevis.android.core.FontStore.init(this)
+        // 常驻通知（2026-11-16）：默认开；关掉就不起前台服务
+        runCatching { com.aevis.android.core.AeviService.apply(this) }
+        com.aevis.android.core.ModelPrefs.init(this)
+        // 把上次崩的栈 / QQ 登录步骤发出去（后台线程，别卡启动）
+        runCatching {
+            Thread { runCatching { com.aevis.android.core.CrashReporter.flush(this) } }.start()
+        }
+        // P0（2026-11-17）：孤儿会话救济 —— 有消息但没有 persona 的，补占位角色挂回列表。
+        // 只加不删；服务端列表拿不到时本轮跳过（见 OrphanConvs 注释）。
+        runCatching {
+            Thread {
+                runCatching { com.aevis.android.core.OrphanConvs.adopt() }
+            }.start()
+        }
+        com.aevis.android.core.BackgroundStore.init(this)
+        // 主背景图（2026-11-16，112）：跟聊天背景分开存（files/bg/app.jpg）
+        runCatching { com.aevis.android.ui.AppBgStore.init(this) }
+        com.aevis.android.core.AnimPrefs.init(this)
+        com.aevis.android.core.ThemePrefs.init(this)
+        com.aevis.android.core.LocalPersonaStore.init(this)
+        com.aevis.android.core.GroupStore.init(this)
         signedInState.value = Api.signedIn()
         handleIntent(intent)
 
         setContent {
             AevisTheme {
-                val signedIn by signedInState
-                // 收到支付回跳就重建一次「我」页（余额会重新拉）
-                val tick by payReturn
-                // 语言一变就整棵树重建 —— 文案是在各个 Composable 里现取的，
-                // 不重建的话只有正在重组的那个子节点会变，其它地方还是旧语言。
-                val langVer = I18n.version
-                key(tick, langVer) {
-                    if (signedIn) {
-                        Shell(onSignOut = {
-                            Api.signOut()
-                            signedInState.value = false
-                        })
-                    } else {
-                        LoginScreen(onDone = { signedInState.value = true })
-                    }
-                }
+                // 主背景（2026-11-16，125 改）：**不再在根节点垫一张图**。
+                // 用户明确要求「要每个二级菜单自己的背景都换成这张图」——
+                // 所以背景由各页面的 `PageBackdrop {}` 自己画（解码结果走进程级缓存，
+                // 不会每页解一次）。根这里只留一个普通 Box。
+                Box(Modifier.fillMaxSize()) {
 
-                // 网页授权确认框：不放在 `key(tick)` 里面 ——
-                // 支付回跳重建 Shell 时它不该跟着消失。
-                val req by webLoginReq
-                val busy by webLoginBusy
-                req?.let { r ->
-                    WebLoginDialog(
-                        req = r,
-                        busy = busy,
-                        onAllow = { approveWebLogin(r) },
-                        onDeny = { denyWebLogin(r) },
-                    )
+                    val signedIn by signedInState
+                    // 收到支付回跳就重建一次「我」页（余额会重新拉）
+                    val tick by payReturn
+                    // 语言一变就整棵树重建 —— 文案是在各个 Composable 里现取的，
+                    // 不重建的话只有正在重组的那个子节点会变，其它地方还是旧语言。
+                    val langVer = I18n.version
+                    key(tick, langVer) {
+                        if (signedIn) {
+                            Shell(onSignOut = {
+                                Api.signOut()
+                                signedInState.value = false
+                            })
+                        } else {
+                            // 125：登录页也自己铺背景（跟登录后的页面同一套观感）
+                            com.aevis.android.ui.PageBackdrop {
+                                LoginScreen(onDone = { signedInState.value = true })
+                            }
+                        }
+                    }
+
+                    // 网页授权确认框：不放在 `key(tick)` 里面 ——
+                    // 支付回跳重建 Shell 时它不该跟着消失。
+                    val req by webLoginReq
+                    val busy by webLoginBusy
+                    req?.let { r ->
+                        WebLoginDialog(
+                            req = r,
+                            busy = busy,
+                            onAllow = { approveWebLogin(r) },
+                            onDeny = { denyWebLogin(r) },
+                        )
+                    }
                 }
             }
         }
@@ -175,5 +217,59 @@ class MainActivity : ComponentActivity() {
     private fun denyWebLogin(req: WebLoginRequest) {
         webLoginReq.value = null
         Thread { Api.webLoginCancel(req.ticket) }.start()
+    }
+
+    /**
+     * App 退到后台（2026-11-16）：**强制推一次**云备份（绕过节流）。
+     * 用户离开时是最该落云的时刻，不能再等 30 秒节流窗口。
+     */
+    override fun onStop() {
+        runCatching {
+            if (com.aevis.android.data.Api.tokenIsThere()) {
+                Thread { runCatching { com.aevis.android.data.Api.backupPushNow() } }.start()
+            }
+        }
+        super.onStop()
+    }
+
+
+    /** App 回到前台拉一次未读（2026-11-16，104）—— 不做轮询，只这一次。 */
+    override fun onStart() {
+        super.onStart()
+        runCatching {
+            Thread { runCatching { com.aevis.android.core.InboxBadge.refresh() } }.start()
+        }
+    }
+
+    /**
+     * 签名校验（2026-11-16，106）：APK 签名证书的 **MD5** 必须是
+     * `ec4cd9b1ebedda734618f706c7503eae`（team-lead 用 apksigner 从 release 包读出来的），
+     * 不匹配 → 直接退出（防二次打包的最低成本手段）。
+     */
+    private fun verifySignature(): Boolean {
+        val expect = "EC4CD9B1EBEDDA734618F706C7503EAE"
+        return runCatching {
+            val sig = packageManager.getPackageInfo(
+                packageName,
+                android.content.pm.PackageManager.GET_SIGNATURES
+            ).signatures?.firstOrNull() ?: return false
+            val md5 = java.security.MessageDigest.getInstance("MD5")
+                .digest(sig.toByteArray())
+                .joinToString("") { "%02X".format(it) }
+            if (md5 != expect) {
+                android.util.Log.e("AevisSign", "signature mismatch: $md5")
+                false
+            } else true
+        }.getOrDefault(false).also { ok ->
+            if (!ok) {
+                // 退出前给一句提示，别让用户以为闪退
+                runCatching {
+                    android.widget.Toast.makeText(
+                        this, "安装包被修改，请从官网重新下载", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                finish()
+            }
+        }
     }
 }

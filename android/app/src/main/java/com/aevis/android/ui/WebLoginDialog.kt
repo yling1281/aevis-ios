@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -74,14 +75,18 @@ fun WebLoginDialog(
                 Spacer(Modifier.height(18.dp))
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFFF4F0FF), RoundedCornerShape(12.dp))
+                        // 116：授权码底框跟主题走（写死浅紫在深色模式下是一块亮斑）
+                        .background(
+                            V2.accent.copy(alpha = 0.14f), RoundedCornerShape(12.dp)
+                        )
                         .padding(horizontal = 16.dp, vertical = 9.dp)
                 ) {
                     Text(
                         req.code,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF7664E2),
+                        // 116：深色模式下用亮一档的主色（原来写死深紫，压不住深底）
+                        color = V2.accent,
                         letterSpacing = 5.sp,
                     )
                 }
@@ -99,12 +104,14 @@ fun WebLoginDialog(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    // 116：最小高度 + 上下留白（写死 50dp 时，系统字号拉满会把「允许登录」裁掉）
+                    .heightIn(min = 50.dp)
                     .background(
                         Brush.linearGradient(listOf(Color(0xFFA897F5), Color(0xFF7664E2))),
                         RoundedCornerShape(16.dp)
                     )
-                    .tapable(enabled = !busy, onClick = onAllow),
+                    .tapable(enabled = !busy, onClick = onAllow)
+                    .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -120,8 +127,9 @@ fun WebLoginDialog(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
-                    .tapable(enabled = !busy, onClick = onDeny),
+                    .heightIn(min = 44.dp)
+                    .tapable(enabled = !busy, onClick = onDeny)
+                    .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(tr("不允许"), fontSize = 15.sp, color = Color(0xFF8A8378))
