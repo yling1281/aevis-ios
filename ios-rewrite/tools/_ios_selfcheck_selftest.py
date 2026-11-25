@@ -99,6 +99,44 @@ print("%-5s %-22s 期望>=1 实际=%d" % ("OK  " if hit3 else "MISS", "3-ASYNCLE
 if not hit3:
     ok = False
 
+# 8-AE-UNKNOWN-MEMBER：run#48 的真实错误 `AE.paper`（paper 其实在 extension Color 里）。
+# 用真实的两块声明做对照表：enum AE 有 accent/card/chatFont，extension AE 有 extra；
+# paper 只在 extension Color 里 —— 所以 AE.paper 必须被抓出来，AE.nope 也是。
+AE_FIXTURE = u'''
+enum AE {
+    static let accent = 1
+    static let card = 2
+    static func chatFont(_ s: Int) -> Int { return s }
+}
+
+extension AE {
+    static let extra = 3
+}
+
+extension Color {
+    static var paper: Int { return 0 }
+}
+
+func bad() {
+    _ = AE.paper
+    _ = AE.nope
+    _ = AE.accent
+    _ = AE.extra
+    _ = AE.chatFont(1)
+    _ = Color.paper
+}
+'''
+sc.issues = []
+sc.AE_MEMBERS.clear()
+sc.AE_MEMBERS.update(sc.collect_ns_members({"Models/Models.swift": AE_FIXTURE}, "AE"))
+sc.check_file("AEUse.swift", AE_FIXTURE, set(), set(), set())
+hit8 = [i for i in sc.issues if i[2] == "8-AE-UNKNOWN-MEMBER"]
+hit8_txt = " ".join(i[3] for i in hit8)
+ok8 = (len(hit8) == 2) and ("AE.paper" in hit8_txt) and ("AE.nope" in hit8_txt)
+print("%-5s %-22s 期望=2 实际=%d   (%s)" % ("OK  " if ok8 else "MISS", "8-AE-UNKNOWN-MEMBER", len(hit8), hit8_txt[:70]))
+if not ok8:
+    ok = False
+
 print("-" * 70)
 print("SELFTEST: " + ("PASS（扫描器有效）" if ok else "FAIL（扫描器空转，需修）"))
 sys.exit(0 if ok else 1)

@@ -11,6 +11,8 @@
   5. `await` 出现在**非 async 的 func 作用域**里（闭包透明，含 Task/.task/refreshable 的 func 跳过）
   6. 香港线路 / 「直连→北京→备用→香港」残留字样
   7. 花括号 / 圆括号 / 方括号平衡
+  8. `AE.xxx` 引用的成员在 `enum AE` / `extension AE` 里真有定义
+     （run#48 的 `type 'AE' has no member 'paper'` 就是这一项漏掉的）
 
 实现要点：先把注释与字符串抹成空格并**保留换行**，再做字符级状态机，
 这样 URL 里的 `//` 不会被误当注释，index → 行号也能精确还原。
@@ -186,6 +188,45 @@ def collect_func_sets(clean_by_file):
     return per_file, worker_asyncs, all_throwing
 
 
+# ---------- 第 8 项：`AE.xxx` 引用的成员必须真有定义 ----------
+# 2026-11-25 run#48 就是栽在这：`ShopView.swift:178` / `MemberView.swift:160` 写了
+# `AE.paper`，但 `paper` 只在 `extension Color` 里（应为 `Color.paper`），
+# 前七项全绿、macOS runner 编 3 分钟后才报 `type 'AE' has no member 'paper'`。
+# AE 是纯自有命名空间，成员全在 `enum AE { }` / `extension AE { }` 里，
+# 对 `AE.<name>` 逐一对表即可，零假报（系统 API 不会挂在 AE 上）。
+NS_DECL = re.compile(r"\b(?:enum|extension)\s+AE\b[^{]*\{")
+NS_MEMBER = re.compile(r"\b(?:static\s+)?(?:let|var|func)\s+([A-Za-z_]\w*)")
+NS_USE = re.compile(r"(?<![\w.])AE\s*\.\s*([A-Za-z_]\w*)")
+
+AE_MEMBERS = set()
+
+
+def collect_ns_members(clean_by_file, ns="AE"):
+    """把 `enum AE {}` / `extension AE {}` 里的静态成员捞出来（按花括号配对切块）。
+
+    只认顶层花括号块，不递归 —— AE 里没有嵌套类型，够用且不会被内部的
+    `switch { case ... }` 之类干扰：块内做全量 `static let/var/func` 匹配即可。
+    """
+    found = set()
+    pat = re.compile(r"\b(?:enum|extension)\s+" + ns + r"\b[^{]*\{")
+    for clean in clean_by_file.values():
+        for m in pat.finditer(clean):
+            depth = 0
+            i = m.end() - 1
+            start = i
+            while i < len(clean):
+                if clean[i] == "{":
+                    depth += 1
+                elif clean[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            for mm in NS_MEMBER.finditer(clean[start:i]):
+                found.add(mm.group(1))
+    return found
+
+
 def check_file(rel, src, local_asyncs, worker_asyncs, throwing_funcs):
     clean = strip_all(src)
     lm = line_map(src)
@@ -311,6 +352,19 @@ def check_file(rel, src, local_asyncs, worker_asyncs, throwing_funcs):
         if d != 0:
             add(rel, len(raw_lines), "7-" + kind + "-IMBALANCE", "差 %+d" % d)
 
+    # ---------- 8. AE.xxx 成员存在性 ----------
+    # AE_MEMBERS 为空说明没扫到 `enum AE`（Models.swift 没在 FILES 里）→ 跳过而不是误报。
+    if AE_MEMBERS:
+        for m in NS_USE.finditer(clean):
+            name = m.group(1)
+            if name in AE_MEMBERS:
+                continue
+            if name in ("self", "Type", "init"):
+                continue
+            add(rel, lm[m.start()], "8-AE-UNKNOWN-MEMBER",
+                "AE.%s 未定义（AE 现有 %d 个成员，是否想写 Color.%s / 或漏了定义？）"
+                % (name, len(AE_MEMBERS), name))
+
     return clean
 
 
@@ -330,6 +384,10 @@ def main():
 
     per_file, worker_asyncs, throwing_funcs = collect_func_sets(clean_by_file)
 
+    # 第 8 项的对照表：`AE.` 有哪些成员（Models.swift 里的 enum AE / extension AE）
+    AE_MEMBERS.clear()
+    AE_MEMBERS.update(collect_ns_members(clean_by_file, "AE"))
+
     for rel in FILES:
         path = os.path.join(TARGET_DIR, rel)
         if not os.path.exists(path):
@@ -342,7 +400,7 @@ def main():
           % (len(worker_asyncs), len(throwing_funcs)))
     print("=" * 96)
     if not issues:
-        print("IS_PASS: YES —— 七项全通过")
+        print("IS_PASS: YES —— 八项全通过（AE 成员 %d 个）" % len(AE_MEMBERS))
         print("=" * 96)
         return 0
     by_kind = {}

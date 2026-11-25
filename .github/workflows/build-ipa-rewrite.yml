@@ -38,6 +38,9 @@ jobs:
           set -eux
           python3 tools/_ios_selfcheck_selftest.py
           python3 tools/_ios_selfcheck.py
+          # pbxproj 引用必须能落到磁盘上（2026-11-25：AevisHosts.swift 被塞进 path=Views
+          # 的 group，实际在 Core/，pbxproj 语法合法但构建报 input file cannot be found）
+          python3 tools/_pbx_check.py
 
       - name: Toolchain
         run: |
@@ -218,6 +221,7 @@ jobs:
           set -eux
           python3 tools/_ios_selfcheck_selftest.py
           python3 tools/_ios_selfcheck.py
+          python3 tools/_pbx_check.py
 
       - name: Build for simulator
         run: |
