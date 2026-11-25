@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 /// 账号中心（2026-11-22 新增，照「忆伴」账号中心参考图做）。
 ///
@@ -31,6 +33,13 @@ struct AccountCenterView: View {
     /// `/v1/me` 失败时给一行明确提示（占位仍在），可下拉重试；不再静默空白。
     @State private var loadFailed = false
 
+    /// 换头像（2026-11-25）：相册选图 → `/v1/media` 上传拿路径 → `POST /v1/me/profile` 写回。
+    /// 注意只动「登录用户头像」，**不碰人设广场**（那是 persona.avatar，另一套数据）。
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var uploadingAvatar = false
+    @State private var avatarError = ""
+    @State private var showAvatarError = false
+
     private let dangerRed = Color.hex(0xE5484D)
 
     var body: some View {
@@ -44,6 +53,11 @@ struct AccountCenterView: View {
                             .font(.system(size: 11.5))
                             .foregroundStyle(AE.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    // 可点的账号/头像设置（目前只有换头像；「目前没有的功能先不加按钮」）
+                    groupBlock("账号") {
+                        avatarRow
                     }
 
                     groupBlock("系统") {
@@ -69,6 +83,11 @@ struct AccountCenterView: View {
             }
             .task { await load() }
             .refreshable { await load() }
+            .alert("头像换不了", isPresented: $showAvatarError) {
+                Button("好", role: .cancel) { }
+            } message: {
+                Text(avatarError)
+            }
         }
         .tint(AE.accent)
     }
@@ -149,6 +168,92 @@ struct AccountCenterView: View {
     private var badgeText: String {
         guard info.memberActive else { return "普通用户" }
         return info.memberDays > 0 ? "会员 · \(info.memberDays) 天" : "会员"
+    }
+
+    /// 「更换头像」行：整行是 PhotosPicker 的触发区，右侧带上传进度。
+    /// 上传走 `/v1/media`（与安卓同接口同字段），成功后写 `POST /v1/me/profile`。
+    private var avatarRow: some View {
+        PhotosPicker(selection: $pickerItem, matching: .images, photoLibrary: .shared()) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 16.5, weight: .medium))
+                    .foregroundStyle(AE.accent)
+                    .frame(width: 24, alignment: .center)
+                Text("更换头像")
+                    .font(.system(size: 15.5))
+                    .foregroundStyle(AE.textPrimary)
+                Spacer(minLength: 8)
+                if uploadingAvatar {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AE.textSecondary.opacity(0.45))
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 54)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(uploadingAvatar)
+        // 选完图立刻上传，不需要再点一次保存
+        .onChange(of: pickerItem) { item in
+            guard let item else { return }
+            Task { await uploadAvatar(item) }
+        }
+    }
+
+    /// 头像上传：读 Data → 缩到长边 512 → JPEG → `/v1/media` → `/v1/me/profile`。
+    /// 缩到 512 是因为头像最大只显示 62pt（@3x ≈ 186px），传原图十几 MB 纯浪费流量。
+    @MainActor
+    private func uploadAvatar(_ item: PhotosPickerItem) async {
+        guard let token = session.token, !token.isEmpty else {
+            avatarError = "登录状态已失效，请重新登录"
+            showAvatarError = true
+            pickerItem = nil
+            return
+        }
+        uploadingAvatar = true
+        defer { uploadingAvatar = false; pickerItem = nil }
+
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let raw = UIImage(data: data) else {
+                throw NSError(domain: "aevis.avatar", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "这张图片读不出来，换一张试试。"] )
+            }
+            let small = Self.downscaled(raw, maxSide: 512)
+            guard let jpg = small.jpegData(compressionQuality: 0.85) else {
+                throw NSError(domain: "aevis.avatar", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "图片压缩失败，换一张试试。"] )
+            }
+            let path = try await APIClient.uploadImage(
+                token: token, data: jpg, filename: "avatar.jpg")
+            _ = try await APIClient.updateProfile(token: token, avatar: path)
+            // 立刻刷新本地：头部大图 + 首页问候区都读这份
+            info.avatar = path
+            session.applyAvatar(path)
+        } catch {
+            avatarError = error.localizedDescription
+            showAvatarError = true
+        }
+    }
+
+    /// 等比缩到长边 maxSide（小于就原样返回，不放大）。
+    private static func downscaled(_ img: UIImage, maxSide: CGFloat) -> UIImage {
+        let w = img.size.width
+        let h = img.size.height
+        guard w > 0, h > 0 else { return img }
+        let scale = min(1, maxSide / max(w, h))
+        guard scale < 1 else { return img }
+        let size = CGSize(width: floor(w * scale), height: floor(h * scale))
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.scale = 1
+        fmt.opaque = true          // 头像没有透明需求，opaque 更小更快
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 
     // MARK: - 分组（只读信息，不带可点感）

@@ -51,6 +51,13 @@ final class Session: ObservableObject {
         if a != avatar { Task { @MainActor in self.avatar = a } }
     }
 
+    /// 换头像成功后同步到全局（首页问候区/聊天「我」的头像都读 `Session.avatar`）。
+    /// `avatar` 是 `private(set)`，外部只能通过这个方法改。
+    func applyAvatar(_ path: String) {
+        guard avatar != path else { return }
+        Task { @MainActor in self.avatar = path }
+    }
+
     /// 冷启动校验：本地有 token 才校验。只有明确的 401/403 才登出；
     /// 其它错误（断网、超时、解析失败、5xx）保留登录态，保证离线可用。
     ///

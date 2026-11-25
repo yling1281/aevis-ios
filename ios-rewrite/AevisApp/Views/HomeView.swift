@@ -43,10 +43,11 @@ struct HomeView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                greeting
-                usageCard
-                sectionHeader("服务", expanded: $serviceExpanded)
-                if serviceExpanded { serviceGrid }
+                // 开屏元素依次轻微上跳（用户要求）：0.05s 递进，不是整块一起淡入
+                greeting.staggerIn(0)
+                usageCard.staggerIn(1)
+                sectionHeader("服务", expanded: $serviceExpanded).staggerIn(2)
+                if serviceExpanded { serviceGrid.staggerIn(3) }
                 if !tip.isEmpty { tipBanner }
             }
             .padding(.horizontal, 18)
@@ -54,7 +55,9 @@ struct HomeView: View {
             // 底部留 TabBar 高度 + 安全区
             .padding(.bottom, 96)
         }
-        .background(Color.clear)   // 背景统一由 MainTabView 最底层提供，这里不能再铺不透明底
+        .background(Color.clear)   // 背景统一由 AppBackgroundHost 最底层提供，这里不能再铺不透明底
+        // 首页白膜压得最重（参考图 ≈0.86）：照片只剩极淡纹理，整体读起来是暖白
+        .appBackgroundIntensity(AEGlass.veilHome)
         .onAppear {
             // 冷启动先显示上次的天气（不等定位/网络），再拉最新数据
             restoreLastWeather()
@@ -197,7 +200,10 @@ struct HomeView: View {
     /// 「多云 18°」/ 第三行小字「更新于 X 分钟前」（刚刷新完不显示）。
     /// 城市名拿不到就少一行，不留空行。
     private func weatherChip(_ w: APIClient.WeatherNow) -> some View {
-        VStack(alignment: .trailing, spacing: 1) {
+        // 展示层归一化：不管上游给英文还是中文，屏幕上只可能是这 10 类中文之一，
+        // 认不出来显示「未知」，绝不把 Sunny/Cloudy 原样丢给用户。
+        let info = WeatherText.resolve(w.descCN)
+        return VStack(alignment: .trailing, spacing: 1) {
             if !w.place.isEmpty {
                 Text(w.place)
                     .font(.system(size: 9.5, weight: .medium))
@@ -205,9 +211,9 @@ struct HomeView: View {
                     .lineLimit(1)
             }
             HStack(spacing: 4) {
-                Image(systemName: weatherSymbol(w.descCN))
+                Image(systemName: info.symbol)
                     .font(.system(size: 11, weight: .medium))
-                Text("\(w.descCN) \(w.tempC)°")
+                Text("\(info.text) \(w.tempC)°")
                     .font(.system(size: 11.5, weight: .medium))
             }
             .foregroundStyle(AE.accent)
@@ -223,7 +229,7 @@ struct HomeView: View {
         .padding(.vertical, 4)
         .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(w.place) \(w.descCN) \(w.tempC) 度" + (weatherAgeText.map { "，\($0)" } ?? ""))
+        .accessibilityLabel("\(w.place) \(info.text) \(w.tempC) 度" + (weatherAgeText.map { "，\($0)" } ?? ""))
     }
 
     /// 「更新于 X 分钟前」：<1 分钟不显示（刚刷新完没必要提醒），超过 1 小时按小时/天换算
@@ -237,16 +243,8 @@ struct HomeView: View {
         return hours < 24 ? "更新于 \(hours) 小时前" : "更新于 \(hours / 24) 天前"
     }
 
-    private func weatherSymbol(_ desc: String) -> String {
-        if desc.contains("雷") { return "cloud.bolt.rain.fill" }
-        if desc.contains("雪") { return "cloud.snow.fill" }
-        if desc.contains("雨") { return "cloud.rain.fill" }
-        if desc.contains("雾") { return "cloud.fog.fill" }
-        if desc.contains("阴") { return "cloud.fill" }
-        if desc.contains("多云") { return "cloud.sun.fill" }
-        if desc.contains("晴") { return "sun.max.fill" }
-        return "cloud.fill"
-    }
+    // 天气图标并入 `WeatherText.symbol(_:)`（展示层统一归一化后再取图标），
+    // 这里不再单独维护一份映射表，避免两处映射不一致。
 
     // MARK: - 用量额度卡
 
@@ -342,7 +340,10 @@ struct HomeView: View {
             }
         }
         .padding(16)
-        .glassCard(cornerRadius: AE.cardRadius, material: .regular)
+        // 「有点透但不是特别透」：白 0.55 + regularMaterial（暗色 黑 0.35），1pt 高光描边。
+        // 见 `GlassComponents.UsageCardGlass`，别在这里手写材质。
+        // 参考图：用量卡是 28pt 连续圆角的玻璃片（数值见 AEGlass）
+        .usageCardGlass()
     }
 
     /// 黄底胶囊：用量提升带猫头，按次计费带 NEW 红标（照参考图）

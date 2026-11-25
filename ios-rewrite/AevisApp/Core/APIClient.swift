@@ -289,6 +289,24 @@ struct APIClient {
         try await request("/v1/me", token: token)
     }
 
+    /// 更新资料（昵称 / 头像）。后端 `POST /v1/me/profile`，body 字段 `nickname` / `avatar`。
+    ///
+    /// `avatar` 传的是**服务端相对路径**（`/static/upload/xxx.jpg`），不是本地文件路径 ——
+    /// 先走 `uploadImage(token:data:filename:)` 拿到路径，再调这里写回用户资料。
+    /// 两个参数都是可选：只改头像时 nickname 传 nil，服务端保持原值。
+    @discardableResult
+    static func updateProfile(
+        token: String,
+        nickname: String? = nil,
+        avatar: String? = nil
+    ) async throws -> [String: Any] {
+        var body: [String: Any] = [:]
+        if let nickname { body["nickname"] = nickname }
+        if let avatar { body["avatar"] = avatar }
+        guard !body.isEmpty else { throw APIError.decode("没有要更新的字段") }
+        return try await request("/v1/me/profile", method: "POST", body: body, token: token)
+    }
+
     // MARK: - 角色
 
     static func myPersonas(token: String, email: String) async throws -> [Persona] {

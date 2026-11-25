@@ -13,6 +13,9 @@ struct PlazaView: View {
 
     private let tabs = ["人设广场", "表情包"]
     @State private var tab: Int
+    /// 切 tab 的方向（true = 往后翻，从右进）。转场方向要跟手势方向一致，
+    /// 否则从第二个 tab 切回第一个时还会"从右进"，看着像又往前走了一步。
+    @State private var forward = true
     @State private var personas: [APIClient.SquarePersona] = []
     @State private var packs: [APIClient.EmojiPack] = []
     @State private var loading = true
@@ -73,7 +76,13 @@ struct PlazaView: View {
 
             SegmentedTabs(tabs: tabs, selected: Binding(
                 get: { tab },
-                set: { new in tab = new }
+                set: { new in
+                    guard new != tab else { return }
+                    // 转场从右往左（AEMotion.pageTransition）：新页从右进、旧页往左出，
+                    // 和方向一致才像"翻页"。注意要先把方向存下来，再用 withAnimation 切。
+                    forward = new > tab
+                    withAnimation(AEMotion.pageAnimation) { tab = new }
+                }
             ))
             .frame(height: 38)
             .padding(.horizontal, 18)
@@ -101,8 +110,14 @@ struct PlazaView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if tab == 0 {
                     personaList
+                        .id("persona")
+                        .transition(forward ? AEMotion.pageTransition
+                                            : AEMotion.pageTransitionBackward)
                 } else {
                     emojiList
+                        .id("emoji")
+                        .transition(forward ? AEMotion.pageTransition
+                                            : AEMotion.pageTransitionBackward)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

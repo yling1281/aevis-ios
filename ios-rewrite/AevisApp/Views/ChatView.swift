@@ -208,6 +208,8 @@ struct ChatView: View {
         // 默认跟随全局背景；设置里打开「聊天页单独设置背景」后只铺聊天专用渐变，
         // 避免花哨全局图片压住气泡文字（2026-11-24）
         .background(ChatBackground())
+        // 聊天页白膜压得轻（参考图 ≈0.60）：背景图看得清，文字靠气泡承载
+        .appBackgroundIntensity(AEGlass.veilChat)
         .navigationTitle(persona.name)
         .navigationBarTitleDisplayMode(.inline)
         // 进聊天详情时收起底部 Dock：系统原生 tab bar 在 push 时不会自动隐藏，
@@ -330,8 +332,12 @@ struct ChatView: View {
                 .font(.system(size: fontSize))
                 .lineSpacing(fontSize * 0.45)
                 .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(mine ? AE.accent.opacity(0.20) : Color.secondary.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: AE.bubbleRadius, style: .continuous))
+                // 气泡（2026-11-25 二次校准，按用户参考图定妆）：
+                // 底 white.opacity(0.70)（暗色 0.62 深灰），圆角 20 连续圆角，**无描边**。
+                // 参考图的气泡上没有高光框 —— 之前那圈白描边撤掉了（`AEGlass.strokeOpacity` 统一控制）。
+                .background(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous)
+                    .fill(bubbleFill(mine: mine)))
+                .clipShape(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous))
 
             if !mine { Spacer(minLength: 40) }
             if mine && avatarMode == 0 {
@@ -340,6 +346,23 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, 12)
+    }
+
+    /// 气泡底色：半透明，让全屏背景透上来（数值见 `AEGlass`，参考图定妆 0.70 / 0.62）。
+    /// - 我：浅色偏白 + 一点点品牌靛蓝（可辨识但不刺眼）；深色用深靛蓝半透。
+    /// - 对方：中性半透白 / 深灰。
+    /// 两边都不超过 0.72 不透明度 —— 再高就变成实心板，背景等于没了。
+    private func bubbleFill(mine: Bool) -> Color {
+        if mine {
+            return Color.adaptive(
+                dark: Color.hex(0x2E3A57).opacity(0.68),
+                light: Color.white.opacity(AEGlass.bubbleFillOpacity)
+            )
+        }
+        return Color.adaptive(
+            dark: Color.hex(0x232630).opacity(AEGlass.bubbleDarkFillOpacity),
+            light: Color.white.opacity(AEGlass.bubbleFillOpacity)
+        )
     }
 
     /// 括号内容变浅：`（…）` / `(…)` 用 60% 前景色（跟安卓同一套）。

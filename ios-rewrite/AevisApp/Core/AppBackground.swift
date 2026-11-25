@@ -66,6 +66,14 @@ enum BackgroundImageStore {
 ///    `imageName` 和 `revision` 同时变，SwiftUI 可能只跑一次、读到的是旧状态。
 ///    现在统一成 `.task(id: signature)` —— 签名变了必然重新读盘，只触发一次。
 struct AppBackground: View {
+    /// 页面级白膜强度（2026-11-25 按用户参考图定妆）。
+    ///
+    /// 参考图里全站是**同一张照片铺满**，靠一层白色蒙版区分页面：
+    /// - 首页压得很重（≈0.86）：照片只剩极淡纹理，整体读起来是暖白；
+    /// - 聊天页压得轻（≈0.60）：背景图看得清，文字靠气泡承载。
+    /// 默认取中间值 `AEGlass.veilDefault`。用户在主题页手动设的 `aevisBgDim` 作为整体倍率叠加。
+    var intensity: Double = AEGlass.veilDefault
+
     @AppStorage(BackgroundKeys.style) private var style: Int = 0
     @AppStorage(BackgroundKeys.blur) private var blurAmount: Double = 0
     @AppStorage(BackgroundKeys.imageName) private var imageName = ""
@@ -106,9 +114,11 @@ struct AppBackground: View {
 
             if let img = customImage {
                 imageLayer(img)
-                // 压暗层：全屏照片背景上，深色文字会消失。
-                // 自动档（dim=-1）浅色 0.22、深色 0.32 —— 用户可在主题页手动调。
-                Color.black.opacity(scrimOpacity)
+                // 真模糊层（参考图「真的是这种做的」）：系统材质，与 `UIVisualEffectView` 同源。
+                // 只压 `white.opacity(x)` 而不模糊，就是上一轮被打回的假半透明。
+                Rectangle().fill(.ultraThinMaterial)
+                // 白膜（深色模式换黑膜，否则整屏发灰）：强度由页面类型决定
+                veilColor
             } else {
                 // 顶部一点柔光，层次靠材质不靠边框
                 RadialGradient(
@@ -124,10 +134,27 @@ struct AppBackground: View {
         .task(id: signature) { reload() }
     }
 
-    /// 压暗强度：`aevisBgDim` < 0 表示自动；否则用用户设的值（0...0.6 夹紧）。
-    private var scrimOpacity: Double {
-        if dimOverride >= 0 { return min(max(dimOverride, 0), 0.6) }
-        return scheme == .dark ? 0.32 : 0.22
+    /// 覆盖在照片上的那层膜：浅色用白、深色用黑。
+    private var veilColor: Color {
+        scheme == .dark
+            ? Color.black.opacity(veilOpacity)
+            : Color.white.opacity(veilOpacity)
+    }
+
+    /// 膜的强度。
+    /// - 基准值来自 `intensity`（首页 0.86 / 聊天页 0.60 / 其它 0.74）；
+    /// - 用户在主题页手动设的 `aevisBgDim`（0…0.6）当作整体倍率：0 = 完全露出照片，0.6 = 用满基准值；
+    /// - 深色模式封顶 0.55 —— 黑膜再厚照片就彻底看不见了，和「留一点通透」冲突。
+    private var veilOpacity: Double {
+        let base = min(max(intensity, 0), 0.95)
+        let userScale: Double
+        if dimOverride >= 0 {
+            userScale = min(max(dimOverride, 0), 0.6) / 0.6
+        } else {
+            userScale = 1
+        }
+        let value = base * userScale
+        return scheme == .dark ? min(value, 0.55) : value
     }
 
     // MARK: - 图层
@@ -203,14 +230,38 @@ struct AppBackground: View {
 ///
 /// 用法（`AevisApp.root` 最外层）：`AppBackgroundHost { 真正的页面 }`
 /// 内容层不加任何底色，页内卡片一律用 `glassCard` 之类的半透明材质。
+///
+/// 页面级白膜强度靠 `PreferenceKey` 往上冒（页面写 `.appBackgroundIntensity(0.60)`），
+/// 这样背景不用知道当前是哪一页，也不会把页面结构耦合进来。
 struct AppBackgroundHost<Content: View>: View {
+    @State private var intensity: Double = AEGlass.veilDefault
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         ZStack {
-            AppBackground()
+            AppBackground(intensity: intensity)
             content()
         }
+        .onPreferenceChange(BackgroundIntensityKey.self) { value in
+            // 防御：页面传了非法值不要炸，夹到合法区间并回落默认
+            let clamped = value.isFinite ? min(max(value, 0), 0.95) : AEGlass.veilDefault
+            if abs(clamped - intensity) > 0.001 { intensity = clamped }
+        }
+    }
+}
+
+/// 页面 → 背景的白膜强度传递通道。默认 `AEGlass.veilDefault`。
+private struct BackgroundIntensityKey: PreferenceKey {
+    static var defaultValue: Double = AEGlass.veilDefault
+    static func reduce(value: inout Double, nextValue: () -> Double) {
+        value = nextValue()
+    }
+}
+
+extension View {
+    /// 告诉全局背景「这一页该压多重」：首页 `AEGlass.veilHome`、聊天页 `AEGlass.veilChat`。
+    func appBackgroundIntensity(_ value: Double) -> some View {
+        preference(key: BackgroundIntensityKey.self, value: value)
     }
 }
 
@@ -257,7 +308,8 @@ struct ChatBackground: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
             } else {
-                AppBackground()
+                // 跟随全局：强度必须和聊天页偏好一致，否则内层会把外层盖成默认值
+                AppBackground(intensity: AEGlass.veilChat)
             }
         }
     }
