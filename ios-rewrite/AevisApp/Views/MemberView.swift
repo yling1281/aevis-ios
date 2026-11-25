@@ -25,6 +25,8 @@ struct MemberView: View {
     /// 九折弹窗日期键：yyyy-MM-dd（本地日历）。空串 = 从未弹过。
     @AppStorage("aevisMemberDiscountLastShownDate") private var lastShownDate: String = ""
     @State private var showDiscount = false
+    /// 会员权益二级页（2026-11-25）
+    @State private var showBenefits = false
 
     // 支付流程状态（与商城页各自持有一套）
     private enum PayChannel: String { case alipay, wxpay }
@@ -113,14 +115,104 @@ struct MemberView: View {
             }
         }
         .background(AppBackground())
+        // 贴底支付栏（2026-11-25）：开通按钮不跟着滚。
+        .safeAreaInset(edge: .bottom, spacing: 0) { stickyPayBar }
         .navigationTitle("会员")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .sheet(isPresented: $showDiscount) { discountSheet }
+        .sheet(isPresented: $showBenefits) { benefitsSheet }
         .sheet(isPresented: $showChannelPicker) { channelPicker }
         .sheet(isPresented: $showWeChatQR) { weChatQRSheet }
         .sheet(isPresented: $showAlipayConfirm) { alipayConfirmSheet }
         .sheet(isPresented: $showSuccess) { successSheet }
+    }
+
+    /// 底部固定「立即开通」栏。现价用 `%.1f` 保住 .9 尾数，切档位时数字联动滚动。
+    private var stickyPayBar: some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.18)
+            payButton(enabled: selectedProduct != nil, action: { showChannelPicker = true }) {
+                HStack(spacing: 0) {
+                    if let p = selectedProduct {
+                        Text("开通 \(p.label.isEmpty ? "套餐" : p.label) 用量 · \(p.days) 天 ¥")
+                        AnimatedNumber(
+                            value: Double(p.priceCents) / 100, specifier: "%.1f",
+                            font: .system(size: 15, weight: .semibold), color: .white
+                        )
+                    } else {
+                        Text("开通套餐")
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color.clear, AE.paper.opacity(0.62)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    // MARK: - 会员权益二级页
+
+    /// 权益列表（二级菜单）。文案来源：优先服务端 `benefits[]`，缺字段回落本地占位，
+    /// 与 `displayedBenefits` 完全同一份数据 —— 入口上显示「N 项」也就不会和列表对不上。
+    private var benefitsSheet: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(displayedBenefits.enumerated()), id: \.offset) { idx, item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(AE.brandPurple)
+                                .padding(.top, 1)
+                            Text(item)
+                                .font(.system(size: 14))
+                                .foregroundStyle(AE.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 13)
+
+                        if idx < displayedBenefits.count - 1 {
+                            Divider()
+                                .opacity(0.35)
+                                .padding(.leading, 40)
+                        }
+                    }
+                }
+                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.16)
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                Text("权益随套餐档位变化，具体以服务端实际到账为准。")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AE.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
+            }
+            .background(Color.clear)
+            .navigationTitle("会员权益")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") { showBenefits = false }
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(AE.accent)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .glassSheetBackground()
     }
 
     // MARK: - 九折弹窗（每日首次进页）
@@ -262,26 +354,32 @@ struct MemberView: View {
                     .shadow(color: AE.shadowColor, radius: 8, y: 3)
                 }
 
-                // 会员权益清单（后端字段待补，当前按产品文案展示）
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("会员权益")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AE.textSecondary)
-                    ForEach(displayedBenefits, id: \.self) { item in
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(AE.brandPurple)
-                            Text(item)
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(AE.textPrimary)
-                            Spacer(minLength: 0)
-                        }
+                // 会员权益（2026-11-25 改二级菜单）：不再把 5~6 条平铺在套餐页里
+                // —— 平铺占掉半屏，把档位列表挤到折叠线以下。现在只留一行入口，
+                // 点进去是独立列表，逐条列出。
+                Button { showBenefits = true } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(AE.brandPurple)
+                        Text("会员权益")
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(AE.textPrimary)
+                        Text("\(displayedBenefits.count) 项")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AE.textSecondary)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AE.textSecondary.opacity(0.45))
                     }
+                    .padding(.horizontal, 14)
+                    .frame(height: 46)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.14)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.14)
+                .buttonStyle(.plain)
 
                 Text("用量越多越划算 · 固定 30 天 · 每周一刷新额度")
                     .font(.system(size: 12, weight: .medium))
@@ -322,22 +420,6 @@ struct MemberView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .glassCard(cornerRadius: 14, material: .thin, tintOpacity: 0.12)
                 }
-
-                // 底部开通按钮：现价 %.1f 保住 .9 尾数，切档位时随 priceCents 联动
-                payButton(enabled: selectedProduct != nil, action: { showChannelPicker = true }) {
-                    HStack(spacing: 0) {
-                        if let p = selectedProduct {
-                            Text("开通 \(p.label.isEmpty ? "套餐" : p.label) 用量 · \(p.days) 天 ¥")
-                            AnimatedNumber(
-                                value: Double(p.priceCents) / 100, specifier: "%.1f",
-                                font: .system(size: 15, weight: .semibold), color: .white
-                            )
-                        } else {
-                            Text("开通套餐")
-                        }
-                    }
-                }
-                .padding(.top, 4)
             }
             .padding(.horizontal, 18)
             .padding(.top, 2)
@@ -545,10 +627,9 @@ struct MemberView: View {
                 }
                 .padding(.bottom, 2)
 
-                channelRow(title: "支付宝", note: "跳转支付宝收银台完成付款",
-                           glyph: "A", tint: AE.payAlipay) { Task { await startPay(.alipay) } }
-                channelRow(title: "微信支付", note: "玻璃二维码，扫码付款",
-                           glyph: "微", tint: AE.payWechat) { Task { await startPay(.wxpay) } }
+                // 官方品牌标识（绿底双气泡 / 蓝底「支」），与商城页共用同一个组件
+                PayChannelRow(brand: .alipay) { Task { await startPay(.alipay) } }
+                PayChannelRow(brand: .wechat) { Task { await startPay(.wxpay) } }
 
                 Text("付款完成后回到本页确认到账")
                     .font(.system(size: 11))
@@ -567,35 +648,7 @@ struct MemberView: View {
         .onAppear { activePay = nil }
     }
 
-    private func channelRow(
-        title: String, note: String, glyph: String, tint: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(tint).frame(width: 40, height: 40)
-                    Text(glyph)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 15.5, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                    Text(note).font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
-                }
-                Spacer(minLength: 6)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AE.textSecondary.opacity(0.45))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassCard(cornerRadius: 16, material: .thin, tintOpacity: 0.16)
-        }
-        .buttonStyle(AevisPressStyle(scale: 0.97))
-    }
-
+    // 渠道行已收敛到 `Views/BrandMarks.swift` 的 `PayChannelRow`，这里不再本地实现。
     private var weChatQRSheet: some View {
         PayQRView(
             payment: activePay?.order.payURL ?? "",
@@ -608,6 +661,8 @@ struct MemberView: View {
         .environmentObject(session)
         .presentationDetents([.fraction(0.78)])
         .glassSheetBackground()
+        // 支付半屏不许下滑关闭（PayQRView 内部也有一次，双保险）
+        .interactiveDismissDisabled()
     }
 
     private var alipayConfirmSheet: some View {
@@ -619,7 +674,7 @@ struct MemberView: View {
             Text("已跳转支付宝")
                 .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundStyle(AE.accent)
-            Text("在支付宝完成付款后，回到这里点「我已支付」确认到账")
+            Text("在支付宝完成付款后，回到这里点「未支付检查」确认到账")
                 .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
                 .multilineTextAlignment(.center)
             if let a = activePay {
@@ -633,7 +688,7 @@ struct MemberView: View {
                 }
                 .buttonStyle(.plain)
                 Button { Task { await confirmAlipay() } } label: {
-                    Text(alipayConfirming ? "正在确认支付…" : "我已支付")
+                    Text(alipayConfirming ? "正在检查…" : "未支付检查")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 46)
                         .background(alipayConfirming ? AE.accentDeep.opacity(0.45) : AE.accentDeep, in: Capsule())
@@ -642,10 +697,17 @@ struct MemberView: View {
                 .disabled(alipayConfirming)
             }
             .padding(.top, 4)
+
+            Text("已付款但没到账？点「未支付检查」我去查一下")
+                .font(.system(size: 10.5))
+                .foregroundStyle(AE.textSecondary)
+                .multilineTextAlignment(.center)
         }
         .padding(24)
         .presentationDetents([.medium])
         .glassSheetBackground()
+        // 支付半屏不许下滑关闭：只能点「取消」或「未支付检查」
+        .interactiveDismissDisabled()
     }
 
     @MainActor

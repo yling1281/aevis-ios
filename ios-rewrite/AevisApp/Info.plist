@@ -53,6 +53,12 @@
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于显示你所在城市的天气</string>
+	<!-- 2026-11-25 补：主题页「选相册图片当背景」与账号中心「更换头像」都走系统相册选择器。
+	     PhotosPicker(photoLibrary: .shared()) 缺少本键时无法呈现，表现为「选了图但背景没变」。 -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于选择图片作为聊天背景或头像</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于保存你从相册选择的图片</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于发送语音消息</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -9,18 +9,22 @@ import UIKit
 /// → 「背景图」分组（更换背景图 / 显示位置 / 模糊 / 恢复默认背景）
 /// → 「预设背景」分组（跟设置页原有 4 个色块同一套 `aevisBgStyle`）。
 ///
-/// 存储（`AppBackground` 直接读这几个键，改完立刻全局生效）：
-/// - `aevisBgImageName`：固定文件名 `aevis-bg.jpg`（重装后路径 UUID 变化，用文件名拼路径）
-/// - `aevisBgPos`：0 填充 / 1 居中 / 2 拉伸
-/// - `aevisBgBlur`：0...20
-/// - `aevisBgStyle`：预设索引（0 奶油 / 1 柔紫 / 2 海盐 / 3 深空）
-/// - `aevisBgRev`：换图/重置后自增，让 AppBackground 重新读盘
+/// 存储（`AppBackground` 直接读这几个键，改完立刻全局生效）。
+/// 2026-11-25：键名全部改引用 `BackgroundKeys` 常量 —— 以前这里和 `AppBackground`
+/// 各手写一遍字符串，少/多一个字符就变成"写进去没人读"，正是「选了背景图不生效」的成因之一。
+/// - `BackgroundKeys.imageName`：固定文件名 `aevis-bg.jpg`（重装后路径 UUID 变化，用文件名拼路径）
+/// - `BackgroundKeys.imagePos`：0 填充 / 1 居中 / 2 拉伸
+/// - `BackgroundKeys.blur`：0...20
+/// - `BackgroundKeys.style`：预设索引（0 奶油 / 1 柔紫 / 2 海盐 / 3 深空）
+/// - `BackgroundKeys.revision`：换图/重置后自增，让 AppBackground 重新读盘
+/// - `BackgroundKeys.dim`：自定义图上压暗强度（-1 自动）
 struct ThemeSettingsView: View {
-    @AppStorage("aevisBgStyle") private var bgStyle = 0
-    @AppStorage("aevisBgBlur") private var bgBlur = 0.0
-    @AppStorage("aevisBgImageName") private var imageName = ""
-    @AppStorage("aevisBgPos") private var imagePos = 0
-    @AppStorage("aevisBgRev") private var revision = 0
+    @AppStorage(BackgroundKeys.style) private var bgStyle = 0
+    @AppStorage(BackgroundKeys.blur) private var bgBlur = 0.0
+    @AppStorage(BackgroundKeys.imageName) private var imageName = ""
+    @AppStorage(BackgroundKeys.imagePos) private var imagePos = 0
+    @AppStorage(BackgroundKeys.revision) private var revision = 0
+    @AppStorage(BackgroundKeys.dim) private var bgDim = -1.0
     /// 聊天背景独立开关：与全局背景键完全分离，互不覆盖
     @AppStorage("aevisChatBgIndependent") private var chatIndependent = false
     @AppStorage("aevisChatBgStyle") private var chatStyle = 0
@@ -57,6 +61,11 @@ struct ThemeSettingsView: View {
                     positionRow
                     innerDivider
                     blurRow
+                    // 压暗只在有自定义图时有意义：全屏照片上深色文字会看不见
+                    if !imageName.isEmpty {
+                        innerDivider
+                        dimRow
+                    }
                     innerDivider
                     resetRow
                 }
@@ -296,6 +305,41 @@ struct ThemeSettingsView: View {
         .padding(.vertical, 4)
     }
 
+    /// 压暗：只作用于自定义照片背景（预设渐变本来就有足够对比度）。
+    /// -1 = 自动（浅色 0.22 / 深色 0.32），拖动后写具体值。
+    private var dimRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AE.accent)
+                    .frame(width: 22)
+                Text("压暗")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AE.textPrimary)
+                Spacer(minLength: 8)
+                Text(bgDim < 0 ? "自动" : "\(Int(bgDim * 100))%")
+                    .font(.system(size: 12.5))
+                    .monospacedDigit()
+                    .foregroundStyle(AE.textSecondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { bgDim < 0 ? 0.22 : bgDim },
+                    set: { bgDim = $0 }
+                ),
+                in: 0...0.6, step: 0.02
+            )
+            .tint(AE.accent)
+            .padding(.leading, 34)
+            Text("背景图太花时调高，文字会更清楚。")
+                .font(.system(size: 11))
+                .foregroundStyle(AE.textSecondary)
+                .padding(.leading, 34)
+        }
+        .padding(.vertical, 4)
+    }
+
     private var resetRow: some View {
         Button {
             resetBackground()
@@ -434,11 +478,9 @@ struct ThemeSettingsView: View {
         presets.first(where: { $0.id == bgStyle }) ?? presets[0]
     }
 
-    /// 自定义图固定存 `Documents/aevis-bg.jpg`（覆盖写），文件名写进 `aevisBgImageName`。
-    private var bgFileURL: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("aevis-bg.jpg")
-    }
+    /// 自定义图固定存 `Documents/aevis-bg.jpg`（覆盖写），文件名写进 `BackgroundKeys.imageName`。
+    /// 路径与文件名统一由 `BackgroundKeys` 提供，避免两处各拼一遍。
+    private var bgFileURL: URL { BackgroundKeys.customFileURL }
 
     private func loadPreview() {
         guard !imageName.isEmpty else {
@@ -454,6 +496,8 @@ struct ThemeSettingsView: View {
         }
         imageName = ""
         previewImage = nil
+        // 先清解码缓存再自增：否则同一 revision 下可能命中旧图
+        BackgroundImageStore.clear()
         revision += 1
     }
 
@@ -484,7 +528,9 @@ struct ThemeSettingsView: View {
             try jpg.write(to: bgFileURL, options: .atomic)
 
             await MainActor.run {
-                imageName = "aevis-bg.jpg"
+                // 覆盖写同一个文件：必须让解码缓存知道"这张图变了"
+                BackgroundImageStore.clear()
+                imageName = BackgroundKeys.customFileName
                 previewImage = img
                 revision += 1
                 saving = false

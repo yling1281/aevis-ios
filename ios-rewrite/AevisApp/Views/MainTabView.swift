@@ -24,33 +24,30 @@ struct MainTabView: View {
     @State private var showMember = false
 
     var body: some View {
-        ZStack {
-            // 唯一的一份背景：所有 tab 共用，切换时不会重建
-            AppBackground()
+        // 背景已上移到 `AevisApp.root` 的 `AppBackgroundHost`（2026-11-25）：
+        // 全 App 只有一份背景，登录页 / 全屏页也统一。这里不再自铺，避免同一张图解码两次。
+        TabView(selection: $selected) {
+            HomeView(
+                onShop: { shopInitialTab = 0; showShop = true },
+                onMember: { showMember = true },
+                onBuyQuota: { showMember = true },  // 「用量提升」→ 套餐页 MemberView
+                onPerUse: { shopInitialTab = 2; showShop = true }  // 「按次计费」→ 商城按次 tab
+            )
+                .modifier(ClearTabBarBackground())
+                .tabItem { Label("主页", systemImage: "house.fill") }
+                .tag(0)
 
-            TabView(selection: $selected) {
-                HomeView(
-                    onShop: { shopInitialTab = 0; showShop = true },
-                    onMember: { showMember = true },
-                    onBuyQuota: { showMember = true },  // 「用量提升」→ 套餐页 MemberView
-                    onPerUse: { shopInitialTab = 2; showShop = true }  // 「按次计费」→ 商城按次 tab
-                )
-                    .modifier(ClearTabBarBackground())
-                    .tabItem { Label("主页", systemImage: "house.fill") }
-                    .tag(0)
+            ChatListView()
+                .modifier(ClearTabBarBackground())
+                .tabItem { Label("聊天", systemImage: "bubble.left.and.bubble.right.fill") }
+                .tag(1)
 
-                ChatListView()
-                    .modifier(ClearTabBarBackground())
-                    .tabItem { Label("聊天", systemImage: "bubble.left.and.bubble.right.fill") }
-                    .tag(1)
-
-                SettingsView()
-                    .modifier(ClearTabBarBackground())
-                    .tabItem { Label("设置", systemImage: "gearshape.fill") }
-                    .tag(2)
-            }
-            .tint(AE.accent)   // 选中项跟随品牌墨靛蓝（深色模式自动提亮，不用固定 accentDeep）
+            SettingsView()
+                .modifier(ClearTabBarBackground())
+                .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                .tag(2)
         }
+        .tint(AE.accent)   // 选中项跟随品牌墨靛蓝（深色模式自动提亮，不用固定 accentDeep）
         .fullScreenCover(isPresented: $showShop) { ShopView(initialTab: shopInitialTab) }
         .fullScreenCover(isPresented: $showMember) { MemberView() }
     }

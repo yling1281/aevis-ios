@@ -53,14 +53,16 @@ struct PayQRView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // 上半屏只压暗、不铺底：sheet 背景透明，背后商城透出来 → 半屏观感
+            // 2026-11-25：**取消点击空白处关闭** —— 用户明确要求只有「取消」和
+            // 「未支付检查」两个出口（点到旁边就关掉，会让人以为支付被取消了）。
             Color.black.opacity(0.10)
                 .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { dismiss() }
 
             panel
         }
         .presentationDetents([.fraction(0.78)])   // iOS 16.0+ 可用
+        // 禁止下滑关闭：付款过程中误滑关掉会丢掉订单上下文
+        .interactiveDismissDisabled()
         .glassSheetBackground()                   // 16.4+ 走兼容包装，低版本退回系统默认底
         .onAppear(perform: prepare)
     }
@@ -72,7 +74,7 @@ struct PayQRView: View {
                 .foregroundStyle(AE.accent)
                 .multilineTextAlignment(.center)
 
-            Text("请用微信扫一扫付款，完成后点「我已支付」")
+            Text("请用微信扫一扫付款，付完点下面的「未支付检查」")
                 .font(.system(size: 12))
                 .foregroundStyle(AE.textSecondary)
                 .multilineTextAlignment(.center)
@@ -85,6 +87,8 @@ struct PayQRView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // 底部固定两个动作（用户要求）：取消 / 未支付检查。
+            // 没有第三个出口 —— 下滑关闭已禁用、点空白也不关。
             HStack(spacing: 10) {
                 Button { dismiss() } label: {
                     Text("取消")
@@ -98,7 +102,7 @@ struct PayQRView: View {
                 .buttonStyle(.plain)
 
                 Button { Task { await confirmPayment() } } label: {
-                    Text(confirming ? "正在确认支付…" : "我已支付")
+                    Text(confirming ? "正在检查…" : "未支付检查")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -113,6 +117,13 @@ struct PayQRView: View {
                 .disabled(confirming || qrImage == nil)
             }
             .padding(.top, 2)
+
+            // 「我去查一下」这层意思用小字说明，不占按钮位置
+            Text("已付款但没到账？点「未支付检查」我去查一下")
+                .font(.system(size: 10.5))
+                .foregroundStyle(AE.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 22)
         .padding(.top, 22)
@@ -213,7 +224,7 @@ struct PayQRView: View {
 
     // MARK: - 行为：我已支付 → 查单
 
-    /// 点「我已支付」后：置 confirming → 每 2 秒查单，最多 12 次（约 24 秒）。
+    /// 点「未支付检查」后：置 confirming → 每 2 秒查单，最多 12 次（约 24 秒）。
     /// 到账 → onPaid；超时未到账 → 回二维码 + 失败提示；网络抖动本轮跳过不中断。
     private func confirmPayment() async {
         guard !confirming else { return }
@@ -247,7 +258,7 @@ struct PayQRView: View {
             } else {
                 // 二维码全程可见（没被替换），这里只改状态提示即可「回到二维码」
                 statusKind = .bad
-                statusText = "支付失败，请确认已付款后点「我已支付」重试"
+                statusText = "还没查到这笔付款，确认已付就再点一次「未支付检查」"
             }
         }
     }

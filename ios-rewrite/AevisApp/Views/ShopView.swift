@@ -119,11 +119,67 @@ struct ShopView: View {
             }
         }
         .background(AppBackground())
+        // 底部固定支付栏（2026-11-25）：按钮**不跟着滚**，永远贴底。
+        // 用 safeAreaInset 而不是把按钮塞进 ScrollView —— 塞进去滚两屏就找不到了。
+        .safeAreaInset(edge: .bottom, spacing: 0) { stickyPayBar }
         .task { await load() }
         .sheet(isPresented: $showChannelPicker) { channelPicker }
         .sheet(isPresented: $showWeChatQR) { weChatQRSheet }
         .sheet(isPresented: $showAlipayConfirm) { alipayConfirmSheet }
         .sheet(isPresented: $showSuccess) { successSheet }
+    }
+
+    /// 贴底支付栏：按当前 tab 决定按钮文案与可用性；重置卡 tab 无支付，整条不出现。
+    @ViewBuilder
+    private var stickyPayBar: some View {
+        if tab == 0 {
+            payBarShell {
+                payButton(enabled: selectedPackage != nil, action: { showChannelPicker = true }) {
+                    HStack(spacing: 0) {
+                        Text("立即充值")
+                        if let sel = selectedPackage {
+                            Text(" ")
+                            AnimatedNumber(
+                                value: Double(sel.amountCents) / 100,
+                                specifier: sel.amountCents % 100 == 0 ? "¥%.0f" : "¥%.2f",
+                                font: .system(size: 15, weight: .semibold), color: .white
+                            )
+                        }
+                    }
+                }
+            }
+        } else if tab == 2 {
+            payBarShell {
+                payButton(enabled: selectedUse != nil, action: { showChannelPicker = true }) {
+                    HStack(spacing: 0) {
+                        Text("购买 \(selectedUse?.uses ?? 0) 次 · ¥")
+                        AnimatedNumber(
+                            value: Double(selectedUse?.priceCents ?? 0) / 100,
+                            specifier: "%.2f",
+                            font: .system(size: 15, weight: .semibold), color: .white
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /// 支付栏外壳：上方一条极淡分隔 + 底部渐隐，让滚动内容在按钮下"淡出"而不是硬切。
+    private func payBarShell<L: View>(@ViewBuilder _ label: () -> L) -> some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.18)
+            label()
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color.clear, AE.paper.opacity(0.62)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
     }
 
     @ViewBuilder
@@ -207,20 +263,6 @@ struct ShopView: View {
                     Text("档位加载中或暂不可用")
                         .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
                         .frame(maxWidth: .infinity).padding(.top, 20)
-                }
-
-                payButton(enabled: selectedPackage != nil, action: { showChannelPicker = true }) {
-                    HStack(spacing: 0) {
-                        Text("立即充值")
-                        if let sel = selectedPackage {
-                            Text(" ")
-                            AnimatedNumber(
-                                value: Double(sel.amountCents) / 100,
-                                specifier: sel.amountCents % 100 == 0 ? "¥%.0f" : "¥%.2f",
-                                font: .system(size: 15, weight: .semibold), color: .white
-                            )
-                        }
-                    }
                 }
             }
             .padding(18)
@@ -347,16 +389,6 @@ struct ShopView: View {
                 if useProducts.isEmpty {
                     Text("按次商品加载中或暂不可用").font(.system(size: 12))
                         .foregroundStyle(AE.textSecondary).frame(maxWidth: .infinity).padding(.top, 20)
-                }
-
-                payButton(enabled: selectedUse != nil, action: { showChannelPicker = true }) {
-                    HStack(spacing: 0) {
-                        Text("购买 \(selectedUse?.uses ?? 0) 次 · ¥")
-                        AnimatedNumber(
-                            value: Double(selectedUse?.priceCents ?? 0) / 100,
-                            specifier: "%.2f", font: .system(size: 15, weight: .semibold), color: .white
-                        )
-                    }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -491,19 +523,10 @@ struct ShopView: View {
                 }
                 .padding(.bottom, 2)
 
-                channelRow(
-                    title: "支付宝",
-                    note: "跳转支付宝收银台完成付款",
-                    glyph: "A",
-                    tint: AE.payAlipay
-                ) { Task { await startPay(.alipay) } }
+                // 官方品牌标识（绿底双气泡 / 蓝底「支」），不再用字母占位框
+                PayChannelRow(brand: .alipay) { Task { await startPay(.alipay) } }
 
-                channelRow(
-                    title: "微信支付",
-                    note: "玻璃二维码，扫码付款",
-                    glyph: "微",
-                    tint: AE.payWechat
-                ) { Task { await startPay(.wxpay) } }
+                PayChannelRow(brand: .wechat) { Task { await startPay(.wxpay) } }
 
                 Text("付款完成后回到本页确认到账")
                     .font(.system(size: 11))
@@ -523,38 +546,8 @@ struct ShopView: View {
         .onAppear { activePay = nil }
     }
 
-    private func channelRow(
-        title: String, note: String, glyph: String, tint: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(tint).frame(width: 40, height: 40)
-                    Text(glyph)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 15.5, weight: .semibold))
-                        .foregroundStyle(AE.textPrimary)
-                    Text(note)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AE.textSecondary)
-                }
-                Spacer(minLength: 6)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AE.textSecondary.opacity(0.45))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassCard(cornerRadius: 16, material: .thin, tintOpacity: 0.16)
-        }
-        .buttonStyle(AevisPressStyle(scale: 0.97))
-    }
+    // 渠道行已收敛到 `Views/BrandMarks.swift` 的 `PayChannelRow`（商城与会员页共用同一套
+    // 官方品牌标识），这里不再保留本地实现，避免两页样式越改越不一样。
 
     private var weChatQRSheet: some View {
         PayQRView(
@@ -568,6 +561,8 @@ struct ShopView: View {
         .environmentObject(session)
         .presentationDetents([.fraction(0.78)])
         .glassSheetBackground()
+        // 支付半屏不许下滑关闭（PayQRView 内部也有一次，双保险）
+        .interactiveDismissDisabled()
     }
 
     private var alipayConfirmSheet: some View {
@@ -579,7 +574,7 @@ struct ShopView: View {
             Text("已跳转支付宝")
                 .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundStyle(AE.accent)
-            Text("在支付宝完成付款后，回到这里点「我已支付」确认到账")
+            Text("在支付宝完成付款后，回到这里点「未支付检查」确认到账")
                 .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
                 .multilineTextAlignment(.center)
             if let a = activePay {
@@ -593,7 +588,7 @@ struct ShopView: View {
                 }
                 .buttonStyle(.plain)
                 Button { Task { await confirmAlipay() } } label: {
-                    Text(alipayConfirming ? "正在确认支付…" : "我已支付")
+                    Text(alipayConfirming ? "正在检查…" : "未支付检查")
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 46)
                         .background(alipayConfirming ? AE.accentDeep.opacity(0.45) : AE.accentDeep, in: Capsule())
@@ -602,10 +597,17 @@ struct ShopView: View {
                 .disabled(alipayConfirming)
             }
             .padding(.top, 4)
+
+            Text("已付款但没到账？点「未支付检查」我去查一下")
+                .font(.system(size: 10.5))
+                .foregroundStyle(AE.textSecondary)
+                .multilineTextAlignment(.center)
         }
         .padding(24)
         .presentationDetents([.medium])
         .glassSheetBackground()
+        // 支付半屏不许下滑关闭：只能点「取消」或「未支付检查」
+        .interactiveDismissDisabled()
     }
 
     /// 支付宝到账确认：每 2 秒查单，最多 12 次；到账 → 成功动效；超时 → 提示重试。

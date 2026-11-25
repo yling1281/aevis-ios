@@ -41,6 +41,7 @@
 		A10000000000000000000027 /* MemberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* MemberView.swift */; };
 		A10000000000000000000028 /* PlazaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000028 /* PlazaView.swift */; };
 		A1000000000000000000002A /* PersonaCreateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002A /* PersonaCreateView.swift */; };
+		A1000000000000000000002B /* BrandMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002B /* BrandMarks.swift */; };
 		A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppIcon60x60@2x.png */; };
 		A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppIcon60x60@3x.png */; };
 		A20000000000000000000003 /* AppIcon1024.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* AppIcon1024.png */; };
@@ -83,6 +84,7 @@
 		B10000000000000000000027 /* MemberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberView.swift; sourceTree = "<group>"; };
 		B10000000000000000000028 /* PlazaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlazaView.swift; sourceTree = "<group>"; };
 		B1000000000000000000002A /* PersonaCreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaCreateView.swift; sourceTree = "<group>"; };
+		B1000000000000000000002B /* BrandMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMarks.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +169,7 @@
 				B10000000000000000000027 /* MemberView.swift */,
 				B10000000000000000000028 /* PlazaView.swift */,
 				B1000000000000000000002A /* PersonaCreateView.swift */,
+				B1000000000000000000002B /* BrandMarks.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -304,6 +307,7 @@
 				A10000000000000000000028 /* PlazaView.swift in Sources */,
 				A10000000000000000000029 /* PlazaCacheStore.swift in Sources */,
 				A1000000000000000000002A /* PersonaCreateView.swift in Sources */,
+				A1000000000000000000002B /* BrandMarks.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
