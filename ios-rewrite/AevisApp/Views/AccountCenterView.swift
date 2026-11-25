@@ -40,6 +40,12 @@ struct AccountCenterView: View {
     @State private var avatarError = ""
     @State private var showAvatarError = false
 
+    /// 2.9 昵称编辑：点顶部昵称进 sheet，保存走 `POST /v1/me/profile`。
+    @State private var showNicknameEdit = false
+    @State private var editNickname = ""
+    @State private var nicknameTip = ""
+    @State private var savingNickname = false
+
     private let dangerRed = Color.hex(0xE5484D)
 
     var body: some View {
@@ -83,6 +89,7 @@ struct AccountCenterView: View {
             }
             .task { await load() }
             .refreshable { await load() }
+            .sheet(isPresented: $showNicknameEdit) { nicknameSheet }
             .alert("头像换不了", isPresented: $showAvatarError) {
                 Button("好", role: .cancel) { }
             } message: {
@@ -99,10 +106,19 @@ struct AccountCenterView: View {
             avatarView
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 7) {
-                    Text(displayName)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(AE.textPrimary)
-                        .lineLimit(1)
+                    Button { editNickname = info.nickname; nicknameTip = ""; showNicknameEdit = true } label: {
+                        HStack(spacing: 3) {
+                            Text(displayName)
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundStyle(AE.textPrimary)
+                                .lineLimit(1)
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(AE.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("编辑昵称")
                     badge
                 }
                 Text("账号 \(accountText)")
@@ -351,6 +367,77 @@ struct AccountCenterView: View {
     }
 
     // MARK: - 加载
+
+    // MARK: - 昵称编辑（2.9）
+
+    private var nicknameSheet: some View {
+        ZStack {
+            GlassBackdrop()
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("修改昵称")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(AE.textPrimary)
+                    Spacer()
+                    Button("关闭") { showNicknameEdit = false }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AE.accent)
+                }
+                TextField("新的昵称", text: $editNickname)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15))
+                    .foregroundStyle(AE.textPrimary)
+                    .padding(.horizontal, 14).frame(height: 44)
+                    .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if !nicknameTip.isEmpty {
+                    Text(nicknameTip)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AE.textSecondary)
+                }
+                Button {
+                    Task { await saveNickname() }
+                } label: {
+                    Text(savingNickname ? "保存中…" : "保存")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 42)
+                        .background(
+                            savingNickname || editNickname.isEmpty
+                                ? AE.accentDeep.opacity(0.45) : AE.accentDeep,
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(savingNickname || editNickname.isEmpty)
+            }
+            .padding(20)
+            .glassCard(cornerRadius: AE.sheetRadius, material: .regular, tintOpacity: 0.42)
+            .padding(.horizontal, 16)
+        }
+        .presentationDetents([.medium])
+        .glassSheetBackground()
+    }
+
+    @MainActor
+    private func saveNickname() async {
+        guard let token = session.token, !token.isEmpty else {
+            nicknameTip = "登录已过期，请重新登录"
+            return
+        }
+        let name = editNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        savingNickname = true
+        do {
+            _ = try await APIClient.updateProfile(token: token, nickname: name)
+            // 成功立刻重拉 /v1/me，左上角昵称同步变化，不等下次进页面。
+            await load()
+            savingNickname = false
+            showNicknameEdit = false
+        } catch {
+            savingNickname = false
+            nicknameTip = "保存失败：\(error.localizedDescription)"
+        }
+    }
 
     private func load() async {
         guard let token = session.token, !token.isEmpty else {

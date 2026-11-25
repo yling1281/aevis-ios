@@ -488,23 +488,41 @@ struct ServerStatusView: View {
     /// 单个模型卡（照参考图）：模型名 / 右侧「实时状态胶囊 + 百分比」/ 平均响应（有才显示）/ 竖条序列。
     private func modelCard(_ m: ModelStatus) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(displayName(m.id))
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AE.textPrimary)
-                    .lineLimit(1)
+            // 2.9 窄屏适配：名字 + 状态胶囊 + 百分比挤不下时换成两行，
+            // 不让三者互相压扁；深色下颜色沿用各语义色的 adaptive 版本。
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(displayName(m.id))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AE.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                // 实时可用性（providers.alive）在百分比左边：标签=此刻能不能用，
-                // 百分比=时间范围成功率，两个概念并排放。
-                statusBadge(m.live)
+                    statusBadge(m.live)
 
-                Text(m.hasData ? percentText(m.rate) : "—")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(m.hasData ? percentColor(m.rate) : AE.textSecondary)
-                    .layoutPriority(1)
+                    Text(m.hasData ? percentText(m.rate) : "—")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(m.hasData ? percentColor(m.rate) : AE.textSecondary)
+                        .layoutPriority(1)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Text(displayName(m.id))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(AE.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                        Spacer(minLength: 4)
+                        statusBadge(m.live)
+                    }
+                    Text(m.hasData ? percentText(m.rate) : "—")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(m.hasData ? percentColor(m.rate) : AE.textSecondary)
+                }
             }
 
             // 只有服务端给了 avg_latency_sec 才显示，没给就不占位、不编数字

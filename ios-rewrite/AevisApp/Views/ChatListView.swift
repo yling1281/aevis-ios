@@ -70,6 +70,9 @@ struct ChatListView: View {
             }
             .task { await reload() }
             .refreshable { await reload() }
+            .onReceive(NotificationCenter.default.publisher(for: CharacterSettingsView.personaUpdated)) { _ in
+                Task { await reload() }
+            }
             // 「先问再恢复」确认框（检测到云端有数据时由 CloudBackup 置 pendingRestore）
             .alert(
                 "检测到云端聊天记录",
@@ -346,7 +349,7 @@ struct ChatListView: View {
         #endif
 
         // ① 先把本地缓存「立刻」顶上 —— 断网/服务端挂了也不能整屏空白（用户硬要求）
-        let cached = LocalStore.loadPersonas()
+        let cached = LocalStore.loadPersonas().map(CharacterSettingsView.applyOverrides)
         let local = cached.isEmpty ? LocalStore.fallbackPersonas() : cached
         if !local.isEmpty { personas = local }
         offlineHint = ""
@@ -359,8 +362,10 @@ struct ChatListView: View {
         do {
             let fresh = try await APIClient.myPersonas(token: token, email: session.email)
             if !fresh.isEmpty {
-                personas = fresh
-                LocalStore.savePersonas(fresh)      // 存本地，下次断网直接用
+                // 2.9：服务端角色卡没有名字/头像编辑接口，本地覆盖要在每次刷新时叠回去。
+                let merged = fresh.map(CharacterSettingsView.applyOverrides)
+                personas = merged
+                LocalStore.savePersonas(fresh)      // 本地缓存仍存原始服务端数据
             }
             error = ""
         } catch {

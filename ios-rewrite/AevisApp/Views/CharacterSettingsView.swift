@@ -21,6 +21,29 @@ struct CharacterSettingsView: View {
     @EnvironmentObject private var session: Session
     let persona: Persona
 
+    /// 从聊天右上角「编辑当前人设」进来时直接展开名字 / 头像编辑卡。
+    var startInProfileEdit: Bool = false
+
+    /// 人设改名 / 换头像通知（聊天页标题、列表、头像都靠它刷新）。
+    static let personaUpdated = Notification.Name("aevisPersonaUpdated")
+    /// 表情包面板里「去广场下载」的通知，由 MainTabView 接住并打开表情包 tab。
+    static let openStickerPlaza = Notification.Name("aevisOpenStickerPlaza")
+
+    /// 目前服务端没有「按 persona.id 改角色卡」的接口（PUT /v1/persona 是用户自画像），
+    /// 所以本地覆盖用 UserDefaults 落盘，ChatListView 每次刷新都会叠加回去。
+    static func nameOverrideKey(_ id: String) -> String { "aevisPersonaName_\(id)" }
+    static func avatarOverrideKey(_ id: String) -> String { "aevisPersonaAvatar_\(id)" }
+
+    static func applyOverrides(_ p: Persona) -> Persona {
+        var out = p
+        let d = UserDefaults.standard
+        let n = d.string(forKey: nameOverrideKey(p.id)) ?? ""
+        let a = d.string(forKey: avatarOverrideKey(p.id)) ?? ""
+        if !n.isEmpty { out = Persona(id: out.id, name: n, tagline: out.tagline, avatar: out.avatar) }
+        if !a.isEmpty { out = Persona(id: out.id, name: out.name, tagline: out.tagline, avatar: a) }
+        return out
+    }
+
     // 模型
     @State private var modelList: [APIClient.LLMModel] = []
     @State private var modelDefaultID: String = "deepseek-flash"
@@ -32,6 +55,12 @@ struct CharacterSettingsView: View {
 
     // 模型健康状态（GET /v1/models/status 的 rows[]，按 model 名匹配）
     @State private var statusByModel: [String: ModelHealth] = [:]
+
+    // 人设资料（名字 / 头像）：本地覆盖，服务端接口上线后改这里一处即可
+    @State private var showProfileEdit = false
+    @State private var editName = ""
+    @State private var editAvatar = ""
+    @State private var profileTip = ""
 
     // 温度
     @State private var temperature: Double = 1.0
@@ -76,9 +105,9 @@ struct CharacterSettingsView: View {
 
         var color: Color {
             switch self {
-            case .ok: return Color.hex(0x2FA36B)
-            case .unstable: return Color.hex(0xE0A020)
-            case .down: return Color.hex(0xE5484D)
+            case .ok: return Color.adaptive(dark: Color.hex(0x6FCF97), light: Color.hex(0x1E7A4E))
+            case .unstable: return Color.adaptive(dark: Color.hex(0xF0B36B), light: Color.hex(0xB26A00))
+            case .down: return Color.adaptive(dark: Color.hex(0xF08A84), light: Color.hex(0xC0392B))
             case .unknown: return AE.textSecondary
             }
         }
@@ -105,6 +134,7 @@ struct CharacterSettingsView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
                 headerCard
+                if showProfileEdit { profileEditCard }
                 modelCard
                 temperatureCard
                 dangerCard
@@ -136,6 +166,10 @@ struct CharacterSettingsView: View {
             Text("将清空与「\(persona.name)」在本机的全部聊天记录，此操作不可恢复。")
         }
         .task {
+            let current = Self.applyOverrides(persona)
+            editName = current.name
+            editAvatar = current.avatar
+            showProfileEdit = startInProfileEdit
             selectedModelID = UserDefaults.standard.string(forKey: modelKey) ?? ""
             if let t = UserDefaults.standard.object(forKey: tempKey) as? Double {
                 temperature = t
@@ -147,6 +181,9 @@ struct CharacterSettingsView: View {
         }
     }
 
+    /// 当前展示用的角色（叠加本地名字 / 头像覆盖）。
+    private var displayedPersona: Persona { Self.applyOverrides(persona) }
+
     // MARK: - 顶部角色卡
 
     private var headerCard: some View {
@@ -155,7 +192,7 @@ struct CharacterSettingsView: View {
                 .frame(width: 72, height: 72)
 
             VStack(spacing: 4) {
-                Text(persona.name)
+                Text(displayedPersona.name)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(AE.textPrimary)
                 if !persona.tagline.isEmpty {
@@ -191,10 +228,85 @@ struct CharacterSettingsView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// 人设名字 / 头像编辑。当前后端没有按 persona.id 改角色卡的接口，
+    /// 所以写本地覆盖并广播通知；服务端接口上线后只需改 `saveProfile()` 一处。
+    private var profileEditCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                sectionTitle("编辑人设")
+                Spacer()
+                Button { showProfileEdit = false } label: {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AE.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .background(AE.accentSoft, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            TextField("名字", text: $editName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(AE.textPrimary)
+                .padding(.horizontal, 12).frame(height: 40)
+                .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            TextField("头像链接（http/https 或 /v1/media/…）", text: $editAvatar)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(AE.textPrimary)
+                .padding(.horizontal, 12).frame(height: 40)
+                .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            if let u = avatarURL(editAvatar) {
+                CachedRemoteImage(url: u, scope: "persona:\(persona.id):preview") {
+                    avatarPlaceholder
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 1.5))
+            }
+
+            if !profileTip.isEmpty {
+                Text(profileTip).font(.system(size: 11)).foregroundStyle(AE.brandPurple)
+            }
+
+            Button { saveProfile() } label: {
+                Text("保存人设资料")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 38)
+                    .background(AE.accentDeep, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(editName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(16)
+        .glassCard(cornerRadius: AE.cardRadius, material: .thin)
+    }
+
+    @MainActor
+    private func saveProfile() {
+        let name = editName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let avatar = editAvatar.trimmingCharacters(in: .whitespacesAndNewlines)
+        let d = UserDefaults.standard
+        d.set(name, forKey: Self.nameOverrideKey(persona.id))
+        if avatar.isEmpty { d.removeObject(forKey: Self.avatarOverrideKey(persona.id)) }
+        else { d.set(avatar, forKey: Self.avatarOverrideKey(persona.id)) }
+        NotificationCenter.default.post(
+            name: Self.personaUpdated,
+            object: nil,
+            userInfo: ["id": persona.id, "name": name, "avatar": avatar]
+        )
+        profileTip = "已保存到本机，聊天标题与列表已更新"
+        withAnimation { toast = "人设资料已更新" }
+    }
+
     @ViewBuilder
     /// 头像：硬缓存（磁盘 + 条件请求 304），AsyncImage 会每次重新下载且断网就没了。
     private var brandAvatar: some View {
-        let url = avatarURL(persona.avatar)
+        let url = avatarURL(displayedPersona.avatar)
         if let url {
             CachedRemoteImage(url: url, scope: "persona:\(persona.id)") { avatarPlaceholder }
                 .clipShape(Circle())
@@ -209,7 +321,7 @@ struct CharacterSettingsView: View {
             Circle().fill(
                 LinearGradient(colors: [AE.accentLift, AE.accentDeep],
                                startPoint: .topLeading, endPoint: .bottomTrailing))
-            Text(String(persona.name.prefix(1)))
+            Text(String(displayedPersona.name.prefix(1)))
                 .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(.white)
         }
@@ -413,17 +525,34 @@ struct CharacterSettingsView: View {
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(m.label.isEmpty ? m.id : m.label)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(AE.textPrimary)
-                            .lineLimit(1)
-                        if let h = statusByModel[statusKeyFor(m.id)] {
-                            Text(h.live.text)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(h.live.color)
-                                .padding(.horizontal, 6).padding(.vertical, 1.5)
-                                .background(h.live.color.opacity(0.14), in: Capsule())
+                    // 窄屏：胶囊挤不下就换行，不让名字被压成一条线。
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            Text(m.label.isEmpty ? m.id : m.label)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AE.textPrimary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                            if let h = statusByModel[statusKeyFor(m.id)] {
+                                Text(h.live.text)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(h.live.color)
+                                    .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                    .background(h.live.color.opacity(0.14), in: Capsule())
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(m.label.isEmpty ? m.id : m.label)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AE.textPrimary)
+                                .lineLimit(1)
+                            if let h = statusByModel[statusKeyFor(m.id)] {
+                                Text(h.live.text)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(h.live.color)
+                                    .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                    .background(h.live.color.opacity(0.14), in: Capsule())
+                            }
                         }
                     }
                     HStack(spacing: 6) {
@@ -436,6 +565,21 @@ struct CharacterSettingsView: View {
                         // 计费方式 + 单价（2026-11-25）：同组价差最大 72 倍，
                         // 点选之前必须能看见「这条消息大概扣多少墨点」，
                         // 否则用户聊两句发现额度掉一大块，观感就是「有毒」。
+                        // 2.9：计费方式必须有明确标识，不能只写价格让用户猜。
+                        if !m.billingText.isEmpty {
+                            HStack(spacing: 2) {
+                                Image(systemName: m.billing == "per_call" ? "ticket.fill" : "dot.radiowaves.left.and.right")
+                                Text(m.billingText)
+                            }
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(m.billing == "per_call" ? AE.brandPurple : AE.accent)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(
+                                (m.billing == "per_call" ? AE.brandLilac : AE.accentSoft),
+                                in: Capsule()
+                            )
+                            .lineLimit(1)
+                        }
                         if !m.priceText.isEmpty {
                             Text(m.priceText)
                                 .font(.system(size: 10, weight: .medium))
@@ -479,7 +623,9 @@ struct CharacterSettingsView: View {
             HStack(spacing: gap) {
                 ForEach(Array(bars.enumerated()), id: \.offset) { pair in
                     RoundedRectangle(cornerRadius: 1, style: .continuous)
-                        .fill(pair.element ? Color.hex(0x2FA36B) : Color.hex(0xE5484D))
+                        .fill(pair.element
+                              ? Color.adaptive(dark: Color.hex(0x6FCF97), light: Color.hex(0x1E7A4E))
+                              : Color.adaptive(dark: Color.hex(0xF08A84), light: Color.hex(0xC0392B)))
                         .frame(width: width, height: 12)
                 }
             }

@@ -72,6 +72,11 @@ struct MainTabView: View {
         }
         }
         .animation(AEMotion.pageAnimation, value: showPlaza)
+        // 聊天加号面板里「去表情包 tab 下载」：直接右滑打开广场表情包页。
+        .onReceive(NotificationCenter.default.publisher(for: CharacterSettingsView.openStickerPlaza)) { _ in
+            plazaTab = 1
+            withAnimation(AEMotion.pageAnimation) { showPlaza = true }
+        }
     }
 }
 

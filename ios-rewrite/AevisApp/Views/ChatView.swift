@@ -8,6 +8,7 @@ import Speech
 /// 增量到达即刷新气泡并滚动贴底；网络/格式异常有兜底与「重发」。
 struct ChatView: View {
     @EnvironmentObject private var session: Session
+    @Environment(\.dismiss) private var dismiss
     let persona: Persona
     #if DEBUG
     /// 137：CI 截图用的样例模式（不读写本地、不发请求）。Release 编不进去。
@@ -46,8 +47,13 @@ struct ChatView: View {
     /// 该角色的温度（0.0–2.0，默认 1.0），按角色存。
     @State private var temperature: Double = 1.0
 
-    /// 表情包面板（最小可用：静态占位说明，不做上传）。
+    /// 表情包面板：数据来自广场 `/v1/emoji/list`（先读硬缓存），不再静态占位。
     @State private var showStickerSheet = false
+    @State private var stickerPacks: [APIClient.EmojiPack] = []
+    @State private var stickerLoading = false
+    @State private var stickerTip = ""
+    /// 人设改名后本地标题跟着变（不重建 ChatView）。
+    @State private var titleName = ""
 
     // MARK: - 语音输入（本地 ASR，2026-11-24；替代原来的 TTS）
     /// 录音/识别/权限全在这里，视图只读它的状态。
@@ -226,31 +232,69 @@ struct ChatView: View {
         .background(ChatBackground())
         // 聊天页白膜压得轻（参考图 ≈0.60）：背景图看得清，文字靠气泡承载
         .appBackgroundIntensity(AEGlass.veilChat)
-        .navigationTitle(persona.name)
+        .navigationTitle(titleName.isEmpty ? persona.name : titleName)
         .navigationBarTitleDisplayMode(.inline)
         // 进聊天详情时收起底部 Dock：系统原生 tab bar 在 push 时不会自动隐藏，
         // 必须由被 push 的目的页声明；加在 ChatListView / 外层会把列表根页的 Dock 也藏掉。
         .toolbar(.hidden, for: .tabBar)
-        // 右上角：进入「角色设置」（模型选择等已挪到那里，聊天页不再放 cpu 按钮）
+        // 2.9 返回键：系统返回箭头在部分机型/主题下不显示或点了没反应，
+        // 这里给一个显式返回按钮直接调 dismiss()。**不禁用** interactivePopGesture，
+        // 系统侧滑照常可用（navigationBarBackButtonHidden 只影响箭头，不影响手势）。
+        .navigationBarBackButtonHidden(true)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button { dismiss() } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("返回").font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(AE.accent)
+                }
+                .accessibilityLabel("返回聊天列表")
+            }
+            // 右上角三个点：编辑人设 / 创建人设 / 角色设置
             ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink {
-                    CharacterSettingsView(persona: persona)
+                Menu {
+                    NavigationLink {
+                        CharacterSettingsView(persona: persona, startInProfileEdit: true)
+                    } label: {
+                        Label("编辑当前人设", systemImage: "person.crop.circle")
+                    }
+                    NavigationLink {
+                        PersonaCreateView { _ in
+                            Task { await reloadPersonaConfig() }
+                        }
+                        .environmentObject(session)
+                    } label: {
+                        Label("添加/创建人设", systemImage: "plus.circle")
+                    }
+                    NavigationLink {
+                        CharacterSettingsView(persona: persona)
+                    } label: {
+                        Label("角色设置", systemImage: "slider.horizontal.3")
+                    }
                 } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .medium))
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(AE.accent)
                 }
-                .accessibilityLabel("角色设置")
+                .accessibilityLabel("更多操作")
             }
         }
         .sheet(isPresented: $showStickerSheet) { stickerSheet }
+        .onReceive(NotificationCenter.default.publisher(for: CharacterSettingsView.personaUpdated)) { note in
+            guard let id = note.userInfo?["id"] as? String, id == persona.id,
+                  let name = note.userInfo?["name"] as? String else { return }
+            titleName = name
+        }
         // 语音识别结果实时写进输入框（不自动发送，让用户确认/编辑）
         .onChange(of: speech.transcript) { text in
             if !text.isEmpty { input = text }
         }
         .onAppear { reloadPersonaConfig() }
         .task {
+            titleName = persona.name
             #if DEBUG
             if demo {
                 msgs = [
@@ -289,15 +333,15 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - 表情包面板（最小可用：静态占位说明，上传未实现不做可点按钮）
+    // MARK: - 表情包面板（2.9：读广场数据，点表情直接插到聊天）
 
     @ViewBuilder
     private var stickerSheet: some View {
         ZStack {
             GlassBackdrop()
-            VStack(spacing: 14) {
+            VStack(spacing: 10) {
                 HStack {
-                    Text("我的表情包")
+                    Text("表情包")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(AE.textPrimary)
                     Spacer()
@@ -305,33 +349,130 @@ struct ChatView: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(AE.accent)
                 }
-                .padding(.horizontal, 20).padding(.top, 16)
+                .padding(.horizontal, 20).padding(.top, 14)
 
-                Spacer()
-                VStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(
-                                AE.textSecondary.opacity(0.4),
-                                style: StrokeStyle(lineWidth: 1.5, dash: [6, 5])
-                            )
-                            .frame(width: 96, height: 96)
-                        Image(systemName: "plus")
-                            .font(.system(size: 30, weight: .light))
-                            .foregroundStyle(AE.textSecondary.opacity(0.7))
+                if stickerLoading && stickerPacks.isEmpty {
+                    Spacer()
+                    ProgressView().controlSize(.small)
+                    Text("正在读取表情包…").font(.system(size: 12)).foregroundStyle(AE.textSecondary)
+                    Spacer()
+                } else if stickerPacks.isEmpty {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "face.smiling")
+                            .font(.system(size: 34))
+                            .foregroundStyle(AE.textSecondary)
+                        Text("还没有下载的表情包")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(AE.textPrimary)
+                        Text("表情包来自人设广场，下载后就能在这里发。")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AE.textSecondary)
+                        Button { openStickerPlaza() } label: {
+                            Text("去人设广场的表情包 tab 下载")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16).frame(height: 36)
+                                .background(AE.accentDeep, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    Text("点「＋」上传 PNG 或 GIF")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(AE.textSecondary)
-                    Text("（表情包上传功能即将上线）")
-                        .font(.system(size: 11))
-                        .foregroundStyle(AE.textSecondary.opacity(0.7))
+                    Spacer()
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            ForEach(stickerPacks) { pack in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        CachedRemoteImage(
+                                            url: APIClient.mediaURL(pack.cover),
+                                            scope: "pack:\(pack.id)"
+                                        ) {
+                                            RoundedRectangle(cornerRadius: 6).fill(AE.accentSoft)
+                                        }
+                                        .frame(width: 24, height: 24)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                        Text(pack.name)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(AE.textPrimary)
+                                        Spacer(minLength: 0)
+                                    }
+                                    LazyVGrid(
+                                        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5),
+                                        spacing: 8
+                                    ) {
+                                        ForEach(Array(pack.items.enumerated()), id: \.offset) { pair in
+                                            Button { sendSticker(pair.element) } label: {
+                                                CachedRemoteImage(
+                                                    url: APIClient.mediaURL(pair.element),
+                                                    scope: "pack:\(pack.id):\(pair.offset)"
+                                                ) {
+                                                    RoundedRectangle(cornerRadius: 10).fill(AE.accentSoft)
+                                                }
+                                                .frame(height: 54)
+                                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                            }
+                                            .buttonStyle(AevisPressStyle(scale: 0.94))
+                                            .accessibilityLabel("发送表情")
+                                        }
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 12)
+                    }
                 }
-                Spacer()
+
+                if !stickerTip.isEmpty {
+                    Text(stickerTip)
+                        .font(.system(size: 11))
+                        .foregroundStyle(AE.textSecondary)
+                        .padding(.horizontal, 20)
+                }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .glassSheetBackground()
+        .task { await loadStickerPacks() }
+    }
+
+    /// 广场表情包：先读硬缓存（预加载已落盘），再拿服务端最新结果覆盖；失败留旧值。
+    private func loadStickerPacks() async {
+        await MainActor.run { stickerLoading = true }
+        var packs = APIClient.cachedJSON(.emojiPacks)
+            .map(APIClient.parseEmojiPacks) ?? []
+        if let fresh = try? await APIClient.emojiPacks(token: session.token) { packs = fresh }
+        await MainActor.run {
+            stickerPacks = packs
+            stickerLoading = false
+        }
+    }
+
+    /// 没有下载包时给一个明确入口，而不是空壳。用通知让主页切到广场表情包 tab。
+    private func openStickerPlaza() {
+        showStickerSheet = false
+        NotificationCenter.default.post(
+            name: CharacterSettingsView.openStickerPlaza,
+            object: nil
+        )
+    }
+
+    /// 点表情 → 作为一条图片消息落盘并出现在聊天里。
+    /// 后端 SSE 目前只收文本，所以这是本地插入并说明；不假装已发到云端。
+    @MainActor
+    private func sendSticker(_ raw: String) {
+        guard let url = APIClient.mediaURL(raw) else {
+            stickerTip = "这个表情没有可用地址，暂时发不了"
+            return
+        }
+        var m = Msg(role: "user", content: "[表情]")
+        m.img = url.absoluteString
+        msgs.append(m)
+        LocalStore.save(pid: persona.id, msgs: msgs)
+        showStickerSheet = false
+        atBottom = true
     }
 
     @ViewBuilder
@@ -344,16 +485,30 @@ struct ChatView: View {
             }
             if mine { Spacer(minLength: 40) }
 
-            Text(annotated(m.content))
-                .font(.system(size: fontSize))
-                .lineSpacing(fontSize * 0.45)
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                // 气泡（2026-11-25 二次校准，按用户参考图定妆）：
-                // 底 white.opacity(0.70)（暗色 0.62 深灰），圆角 20 连续圆角，**无描边**。
-                // 参考图的气泡上没有高光框 —— 之前那圈白描边撤掉了（`AEGlass.strokeOpacity` 统一控制）。
+            if !m.img.isEmpty, let imgURL = URL(string: m.img) {
+                // 表情包图片消息：走同一套硬缓存；没有缓存时显示占位，不转圈。
+                CachedRemoteImage(url: imgURL, scope: "sticker:\(m.id.uuidString)") {
+                    ZStack {
+                        AE.accentSoft
+                        Image(systemName: "face.smiling").foregroundStyle(AE.textSecondary)
+                    }
+                }
+                .frame(width: 120, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous))
                 .background(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous)
                     .fill(bubbleFill(mine: mine)))
-                .clipShape(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous))
+            } else {
+                Text(annotated(m.content))
+                    .font(.system(size: fontSize))
+                    .lineSpacing(fontSize * 0.45)
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    // 气泡（2026-11-25 二次校准，按用户参考图定妆）：
+                    // 底 white.opacity(0.70)（暗色 0.62 深灰），圆角 20 连续圆角，**无描边**。
+                    // 参考图的气泡上没有高光框 —— 之前那圈白描边撤掉了（`AEGlass.strokeOpacity` 统一控制）。
+                    .background(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous)
+                        .fill(bubbleFill(mine: mine)))
+                    .clipShape(RoundedRectangle(cornerRadius: AEGlass.bubbleRadius, style: .continuous))
+            }
 
             if !mine { Spacer(minLength: 40) }
             if mine && avatarMode == 0 {
