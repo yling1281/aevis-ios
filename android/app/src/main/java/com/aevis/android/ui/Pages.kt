@@ -167,7 +167,10 @@ fun MallScreen(
     // 余额（只有商城显示；拿不到就不显示，不占位）
     var points by remember { mutableIntStateOf(-1) }
     // 2026-11-24：商城商品（会员/按次）服务端驱动 —— 价格、档位数量都不写死
-    var products by remember { mutableStateOf<List<Api.ShopProduct>>(emptyList()) }
+    // 2026-11-25：冷启动先读缓存立即显示，再联网刷新
+    var products by remember {
+        mutableStateOf<List<Api.ShopProduct>>(com.aevis.android.core.ColdCache.loadProducts(ctx))
+    }
     // 广场里点表情 → 大图预览（跟表情页同一个 sheet）
     var preview by remember { mutableStateOf<String?>(null) }
 
@@ -176,8 +179,14 @@ fun MallScreen(
             points = withContext(Dispatchers.IO) {
                 runCatching { Api.balance() }.getOrNull() ?: -1
             }
-            products = withContext(Dispatchers.IO) {
+            val fresh = withContext(Dispatchers.IO) {
                 runCatching { Api.shopProducts() }.getOrDefault(emptyList())
+            }
+            if (fresh.isNotEmpty()) {
+                products = fresh
+                withContext(Dispatchers.IO) {
+                    com.aevis.android.core.ColdCache.saveProducts(ctx, fresh)
+                }
             }
         }
     }

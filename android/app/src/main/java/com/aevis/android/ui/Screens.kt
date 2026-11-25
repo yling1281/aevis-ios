@@ -432,6 +432,14 @@ fun Shell(onSignOut: () -> Unit) {
     // 现在冷启动查一次 `/v1/app/update`；同一个 latest 每天最多提示一次
     // （用户点「稍后」记下当天日期，第二天再提醒）。
     var updateInfo by remember { mutableStateOf<com.aevis.android.data.Api.UpdateInfo?>(null) }
+    // 2026-11-25：冷启动后台预拉广场/表情/商品/额度/余额/会员态落盘，
+    // 各页冷启动先读缓存立即显示，断网也不白屏（对标 iOS HardCache）。
+    val prefetchCtx = LocalContext.current
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            com.aevis.android.core.ColdCache.prefetch(prefetchCtx)
+        }
+    }
     LaunchedEffect(Unit) {
         val u = withContext(Dispatchers.IO) { runCatching { Api.checkUpdate() }.getOrNull() }
         // 2026-11-24 强制更新门禁：force=true 必须真拦住 —— 绕过"今天已稍后"的抑制，
@@ -1638,12 +1646,17 @@ private fun HomeTab(
     bottomInset: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     val ink = MaterialTheme.colorScheme.onSurface
+    val homeCtx = LocalContext.current
     var me by remember { mutableStateOf<Api.MeInfo?>(Api.cachedMe()) }
-    var points by remember { mutableIntStateOf(-1) }
+    // 2026-11-25：冷启动先读硬缓存立即显示，再联网刷新（对标 iOS HardCache）
+    val cachedWallet = remember { com.aevis.android.core.ColdCache.loadWallet(homeCtx) }
+    var points by remember { mutableIntStateOf(cachedWallet?.points ?: -1) }
     // 会员周额度（2026-11-16）：wallet 拿不到就是 null → 会员那块显示「—」，不显示 0
-    var member by remember { mutableStateOf<Api.MemberQuota?>(null) }
+    var member by remember { mutableStateOf<Api.MemberQuota?>(cachedWallet?.member) }
     // 2026-11-24 用量卡：本周额度百分比（真实来自 /v1/quota/state，取不到为 null → 显示「—」）
-    var quota by remember { mutableStateOf<Api.QuotaState?>(null) }
+    var quota by remember {
+        mutableStateOf<Api.QuotaState?>(com.aevis.android.core.ColdCache.loadQuota(homeCtx))
+    }
     var persons by remember { mutableStateOf<List<Api.Persona>>(emptyList()) }
     // 群聊入口的占位弹窗（2026-11-16，群号未给）
     var qqGroupAsk by remember { mutableStateOf(false) }
@@ -1654,12 +1667,21 @@ private fun HomeTab(
             Api.saveMe(m)
         }
         // 2026-11-24：额度百分比独立取，不串行等钱包（用户进主页第一眼要看到的是它）
-        quota = withContext(Dispatchers.IO) { runCatching { Api.quotaState() }.getOrNull() }
+        val freshQuota = withContext(Dispatchers.IO) { runCatching { Api.quotaState() }.getOrNull() }
+        if (freshQuota != null) {
+            quota = freshQuota
+            withContext(Dispatchers.IO) {
+                com.aevis.android.core.ColdCache.saveQuota(homeCtx, freshQuota)
+            }
+        }
         // 钱包：一次拿墨点 + 会员周额度。拿不到就退回 balance() 只显示墨点
         val w = withContext(Dispatchers.IO) { runCatching { Api.wallet() }.getOrNull() }
         if (w != null) {
             points = w.points
             member = w.member
+            withContext(Dispatchers.IO) {
+                com.aevis.android.core.ColdCache.saveWallet(homeCtx, w)
+            }
         } else {
             points = withContext(Dispatchers.IO) {
                 runCatching { Api.balance() }.getOrNull() ?: -1
