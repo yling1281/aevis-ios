@@ -483,7 +483,7 @@ struct ChatView: View {
     }
 
     /// 发送一段文本：落盘用户消息 → SSE 逐字收增量 → 落盘完整回复。
-    /// 线路回落（直连→北京→备用→香港）已内置在 `APIClient.sendChatStream` 里，
+    /// 线路回落（直连→北京）已内置在 `APIClient.sendChatStream` 里，
     /// 这里不再做二次换线重试（否则已出字时会重复内容）。`allowLineRetry` 仅为兼容旧调用保留。
     @MainActor
     private func performSend(text: String, allowLineRetry: Bool = true) async {
@@ -533,7 +533,7 @@ struct ChatView: View {
                 CloudBackup.shared.pushIfNeeded(token: token)
             }
         } catch {
-            // 线路回落已由 APIClient.sendChatStream 内部完成（直连→北京→备用→香港）。
+            // 线路回落已由 APIClient.sendChatStream 内部完成（直连→北京）。
             // 这里不再二次换线重试 —— 否则已吐字的情况下会重复拼内容。
             // 只需：把最终失败归类成可见错误 + 处理空气泡（可点「重发」）。
             await reportFailure(error, assistantID: assistantID)

@@ -5,7 +5,7 @@ import Foundation
 /// 服务器状态（2026-11-22 新增，照用户给的「服务器状态」参考图做）。
 ///
 /// 两块内容都是**真实数据**，没有假按钮：
-/// 1. 服务器：`APIClient.lines` 的每条线路（直连 / 北京 / 香港，名字和条数都直接读 APIClient），
+/// 1. 服务器：`APIClient.lines` 的每条线路（直连 / 北京，名字和条数都直接读 APIClient），
 ///    逐条 `APIClient.lineLatency(_:)` 实测延迟，列表按实测毫秒升序展示（不通置后）；
 ///    点某行 = `APIClient.setActiveLine(id)`（持久化键 `apiLineId`，与 APIClient 内部一致）。
 ///    「自动选择」= 按 `APIClient.lines` 的回落顺序自动切，标记存 `apiAutoLine`。
@@ -685,10 +685,9 @@ struct ServerStatusView: View {
     }
 
     /// 地域描述按线路**名字**匹配（不写死 id，线路表改名/增删这里自动跟上）
-    /// 只出纯地名：直连 / 北京 / 香港，不上屏 IP 或工程词；无匹配时原样返回名字。
+    /// 只出纯地名：直连 / 北京，不上屏 IP 或工程词；无匹配时原样返回名字。
     private func regionText(for line: APIClient.Line) -> String {
         let n = line.name
-        if n.contains("香港") { return "中国·香港" }
         if n.contains("北京") { return "中国·北京" }
         if n.contains("直连") { return "直连" }
         return n

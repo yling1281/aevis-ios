@@ -4,10 +4,14 @@ import UIKit
 /// 所有网络请求。
 ///
 /// 默认走直连 `https://103.236.72.107:54319`（2026-11-24 用户拍板恢复）：NAT 端口映射，
-/// 实测 ~0.13s，比北京隧道（~0.15s）更快、比香港（0.5~1.4s 且不稳）快一个数量级。
+/// 实测 ~0.13s，比北京隧道（~0.15s）快一个数量级。
 /// 直连自签证书，靠 `PinDelegate` 放行该 host:port 的 serverTrust + Info.plist ATS 例外；
 /// 万一某台设备证书就是过不了，`request` 会自动回落到北京（见下方 orderedLines），
 /// 不会卡死。线路地址一律不上屏，用户只见城市名。
+///
+/// 2026-11 用户决定**关闭原来的第三条境外备用线路**（延迟 0.5~1.4s 且长期不稳），
+/// 线路收敛为 直连 → 北京 两条。删掉 `lines` 里的对应条目即可：`orderedLines`、
+/// 失败降权、自动选择全部按数组长度自适应，无需改动任何逻辑。
 ///
 /// 契约与安卓完全一致；错误一律抛 `APIError`，由 View 决定怎么显示。
 enum APIError: LocalizedError {
@@ -26,14 +30,15 @@ struct APIClient {
     /// 线路（2026-11-17，147/148）：UI 只显示名字，**地址一律不上屏**。
     struct Line: Identifiable, Equatable {
         let id: String        // 内部 key，也用作持久化
-        let name: String      // 北京 / 香港 / 直连 / 备用
+        let name: String      // 北京 / 直连（现存两条线路）
         let base: String      // 真实地址；留空 = 暂不可用
         let pinning: Bool     // 仅「直连」为 true（自签证书）
         var note: String = "" // 半窗里的用户向短注（最快/默认/备用）
     }
 
-    /// 线路顺序（2026-11-24 用户拍板恢复直连）：「默认直连，不行切北京，再退香港。」
-    /// 数组顺序 = 回落顺序：直连 → 北京 → 香港。UI 只显示名字，地址不上屏。
+    /// 线路顺序（2026-11-24 用户拍板恢复直连；2026-11 关闭第三条境外备用）：
+    /// 「默认直连，不行切北京。就这两条。」
+    /// 数组顺序 = 回落顺序：直连 → 北京。UI 只显示名字，地址不上屏。
     ///
     /// 直连是自签证书（CN=103.236.72.107 / O=Aevis，有效期至 2036），pinning=true 让
     /// makeSession 挂 PinDelegate、按 host+port 精确放行该 serverTrust；Info.plist 的
@@ -43,10 +48,11 @@ struct APIClient {
     /// 2026-11-24 实测：直连 /v1/app/config 返回 200、0.13s（本机 curl 验证）。
     static let lines: [Line] = [
         // name 用纯地名，不出现 IP、日期、「自签证书/隧道」等工程词。
-        // 顺序 = 回落顺序：直连 → 北京 → 香港，不要打乱。
+        // 顺序 = 回落顺序：直连 → 北京，不要打乱。
+        // 原第三条境外备用线路已于 2026-11 关闭（延迟高且不稳），此处不再保留条目；
+        // 老用户本地若存着已下线线路的 id，`activeLine` 找不到会自然回落到首条，不会崩。
         Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319",     pinning: true,  note: "最快"),
         Line(id: "bj",     name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "备用"),
-        Line(id: "hk",     name: "香港", base: "https://lingyan.cyou/prod-api/aevis", pinning: false, note: "备用"),
     ]
 
     private static let activeKey = "apiLineId"
@@ -182,7 +188,7 @@ struct APIClient {
         token: String? = nil,
         account: String? = nil
     ) async throws -> [String: Any] {
-        // 默认走「自动回落」：按 orderedLines（直连→北京→备用→香港）逐条试，
+        // 默认走「自动回落」：按 orderedLines（直连→北京）逐条试，
         // 只有线路级错误（SSL/连不上/超时/5xx）才换线；业务错误（401/402/4xx）立即抛。
         // 成功后确立该线路为首选并持久化 —— 真机直连 SSL 失败一次后，下次启动直接走北京，
         // 不再每次先撞直连卡几秒。所有调用方无需改动即获得回落能力。
@@ -431,7 +437,7 @@ struct APIClient {
         temperature: Double? = nil,
         onDelta: @escaping (String) -> Void
     ) async throws -> String {
-        // 线路回落：按 orderedLines（直连→北京→备用→香港）逐条试，线路级错误才换线。
+        // 线路回落：按 orderedLines（直连→北京）逐条试，线路级错误才换线。
         // 注意流式一旦开始吐字就不能中途换线，否则会出现半截回复 —— 故回落只在
         // 「连接阶段失败（一个增量都没出）」时进行；已出字后失败由上层原地提示重发。
         let ordered = orderedLines
@@ -1286,7 +1292,7 @@ struct APIClient {
             do {
                 let (_, resp) = try await sess.data(for: req)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                // 只认 2xx/3xx；404（香港那种"nginx 在但没挂 API"）以前被算成可用，
+                // 只认 2xx/3xx；404（"nginx 在但没挂 API"那种半死状态）以前被算成可用，
                 // 导致坏线路进了自动切换候选，必须排除。
                 if (200..<400).contains(code) {
                     samples.append(Int(Date().timeIntervalSince(t0) * 1000))

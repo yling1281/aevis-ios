@@ -20,8 +20,8 @@ struct ShopView: View {
 
     /// 入口可指定初始 tab：主页「按次计费」直接落到第 3 个 tab（index 2）。
     private let initialTab: Int
-    @State private var tab
-    @State private var prevTab
+    @State private var tab: Int
+    @State private var prevTab: Int
 
     init(initialTab: Int = 0) {
         self.initialTab = min(max(initialTab, 0), 2)
@@ -142,12 +142,16 @@ struct ShopView: View {
         async let b = APIClient.pointsBalance(token: session.token)
         async let q = APIClient.quotaState(token: session.token)
         async let sp = APIClient.shopProducts()
-        async let ub = session.token.map { APIClient.dsUses(token: $0) }
         let pkgs = (try? await p) ?? []
         let bal = (try? await b)         // 失败保持 nil → 显示「—」
         let qt = (try? await q)          // 失败保持 nil → 显示「—」
         let allProducts = (try? await sp) ?? []
-        let uses = (try? await ub)?.left
+        // 按次剩余次数：`dsUses` 依赖 token，拿不到 token 就不发请求（保持 nil → 显示「—」）。
+        // 注意：不能写成 `async let ub = session.token.map { ... }` —— async let 的右值必须是
+        // 返回 async 结果的表达式，Optional.map 的闭包是同步的，编译器会报错；
+        // 且 Optional 解包 + async let 混用会在 `try? await ub` 处二次报错。故单独顺序取。
+        var uses: Int? = nil
+        if let t = session.token { uses = (try? await APIClient.dsUses(token: t))?.left }
         let useList = allProducts.filter { $0.kind == "uses" }
         await MainActor.run {
             packages = pkgs
