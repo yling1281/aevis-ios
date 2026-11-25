@@ -59,6 +59,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -134,6 +135,8 @@ private fun PageScaffold(
 fun MallScreen(
     onBack: () -> Unit,
     onOpenPersona: (String) -> Unit = {},
+    // 广场「创建人设」入口（2026-11-24）：跳 personanew 走本地创建页。
+    onCreatePersona: () -> Unit = {},
     title: String = "广场",
     isPlaza: Boolean = true,
     startTab: Int = 0
@@ -142,15 +145,29 @@ fun MallScreen(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // 商城多一段「按次」（2026-11-24，对标 iOS ShopView）：DeepSeek 按次计费。
+    // index 保持：0 会员 / 1 音色包 / 2 墨点（mallpt 的 startTab=2 不受影响）/ 3 按次。
     val tabNames = if (isPlaza) listOf(tr("人设"), tr("表情包"))
-    else listOf(tr("会员"), tr("音色包"), tr("墨点"))
+    else listOf(tr("会员"), tr("音色包"), tr("墨点"), tr("按次"))
 
     var tab by remember { mutableIntStateOf(startTab.coerceIn(0, tabNames.size - 1)) }
-    var list by remember { mutableStateOf<List<Api.Persona>?>(null) }
+    // 2026-11-24 硬缓存：冷启动先同步读本地缓存 → 立刻显示；云端有更新才覆盖。
+    val cached = remember { com.aevis.android.core.PlazaCache.load(ctx) }
+    var list by remember {
+        mutableStateOf<List<Api.Persona>?>(cached.personas.ifEmpty { null })
+    }
+    var packs by remember {
+        mutableStateOf<List<Api.EmojiPack>?>(cached.packs.ifEmpty { null })
+    }
     var err by remember { mutableStateOf("") }
-    var packs by remember { mutableStateOf<List<Api.EmojiPack>?>(null) }
+    // 落盘签名：只有内容真变了才写盘，省电省 IO
+    var cacheSig by remember { mutableStateOf(cached.signature) }
+    // 连不上服务器提示（有旧缓存时才显示）
+    var offline by remember { mutableStateOf(false) }
     // 余额（只有商城显示；拿不到就不显示，不占位）
     var points by remember { mutableIntStateOf(-1) }
+    // 2026-11-24：商城商品（会员/按次）服务端驱动 —— 价格、档位数量都不写死
+    var products by remember { mutableStateOf<List<Api.ShopProduct>>(emptyList()) }
     // 广场里点表情 → 大图预览（跟表情页同一个 sheet）
     var preview by remember { mutableStateOf<String?>(null) }
 
@@ -159,22 +176,70 @@ fun MallScreen(
             points = withContext(Dispatchers.IO) {
                 runCatching { Api.balance() }.getOrNull() ?: -1
             }
+            products = withContext(Dispatchers.IO) {
+                runCatching { Api.shopProducts() }.getOrDefault(emptyList())
+            }
         }
     }
 
-    // 只有广场这两段需要网络；商城三段本地就能画
+    // 只有广场这两段需要网络；商城几段本地就能画。
+    // 2026-11-24：失败时**保留本地缓存**，只把 offline 亮起来，不再清空成空列表。
     LaunchedEffect(tab, isPlaza) {
         if (!isPlaza) return@LaunchedEffect
-        if (tab == 0 && list == null) {
-            err = ""
-            // 公共广场：`Api.personas()` 走 `/v1/psquare/list`（全站），**不加 mine**
-            val r = withContext(Dispatchers.IO) { runCatching { Api.personas() } }
-            r.onSuccess { list = it }
-                .onFailure { err = it.message ?: "加载失败"; list = emptyList() }
+        if (tab == 0) {
+            val r = withContext(Dispatchers.IO) { runCatching { Api.personasChecked() } }
+            val res = r.getOrNull()
+            if (res != null && res.ok) {
+                offline = false
+                err = ""
+                list = res.items
+                // 还没看过表情 tab 时 packs 是 null —— 用缓存里的表情，别抹掉已缓存的表情
+                val keepPacks = packs ?: cached.packs
+                val sig = com.aevis.android.core.PlazaCache.signature(res.items, keepPacks)
+                if (sig != cacheSig) {
+                    cacheSig = sig
+                    withContext(Dispatchers.IO) {
+                        com.aevis.android.core.PlazaCache.save(
+                            ctx,
+                            com.aevis.android.core.PlazaCache.Payload(
+                                personas = res.items, packs = keepPacks,
+                                signature = sig, checkedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+            } else if (list == null) {
+                // 没缓存又没有网：才显示错误；有缓存就仅提示 offline
+                err = r.exceptionOrNull()?.message?.ifEmpty { null } ?: tr("连不上服务器，显示本地缓存")
+            } else {
+                offline = true
+            }
         }
-        if (tab == 1 && packs == null) {
-            packs = withContext(Dispatchers.IO) {
-                runCatching { Api.emojiPacks() }.getOrElse { emptyList() }
+        if (tab == 1) {
+            val r = withContext(Dispatchers.IO) { runCatching { Api.emojiPacksChecked() } }
+            val res = r.getOrNull()
+            if (res != null && res.ok) {
+                offline = false
+                packs = res.items
+                // 只先看了表情 tab 时 list 还是 null —— 用缓存里的人设，别把已缓存的人设抹成空
+                val keepPersons = list ?: cached.personas
+                val sig = com.aevis.android.core.PlazaCache.signature(keepPersons, res.items)
+                if (sig != cacheSig) {
+                    cacheSig = sig
+                    withContext(Dispatchers.IO) {
+                        com.aevis.android.core.PlazaCache.save(
+                            ctx,
+                            com.aevis.android.core.PlazaCache.Payload(
+                                personas = keepPersons, packs = res.items,
+                                signature = sig, checkedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+            } else if (packs == null) {
+                offline = true
+            } else {
+                offline = true
             }
         }
     }
@@ -190,9 +255,27 @@ fun MallScreen(
                 Spacer(Modifier.weight(1f))
                 Text(
                     "$points", fontSize = V2.body, fontWeight = FontWeight.SemiBold,
-                    color = V2.accent
+                    // 2026-11-24：墨点夜间配色用语义色，不再写死浅色紫
+                    color = pointAccentColor()
                 )
             }
+        }
+
+        // ---------- 连不上服务器：用本地缓存时明确告诉用户（2026-11-24）----------
+        if (isPlaza && offline) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 2.dp)
+                    .clip(squircle(10.dp))
+                    .background(V2.alert.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    tr("连不上服务器，正在显示本地缓存"),
+                    fontSize = V2.micro, color = V2.alert
+                )
+            }
+            Spacer(Modifier.height(6.dp))
         }
 
         // ---------- 分段（2026-11-16 换成公共的 SegmentedTabs：有滑动指示块 + 内容过渡）----------
@@ -211,6 +294,46 @@ fun MallScreen(
             if (isPlaza) {
                 if (seg == 0) {
                     // ---------- 广场 · 人设 ----------
+                    // 2026-11-24「添加不了」：以前广场只有"下载别人"，没有"创建自己的"。
+                    // 顶部常驻一张「创建人设」卡，点进去走 personanew（本地创建 + 可选投稿广场）。
+                    V2Card(
+                        Modifier.padding(horizontal = V2.gutter, vertical = 2.dp),
+                        pad = 14.dp
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().tapable { onCreatePersona() },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(40.dp).clip(squircle(13.dp))
+                                    .background(V2.accent.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.ic_row_create), null,
+                                    tint = V2.accent, modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    tr("创建我的人设"), fontSize = V2.sub,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    tr("名字、标签、头像、设定自己写，创建后本地可见"),
+                                    fontSize = V2.micro, color = ink.copy(alpha = 0.45f)
+                                )
+                            }
+                            Icon(
+                                painterResource(R.drawable.ic_chevron_right), null,
+                                tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+
                     val items = list
                     when {
                         items == null -> Box(
@@ -261,28 +384,42 @@ fun MallScreen(
                 }
             } else {
                 when (seg) {
-                    // ---------- 商城 · 会员 ----------
+                    // ---------- 商城 · 会员（2026-11-24 服务端驱动）----------
                     0 -> {
-                        MemberCard(
-                            price = "¥15",
-                            days = tr("/ 30 天"),
-                            // 30 天 = 4 周，1200 点摊成每周 300
-                            weeklyPoints = 300,
-                            bestValue = false,
-                            onBuy = { payOrder(ctx, scope, "member_15") }
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        MemberCard(
-                            price = "¥29",
-                            days = tr("/ 30 天"),
-                            // 30 天 = 4 周，2500 点摊成每周 625
-                            weeklyPoints = 625,
-                            bestValue = true,
-                            // ⚠️ SKU 是 `member_29`（服务端清单里的真值）。
-                            //    别写成 `member_30`：那个 SKU 不存在；`member_30d` 是老的"只续期不发额度"，
-                            //    买错用户拿不到 2500 点。
-                            onBuy = { payOrder(ctx, scope, "member_29") }
-                        )
+                        // 档位数量 / 价格 / 权益全读 /v1/shop/products，客户端不写死。
+                        // 2026-11-25 线上只有一档 p_x（¥14.9 / 30 天）；以前写死两档已删。
+                        val memberProducts = products.filter {
+                            it.kind != "uses" && it.priceCents > 0
+                        }
+                        if (memberProducts.isEmpty()) {
+                            Text(
+                                tr("套餐加载中或暂不可用"),
+                                fontSize = V2.tiny, color = ink.copy(alpha = 0.45f),
+                                modifier = Modifier.padding(horizontal = V2.gutter, vertical = 30.dp)
+                            )
+                        } else {
+                            memberProducts.forEachIndexed { pi, p ->
+                                if (pi > 0) Spacer(Modifier.height(14.dp))
+                                val cents = p.priceCents / 100.0
+                                val orig = if (p.listPriceCents > 0) p.listPriceCents / 100.0
+                                           else (cents / 0.9).let { k ->
+                                               Math.ceil(k * 10) / 10.0 - 0.1
+                                           }
+                                MemberCard(
+                                    tier = p.label.ifBlank { tr("月卡") },
+                                    origPrice = "¥%.1f".format(java.util.Locale.US, orig),
+                                    price = "¥%.1f".format(java.util.Locale.US, cents),
+                                    days = tr("/ %d 天", p.days),
+                                    weeklyPoints = p.weekTotal,
+                                    benefits = p.benefits.ifEmpty {
+                                        listOf(tr("开通立得墨点"), tr("本周用量一次回满"),
+                                            tr("每天签到翻倍"), tr("免费时长"))
+                                    },
+                                    bestValue = pi == memberProducts.lastIndex && memberProducts.size > 1,
+                                    onBuy = { payOrder(ctx, scope, p.id) }
+                                )
+                            }
+                        }
                     }
 
                     // ---------- 商城 · 音色包（还没接，禁用）----------
@@ -334,7 +471,10 @@ fun MallScreen(
                     }
 
                     // ---------- 商城 · 墨点（真能买）----------
-                    else -> PointPacks()
+                    2 -> PointPacks()
+
+                    // ---------- 商城 · 按次（2026-11-24，对标 iOS ShopView tab2）----------
+                    else -> PerCallSection(products.filter { it.kind == "uses" })
                 }
             }
                     Spacer(Modifier.height(30.dp))
@@ -362,18 +502,21 @@ fun MallScreen(
  */
 @Composable
 private fun MemberCard(
-    price: String,          // "¥15"
+    tier: String,           // 档位短名（服务端 label，兜"月卡"）
+    origPrice: String,      // 划线原价 "¥16.9"
+    price: String,          // 现价 "¥14.9"
     days: String,           // "/ 30 天"
-    weeklyPoints: Int,      // 每周刷新的额度（300 / 625）
+    weeklyPoints: Int,      // 每周刷新的额度
+    benefits: List<String>, // 服务端下发权益文案；空用占位
     bestValue: Boolean,     // 右上「更划算」
     onBuy: () -> Unit
 ) {
     val ink = MaterialTheme.colorScheme.onSurface
     V2Card(Modifier.padding(horizontal = V2.gutter)) {
-        // 角标行
+        // 角标行：档位名（X 用量 / XL 用量）+ 更划算
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                tr("月卡"), fontSize = 10.sp, color = V2.accent,
+                tier, fontSize = 10.sp, color = V2.accent,
                 modifier = Modifier.clip(squircle(6.dp))
                     .background(V2.accent.copy(alpha = 0.13f))
                     .padding(horizontal = 7.dp, vertical = 2.dp)
@@ -390,11 +533,17 @@ private fun MemberCard(
         }
         Spacer(Modifier.height(10.dp))
 
-        // 价格
+        // 价格：划线原价 + 现价（2026-11-24「所有价格标面」）
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
+                origPrice, fontSize = 12.sp, color = ink.copy(alpha = 0.38f),
+                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
                 price, fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                color = ink, letterSpacing = (-1).sp
+                color = V2.accent, letterSpacing = (-1).sp
             )
             Spacer(Modifier.width(5.dp))
             Text(
@@ -402,11 +551,21 @@ private fun MemberCard(
                 modifier = Modifier.padding(bottom = 6.dp)
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(6.dp))
+        // 用量数字翻动（对标 iOS AnimatedNumber：切档位数字滚一下）
+        AnimatedNumber(
+            value = weeklyPoints,
+            style = TextStyle(fontSize = V2.body, fontWeight = FontWeight.SemiBold),
+            color = ink,
+            suffix = tr(" 点 / 周")
+        )
+        Spacer(Modifier.height(8.dp))
 
-        // 权益（2026-11-16 改成「按周」口径：30 天 = 4 周，每周一刷新）
-        BenefitLine(tr("每周 %d 点额度，每周一 0 点刷新（共 4 周）", weeklyPoints))
-        BenefitLine(tr("会员期内不限次对话"))
+        // 会员权益（服务端 benefits[] 下发；缺字段时显示占位文案）
+        if (weeklyPoints > 0) {
+            BenefitLine(tr("每周 %d 点额度，每周一 0 点刷新", weeklyPoints))
+        }
+        benefits.forEach { BenefitLine(it) }
         BenefitLine(tr("到期不自动续费"))
 
         Spacer(Modifier.height(14.dp))
@@ -447,6 +606,93 @@ private fun BenefitLine(text: String) {
         )
         Spacer(Modifier.width(7.dp))
         Text(text, fontSize = V2.tiny, color = ink.copy(alpha = 0.75f))
+    }
+}
+
+/**
+ * 按次套餐（2026-11-24，对标 iOS ShopView tab「按次」）。
+ *
+ * 产品口径：DeepSeek 按次 1 元 = 50 次、2 元 = 100 次、**100 次起卖**；
+ * 所有价格明面展示（原价 + 现价都写），另附 token 限量说明。
+ * ⚠️ 后端目前没有按次商品 / 下单接口 —— 本段只做明示价格的 UI，
+ *    购买入口灰着并写清"待后端补齐"，不假装能下单（等后端-shop 确认后再接）。
+ */
+@Composable
+internal fun PerCallSection(serverProducts: List<Api.ShopProduct> = emptyList()) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 服务端下发优先（kind=uses：1 元=50 次 / 2 元=100 次，100 次起卖）；
+    // 服务端没给时用产品口径兜底，价格仍明面展示，不写死购买。
+    val packs = if (serverProducts.isNotEmpty()) {
+        serverProducts.map { p ->
+            val cents = p.priceCents / 100.0
+            val usesLabel = if (p.uses > 0) "${p.uses} 次"
+                            else if (p.usesPerYuan > 0) "${p.usesPerYuan} 次 / 元" else p.title
+            Triple(p.id, "¥%.1f".format(java.util.Locale.US, cents), usesLabel)
+        }
+    } else {
+        listOf(
+            Triple("ds_use_100", "¥1.0", "100 次"),
+            Triple("ds_use_200", "¥2.0", "200 次")
+        )
+    }
+    Column(Modifier.padding(horizontal = V2.gutter)) {
+        Text(tr("DeepSeek 按次"), fontSize = V2.sub, fontWeight = FontWeight.SemiBold, color = ink)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            tr("默认 100 次起卖 · 即用即扣，所有价格明面展示"),
+            fontSize = V2.micro, color = ink.copy(alpha = 0.45f)
+        )
+        Spacer(Modifier.height(10.dp))
+
+        V2Card(pad = 0.dp) {
+            packs.forEachIndexed { i, (sku, price, times) ->
+                if (i > 0) HorizontalDivider(
+                    Modifier.padding(start = 78.dp), thickness = 0.5.dp,
+                    color = ink.copy(alpha = 0.07f)
+                )
+                Row(
+                    Modifier.fillMaxWidth()
+                        .tapable { payOrder(ctx, scope, sku) }
+                        .padding(horizontal = V2.gutter, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(times, fontSize = V2.body, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            tr("即用即扣 · 100 次起卖"),
+                            fontSize = V2.micro, color = ink.copy(alpha = 0.4f)
+                        )
+                    }
+                    Text(
+                        price, fontSize = V2.sub, fontWeight = FontWeight.SemiBold,
+                        color = pointAccentColor()
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        V2Card {
+            Text(tr("token 限量说明"), fontSize = V2.tiny, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(5.dp))
+            Text(
+                tr("每一轮对话最多计入 2000 token，超出部分按服务端实际口径另计；设置上限是为了防止次数包被少量高消耗对话吃穿。具体上限以服务端配置为准。"),
+                fontSize = V2.micro, color = ink.copy(alpha = 0.6f), lineHeight = 17.sp
+            )
+        }
+        if (serverProducts.isEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                tr("按次商品正从服务端拉取；暂时按产品口径明价展示，下单以服务端返回为准。"),
+                fontSize = V2.micro, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.clip(squircle(9.dp))
+                    .background(ink.copy(alpha = 0.05f))
+                    .padding(horizontal = 11.dp, vertical = 7.dp)
+            )
+        }
     }
 }
 

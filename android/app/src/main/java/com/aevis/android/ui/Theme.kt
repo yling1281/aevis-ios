@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
@@ -226,3 +227,38 @@ fun onColorFor(bg: Color): Color {
 /** `onColorFor` 返回的那两个前景色，单独拎出来方便比较。*/
 val OnLightBg = Color(0xFF1B1D22)
 val OnDarkBg = Color(0xFFF5F6F8)
+
+// ------------------------------------------------------------------ 磨砂玻璃（2026-11-24，对标 iOS `.glassSheetBackground()`）
+//
+// 用户：「所有半屏/底部弹窗背后要磨砂玻璃，别是透明的，明色偏白、暗色偏暗」。
+// 统一走语义色：从**当前主题**取明暗，不跟着背景亮度翻转（跟 AppSkin 同一口径）。
+// 半透明（alpha < 1）是为了透出底下那一层已模糊的 PageBackdrop —— 这样才是"磨砂"，
+// 而不是一块死白 / 死黑。alpha 给得高（0.9+）保证弹窗上的字始终有足够对比。
+
+/** 半窗 / 底部弹窗的容器色：明色偏白、暗色偏暗。*/
+@Composable
+fun frostedSheetColor(): Color {
+    val dark = isSystemInDarkTheme() ||
+        MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return if (dark) Color(0xFF1E1D24).copy(alpha = 0.94f)
+    else Color(0xFFFFFFFF).copy(alpha = 0.93f)
+}
+
+/** 弹窗背后的遮罩：磨砂感（半透明），同样跟主题明暗。*/
+@Composable
+fun frostedScrimColor(): Color {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return if (dark) Color(0xFF000000).copy(alpha = 0.42f)
+    else Color(0xFF1B1A24).copy(alpha = 0.28f)
+}
+
+/** 商城"墨点"卡片的语义色（2026-11-24，夜间修复）。
+ *  以前写死浅色 highlight，夜间一片糊；现在按主题给一支够亮的紫 + 相应的弱底。*/
+@Composable
+fun pointAccentColor(): Color {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return if (dark) Color(0xFFB9A9FF) else V2.accent
+}
+
+@Composable
+fun pointTintColor(): Color = pointAccentColor().copy(alpha = 0.14f)

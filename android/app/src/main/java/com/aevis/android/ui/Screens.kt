@@ -399,7 +399,7 @@ internal fun UpdateDialog(info: com.aevis.android.data.Api.UpdateInfo, onDismiss
         } else {
             { TextButton(onClick = onDismiss) { Text(tr("稍后")) } }
         },
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = frostedSheetColor()
     )
 }
 
@@ -434,8 +434,10 @@ fun Shell(onSignOut: () -> Unit) {
     var updateInfo by remember { mutableStateOf<com.aevis.android.data.Api.UpdateInfo?>(null) }
     LaunchedEffect(Unit) {
         val u = withContext(Dispatchers.IO) { runCatching { Api.checkUpdate() }.getOrNull() }
+        // 2026-11-24 强制更新门禁：force=true 必须真拦住 —— 绕过"今天已稍后"的抑制，
+        // 每次冷启动都弹，且不给孩子 dismiss 按钮（UpdateDialog 里已处理）。
         if (u != null && u.update &&
-            !com.aevis.android.core.ChatPrefs.updateSkippedToday(u.latest)
+            (u.force || !com.aevis.android.core.ChatPrefs.updateSkippedToday(u.latest))
         ) {
             updateInfo = u
         }
@@ -768,7 +770,9 @@ fun Shell(onSignOut: () -> Unit) {
                         BoxWithConstraints(
                             Modifier.fillMaxWidth().height(66.dp)
                                 .clip(squircle(33.dp))
-                                .background(dockSkin?.barFill ?: MaterialTheme.colorScheme.surface)
+                                // 2026-11-24「Dock 怪怪的」：非玻璃模式下也用语义磨砂底，
+                                // 跟弹窗/卡片一套质感，不再是突兀的一条实色胶囊。
+                                .background(dockSkin?.barFill ?: frostedSheetColor())
                                 .border(
                                     if (dockSkin == null) 0.5.dp else 1.dp,
                                     dockSkin?.cardStroke
@@ -778,28 +782,23 @@ fun Shell(onSignOut: () -> Unit) {
                                 .padding(horizontal = 8.dp)
                         ) {
                             val itemW: Dp = maxWidth / tabs.size
-                            // 指示块位置：低阻尼 spring = 会冲过头再回来，即「果冻」
+                            // 2026-11-24：指示器改"稳一点"的滑动 —— 原来的果冻
+                            // `scaleY = 2 - sx` 过冲太夸张（用户：「怪怪的」），
+                            // 保留一点弹性但不再纵向压扁变形。
                             val pos by androidx.compose.animation.core.animateFloatAsState(
                                 targetValue = idx.toFloat(),
                                 animationSpec = androidx.compose.animation.core.spring(
-                                    dampingRatio = 0.42f,
-                                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+                                    dampingRatio = 0.7f,
+                                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
                                 ),
                                 label = "dockPos"
                             )
-                            // 还在路上就拉长 —— 离目标越远拉得越长
-                            val lag = kotlin.math.abs(idx - pos).coerceAtMost(1f)
-                            val sx = 1f + lag * 0.16f
                             Box(
                                 Modifier
                                     .offset { androidx.compose.ui.unit.IntOffset((itemW * pos).roundToPx(), 0) }
                                     .width(itemW)
                                     .fillMaxHeight()
                                     .padding(horizontal = 5.dp, vertical = 9.dp)
-                                    .graphicsLayer {
-                                        scaleX = sx
-                                        scaleY = 2f - sx
-                                    }
                                     .clip(squircle(24.dp))
                                     .background(V2.accent.copy(alpha = 0.15f))
                             )
@@ -812,11 +811,12 @@ fun Shell(onSignOut: () -> Unit) {
                                     val on = idx == i
                                     val tint = if (on) V2.accent
                                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
-                                    // 选中放大，带一点点过冲
+                                    // 2026-11-24：选中放大收敛到 1.08、阻尼调高，
+                                    // 不再一跳一跳地过冲（"怪怪的"主要就来自这里）
                                     val iconScale by androidx.compose.animation.core.animateFloatAsState(
-                                        targetValue = if (on) 1.14f else 1f,
+                                        targetValue = if (on) 1.08f else 1f,
                                         animationSpec = androidx.compose.animation.core.spring(
-                                            dampingRatio = 0.38f,
+                                            dampingRatio = 0.65f,
                                             stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
                                         ),
                                         label = "iconScale"
@@ -999,8 +999,8 @@ fun Shell(onSignOut: () -> Unit) {
                 // 恢复中不允许滑掉 —— 不然用户会以为没在干活
                 if (restoreStage != 2) restoreStage = 0
             },
-            containerColor = dialogSurfaceColor(),
-            scrimColor = Color.Black.copy(alpha = 0.32f)
+            containerColor = frostedSheetColor(),
+            scrimColor = frostedScrimColor()
         ) {
             Column(
                 Modifier.fillMaxWidth()
@@ -1341,7 +1341,15 @@ private fun SubPageHost(
         route == "plaza" ->
             MallScreen(
                 onBack = back, onOpenPersona = { go("persona:" + it) },
+                // 2026-11-24「创建」入口：广场里能自己搓人设（本地创建）
+                onCreatePersona = { go("personanew") },
                 title = "广场", isPlaza = true
+            )
+        // 2026-11-24：首页用量卡「按次计费」直接落到商城的按次 tab（index 3）
+        route == "mallcall" ->
+            MallScreen(
+                onBack = back, onOpenPersona = { go("persona:" + it) },
+                title = "商城", isPlaza = false, startTab = 3
             )
         route == "group" -> ComingSoonScreen(tr("群聊"), onBack = back)
         // 2026-11-16：表情包不再是「即将上线」，接的是能看的那一版
@@ -1632,6 +1640,8 @@ private fun HomeTab(
     var points by remember { mutableIntStateOf(-1) }
     // 会员周额度（2026-11-16）：wallet 拿不到就是 null → 会员那块显示「—」，不显示 0
     var member by remember { mutableStateOf<Api.MemberQuota?>(null) }
+    // 2026-11-24 用量卡：本周额度百分比（真实来自 /v1/quota/state，取不到为 null → 显示「—」）
+    var quota by remember { mutableStateOf<Api.QuotaState?>(null) }
     var persons by remember { mutableStateOf<List<Api.Persona>>(emptyList()) }
     // 群聊入口的占位弹窗（2026-11-16，群号未给）
     var qqGroupAsk by remember { mutableStateOf(false) }
@@ -1641,6 +1651,8 @@ private fun HomeTab(
             me = m
             Api.saveMe(m)
         }
+        // 2026-11-24：额度百分比独立取，不串行等钱包（用户进主页第一眼要看到的是它）
+        quota = withContext(Dispatchers.IO) { runCatching { Api.quotaState() }.getOrNull() }
         // 钱包：一次拿墨点 + 会员周额度。拿不到就退回 balance() 只显示墨点
         val w = withContext(Dispatchers.IO) { runCatching { Api.wallet() }.getOrNull() }
         if (w != null) {
@@ -1713,112 +1725,156 @@ private fun HomeTab(
             }
         }
 
-        // ---------- 用量额度（2026-11-16 改成两个数并列）----------
-        // 用户：「主页的用量额度那里可以看墨点，还有整体一个会员额度」。
-        // 会员改成按周发额度之后，光看墨点不够 —— 左边墨点、右边本周会员额度，
-        // 左边点进「墨点」段、右边点进「会员」段。
+        // ---------- 用量额度卡（2026-11-24 对标参考图重做）----------
+        // 大数字 = 剩余百分比；横条满时蓝色渐变、用掉部分变灰、猫头随剩余量滑动；
+        // 免费用量条数 + 重置时间单独一行；墨点是独立单位，拆开显示、不参与本周额度。
         V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 4.dp)) {
+            // 标题行 + 两个入口胶囊
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("用量额度"), fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     color = ink.copy(alpha = 0.55f))
+                Icon(
+                    painterResource(R.drawable.ic_chevron), null,
+                    tint = ink.copy(alpha = 0.35f), modifier = Modifier.size(14.dp)
+                )
                 Spacer(Modifier.weight(1f))
-                Text(
-                    tr("充值"), fontSize = 11.5.sp, color = V2.accent,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                        .background(V2.accent.copy(alpha = 0.12f))
-                        .tapable { onOpenPage("mallpt") }
-                        .padding(horizontal = 9.dp, vertical = 4.dp)
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth()) {
-                // ---- 左：墨点 ----
-                Column(
-                    Modifier.weight(1f).tapable { onOpenPage("mallpt") }
-                        .padding(vertical = 2.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            if (points >= 0) "$points" else "—",
-                            fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                            color = ink, letterSpacing = (-1).sp
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            tr("墨点"), fontSize = 11.5.sp, color = ink.copy(alpha = 0.42f),
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        if (points >= 0) tr("约 %d 次对话", (points / 0.35f).toInt().coerceAtLeast(0))
-                        else tr("读取中…"),
-                        fontSize = 11.sp, color = ink.copy(alpha = 0.38f)
-                    )
-                }
-
-                // ---- 中间 1dp 竖分割线 ----
-                Box(
-                    Modifier.width(1.dp).height(46.dp)
-                        .background(ink.copy(alpha = 0.10f))
-                )
-
-                // ---- 右：会员周额度 ----
-                Column(
-                    Modifier.weight(1f)
+                // 用量提升：黄底猫头，跳会员 / 套餐页
+                Row(
+                    Modifier.clip(squircle(9.dp))
+                        .background(Color(0xFFFFD66B))
                         .tapable { onOpenPage("mall") }
-                        .padding(start = 14.dp, top = 2.dp, bottom = 2.dp)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val mq = member
-                    if (mq != null && mq.active) {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                "${mq.weekLeft}",
-                                fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                                color = ink, letterSpacing = (-0.5).sp
-                            )
-                            Spacer(Modifier.width(3.dp))
-                            Text(
-                                "/ ${mq.weekTotal}", fontSize = 12.sp,
-                                color = ink.copy(alpha = 0.42f),
-                                modifier = Modifier.padding(bottom = 5.dp)
-                            )
-                        }
-                        Spacer(Modifier.height(3.dp))
+                    Icon(
+                        painterResource(R.drawable.ic_cat_line), null,
+                        tint = Color(0xFF6B4E00), modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(tr("用量提升"), fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3600))
+                }
+                Spacer(Modifier.width(6.dp))
+                // 按次计费：黄底 + NEW 红标，跳商城「按次」tab
+                Box(
+                    Modifier.clip(squircle(9.dp))
+                        .background(Color(0xFFFFD66B))
+                        .tapable { onOpenPage("mallcall") }
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(tr("按次计费"), fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3600))
+                        Spacer(Modifier.width(4.dp))
                         Text(
-                            tr("会员额度 · 本周"), fontSize = 11.sp,
-                            color = V2.accent.copy(alpha = 0.8f)
-                        )
-                    } else {
-                        Text(
-                            // 拿不到 wallet（或未开通）显示「未开通」，**不显示 0** ——
-                            // 0 会让人以为"额度用完了"，其实是没开会员
-                            if (mq == null) "—" else tr("未开通"),
-                            fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                            color = ink.copy(alpha = 0.35f)
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            tr("会员额度 · 去看看"), fontSize = 11.sp, color = V2.accent
+                            "NEW", fontSize = 7.5.sp, fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.clip(squircle(4.dp))
+                                .background(Color(0xFFE5484D))
+                                .padding(horizontal = 3.dp, vertical = 1.dp)
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            val pct = if (points <= 0) 0.02f else (points / 5000f).coerceIn(0.02f, 1f)
-            Box(
-                Modifier.fillMaxWidth().height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(ink.copy(alpha = 0.07f))
+            Spacer(Modifier.height(12.dp))
+
+            // 大数字：剩余百分比（真实来自 quota；取不到显示「—」）
+            val q = quota
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Text(
+                    if (q != null) "${q.leftPct}%" else "—",
+                    fontSize = 40.sp, fontWeight = FontWeight.Bold,
+                    color = ink, letterSpacing = (-2).sp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (q != null) tr("已用 %d%%", q.percent) else tr("额度暂时取不到"),
+                    fontSize = 11.5.sp, color = ink.copy(alpha = 0.45f),
+                    modifier = Modifier.padding(bottom = 7.dp)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+
+            // 横条：满（剩余 100%）蓝色渐变满色；已用部分变灰；猫头末端随剩余量滑动
+            val leftFrac = if (q != null) (q.leftPct.coerceIn(0, 100)) / 100f else 1f
+            BoxWithConstraints(
+                Modifier.fillMaxWidth().height(12.dp)
+                    .clip(squircle(7.dp))
+                    .background(ink.copy(alpha = 0.10f))
             ) {
+                // 用掉的部分（右侧）灰色：整条是灰底，左侧覆盖蓝色渐变 = 剩余
                 Box(
-                    Modifier.fillMaxWidth(pct).fillMaxHeight()
-                        .clip(RoundedCornerShape(3.dp))
+                    Modifier.fillMaxWidth(leftFrac).fillMaxHeight()
+                        .clip(squircle(7.dp))
                         .background(
                             androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                listOf(Color(0xFFFFD66B), V2.accent)
+                                listOf(Color(0xFF6FA8E8), Color(0xFF9B8AF0))
                             )
                         )
+                )
+                // 猫头终点：随剩余量滑动
+                Icon(
+                    painterResource(R.drawable.ic_cat_line), null,
+                    tint = Color.White,
+                    modifier = Modifier
+                        .offset(x = with(LocalDensity.current) {
+                            (maxWidth * leftFrac).toPx().toDp() - 14.dp
+                        }.coerceAtLeast(0.dp))
+                        .size(14.dp)
+                        .align(Alignment.CenterStart)
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+
+            // 底部：左 = 本周剩余额度折成的条数，右 = 重置时间（取不到不显示）
+            // 口径照 iOS：① quota.est_messages（服务端，会员/免费都对）→
+            //            ② 免费基线 15 × 剩余百分比 → ③ 断网也无基线时显示「—」
+            val freeBaseline = 15
+            val leftMessages = when {
+                q != null && q.estMessages > 0 -> q.estMessages
+                q != null -> (freeBaseline * q.leftPct / 100.0).let { n ->
+                    if (n > 0) kotlin.math.round(n).toInt() else 0
+                }
+                else -> -1   // 没拿到额度，不写死条数
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (leftMessages >= 0) tr("您大约还有 %d 条消息额度", leftMessages)
+                    else tr("您大约还有 — 条消息额度"),
+                    fontSize = V2.tiny, color = ink.copy(alpha = 0.62f)
+                )
+                Spacer(Modifier.weight(1f))
+                val reset = q?.resetAt.orEmpty()
+                if (reset.isNotEmpty()) {
+                    Text(
+                        tr("%s 重置", reset),
+                        fontSize = V2.micro, color = ink.copy(alpha = 0.42f)
+                    )
+                }
+            }
+
+            // 墨点：独立单位，拆开显示，不参与本周额度计算
+            HorizontalDivider(
+                Modifier.padding(vertical = 10.dp),
+                thickness = 0.5.dp, color = ink.copy(alpha = 0.08f)
+            )
+            Row(
+                Modifier.fillMaxWidth().tapable { onOpenPage("mallpt") },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    tr("墨点余额"), fontSize = V2.tiny, color = ink.copy(alpha = 0.55f)
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (points >= 0) "$points" else "—",
+                    fontSize = V2.sub, fontWeight = FontWeight.SemiBold,
+                    color = pointAccentColor()
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    painterResource(R.drawable.ic_chevron_right), null,
+                    tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(14.dp)
                 )
             }
         }
@@ -2220,8 +2276,8 @@ private fun ChatTab(
             val isGroup = menuRow.group != null
             ModalBottomSheet(
                 onDismissRequest = { askDelete = null },
-                containerColor = MaterialTheme.colorScheme.surface,
-                scrimColor = Color.Black.copy(alpha = 0.32f)
+                containerColor = frostedSheetColor(),
+                scrimColor = frostedScrimColor()
             ) {
                 Column(
                     Modifier.fillMaxWidth()

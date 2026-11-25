@@ -83,8 +83,8 @@ fun RecoverCodeSheet(
 
     ModalBottomSheet(
         onDismissRequest = { if (!working) onDismiss() },
-        containerColor = dialogSurfaceColor(),
-        scrimColor = Color.Black.copy(alpha = 0.32f)
+        containerColor = frostedSheetColor(),
+        scrimColor = frostedScrimColor()
     ) {
         Column(
             Modifier.fillMaxWidth()

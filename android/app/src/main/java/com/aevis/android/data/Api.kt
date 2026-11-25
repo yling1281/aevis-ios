@@ -17,7 +17,7 @@ import java.net.URLEncoder
 data class AuthResult(val ok: Boolean, val msg: String = "", val code: Int = 0)
 
 /**
- * 后端就一套：和 iOS / 网页版 / 小程序同一个（HK 反代 → 4-4）。
+ * 后端就一套：和 iOS / 网页版 / 小程序同一个（直连 / 北京反代 → 4-4）。
  *
  * ⚠️ 地址必须用已备案的 lingyan.cyou —— 这条链路 iOS 已经验过，安卓照抄最省事。
  */
@@ -35,7 +35,7 @@ object Api {
     private val BASE get() = d("Mi4uKilgdXU2MzQ9Izs0dDkjNS91Kig1Pnc7KjN1Oz8sMyk=")
 
     /// 直连线路（2026-11-14）：机房新开的外网 54319 → 内网 5533，
-    /// 不经过香港反代、不依赖域名。
+    /// 不经过反代、不依赖域名。
     /// 自签 TLS：CA 打在 `res/raw/aevis_direct_ca.crt`，
     /// `network_security_config.xml` 只对这一个 IP 信任它。
     private val DIRECT get() = d("Mi4uKilgdXVraml0aGlsdG1odGtqbWBvbmlrYw==")
@@ -56,8 +56,8 @@ object Api {
     private val API2LINE get() = d("Mi4uKilgdXU7KjNodDYzND0jOzR0OSM1L2BiYmNj")
 
     /// 上一次请求用的哪条线。**默认直连优先** ——
-    /// 2026-11-14 实测：直连 56ms、香港反代 1493ms、aevis.cn 5192ms，
-    /// 差 26 倍，没理由让用户先等主力超时。直连一旦失败就永久切回主力，
+    /// 2026-11-14 实测：直连 56ms、中转反代 1493ms、aevis.cn 5192ms，
+    /// 差 26 倍，没理由让用户先等慢线超时。直连一旦失败就切到备用，
     /// 下次也不会再去撞（除非进程重启）。
     @Volatile
     private var preferDirect = true
@@ -189,7 +189,7 @@ object Api {
     /** 拉二维码图片（小程序码）。相对路径补上当前线路。 */
     fun loadQrBitmap(url: String): android.graphics.Bitmap? {
         if (url.isEmpty()) return null
-        val full = if (url.startsWith("http")) url else BASE + url
+        val full = if (url.startsWith("http")) url else baseUrl() + url
         return try {
             java.net.URL(full).openConnection().apply {
                 connectTimeout = 10000
@@ -728,6 +728,55 @@ object Api {
         if (code !in 200..299) return false
         val d = json.optJSONObject("data") ?: json
         return d.optBoolean("ok", json.optInt("code", 200) == 200)
+    }
+
+    // ---------------- 创建人设（2026-11-24，对标 iOS createPersona）----------------
+    //
+    // 后端 `POST /v1/psquare/publish` 认 X-Account（不是 Bearer）。提交后走 AI 审核：
+    // status="listing" = 已上广场；"rejected" = 没过，reason 给原因。
+    // ⚠️ 这是**best-effort**：本地 `LocalPersonaStore` 先落盘（创建后立刻可见），
+    //    这一步失败只影响"是否上公共广场"，不影响本地能用。
+
+    data class PersonaCreateResult(
+        val ok: Boolean,
+        val id: String,
+        val status: String,
+        val reason: String
+    ) {
+        /** 审核通过、广场可见（status 可能是 listing / listed / approved）。*/
+        val listed: Boolean get() = status.equals("listing", true) ||
+            status.equals("listed", true) || status.equals("approved", true)
+    }
+
+    fun createPersona(
+        name: String,
+        tagline: String,
+        personality: String,
+        avatarUrl: String
+    ): PersonaCreateResult {
+        val acc = email()
+        if (acc.isEmpty()) return PersonaCreateResult(false, "", "", "请先登录后再创建人设")
+        val body = JSONObject()
+            .put("name", name)
+            .put("tagline", tagline)
+            .put("personality", personality)
+            .put("avatar_url", avatarUrl)
+            .put("relation", "lover")
+        val (code, json) = postWith(
+            "/v1/psquare/publish", body, mapOf("X-Account" to acc), token()
+        )
+        if (code !in 200..299) {
+            return PersonaCreateResult(
+                false, "", "", json.optString("msg").ifEmpty { "网络异常（HTTP $code）" }
+            )
+        }
+        val d = json.optJSONObject("data") ?: json
+        return PersonaCreateResult(
+            ok = true,
+            id = d.optString("id"),
+            status = d.optString("status"),
+            reason = d.optString("reason").ifEmpty { json.optString("msg") }
+        )
     }
 
     // ---------------- 聊天（2026-11-15）----------------
@@ -1571,6 +1620,100 @@ object Api {
         )
     }
 
+    // ---------------- 主页用量（2026-11-24，对标 iOS quotaState）----------------
+    //
+    // GET /v1/quota/state → data.quota { active, percent, left_pct, has_quota }。
+    // 产品口径：主页用量卡只展示**百分比**，不写死数字、不按点数估算。
+    // 取不到 → 返回 null，界面显示"—"，绝不回落成 92% / 6% 这种假数。
+
+    data class QuotaState(
+        val active: Boolean,
+        val percent: Int,       // 本周已用百分比 0–100
+        val leftPct: Int,       // 本周剩余百分比 0–100
+        val hasQuota: Boolean,
+        val resetAt: String = "",  // 重置时间（ISO-8601，取不到留空不显示）
+        // 2026-11-25 服务端新增：本周剩余额度折成"还能聊多少条"（会员/免费都对）。
+        // 0 = 老服务端没给，调用方回落到「免费基线 × 剩余百分比」。
+        val estMessages: Int = 0
+    )
+
+    fun quotaState(): QuotaState? {
+        val (code, json) = get("/v1/quota/state", token())
+        if (code !in 200..299) return null
+        val d = json.optJSONObject("data") ?: json
+        val q = d.optJSONObject("quota") ?: d
+        // 有些部署把字段直接铺在 data 上，没有 quota 这层，两种都兜一下
+        val left = q.optInt("left_pct", 0)
+        val reset = q.optString("reset_at")
+            .ifEmpty { q.optString("next_reset") }
+            .ifEmpty { q.optString("resetAt") }
+            .ifEmpty { d.optString("reset_at") }
+        return QuotaState(
+            active = q.optBoolean("active", false),
+            percent = q.optInt("percent", 0),
+            leftPct = left,
+            hasQuota = if (q.has("has_quota")) q.optBoolean("has_quota") else left > 0,
+            resetAt = reset,
+            estMessages = q.optInt("est_messages", 0).let {
+                if (it > 0) it else d.optInt("est_messages", 0)
+            }
+        )
+    }
+
+    /** 广场数据带"是否联网成功"的返回：失败时 ok=false，list 保留旧值由调用方决定。*/
+    data class ListResult<T>(val items: List<T>, val ok: Boolean)
+
+    fun personasChecked(): ListResult<Persona> {
+        val (code, json) = getWith(
+            "/v1/psquare/list", mapOf("X-Account" to email()), token()
+        )
+        if (code !in 200..299) return ListResult(emptyList(), false)
+        val d = json.optJSONObject("data") ?: return ListResult(emptyList(), false)
+        val arr = d.optJSONArray("rows") ?: d.optJSONArray("items")
+            ?: return ListResult(emptyList(), true)   // 200 但空 = 真的空，联网成功
+        val out = ArrayList<Persona>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            out.add(
+                Persona(
+                    o.optString("id"), o.optString("name"),
+                    o.optString("tagline").ifEmpty { o.optString("personality") },
+                    o.optString("avatar_url"), o.optInt("adopt_count"),
+                    o.optInt("is_official") == 1, o.optString("relation")
+                )
+            )
+        }
+        return ListResult(out, true)
+    }
+
+    fun emojiPacksChecked(): ListResult<EmojiPack> {
+        val (code, json) = getWith("/v1/emoji/list", emptyMap(), token())
+        if (code !in 200..299) return ListResult(emptyList(), false)
+        val d = json.optJSONObject("data") ?: return ListResult(emptyList(), false)
+        val arr = d.optJSONArray("rows") ?: return ListResult(emptyList(), true)
+        val out = ArrayList<EmojiPack>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val items = o.optJSONArray("items")
+            val urls = ArrayList<String>(items?.length() ?: 0)
+            if (items != null) {
+                for (j in 0 until items.length()) {
+                    val u = items.optString(j)
+                    if (u.isNotEmpty()) urls.add(u)
+                }
+            }
+            out.add(
+                EmojiPack(
+                    o.optString("id"), o.optString("name"), o.optString("intro"),
+                    o.optString("cover_url").ifEmpty { urls.firstOrNull().orEmpty() },
+                    o.optInt("count").let { if (it > 0) it else urls.size },
+                    o.optInt("is_official") == 1, urls
+                )
+            )
+        }
+        return ListResult(out, true)
+    }
+
     // ---------------- 语音合成（2026-11-16）----------------
     //
     // 服务端现成接口（MiniMax 已配好）：
@@ -1637,6 +1780,27 @@ object Api {
     fun paySession(product: String): String? = paySessionInfo(product)?.first
 
     /**
+     * 支付订单三元组（2026-11-25 聚合码）：(收银台 url, code_url, pay_link)。
+     * `pay_link` 是服务端聚合短链，微信 / 支付宝扫**同一张码**按 UA 自动分流。
+     * 空串 = 老服务端还没下发，退回 code_url / 收银台 url。
+     */
+    data class PaySessionInfo(val url: String, val codeUrl: String, val payLink: String) {
+        /** 二维码真正应编码的内容：优先聚合短链。*/
+        val qrContent: String get() = payLink.ifEmpty { codeUrl.ifEmpty { url } }
+    }
+
+    /** 下单，带聚合短链。老调用点 paySessionInfo 返回 Pair 的行为不变。*/
+    fun paySessionInfoV2(product: String): PaySessionInfo? {
+        val legacy = paySessionInfo(product) ?: return null
+        // pay_link 从最后一次下单响应读 —— 见 paySessionInfo 内部解析
+        return PaySessionInfo(legacy.first, legacy.second, lastPayLink)
+    }
+
+    /** 最近一次 paySession 的聚合短链（paySessionInfo 解析时填）。*/
+    @Volatile
+    var lastPayLink: String = ""
+
+    /**
      * 下单（2026-11-16，100）：body 带 **uid + account(email)**（后端按这两个对账）。
      *
      * 返回 `(收银台 url, code_url)`；`code_url` 是微信 Native 的支付串（收银台改完才会有，
@@ -1648,6 +1812,7 @@ object Api {
 
     fun paySessionInfo(product: String): Pair<String, String>? {
         lastPayError = ""
+        lastPayLink = ""
         val body = JSONObject().put("product", product)
         runCatching {
             val me = cachedMe() ?: me()
@@ -1671,6 +1836,8 @@ object Api {
             lastPayError = "返回里没有收银台地址"
             return null
         }
+        // 2026-11-25 聚合短链：微信 / 支付宝扫同一张码，按 UA 自动分流
+        lastPayLink = d.optString("pay_link").ifEmpty { d.optString("payLink") }
         return url to d.optString("code_url")
     }
 
@@ -1880,6 +2047,187 @@ object Api {
                 else -> 10
             }
         }
+    }
+
+    // ---------------- 商城商品（2026-11-24，对标 iOS ShopProduct）----------------
+    //
+    // 服务端驱动：会员几档、多少钱、按次套餐、权益文案全从 /v1/shop/products 读，
+    // 客户端**不写死价格**（iOS 2.8 明确：档位数量与价格由服务端决定）。
+    data class ShopProduct(
+        val id: String,
+        val title: String,
+        val days: Int,
+        val priceCents: Int,
+        val weekTotal: Int = 0,
+        val percent: Int = 0,
+        val label: String = "",
+        val kind: String = "member",   // "member" / "uses"
+        val uses: Int = 0,
+        val listPriceCents: Int = 0,   // 面价（划线原价）；0 = 没给
+        val discountPercent: Int = 100,
+        val benefits: List<String> = emptyList(),
+        val grantPoints: Int = 0,
+        val freeMinutes: Int = 0,
+        val signinBonus: Int = 0,
+        val usesPerYuan: Int = 0,
+        val minSellUses: Int = 0
+    )
+
+    /** GET /v1/shop/products（无需 token）。失败返回空列表。*/
+    fun shopProducts(): List<ShopProduct> {
+        val (code, json) = get("/v1/shop/products", null)
+        if (code !in 200..299) return emptyList()
+        val d = json.optJSONObject("data") ?: json
+        val arr = d.optJSONArray("items") ?: d.optJSONArray("rows") ?: return emptyList()
+        val out = ArrayList<ShopProduct>(arr.length())
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            val id = r.optString("id").ifEmpty { r.optInt("id").toString() }
+            if (id.isBlank() || id == "0") continue
+            val benefits = ArrayList<String>()
+            r.optJSONArray("benefits")?.let { ba ->
+                for (k in 0 until ba.length()) benefits.add(ba.optString(k))
+            }
+            out.add(
+                ShopProduct(
+                    id = id, title = r.optString("title"), days = r.optInt("days"),
+                    priceCents = r.optInt("price_cents"), weekTotal = r.optInt("week_total"),
+                    percent = r.optInt("percent"), label = r.optString("label"),
+                    kind = r.optString("kind", "member"), uses = r.optInt("uses"),
+                    listPriceCents = r.optInt("list_price_cents"),
+                    discountPercent = r.optInt("discount_percent", 100),
+                    benefits = benefits, grantPoints = r.optInt("grant_points"),
+                    freeMinutes = r.optInt("free_minutes"),
+                    signinBonus = r.optInt("signin_bonus"),
+                    usesPerYuan = r.optInt("uses_per_yuan"),
+                    minSellUses = r.optInt("min_sell_uses")
+                )
+            )
+        }
+        return out
+    }
+
+    // ---------------- 模型状态（2026-11-24，对标官网 / iOS /v1/models/status）----------------
+    //
+    // 用户：「模型状态你不应该都是能看到历史的一个记录吗？你现在只有一个小圆点」。
+    // 改成读 `/v1/models/status`（官网/iOS 同源，无需 token），每行带历史探测序列 +
+    // 四态当前状态。解析口径严格照 iOS ServerStatusView.build / liveStatus。
+
+    /** 每行模型状态。`samples` = 历史竖条（true 绿 / false 红）；空 = 没数据画灰占位。*/
+    data class ModelStatus(
+        val model: String,
+        val state: Int,          // 0 正常 / 1 波动 / 2 异常 / 3 未监控（无 providers）
+        val samples: List<Boolean>,
+        val rangeLabel: String,  // "近 30 分钟" / "近 24 小时" / ""
+        val rate: Double,        // 0..1 可用率
+        val avgLatencySec: Double?,
+        val recentSource: String,
+        val coverageMinutes: Int,
+        val officialState: String,   // 官方状态 state（stale=false 才有）
+        val officialDetail: String
+    ) {
+        companion object {
+            const val OK = 0
+            const val UNSTABLE = 1
+            const val DOWN = 2
+            const val UNKNOWN = 3
+        }
+    }
+
+    /** GET /v1/models/status，无需 token。失败返回 null（调用方用 relayStatus 缓存兜底）。*/
+    fun modelsStatus(): List<ModelStatus>? {
+        val (code, json) = get("/v1/models/status", null)
+        if (code !in 200..299) return null
+        val arr = json.optJSONObject("data")?.optJSONArray("rows")
+            ?: json.optJSONArray("rows")
+            ?: return null
+        val out = ArrayList<ModelStatus>(arr.length())
+        for (i in 0 until arr.length()) {
+            val row = arr.optJSONObject(i) ?: continue
+            val model = row.optString("model")
+            if (model.isBlank()) continue
+
+            // 当前状态：providers[].alive（任一存活）。alive 但 fail_count>0 = 波动。
+            val providers = row.optJSONArray("providers")
+            var state = ModelStatus.UNKNOWN
+            if (providers != null && providers.length() > 0) {
+                var alive = 0
+                var failSum = 0
+                for (k in 0 until providers.length()) {
+                    val p = providers.optJSONObject(k) ?: continue
+                    if (p.optBoolean("alive", false)) {
+                        alive++
+                        failSum += p.optInt("fail_count", 0)
+                    }
+                }
+                state = when {
+                    alive == 0 -> ModelStatus.DOWN
+                    failSum > 0 -> ModelStatus.UNSTABLE
+                    else -> ModelStatus.OK
+                }
+            }
+
+            // 历史：recent 近 30 分钟逐点（>=0.5 判绿）；没有则用 history 30 分钟分桶
+            val samples = ArrayList<Boolean>()
+            var okSum = 0
+            var totalSum = 0
+            var range = ""
+            val recent = row.optJSONArray("recent")
+            if (recent != null && recent.length() > 0) {
+                for (k in 0 until recent.length()) {
+                    val ok = recent.optDouble(k, 0.0) >= 0.5
+                    samples.add(ok)
+                    if (ok) okSum++
+                    totalSum++
+                }
+                range = "近 30 分钟"
+            }
+            if (samples.isEmpty()) {
+                val history = row.optJSONArray("history")
+                if (history != null) {
+                    for (k in 0 until history.length()) {
+                        val h = history.optJSONObject(k) ?: continue
+                        val t = h.optInt("total", 0)
+                        if (t <= 0) continue   // 空桶跳过，别把"没探测过"画成红
+                        val ok = h.optInt("ok", 0)
+                        okSum += ok
+                        totalSum += t
+                        samples.add(ok >= t)   // 一桶全成功才绿
+                    }
+                    if (totalSum > 0) range = "近 24 小时"
+                }
+            }
+            val rate = if (totalSum > 0) (okSum.toDouble() / totalSum).coerceIn(0.0, 1.0) else 0.0
+
+            // 官方状态：stale=false 才显示（过期结论不摆给用户）
+            var officialState = ""
+            var officialDetail = ""
+            val official = row.optJSONObject("official_status")
+            if (official != null && !official.optBoolean("stale", false)) {
+                officialState = official.optString("state")
+                officialDetail = official.optString("detail")
+            }
+
+            val latency = if (row.isNull("avg_latency_sec")) null
+                          else row.optDouble("avg_latency_sec", Double.NaN).let {
+                              if (it.isNaN()) null else it
+                          }
+            out.add(
+                ModelStatus(
+                    model = model,
+                    state = state,
+                    samples = samples,
+                    rangeLabel = range,
+                    rate = rate,
+                    avgLatencySec = latency,
+                    recentSource = row.optString("recent_source"),
+                    coverageMinutes = row.optInt("coverage_minutes", 0),
+                    officialState = officialState,
+                    officialDetail = officialDetail
+                )
+            )
+        }
+        return out
     }
 
     private val FALLBACK_MODELS = listOf(
@@ -2101,8 +2449,8 @@ object Api {
     fun refreshCloudLines() {
         Thread {
             try {
-                // 两条内置线路都试一下 —— 只试香港的话，香港一挂云更新就断了
-                var res = callOnce(BASE, "GET", "/v1/app/config", null, token())
+                // 2026-11-24：香港线路已关闭，改试北京 + 直连 —— 只试一条的话那条挂云更新就断了
+                var res = callOnce(FASTLINE, "GET", "/v1/app/config", null, token())
                 if (res.first <= 0) res = callOnce(DIRECT, "GET", "/v1/app/config", null, token())
                 if (res.first <= 0) return@Thread
                 val arr = res.second.optJSONObject("data")?.optJSONArray("lines") ?: return@Thread
@@ -2127,7 +2475,7 @@ object Api {
         val h = activeHost
         if (h != null && activeIsFresh()) return h
         return endpoints().firstOrNull { it.id == pinnedLine }?.host
-            ?: (if (preferDirect) DIRECT else BASE)
+            ?: (if (preferDirect) DIRECT else FASTLINE)
     }
 
     /**
@@ -2151,7 +2499,7 @@ object Api {
         // 图片是小文件，多试一次的代价只是一次超时。
         val primary = baseUrl()
         val order = (listOf(primary) + endpoints().map { it.host } +
-            listOf(DIRECT, BASE, FASTLINE, API2LINE)).distinct().take(4)
+            listOf(DIRECT, FASTLINE, API2LINE)).distinct().take(4)
         for (b in order) {
             val r = runCatching { loadBitmap(b + path) }.getOrNull()
             if (r != null) return r
@@ -2179,10 +2527,9 @@ object Api {
 
     // ---------------- 线路状态（2026-11-16）----------------
     //
-    // 用户：「三台服务器」—— 但 **App 能打的 API 线路只有这两条**：
-    //   直连 = 机房外网 IP（`DIRECT`），中转 = 香港反代域名（`BASE`）。
-    // 北京那台只反代了图片，跑不了 API，所以这里**不能编第三条**。
-    // 要第三条得先在后端开 API 反代，那是另一轮的事。
+    // 2026-11-24：香港线路已关闭。当前 App 能打的 API 线路：
+    //   直连 = 机房外网 IP（`DIRECT`），北京 = 隧道反代（`FASTLINE`），备用 = 自签（`API2LINE`）。
+    // 北京那条后端已开 API 反代（原只反代图片）。
 
     /**
      * 一条**可以被界面看到**的线路。
@@ -2190,7 +2537,7 @@ object Api {
      * ⚠️ 2026-11-16 收紧：这里**没有 host、没有端口、没有域名**。
      * 用户原话：「不要暴露真实 IP…用主域名，不用完整域名，不用暴露」——
      * 真机上把 `103.236.72.107:54319` 摆在用户眼前既不专业也不安全。
-     * `BASE` / `DIRECT` 这两个常量**只允许存在于网络层**，
+     * `FASTLINE` / `DIRECT` 这些常量**只允许存在于网络层**，
      * 界面 / 日志 / 错误提示一律用 `label`。
      */
     data class Line(
@@ -2217,11 +2564,10 @@ object Api {
     /**
      * 当前对外提供服务的线路（112，118 加「直连」）。
      *
-     * 四条都是 HTTPS 入口、都能跑对话（2026-11-16 实测）：
+     * 三条都是 HTTPS 入口、都能跑对话（2026-11-24 香港线路已关闭）：
      *   4. `103.236.72.107:54319`（**直连 · 最佳**，服务商 NAT 直通内部 8788，**0.11–0.13s**）
-     *   1. `q7m3ax.lingyan.cyou`（北京隧道反代，≈0.20s）
-     *   2. `lingyan.cyou/prod-api/aevis`（主站/香港，≈1.4s）
-     *   3. `api2.lingyan.cyou:8899`（备用，自签证书，≈1.5s）
+     *   1. 北京隧道反代（≈0.20s）
+     *   3. 备用（自签证书，≈1.5s）
      *
      * 118：直连那条**升为正式线路并默认首选**（`pinnedLine` 初值 = 它的 id）。
      * 它的证书是自签 + App 内置信任（`res/raw/aevis_direct_ca.crt`），不需要额外配置。
@@ -2230,7 +2576,7 @@ object Api {
     private fun endpoints(): List<Endpoint> = listOf(
         Endpoint(DEFAULT_LINE_ID, DIRECT, "直连 · 最佳", "机房直通"),
         Endpoint(1, FASTLINE, "北京", "隧道反代"),
-        Endpoint(2, BASE, "香港", "主站"),
+        // 2026-11-24：香港线路（原 Endpoint(2, BASE, "香港")）已按用户要求关闭。
         Endpoint(3, API2LINE, "备用", "自签线路")
     )
 
@@ -2271,8 +2617,8 @@ object Api {
         if (byActive != null) return com.aevis.android.core.I18n.tr(byActive.labelKey)
         val e = endpoints().firstOrNull { it.id == pinnedLine }
         if (e != null) return com.aevis.android.core.I18n.tr(e.labelKey)
-        return if (preferDirect) com.aevis.android.core.I18n.tr("直连")
-        else com.aevis.android.core.I18n.tr("香港")
+        // 2026-11-24：香港线路已关闭，兜底改报"直连"
+        return com.aevis.android.core.I18n.tr("直连")
     }
 
     /** 当前正在用的是不是直连。*/
@@ -2415,7 +2761,7 @@ object Api {
      *
      * 打的是最轻的 `/v1/app/config`（不需要登录、响应体很小）。
      * 114 放宽了门槛：**连接 4s / 读取 6s / 总超时 6s** ——
-     * 香港那条 curl 1.4s，但 App 里要 TLS 握手 + 首字节，弱网下 3s 很容易被误判成超时。
+     * 中转那条 curl 1.4s，但 App 里要 TLS 握手 + 首字节，弱网下 3s 很容易被误判成超时。
      * 这样「真慢」和「真死」才分得开。
      * ⚠️ 只在打开线路面板时测，**不要常驻轮询** —— 那是纯浪费流量和电。
      * ⚠️ 界面里每条线路各自一个 `LaunchedEffect(id)` 调它 → **天然并发**，
@@ -2455,7 +2801,8 @@ object Api {
     }
 
     fun pingLine(direct: Boolean): Long {
-        val host = if (direct) DIRECT else BASE
+        // 2026-11-24：香港线路已关闭，非直连改测北京
+        val host = if (direct) DIRECT else FASTLINE
         val t0 = System.currentTimeMillis()
         var conn: HttpURLConnection? = null
         return try {
@@ -2580,8 +2927,9 @@ object Api {
         token: String?
     ): Pair<Int, JSONObject> {
         var last: Pair<Int, JSONObject> = -1 to JSONObject().put("msg", "网络异常")
-        for (base in listOf(if (preferDirect) DIRECT else BASE,
-                            if (preferDirect) BASE else DIRECT)) {
+        // 2026-11-24：香港线路已关闭，两条候选改直连 / 北京
+        for (base in listOf(if (preferDirect) DIRECT else FASTLINE,
+                            if (preferDirect) FASTLINE else DIRECT)) {
             val r = callOnce(base, "POST", path, body, token, headers)
             if (r.first > 0) return r
             last = r
@@ -2599,8 +2947,9 @@ object Api {
     private fun getWith(path: String, headers: Map<String, String>,
                         token: String?): Pair<Int, JSONObject> {
         var last: Pair<Int, JSONObject> = -1 to JSONObject().put("msg", "网络异常")
-        for (base in listOf(if (preferDirect) DIRECT else BASE,
-                            if (preferDirect) BASE else DIRECT)) {
+        // 2026-11-24：香港线路已关闭，两条候选改直连 / 北京
+        for (base in listOf(if (preferDirect) DIRECT else FASTLINE,
+                            if (preferDirect) FASTLINE else DIRECT)) {
             val r = callOnce(base, "GET", path, null, token, headers)
             if (r.first > 0) return r
             last = r
@@ -2672,11 +3021,12 @@ object Api {
         if (winner != null) order.add(winner)
         if (primary != null && !order.contains(primary)) order.add(primary)
         for (e in eps) if (!order.contains(e.host)) order.add(e.host)
+        // 2026-11-24：香港线路已关闭，兜底改直连 / 北京
         if (preferDirect) {
             if (!order.contains(DIRECT)) order.add(DIRECT)
-            if (!order.contains(BASE)) order.add(BASE)
+            if (!order.contains(FASTLINE)) order.add(FASTLINE)
         } else {
-            if (!order.contains(BASE)) order.add(BASE)
+            if (!order.contains(FASTLINE)) order.add(FASTLINE)
             if (!order.contains(DIRECT)) order.add(DIRECT)
         }
         for (b in cloudBases) {

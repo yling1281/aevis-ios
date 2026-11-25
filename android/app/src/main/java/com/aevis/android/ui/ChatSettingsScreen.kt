@@ -436,8 +436,8 @@ private fun ColorSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        scrimColor = Color.Black.copy(alpha = 0.32f)
+        containerColor = frostedSheetColor(),
+        scrimColor = frostedScrimColor()
     ) {
         Column(
             Modifier.fillMaxWidth()

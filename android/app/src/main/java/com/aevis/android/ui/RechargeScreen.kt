@@ -166,24 +166,29 @@ internal fun PaySheetHost() {
     var phase by remember { mutableStateOf(0) }   // 0 创建中 / 1 就绪 / 2 失败
     var payUrl by remember { mutableStateOf("") }
     var codeUrl by remember { mutableStateOf("") }
+    // 2026-11-25 聚合短链：微信 / 支付宝扫同一张码自动分流
+    var payLink by remember { mutableStateOf("") }
     var err by remember { mutableStateOf("") }
 
     LaunchedEffect(sku) {
         phase = 0
-        val r = withContext(Dispatchers.IO) { runCatching { Api.paySessionInfo(sku) }.getOrNull() }
+        val r = withContext(Dispatchers.IO) { runCatching { Api.paySessionInfoV2(sku) }.getOrNull() }
         if (r == null) {
             phase = 2
             err = Api.lastPayError.ifBlank { "下单失败" }
         } else {
-            payUrl = r.first
-            codeUrl = r.second
+            payUrl = r.url
+            codeUrl = r.codeUrl
+            payLink = r.payLink
             phase = 1
         }
     }
 
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = { PayState.clear() },
-        containerColor = dialogSurfaceColor()
+        // 2026-11-24：支付半窗背后磨砂（用户点名"支付宝/微信那个"要磨砂不要透明）
+        containerColor = frostedSheetColor(),
+        scrimColor = frostedScrimColor()
     ) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = V2.gutter)
@@ -209,8 +214,9 @@ internal fun PaySheetHost() {
                     Spacer(Modifier.height(18.dp))
                 }
                 1 -> {
-                    // 二维码内容优先用 code_url（微信 Native），没有就用收银台地址
-                    val content = codeUrl.ifBlank { payUrl }
+                    // 2026-11-25 聚合码：优先 pay_link（微信/支付宝扫同一张码按 UA 分流），
+                    // 没有则退回 code_url（微信 Native）/ 收银台地址。
+                    val content = payLink.ifBlank { codeUrl.ifBlank { payUrl } }
                     val bmp = remember(content) { payQrBitmap(content, 512) }
                     if (bmp != null) {
                         androidx.compose.foundation.Image(
@@ -220,7 +226,8 @@ internal fun PaySheetHost() {
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "用微信扫一扫付款",
+                            if (payLink.isNotBlank()) "微信或支付宝扫一扫付款（同一个码）"
+                            else "用微信扫一扫付款",
                             fontSize = 12.sp, color = ink.copy(alpha = 0.5f)
                         )
                     }
@@ -351,7 +358,8 @@ internal fun PointPacks() {
             val on = channel == k
             Row(
                 Modifier.clip(RoundedCornerShape(9.dp))
-                    .background(if (on) Color(0xFF101828) else ink.copy(alpha = 0.05f))
+                    // 2026-11-24：选中态用语义色（白底深字 / 暗底浅字），夜间不再糊成一片
+                    .background(if (on) ink else ink.copy(alpha = 0.05f))
                     .tapable {
                         channel = k
                         com.aevis.android.core.ChatPrefs.payChannel = k
@@ -366,7 +374,8 @@ internal fun PointPacks() {
                 Spacer(Modifier.width(6.dp))
                 Text(
                     label, fontSize = 12.sp,
-                    color = if (on) Color.White else ink.copy(alpha = 0.7f)
+                    // 选中态文字跟背景反相（明底深字 / 暗底浅字）
+                    color = if (on) onColorFor(ink) else ink.copy(alpha = 0.7f)
                 )
             }
         }

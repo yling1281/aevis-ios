@@ -44,13 +44,41 @@ import kotlinx.coroutines.withContext
 @Composable
 fun EmojiScreen(onBack: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
-    var packs by remember { mutableStateOf<List<Api.EmojiPack>?>(null) }
+    val ctx = LocalContext.current
+    // 2026-11-24 硬缓存：冷启动先读本地缓存立刻显示；云端有更新才覆盖；失败保留旧缓存。
+    val cached = remember { com.aevis.android.core.PlazaCache.load(ctx) }
+    var packs by remember {
+        mutableStateOf<List<Api.EmojiPack>?>(cached.packs.ifEmpty { null })
+    }
+    var cacheSig by remember { mutableStateOf(cached.signature) }
+    var offline by remember { mutableStateOf(false) }
     // 点某个表情 → 大图预览（这页只浏览，不发送）
     var preview by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        packs = withContext(Dispatchers.IO) {
-            runCatching { Api.emojiPacks() }.getOrElse { emptyList() }
+        val r = withContext(Dispatchers.IO) { runCatching { Api.emojiPacksChecked() } }
+        val res = r.getOrNull()
+        if (res != null && res.ok) {
+            offline = false
+            packs = res.items
+            val sig = com.aevis.android.core.PlazaCache.signature(cached.personas, res.items)
+            if (sig != cacheSig) {
+                cacheSig = sig
+                withContext(Dispatchers.IO) {
+                    com.aevis.android.core.PlazaCache.save(
+                        ctx,
+                        com.aevis.android.core.PlazaCache.Payload(
+                            personas = cached.personas, packs = res.items,
+                            signature = sig, checkedAt = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+        } else if (packs != null) {
+            // 有缓存：保留旧数据，只提示离线
+            offline = true
+        } else {
+            packs = emptyList()
         }
     }
 
@@ -62,6 +90,15 @@ fun EmojiScreen(onBack: () -> Unit) {
             .statusBarsPadding()
     ) {
         SubPageHeader(title = "表情包", onBack = onBack)
+
+        // 2026-11-24：连不上服务器、用的是本地缓存时给一句提示
+        if (offline) {
+            Text(
+                tr("连不上服务器，正在显示本地缓存"),
+                fontSize = V2.micro, color = V2.alert,
+                modifier = Modifier.padding(horizontal = V2.gutter, vertical = 3.dp)
+            )
+        }
 
         when (val ps = packs) {
             null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -250,8 +287,8 @@ internal fun EmojiPreviewSheet(url: String, onDismiss: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        scrimColor = Color.Black.copy(alpha = 0.32f)
+        containerColor = frostedSheetColor(),
+        scrimColor = frostedScrimColor()
     ) {
         Column(
             Modifier.fillMaxWidth()
@@ -297,8 +334,8 @@ internal fun EmojiSheet(onPick: (String) -> Unit, onDismiss: () -> Unit) {
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        scrimColor = Color.Black.copy(alpha = 0.32f)
+        containerColor = frostedSheetColor(),
+        scrimColor = frostedScrimColor()
     ) {
         Column(
             Modifier.fillMaxWidth()

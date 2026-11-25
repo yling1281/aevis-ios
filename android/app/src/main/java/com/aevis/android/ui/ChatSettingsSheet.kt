@@ -80,8 +80,8 @@ fun ChatSettingsSheet(
         onDismissRequest = { onClose() },
         sheetState = sheetState,
         // 135：半窗**不用玻璃**，实底 + 底下压一层遮罩，字才看得清
-        containerColor = MaterialTheme.colorScheme.surface,
-        scrimColor = Color.Black.copy(
+        containerColor = frostedSheetColor(),
+        scrimColor = frostedScrimColor().copy(
             alpha = if (ink.luminance() > 0.5f) 0.55f else 0.32f
         ),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(

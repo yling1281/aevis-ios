@@ -344,9 +344,12 @@ internal object Presence {
  */
 @Composable
 internal fun dialogSurfaceColor(): androidx.compose.ui.graphics.Color =
+    // 2026-11-24：半窗/弹窗统一磨砂（用户：「背后要磨砂玻璃，别是透明的」）。
+    // dialogStyle==1 仍是用户可钉住的"深色玻璃"档；其余走语义磨砂色，
+    // 明色偏白、暗色偏暗，不再是一块死实色或透底。
     if (com.aevis.android.core.ChatPrefs.dialogStyle == 1)
-        androidx.compose.ui.graphics.Color(0xFF1B1A20)
-    else appSkin()?.cardFill ?: MaterialTheme.colorScheme.surface
+        androidx.compose.ui.graphics.Color(0xFF1B1A20).copy(alpha = 0.94f)
+    else frostedSheetColor()
 
 /**
  * 三个点依次动（2026-11-16，89）。

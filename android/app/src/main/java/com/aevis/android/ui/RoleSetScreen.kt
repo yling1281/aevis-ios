@@ -195,7 +195,8 @@ fun RoleSetScreen(
         val cur = ChatPrefs.chatMode
         ModalBottomSheet(
             onDismissRequest = { showModePick = false },
-            containerColor = dialogSurfaceColor()
+            containerColor = frostedSheetColor(),
+            scrimColor = frostedScrimColor()
         ) {
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = V2.gutter)
