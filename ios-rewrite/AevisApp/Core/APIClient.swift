@@ -1050,6 +1050,17 @@ struct APIClient {
         let note: String        // 说明（可为空）
         let billing: String     // per_token / per_call
         let isDefault: Bool     // 服务端默认模型
+        /// 预计每条消息扣多少墨点（服务端 `estPointsPerMsg`，2026-11-25 上线）。
+        ///
+        /// 公式与首页 `avg_msg_cost` 完全一致（4000 输入 + 500 输出），所以
+        /// 「这里显示的单价 × 剩余条数」和首页「还能聊几条」能对上，不会自相矛盾。
+        /// **0 = 老服务端没下发这个字段**，此时不显示价格（不显示「0 墨点」）。
+        let estPointsPerMsg: Double
+
+        /// 单条价格高于这个值就标警示色。
+        /// 依据：同组价差能到 72 倍（deepseek-web 0.1 / kimi-k2.6 7.27），
+        /// 用户点选前必须能一眼看出「这个贵」。阈值只在这里定义，别在页面里再写一次。
+        static let priceyThreshold: Double = 3.0
 
         /// 计费方式的中文短标（给选择列表用）。
         var billingText: String {
@@ -1058,6 +1069,27 @@ struct APIClient {
             case "per_call":  return "按次"
             default:          return billing.isEmpty ? "" : billing
             }
+        }
+
+        /// 列表里展示的「计费方式 · 单价」。
+        /// 有价：`按次 · 7.3 墨点/条` / `按 token · 约 0.9 墨点/条`；无价：只显示计费方式。
+        var priceText: String {
+            guard estPointsPerMsg > 0 else { return billingText }
+            let n = Self.formatPoints(estPointsPerMsg)
+            // 按 token 是估算，加「约」；按次是固定扣，不加
+            let prefix = billing == "per_token" ? "约 " : ""
+            return "\(billingText) · \(prefix)\(n) 墨点/条"
+        }
+
+        /// 是否属于「贵」的那一档（用于警示配色）。
+        var isPricey: Bool { estPointsPerMsg > Self.priceyThreshold }
+
+        /// 墨点单价格式：<10 保留 1 位（7.3 / 0.9），≥10 取整（24 / 50）。
+        /// 价差跨两个数量级，统一 `%.1f` 会让 50.6 和 0.9 一样长，反而不好扫。
+        static func formatPoints(_ v: Double) -> String {
+            if v >= 10 { return String(format: "%.0f", v) }
+            if v >= 1 { return String(format: "%.1f", v) }
+            return String(format: "%.2f", v).replacingOccurrences(of: "0$", with: "", options: .regularExpression)
         }
 
         /// 右上角按钮用的短名：label 取不到就退回 id。
@@ -1091,7 +1123,10 @@ struct APIClient {
                 label: (r["label"] as? String) ?? (r["name"] as? String) ?? id,
                 note: (r["note"] as? String) ?? "",
                 billing: (r["billing"] as? String) ?? "",
-                isDefault: (r["default"] as? Bool) ?? (id == defaultID)
+                isDefault: (r["default"] as? Bool) ?? (id == defaultID),
+                // 老服务端没有这个字段 → 0 → 列表里不显示价格，不报错、不显示 0
+                estPointsPerMsg: (r["estPointsPerMsg"] as? NSNumber)?.doubleValue
+                    ?? (r["perCallPoints"] as? NSNumber)?.doubleValue ?? 0
             )
         }
         return LLMModelList(defaultID: defaultID, models: models)

@@ -38,7 +38,7 @@ struct UpdateSheet: View {
                                     .minimumScaleFactor(0.85)
 
                                 Text(info.force
-                                     ? "需要更新后才能继续使用"
+                                     ? "当前版本已停止支持"
                                      : "当前 \(info.current) · 最新 \(info.latest)")
                                     .font(.system(size: 11.5))
                                     .foregroundStyle(AE.textSecondary)
@@ -47,6 +47,30 @@ struct UpdateSheet: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.top, 2)
+
+                        // 强制更新必须写清「下一步」（2026-11-25）。
+                        // 只写「需要更新后才能继续使用」的话，用户点开发现关不掉、
+                        // 又不知道要去哪、装完要干什么，第一反应是「App 坏了」。
+                        // 这个 App 从来都是未签名 IPA + 全能签安装，所以「下载 IPA 再签名」
+                        // 就是它唯一的常规升级路径，如实写出来即可。
+                        if info.force {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("安装包已就绪（\(info.latest)）")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(ink)
+
+                                nextStep("1", info.hasOTA
+                                         ? "点下方按钮跳转系统安装页"
+                                         : "点下方按钮下载 IPA（会存到「文件」里）")
+                                nextStep("2", info.hasOTA
+                                         ? "按系统提示完成安装"
+                                         : "用签名工具（全能签等）对它签名安装")
+                                nextStep("3", "装好后重新打开 App 即可继续使用")
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .glassCard(cornerRadius: 16, material: .thin, tintOpacity: 0.16)
+                        }
 
                         // MARK: 正文：一张磨砂卡，顶部小标题 + 说明正文
                         VStack(alignment: .leading, spacing: 10) {
@@ -76,21 +100,26 @@ struct UpdateSheet: View {
                         .glassCard(cornerRadius: 18, material: .thin, tintOpacity: 0.20)
 
                         // MARK: 底部小灰字安装提示（小爱心弱化点缀）
-                        HStack(alignment: .top, spacing: 5) {
-                            Heart(color: AE.textSecondary.opacity(0.5), size: 12)
-                                .padding(.top, 2)
-                            Text(info.hasOTA
-                                 ? "将跳转到系统安装页完成更新。"
-                                 : "将下载安装包（.ipa）。iOS 不允许 App 自行安装，下载后请在「文件」中用签名工具安装。")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(AE.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        // 强制更新时上面已经写了分步指引，这里不再重复一遍；
+                        // 非强制更新保留，讲清「点了会发生什么」。
+                        if !info.force {
+                            HStack(alignment: .top, spacing: 5) {
+                                Heart(color: AE.textSecondary.opacity(0.5), size: 12)
+                                    .padding(.top, 2)
+                                Text(info.hasOTA
+                                     ? "将跳转到系统安装页完成更新。"
+                                     : "将下载安装包（.ipa）。iOS 不允许 App 自行安装，下载后请在「文件」中用签名工具安装。")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(AE.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                        // MARK: 主按钮：深藏青实心大按钮「确定」
+                        // MARK: 主按钮：深藏青实心大按钮
+                        // 强制 + 手动装包时按钮直接叫「下载 IPA」——「确定」不知道确定什么。
                         Button { center.openInstall() } label: {
-                            Text("确定")
+                            Text(mainButtonTitle)
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
@@ -120,6 +149,30 @@ struct UpdateSheet: View {
                 }
             }
             .interactiveDismissDisabled(info.force)
+        }
+    }
+
+    /// 主按钮文案。
+    /// 强制 + 手动装包时叫「下载 IPA」——「确定」两个字在这里没有信息量；
+    /// OTA 走系统安装页，叫「去更新」；非强制保留原来的「确定」。
+    private var mainButtonTitle: String {
+        guard let info = center.latest, info.force else { return "确定" }
+        return info.hasOTA ? "去更新" : "下载 IPA"
+    }
+
+    /// 强制更新的分步指引行：序号圆点 + 说明。
+    private func nextStep(_ index: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(index)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 16, height: 16)
+                .background(ink, in: Circle())
+            Text(text)
+                .font(.system(size: 12.5))
+                .foregroundStyle(AE.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 }

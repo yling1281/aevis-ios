@@ -318,7 +318,18 @@ struct CharacterSettingsView: View {
                     ScrollView {
                         VStack(spacing: 8) {
                             // 按 billing 分组（有 billing 才分组，否则平铺）
-                            let perToken = modelList.filter { $0.billing == "per_token" }
+                            // 2026-11-25：`per_token` 组内按单价**升序**（便宜的在上面），
+                            // 用户一眼能看到同组价差（0.9 vs 3.18 vs 7.27）。
+                            // 未知价（0，老服务端）排到最后 —— 不能让它冒充「最便宜」。
+                            let perToken = modelList
+                                .filter { $0.billing == "per_token" }
+                                .sorted { a, b in
+                                    let ka = a.estPointsPerMsg > 0 ? a.estPointsPerMsg : Double.greatestFiniteMagnitude
+                                    let kb = b.estPointsPerMsg > 0 ? b.estPointsPerMsg : Double.greatestFiniteMagnitude
+                                    return ka < kb
+                                }
+                            // `per_call` 组保持服务端顺序，**不重排**：
+                            // 这组只有两三档，服务端已经按产品意图排好（deepseek-web 在最前）。
                             let perCall = modelList.filter { $0.billing == "per_call" }
                             let others = modelList.filter { $0.billing != "per_token" && $0.billing != "per_call" }
 
@@ -383,10 +394,14 @@ struct CharacterSettingsView: View {
                                 .foregroundStyle(AE.textSecondary)
                                 .lineLimit(1)
                         }
-                        if !m.billingText.isEmpty {
-                            Text(m.billingText)
+                        // 计费方式 + 单价（2026-11-25）：同组价差最大 72 倍，
+                        // 点选之前必须能看见「这条消息大概扣多少墨点」，
+                        // 否则用户聊两句发现额度掉一大块，观感就是「有毒」。
+                        if !m.priceText.isEmpty {
+                            Text(m.priceText)
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(AE.accent)
+                                .foregroundStyle(m.isPricey ? AE.memberBadge : AE.accent)
+                                .lineLimit(1)
                         }
                     }
                 }
