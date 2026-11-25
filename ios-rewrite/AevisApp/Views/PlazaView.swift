@@ -33,8 +33,9 @@ struct PlazaView: View {
     @State private var offline = false
     @State private var cacheHint = ""
 
-    init(initialTab: Int = 0) {
+    init(initialTab: Int = 0, onClose: (() -> Void)? = nil) {
         _tab = State(initialValue: initialTab)
+        self.onClose = onClose
     }
 
     var body: some View {

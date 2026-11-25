@@ -64,13 +64,11 @@ struct HomeView: View {
         .onAppear {
             // 2.8 冷启动首帧：先同步读硬缓存，用量 / 余额 / 头像不转圈。
             // 读不到就保持占位，随后 Task 走网络；失败时也还有上次的值。
-            if let raw = APIClient.cachedJSON(.quotaState, scope: APIClient.cacheScope),
-               let cached = APIClient.parseQuotaState(raw) {
-                quota = cached
+            if let raw = APIClient.cachedJSON(.quotaState, scope: APIClient.cacheScope) {
+                quota = APIClient.parseQuotaState(raw)
             }
-            if let raw = APIClient.cachedJSON(.pointsHome, scope: APIClient.cacheScope),
-               let cached = APIClient.parsePointsHome(raw) {
-                points = cached
+            if let raw = APIClient.cachedJSON(.pointsHome, scope: APIClient.cacheScope) {
+                points = APIClient.parsePointsHome(raw)
             }
             if let raw = APIClient.cachedJSON(.memberState, scope: APIClient.cacheScope) {
                 let d = (raw["data"] as? [String: Any]) ?? raw
