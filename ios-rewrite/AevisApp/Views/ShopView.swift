@@ -175,7 +175,7 @@ struct ShopView: View {
         }
         .background(
             LinearGradient(
-                colors: [Color.clear, AE.paper.opacity(0.62)],
+                colors: [Color.clear, Color.paper.opacity(0.62)],
                 startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea(edges: .bottom)

@@ -136,6 +136,7 @@
 				B1000000000000000000000D /* AppUpdate.swift */,
 				B10000000000000000000016 /* AppBackground.swift */,
 				B10000000000000000000026 /* AgreementContentStore.swift */,
+				B1000000000000000000002E /* AevisHosts.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -175,7 +176,6 @@
 				B10000000000000000000027 /* MemberView.swift */,
 				B10000000000000000000028 /* PlazaView.swift */,
 				B1000000000000000000002A /* PersonaCreateView.swift */,
-				B1000000000000000000002E /* AevisHosts.swift */,
 				B1000000000000000000002D /* Motion.swift */,
 				B1000000000000000000002C /* WeatherText.swift */,
 				B1000000000000000000002B /* BrandMarks.swift */,
