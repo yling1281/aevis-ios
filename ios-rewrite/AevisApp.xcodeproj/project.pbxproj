@@ -41,6 +41,7 @@
 		A10000000000000000000027 /* MemberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* MemberView.swift */; };
 		A10000000000000000000028 /* PlazaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000028 /* PlazaView.swift */; };
 		A1000000000000000000002A /* PersonaCreateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002A /* PersonaCreateView.swift */; };
+		A1000000000000000000002E /* AevisHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002E /* AevisHosts.swift */; };
 		A1000000000000000000002D /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002D /* Motion.swift */; };
 		A1000000000000000000002C /* WeatherText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002C /* WeatherText.swift */; };
 		A1000000000000000000002B /* BrandMarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002B /* BrandMarks.swift */; };
@@ -86,6 +87,7 @@
 		B10000000000000000000027 /* MemberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberView.swift; sourceTree = "<group>"; };
 		B10000000000000000000028 /* PlazaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlazaView.swift; sourceTree = "<group>"; };
 		B1000000000000000000002A /* PersonaCreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonaCreateView.swift; sourceTree = "<group>"; };
+		B1000000000000000000002E /* AevisHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AevisHosts.swift; sourceTree = "<group>"; };
 		B1000000000000000000002D /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
 		B1000000000000000000002C /* WeatherText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherText.swift; sourceTree = "<group>"; };
 		B1000000000000000000002B /* BrandMarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMarks.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 				B10000000000000000000027 /* MemberView.swift */,
 				B10000000000000000000028 /* PlazaView.swift */,
 				B1000000000000000000002A /* PersonaCreateView.swift */,
+				B1000000000000000000002E /* AevisHosts.swift */,
 				B1000000000000000000002D /* Motion.swift */,
 				B1000000000000000000002C /* WeatherText.swift */,
 				B1000000000000000000002B /* BrandMarks.swift */,
@@ -313,6 +316,7 @@
 				A10000000000000000000028 /* PlazaView.swift in Sources */,
 				A10000000000000000000029 /* PlazaCacheStore.swift in Sources */,
 				A1000000000000000000002A /* PersonaCreateView.swift in Sources */,
+				A1000000000000000000002E /* AevisHosts.swift in Sources */,
 				A1000000000000000000002D /* Motion.swift in Sources */,
 				A1000000000000000000002C /* WeatherText.swift in Sources */,
 				A1000000000000000000002B /* BrandMarks.swift in Sources */,

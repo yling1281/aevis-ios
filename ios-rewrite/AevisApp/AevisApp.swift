@@ -123,6 +123,10 @@ struct AevisApp: App {
                 // 恢复直连的一次性迁移：老用户 apiLineId=bj / apiFailedLines 含 direct 时，
                 // 重置到直连并清掉旧失败标记（只做一次，之后用户手动选择优先）。
                 APIClient.migrateToDirectIfNeeded()
+                // 动态下发线路（2026-11-25）：从 `/v1/app/config` 拉云端线路表，
+                // 按 `/v1/ping` 实测 RTT 排序后落缓存。**独立 Task** ——
+                // 它最坏要等一个 5 秒超时，绝不能挡住下面的强更检查（门禁优先级更高）。
+                Task { await AevisHosts.refresh() }
                 // 冷启动**强制**查一次（无视节流），保证「进程刚起就一定检查强更」。
                 await update.checkIfNeeded(force: true)
                 // 协议内容热更新：本地硬缓存先显示，云端有新版本才覆盖（失败保留旧缓存）。

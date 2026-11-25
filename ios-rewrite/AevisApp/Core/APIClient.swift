@@ -36,17 +36,15 @@ struct APIClient {
         var note: String = "" // 半窗里的用户向短注（最快/默认/备用）
     }
 
-    /// 线路顺序（2026-11-24 用户拍板恢复直连；2026-11 关闭第三条境外备用）：
-    /// 「默认直连，不行切北京。就这两条。」
-    /// 数组顺序 = 回落顺序：直连 → 北京。UI 只显示名字，地址不上屏。
+    /// 内置线路表（编进 App 的兜底，**永远存在**，云端全挂也还有它）。
     ///
-    /// 直连是自签证书（CN=103.236.72.107 / O=Aevis，有效期至 2036），pinning=true 让
-    /// makeSession 挂 PinDelegate、按 host+port 精确放行该 serverTrust；Info.plist 的
-    /// NSExceptionDomains 也列了该 IP，双保险。443 不通，只走 54319。
-    /// 证书万一仍过不了（个别真机）：`request` 会自动按数组顺序回落到北京，并把直连记进
-    /// `failedLines` 降权，下次启动跳过它——所以「恢复直连」不会把所有用户卡死在自签证书上。
-    /// 2026-11-24 实测：直连 /v1/app/config 返回 200、0.13s（本机 curl 验证）。
-    static let lines: [Line] = [
+    /// 2026-11-25：改名为 `builtInLines`，并新增计算属性 `lines` = 内置 ∪ 云端
+    /// （`AevisHosts.allAccountLines`）。所有已有调用点读 `APIClient.lines` 的代码
+    /// 自动就能看到云端下发的线路，不用改一行；`AevisHosts` 也拿这张内置表做
+    /// 拉配置的起点（避免 `lines` → `allAccountLines` → 拉配置的环）。
+    ///
+    /// 顺序 = 回落顺序：直连 → 北京。UI 只显示名字，地址不上屏。
+    static let builtInLines: [Line] = [
         // name 用纯地名，不出现 IP、日期、「自签证书/隧道」等工程词。
         // 顺序 = 回落顺序：直连 → 北京，不要打乱。
         // 原第三条境外备用线路已于 2026-11 关闭（延迟高且不稳），此处不再保留条目；
@@ -54,6 +52,12 @@ struct APIClient {
         Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319",     pinning: true,  note: "最快"),
         Line(id: "bj",     name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "备用"),
     ]
+
+    /// 生效中的线路表：内置 ∪ 云端下发（按 base 去重、内置优先、云端已按实测 RTT 排序）。
+    ///
+    /// 顺序语义不变：数组顺序 = 回落顺序，`orderedLines` 仍在其上做「首选 / 失败降权」。
+    /// 云端的数组顺序**不参与**优先级 —— 见 `AevisHosts` 里的三条硬约束。
+    static var lines: [Line] { AevisHosts.allAccountLines }
 
     private static let activeKey = "apiLineId"
     /// 已知失败线路的 id 集合（持久化）：失败后降权，下次启动不优先撞它。
@@ -1341,6 +1345,47 @@ struct APIClient {
         } catch {
             return nil
         }
+    }
+
+    /// 在**指定线路**上裸发一次 GET：不走回落、不读 `lines`、不递归。
+    ///
+    /// 给 `AevisHosts` 拉 `/v1/app/config` 和测 `/v1/ping` 用 —— 那个时刻线路表本身还没定，
+    /// 走 `request` 会 `lines` → `allAccountLines` → 又回来拉配置，成环。
+    /// 返回 `(data, httpStatus)`；连接失败/超时返回 nil（与「返回了 4xx/5xx」区分开）。
+    static func rawGet(_ path: String, line: Line,
+                       timeout: TimeInterval = 4) async -> (data: Data, status: Int)? {
+        guard !line.base.isEmpty, let url = URL(string: line.base + path) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = timeout
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (data, resp) = try await makeSession(for: line).data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            return (data, code)
+        } catch {
+            return nil
+        }
+    }
+
+    /// 一次 `/v1/ping` 实测（毫秒）；不可达返回 nil。给 `AevisHosts` 排线路用。
+    ///
+    /// 判定口径（2026-11-25，别改）：
+    /// - **2xx/3xx → 可达**
+    /// - **429 / 503 → 可达，照常计入 RTT**：被 nginx `limit_req` 限流不等于线路挂了。
+    ///   只认 2xx 的话，「限流」会被误判成「线路不可用」，然后把整条线路从候选里剔掉
+    ///   —— 那是比误报更糟的连锁反应（本来只是慢，结果变成没得用）。
+    /// - **超时 / 连接失败 / TLS 失败 → 不可达**
+    /// - **404 及其它 4xx/5xx → 不可达**：与 `probe()` 保持一致 ——
+    ///   「nginx 活着但没挂 API」是半死状态，不能当可用线路收进候选。
+    static func pingLatency(_ line: Line, timeout: TimeInterval = 2) async -> Int? {
+        let t0 = Date()
+        guard let r = await rawGet("/v1/ping", line: line, timeout: timeout) else { return nil }
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        if (200..<400).contains(r.status) { return ms }
+        if r.status == 429 || r.status == 503 { return ms }
+        return nil
     }
 
     /// 探一条线路：`GET {base}/v1/app/config`，2s 超时，3 次取中位数。
