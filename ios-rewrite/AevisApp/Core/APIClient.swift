@@ -1010,10 +1010,17 @@ struct APIClient {
     struct PayOrder: Identifiable {
         enum Kind: String { case points, member }
         let orderID: String      // 查单用：墨点=orderNo，会员=order_id
-        let payURL: String       // 易支付收银台地址
+        let payURL: String       // 易支付收银台地址（老服务端 / 兜底二维码内容）
         let kind: Kind
+        /// 2.8 聚合短链：`https://aevis.cn/prod-api/aevis/v1/shop/paylink/<订单号>`，
+        /// 按扫码 App 的 UA 自动跳微信或支付宝。空串 = 老服务端还没下发。
+        var payLink: String = ""
         var uses: Int = 0        // 按次订单：购买的次数（后端 order 响应新增）
         var id: String { kind.rawValue + "-" + orderID }
+
+        /// 二维码真正编码的内容：有聚合短链就用它，否则回落收银台地址。
+        var qrContent: String { payLink.isEmpty ? payURL : payLink }
+        var hasAggregateLink: Bool { !payLink.isEmpty }
     }
 
     /// 查单结果：paid 表示已到账；amount 是到账墨点数或天数；unit 是展示单位。
@@ -1034,7 +1041,12 @@ struct APIClient {
         guard let no = d["orderNo"] as? String, !no.isEmpty else {
             throw APIError.decode("下单没有返回订单号")
         }
-        return PayOrder(orderID: no, payURL: (d["payUrl"] as? String) ?? "", kind: .points)
+        return PayOrder(
+            orderID: no,
+            payURL: (d["payUrl"] as? String) ?? "",
+            kind: .points,
+            payLink: (d["pay_link"] as? String) ?? (d["payLink"] as? String) ?? ""
+        )
     }
 
     /// 墨点查单：state == "paid" 即到账，points 为到账墨点数。
@@ -1069,8 +1081,13 @@ struct APIClient {
         guard let oid = d["order_id"] as? String, !oid.isEmpty else {
             throw APIError.decode("下单没有返回订单号")
         }
-        return PayOrder(orderID: oid, payURL: (d["pay_url"] as? String) ?? "", kind: .member,
-                        uses: (d["uses"] as? NSNumber)?.intValue ?? 0)
+        return PayOrder(
+            orderID: oid,
+            payURL: (d["pay_url"] as? String) ?? "",
+            kind: .member,
+            payLink: (d["pay_link"] as? String) ?? (d["payLink"] as? String) ?? "",
+            uses: (d["uses"] as? NSNumber)?.intValue ?? 0
+        )
     }
 
     /// 按次余额：`GET /v1/shop/ds-uses` → data.balance.uses_left

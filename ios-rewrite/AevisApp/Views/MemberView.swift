@@ -38,14 +38,14 @@ struct MemberView: View {
     private struct ActivePay {
         let order: APIClient.PayOrder
         let title: String
+        /// 用户下单时选的渠道；聚合码下两边二维码一样，仅用于回落文案。
+        let channel: String
     }
     @State private var showChannelPicker = false
     @State private var activePay: ActivePay? = nil
     @State private var showWeChatQR = false
-    @State private var showAlipayConfirm = false
     @State private var showSuccess = false
     @State private var successResult: APIClient.PayVerifyResult? = nil
-    @State private var alipayConfirming = false
 
     /// 会员权益（本地兜底文案）。后端 `/v1/shop/products` 已下发 `benefits[]`（4 条），
     /// 只有老服务端缺字段时才用这里，保证权益区不空白。
@@ -130,7 +130,6 @@ struct MemberView: View {
         .sheet(isPresented: $showBenefits) { benefitsSheet }
         .sheet(isPresented: $showChannelPicker) { channelPicker }
         .sheet(isPresented: $showWeChatQR) { weChatQRSheet }
-        .sheet(isPresented: $showAlipayConfirm) { alipayConfirmSheet }
         .sheet(isPresented: $showSuccess) { successSheet }
     }
 
@@ -588,16 +587,14 @@ struct MemberView: View {
             guard let prod = selectedProduct else { return }
             let order = try await APIClient.memberOrder(
                 productID: prod.id, payType: channel.rawValue, token: token)
-            guard !order.payURL.isEmpty else { showTip("支付链接为空，请稍后重试"); return }
-            activePay = ActivePay(order: order, title: "开通 \(prod.label.isEmpty ? "套餐" : prod.label) 用量 · \(prod.days) 天")
-            if channel == .alipay {
-                showAlipayConfirm = true
-                if let url = URL(string: order.payURL) {
-                    await UIApplication.shared.open(url)
-                }
-            } else {
-                showWeChatQR = true
-            }
+            guard !order.qrContent.isEmpty else { showTip("支付链接为空，请稍后重试"); return }
+            // 2.8：微信 / 支付宝都进同一个聚合二维码弹窗，不再跳外部浏览器。
+            activePay = ActivePay(
+                order: order,
+                title: "开通 \(prod.label.isEmpty ? "套餐" : prod.label) 用量 · \(prod.days) 天",
+                channel: channel.rawValue
+            )
+            showWeChatQR = true
         } catch {
             showTip("下单失败：\(error.localizedDescription)")
         }
@@ -620,7 +617,6 @@ struct MemberView: View {
     @MainActor
     private func onPaid(_ result: APIClient.PayVerifyResult) {
         showWeChatQR = false
-        showAlipayConfirm = false
         successResult = result
         showSuccess = true
     }
@@ -676,8 +672,10 @@ struct MemberView: View {
     // 渠道行已收敛到 `Views/BrandMarks.swift` 的 `PayChannelRow`，这里不再本地实现。
     private var weChatQRSheet: some View {
         PayQRView(
-            payment: activePay?.order.payURL ?? "",
-            title: "扫码支付 · " + (activePay?.title ?? "")
+            payment: activePay?.order.qrContent ?? "",
+            title: "扫码支付 · " + (activePay?.title ?? ""),
+            channel: activePay?.channel ?? "wxpay",
+            aggregated: activePay?.order.hasAggregateLink ?? false
         ) {
             try await verifyActivePay()
         } onPaid: { result in
@@ -688,72 +686,6 @@ struct MemberView: View {
         .glassSheetBackground()
         // 支付半屏不许下滑关闭（PayQRView 内部也有一次，双保险）
         .interactiveDismissDisabled()
-    }
-
-    private var alipayConfirmSheet: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle().fill(AE.payAlipay.opacity(0.16)).frame(width: 62, height: 62)
-                Image(systemName: "hand.raised.fill").font(.system(size: 26)).foregroundStyle(AE.payAlipay)
-            }
-            Text("已跳转支付宝")
-                .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(AE.accent)
-            Text("在支付宝完成付款后，回到这里点「未支付检查」确认到账")
-                .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
-                .multilineTextAlignment(.center)
-            if let a = activePay {
-                Text(a.title).font(.system(size: 13, weight: .medium)).foregroundStyle(AE.textPrimary)
-            }
-            HStack(spacing: 10) {
-                Button { showAlipayConfirm = false } label: {
-                    Text("取消").font(.system(size: 15, weight: .medium)).foregroundStyle(AE.accent)
-                        .frame(maxWidth: .infinity).frame(height: 46)
-                        .glassCard(cornerRadius: 23, material: .thin, tintOpacity: 0.08, strokeOpacity: 0.18)
-                }
-                .buttonStyle(.plain)
-                Button { Task { await confirmAlipay() } } label: {
-                    Text(alipayConfirming ? "正在检查…" : "未支付检查")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(alipayConfirming ? AE.accentDeep.opacity(0.45) : AE.accentDeep, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(alipayConfirming)
-            }
-            .padding(.top, 4)
-
-            Text("已付款但没到账？点「未支付检查」我去查一下")
-                .font(.system(size: 10.5))
-                .foregroundStyle(AE.textSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(24)
-        .presentationDetents([.medium])
-        .glassSheetBackground()
-        // 支付半屏不许下滑关闭：只能点「取消」或「未支付检查」
-        .interactiveDismissDisabled()
-    }
-
-    @MainActor
-    private func confirmAlipay() async {
-        guard !alipayConfirming else { return }
-        alipayConfirming = true
-        var result: APIClient.PayVerifyResult? = nil
-        for _ in 0..<12 {
-            if Task.isCancelled { break }
-            do {
-                let r = try await verifyActivePay()
-                if r.paid { result = r; break }
-            } catch { /* 网络抖动，下一轮重试 */ }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-        }
-        alipayConfirming = false
-        if let r = result {
-            onPaid(r)
-        } else {
-            showTip("支付失败，请确认已付款后重试")
-        }
     }
 
     private var successSheet: some View {

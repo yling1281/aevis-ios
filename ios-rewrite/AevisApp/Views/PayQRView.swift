@@ -2,10 +2,14 @@ import SwiftUI
 import UIKit
 import CoreImage
 
-/// 微信扫码支付弹窗：半屏 + 磨砂玻璃。
+/// 聚合扫码支付弹窗：半屏 + 磨砂玻璃。
 ///
-/// 流程：服务端下单返回 `pay_url` → 本地用 `CIQRCodeGenerator` 生成二维码 → 用户微信扫码付款
-/// → 点「我已支付」→ 每 2 秒查单、最多 12 次（约 24 秒）：
+/// 2.8：下单响应里的 `pay_link` 是按扫码 App UA 自动跳微信/支付宝的短链，
+/// 本地只生成**一个二维码**，微信和支付宝扫的是同一张图。老服务端没给 `pay_link` 时
+/// 回落 `pay_url`，文案按 channel 区分，流程不变。
+///
+/// 流程：下单 → 本地用 `CIQRCodeGenerator` 生成二维码 → 用微信或支付宝扫码付款
+/// → 点「未支付检查」→ 每 2 秒查单、最多 12 次（约 24 秒）：
 ///   · 到账 → `onPaid(result)`（调用方关闭弹窗并弹成功动效）；
 ///   · 未到账 → 二维码一直留在屏幕上，只把提示改成「支付失败，请重试」，不打断。
 ///
@@ -20,8 +24,12 @@ import CoreImage
 struct PayQRView: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// 收银台地址（微信扫码后打开的支付页）
+    /// 二维码实际编码的内容：优先聚合短链，回落收银台地址。
     let payURL: String
+    /// 是否聚合短链：决定文案说「微信或支付宝」还是只说单一渠道。
+    let aggregated: Bool
+    /// 用户下单时选的渠道（`"wxpay"` / `"alipay"`），仅用于回落文案，不参与二维码内容。
+    let channel: String
     /// 标题，由调用方拼（「扫码支付 · 会员 X · 30 天」）
     let title: String
     /// 查单闭包：返回到账结果（paid == false 视为本轮未到账）
@@ -39,13 +47,28 @@ struct PayQRView: View {
     init(
         payment payURL: String,
         title: String,
+        channel: String = "wxpay",
+        aggregated: Bool = false,
         verify: @escaping () async throws -> APIClient.PayVerifyResult,
         onPaid: @escaping (APIClient.PayVerifyResult) -> Void
     ) {
         self.payURL = payURL
         self.title = title
+        self.channel = channel
+        self.aggregated = aggregated
         self.verify = verify
         self.onPaid = onPaid
+    }
+
+    /// 扫码提示：有聚合短链时明确告诉用户两个 App 都能扫；
+    /// 回落旧收银台时按用户刚才选的渠道说，避免让用户拿支付宝去扫只能微信开的链接。
+    private var scanHint: String {
+        if aggregated {
+            return "请用微信或支付宝扫一扫付款，付完点下面的「未支付检查」"
+        }
+        return channel == "alipay"
+            ? "请用支付宝扫一扫付款，付完点下面的「未支付检查」"
+            : "请用微信扫一扫付款，付完点下面的「未支付检查」"
     }
 
     // MARK: - Body
@@ -74,7 +97,17 @@ struct PayQRView: View {
                 .foregroundStyle(AE.accent)
                 .multilineTextAlignment(.center)
 
-            Text("请用微信扫一扫付款，付完点下面的「未支付检查」")
+            HStack(spacing: 8) {
+                if aggregated {
+                    // 两个官方品牌标识并列，直观说明「一个码两边都能扫」
+                    PayBrandMark(brand: .wechat, size: 20)
+                    PayBrandMark(brand: .alipay, size: 20)
+                } else {
+                    PayBrandMark(brand: channel == "alipay" ? .alipay : .wechat, size: 20)
+                }
+            }
+
+            Text(scanHint)
                 .font(.system(size: 12))
                 .foregroundStyle(AE.textSecondary)
                 .multilineTextAlignment(.center)
@@ -196,7 +229,7 @@ struct PayQRView: View {
         qrImage = Self.makeQRImage(payURL)
         if payURL.isEmpty {
             statusKind = .bad
-            statusText = "收银台地址为空，请关闭后重试"
+            statusText = "支付链接为空，请关闭后重试"
         } else if qrImage == nil {
             statusKind = .bad
             statusText = "二维码生成失败，请关闭后重新下单"

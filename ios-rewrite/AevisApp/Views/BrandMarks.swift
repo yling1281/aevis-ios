@@ -29,8 +29,8 @@ enum PayBrand: String, CaseIterable, Identifiable {
     /// 一句话说明（渠道行副标题）
     var note: String {
         switch self {
-        case .wechat: return "扫码付款，到账自动提示"
-        case .alipay: return "跳转支付宝收银台完成付款"
+        case .wechat: return "微信扫聚合码付款，到账自动提示"
+        case .alipay: return "微信或支付宝扫同一个码付款"
         }
     }
 
