@@ -11,6 +11,8 @@ import UIKit
 /// - `memberDays <= 0` 时顶部「当前方案」整块不渲染（不是显示「未开通」）。
 /// - 支付流程自成一套（复用 `PayQRView` / `PaySuccessView`），与商城墨点支付互不干扰。
 /// - 夜间配色收敛到 `AE` 会员语义色（`Color.adaptive`），浅色保持原值。
+/// - **本页只收 `kind == "member"` 的商品**：`/v1/shop/products` 把会员档与按次包混在一个
+///   数组里下发，不过滤会把「DeepSeek 按次 100/200 次」当成会员档摆出来（线上 bug）。
 struct MemberView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: Session
@@ -51,6 +53,8 @@ struct MemberView: View {
 
     /// 后端 `/v1/shop/products` 已下发 `benefits[]`（字符串数组），优先用服务端文案；
     /// 老服务端缺字段时回落本地占位，不让权益区空白。
+    /// 注意 `products` 只含会员档（`load()` 里已按 kind 过滤），这里的 `products.first`
+    /// 兜底不会拿到按次商品。
     private var displayedBenefits: [String] {
         let list = selectedProduct?.benefits.isEmpty == false
             ? selectedProduct?.benefits
@@ -136,6 +140,9 @@ struct MemberView: View {
         markDiscountShown()
     }
 
+    /// 九折弹窗展示的档位：优先用户选中的，否则第一个会员档。
+    /// `products` 已按 kind 过滤成纯会员档，`products.first` 可为 nil（加载中/失败）——
+    /// 弹窗里对 `discountProduct` 全部做了可选绑定，空列表不会越界。
     private var discountProduct: APIClient.ShopProduct? {
         selectedProduct ?? products.first
     }
@@ -191,11 +198,24 @@ struct MemberView: View {
         async let s = APIClient.shopProducts()
         async let days = APIClient.membershipDays(token: session.token ?? "")
         let prods = (try? await s) ?? []
+        // ⚠️ `/v1/shop/products` 是**混合数组**：会员四档（kind="member"）+ 按次两档
+        // （kind="uses"，ds_use_100 / ds_use_200）共用同一个接口，靠 `kind` 区分。
+        // 会员页只认 member，否则「DeepSeek 按次 100 次 / 200 次」会作为档位卡摆进套餐列表，
+        // 用户点了「开通」以为在买会员（线上已踩过：「你的按次给我干会员了」）。
+        // `ShopView` 那侧对称地只取 kind=="uses"，两边各拿各的，互不污染。
+        // 容错：`kind` 解析时缺键默认 "member"（见 APIClient.shopProducts），所以老服务端不受影响。
+        let memberProds = prods.filter { $0.kind == "member" }
         let mDays = (try? await days)
         await MainActor.run {
-            products = prods
+            products = memberProds
             memberDays = mDays
-            if selectedProduct == nil { selectedProduct = prods.first }
+            // 选中项必须来自**过滤后**的数组。原来写的是 `prods.first`，
+            // 一旦数组首元素是按次商品，就会选中一个根本不在列表里的档位，
+            // 底部按钮会显示「开通 按次 用量 · 0 天 ¥2.0」并发出会员下单请求。
+            // 这里同时覆盖两种情况：从未选过（nil）与选中的已不在列表里（脏值）。
+            if !memberProds.contains(where: { $0.id == selectedProduct?.id }) {
+                selectedProduct = memberProds.first
+            }
             maybeShowDailyDiscount()
         }
     }
