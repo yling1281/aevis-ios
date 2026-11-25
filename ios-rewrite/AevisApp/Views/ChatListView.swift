@@ -240,7 +240,7 @@ struct ChatListView: View {
     /// 角色头像：磁盘硬缓存优先（`CachedRemoteImage`），没有缓存才显示渐变底 + 首字；
     /// 后台带 ETag 条件请求，服务器说变了才换图，断网一直用旧图。
     private func avatar(_ p: Persona) -> some View {
-        CachedRemoteImage(url: avatarURL(p)) {
+        CachedRemoteImage(url: avatarURL(p), scope: "persona:\(p.id)") {
             avatarPlaceholder(p)
         }
         .frame(width: 52, height: 52)

@@ -85,6 +85,21 @@ struct SettingsView: View {
                         hint("恢复只补本机缺少的记录，不会删除或覆盖本地聊天。")
                     }
 
+                    sectionCard(title: "福利与记录", icon: "gift.fill") {
+                        navRow(icon: "calendar.badge.checkmark", title: "每日签到", value: "") {
+                            CheckInView()
+                        }
+                        innerDivider
+                        navRow(icon: "person.2.fill", title: "创作者与活动", value: "") {
+                            GrowthView()
+                        }
+                        innerDivider
+                        navRow(icon: "doc.text.magnifyingglass", title: "对话日志", value: "") {
+                            ChatLogsView()
+                        }
+                        hint("入口链接与数据来自服务端，接口未开放时显示「暂无数据」。")
+                    }
+
                     logoutCard
                 }
                 .padding(.horizontal, 18)
@@ -181,7 +196,7 @@ struct SettingsView: View {
     private var userAvatar: some View {
         Group {
             if let url = myAvatarURL {
-                CachedRemoteImage(url: url) {
+                CachedRemoteImage(url: url, scope: "user:\(session.email)") {
                     avatarPlaceholder
                 }
             } else {
@@ -264,9 +279,16 @@ struct SettingsView: View {
 
     /// 拉一次 `/v1/me`：昵称 + 会员剩余天数。失败不写任何状态（下次进设置页再试），不阻塞 UI。
     private func loadProfile() async {
-        guard !profileLoaded, let token = session.token, !token.isEmpty else { return }
+        // 2.8：先用硬缓存把昵称 / 会员状态填上没有网络等待，再拉新的覆盖。
+        if !profileLoaded, let cached = APIClient.cachedJSON(.memberState, scope: APIClient.cacheScope) {
+            await applyProfile(cached)
+        }
+        guard let token = session.token, !token.isEmpty else { return }
         guard let json = try? await APIClient.me(token: token) else { return }
+        await applyProfile(json)
+    }
 
+    private func applyProfile(_ json: [String: Any]) async {
         var nick = (json["nickname"] as? String) ?? ""
         if nick.isEmpty {
             let d = (json["data"] as? [String: Any]) ?? json

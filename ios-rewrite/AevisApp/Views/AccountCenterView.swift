@@ -123,7 +123,7 @@ struct AccountCenterView: View {
     private var avatarView: some View {
         Group {
             if let url = avatarURL {
-                CachedRemoteImage(url: url) {
+                CachedRemoteImage(url: url, scope: "user:\(session.email)") {
                     avatarPlaceholder
                 }
             } else {

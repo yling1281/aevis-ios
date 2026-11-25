@@ -156,7 +156,7 @@ struct CharacterSettingsView: View {
     private var brandAvatar: some View {
         let url = avatarURL(persona.avatar)
         if let url {
-            CachedRemoteImage(url: url) { avatarPlaceholder }
+            CachedRemoteImage(url: url, scope: "persona:\(persona.id)") { avatarPlaceholder }
                 .clipShape(Circle())
                 .overlay(Circle().stroke(Color.white.opacity(0.9), lineWidth: 2))
         } else {

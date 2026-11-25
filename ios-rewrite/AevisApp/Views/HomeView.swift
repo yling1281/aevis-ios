@@ -18,12 +18,15 @@ struct HomeView: View {
     var onBuyQuota: (() -> Void)? = nil
     /// 「按次计费」入口：由 MainTabView 注入，跳商城按次 tab
     var onPerUse: (() -> Void)? = nil
+    /// 广场入口：由 MainTabView 注入，用右滑全屏二级菜单承载（2.8）；nil 时用本页 sheet 兜底。
+    var onPlaza: ((Int) -> Void)? = nil
     /// 用量卡是否展开（标题旁 chevron 可折叠）
     @State private var usageExpanded = true
     @State private var showShop = false        // 仅在 onShop == nil 时用的占位
     @State private var showMember = false      // 仅在 onMember == nil 时用的占位
     @State private var showPlaza = false       // 人设/表情包广场（本页内 sheet 即可）
     @State private var plazaTab = 0
+    @State private var showCheckIn = false     // 每日签到（2.8）
     @State private var tip = ""
     @State private var serviceExpanded = true
 
@@ -59,6 +62,23 @@ struct HomeView: View {
         // 首页白膜压得最重（参考图 ≈0.86）：照片只剩极淡纹理，整体读起来是暖白
         .appBackgroundIntensity(AEGlass.veilHome)
         .onAppear {
+            // 2.8 冷启动首帧：先同步读硬缓存，用量 / 余额 / 头像不转圈。
+            // 读不到就保持占位，随后 Task 走网络；失败时也还有上次的值。
+            if let raw = APIClient.cachedJSON(.quotaState, scope: APIClient.cacheScope),
+               let cached = APIClient.parseQuotaState(raw) {
+                quota = cached
+            }
+            if let raw = APIClient.cachedJSON(.pointsHome, scope: APIClient.cacheScope),
+               let cached = APIClient.parsePointsHome(raw) {
+                points = cached
+            }
+            if let raw = APIClient.cachedJSON(.memberState, scope: APIClient.cacheScope) {
+                let d = (raw["data"] as? [String: Any]) ?? raw
+                let nick = (d["nickname"] as? String) ?? (raw["nickname"] as? String) ?? ""
+                let pic = (d["avatar"] as? String) ?? (raw["avatar"] as? String) ?? ""
+                if !nick.isEmpty { nickname = nick }
+                if !pic.isEmpty { avatarPath = pic }
+            }
             // 冷启动先显示上次的天气（不等定位/网络），再拉最新数据
             restoreLastWeather()
             // 用量额度优先级最高，必须独立 Task。
@@ -99,6 +119,10 @@ struct HomeView: View {
             PlazaView(initialTab: plazaTab)
                 .environmentObject(session)
         }
+        .sheet(isPresented: $showCheckIn) {
+            CheckInView()
+                .environmentObject(session)
+        }
     }
 
     // MARK: - 顶部问候
@@ -124,6 +148,17 @@ struct HomeView: View {
             if let weather, !weather.descCN.isEmpty {
                 weatherChip(weather)
             }
+
+            // 签到入口（2.8）：主页可见，点开是独立页，不占服务宫格的位置。
+            Button { showCheckIn = true } label: {
+                Image(systemName: "calendar.badge.checkmark")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AE.accent)
+                    .frame(width: 30, height: 30)
+                    .background(AE.accentSoft, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("每日签到")
         }
     }
 
@@ -150,7 +185,7 @@ struct HomeView: View {
     @ViewBuilder
     private var avatarView: some View {
         if let avatarURL {
-            CachedRemoteImage(url: avatarURL) {
+            CachedRemoteImage(url: avatarURL, scope: "user:\(session.email)") {
                 avatarPlaceholder
             }
             .frame(width: 44, height: 44)
@@ -375,11 +410,7 @@ struct HomeView: View {
 
                 Divider().opacity(0.35)
                 // 墨点是独立单位，单独一行，不参与本周额度计算
-                Text(balanceLine)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(usageGray)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                balanceRow
             }
         }
         .padding(16)
@@ -401,26 +432,26 @@ struct HomeView: View {
         .accessibilityHidden(true)
     }
 
-    /// 黄底胶囊（照参考图）：底 `#F5DC96` @0.85，高 34pt，全圆角，14pt 图标 + 14pt medium 文字。
-    /// 「按次计费」右侧挂一枚 NEW 红标，说明这是新入口。
+    /// 黄底胶囊（2.8 按用户反馈缩小）：底 `#F5DC96` @0.85，高 26pt（原 34），
+    /// 12pt 文字（原 14）、12pt 图标、横向留白 9pt（原 12）。「按次计费」保留 NEW 红标。
     private func quotaCapsule(_ text: String, symbol: String?, showNew: Bool) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             if let symbol {
-                Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+                Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
             }
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
             if showNew {
                 Text("NEW")
-                    .font(.system(size: 8, weight: .heavy))
+                    .font(.system(size: 7, weight: .heavy))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 3.5).padding(.vertical, 1.5)
+                    .padding(.horizontal, 3).padding(.vertical, 1)
                     .background(Color.hex(0xE5484D), in: Capsule())
             }
         }
         .foregroundStyle(AE.accentDeep)
-        .padding(.horizontal, 12)
-        .frame(height: 34)
+        .padding(.horizontal, 9)
+        .frame(height: 26)
         .background(Color.hex(0xF5DC96).opacity(0.85), in: Capsule())
         .contentShape(Capsule())
     }
@@ -476,6 +507,32 @@ struct HomeView: View {
         guard let points else { return "墨点余额 —（独立单位，不计入本周额度）" }
         guard points.points > 0 else { return "墨点余额 0（独立单位，不计入本周额度）" }
         return "墨点余额 \(points.points.formatted()) · 约还能聊 \(points.estMessages.formatted()) 条（独立单位）"
+    }
+
+    /// 余额行：数值走 `AnimatedNumber`，刷新时逐帧滚动；拿不到 / 为 0 时保留原文案。
+    @ViewBuilder
+    private var balanceRow: some View {
+        if let points, points.points > 0 {
+            HStack(spacing: 4) {
+                Text("墨点余额")
+                AnimatedNumber(
+                    value: points.points,
+                    font: .system(size: 11.5, weight: .semibold, design: .rounded),
+                    color: usageGray
+                )
+                Text("· 约还能聊 \(points.estMessages) 条（独立单位）")
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(usageGray)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+        } else {
+            Text(balanceLine)
+                .font(.system(size: 11.5))
+                .foregroundStyle(usageGray)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
     }
 
     /// 本周额度百分比口径（与墨点彻底分开）
@@ -641,9 +698,11 @@ struct HomeView: View {
             case "会员":
                 if let onMember { onMember() } else { showMember = true }
             case "人设广场":
-                plazaTab = 0; showPlaza = true
+                plazaTab = 0
+                if let onPlaza { onPlaza(0) } else { showPlaza = true }
             case "表情包":
-                plazaTab = 1; showPlaza = true
+                plazaTab = 1
+                if let onPlaza { onPlaza(1) } else { showPlaza = true }
             default:
                 showTip("「\(item.label)」即将上线")
             }

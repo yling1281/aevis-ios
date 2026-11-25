@@ -274,6 +274,100 @@ struct APIClient {
         return json
     }
 
+    // MARK: - 统一硬缓存（2.8）
+    //
+    // 用户诉求：「所有东西都要硬缓存，就算不点开也要用硬缓存抵上，服务器太拉了」。
+    // 原则：**先读盘渲染 → 后台刷新 → 失败留旧值**。缓存不产生数据，只保存服务端给过的东西；
+    // 任何解析函数都吃 `[String: Any]`，所以缓存命中与网络命中走的是同一段解析代码。
+
+    /// 用户态缓存作用域：与 `Session.applyLogin` 写的 email 键一致。
+    /// 不用 token —— token 会轮换，一换就读不到上次缓存；email 在设备上是稳定的。
+    static var cacheScope: String {
+        UserDefaults.standard.string(forKey: "email") ?? ""
+    }
+
+    /// 同步读缓存，给 View 在 `.onAppear` 里立刻种 state，不等网络。
+    static func cachedJSON(_ key: HardCache.Key, scope: String = "") -> [String: Any]? {
+        HardCache.cachedJSON(key, scope: scope)
+    }
+
+    /// stale-while-revalidate：TTL 内直接返回；过期先打网，打不通就退回旧缓存。
+    /// 注意这个函数仍然 `async`——它用于「后台刷新」那一步；界面首帧请用 `cachedJSON`。
+    static func cacheAndFetch(
+        _ key: HardCache.Key,
+        path: String,
+        scope: String = "",
+        ttl: TimeInterval = 300,
+        token: String? = nil,
+        account: String? = nil
+    ) async throws -> [String: Any] {
+        if HardCache.isFresh(key, scope: scope, ttl: ttl),
+           let hit = HardCache.cachedJSON(key, scope: scope) {
+            return hit
+        }
+        do {
+            let json = try await request(path, token: token, account: account)
+            HardCache.saveJSON(key, json, scope: scope)
+            return json
+        } catch {
+            if let stale = HardCache.cachedJSON(key, scope: scope) {
+                NSLog("[HardCache] \(key.rawValue) 刷新失败，用旧缓存：\(error.localizedDescription)")
+                return stale
+            }
+            throw error
+        }
+    }
+
+    /// 媒体资源 session：自签「直连」必须带 PinDelegate。
+    /// 头像 / 广场封面之前用 `URLSession.shared` 或 `AsyncImage`，在这个 host 上必定 SSL 失败，
+    /// 这就是用户说的「头像加载不出来、广场东西下不了」。非直连线走 shared。
+    static func mediaSession(for url: URL) -> URLSession {
+        guard let host = url.host else { return .shared }
+        for line in lines where line.pinning && !line.base.isEmpty {
+            guard let base = URL(string: line.base), let baseHost = base.host else { continue }
+            if host == baseHost && url.port == base.port { return makeSession(for: line) }
+        }
+        return .shared
+    }
+
+    /// 把相对媒体路径拼成当前线路绝对地址（广场 / 头像共用一个入口，避免各写各的漏斜杠）。
+    static func mediaURL(_ raw: String) -> URL? {
+        guard !raw.isEmpty else { return nil }
+        if raw.hasPrefix("http://") || raw.hasPrefix("https://") { return URL(string: raw) }
+        let base = self.base
+        return URL(string: raw.hasPrefix("/") ? base + raw : base + "/" + raw)
+    }
+
+    /// 登录后空闲预热：不等用户点开，把常用数据一次性拉回落盘。
+    /// 每项独立吞错 —— 一个接口 4xx 不能让其它缓存全空。优先 `.utility`，不抢 UI 线程。
+    static func preloadHardCache(token: String, email: String) async {
+        let scope = email
+        let jobs: [(HardCache.Key, String, String, TimeInterval, String?, String?)] = [
+            (.appConfig, "/v1/app/config", "", 1800, nil, nil),
+            (.squarePersonas, "/v1/psquare/list", "", 1800, nil, nil),
+            (.emojiPacks, "/v1/emoji/list", "", 1800, token, nil),
+            (.pointPackages, "/v1/points/recharge/packages", "", 1800, nil, nil),
+            (.shopProducts, "/v1/shop/products", "", 1800, nil, nil),
+            (.quotaState, "/v1/quota/state", scope, 300, token, nil),
+            (.pointsHome, "/v1/points", scope, 300, token, nil),
+            (.usesBalance, "/v1/shop/ds-uses", scope, 300, token, nil),
+            (.memberState, "/v1/me", scope, 300, token, nil),
+            (.payMethods, "/v1/pay/methods", scope, 1800, token, nil),
+        ]
+        await withTaskGroup(of: Void.self) { group in
+            for job in jobs {
+                group.addTask {
+                    _ = try? await cacheAndFetch(
+                        job.0, path: job.1, scope: job.2,
+                        ttl: job.3, token: job.4, account: job.5)
+                }
+            }
+            for await _ in group { }
+        }
+        HardCache.cleanup()
+        NSLog("[HardCache] preload done, scope=\(scope)")
+    }
+
     // MARK: - 账号
 
     struct LoginResult { let token: String; let uid: String }
@@ -333,7 +427,12 @@ struct APIClient {
     }
 
     static func squarePersonas() async throws -> [SquarePersona] {
-        let json = try await request("/v1/psquare/list")
+        let json = try await cacheAndFetch(.squarePersonas, path: "/v1/psquare/list", ttl: 1800)
+        return parseSquarePersonas(json)
+    }
+
+    /// 解析函数单独暴露：View 首帧可以用 `cachedJSON(.squarePersonas)` 同步种 state。
+    static func parseSquarePersonas(_ json: [String: Any]) -> [SquarePersona] {
         let d = (json["data"] as? [String: Any]) ?? json
         let rows = (d["rows"] as? [[String: Any]]) ?? []
         return rows.compactMap { r in
@@ -342,8 +441,8 @@ struct APIClient {
                 id: id,
                 name: (r["name"] as? String) ?? "未命名人设",
                 tagline: (r["tagline"] as? String) ?? (r["personality"] as? String) ?? "",
-                avatar: (r["avatar_url"] as? String) ?? "",
-                cover: (r["cover_url"] as? String) ?? "",
+                avatar: (r["avatar_url"] as? String) ?? (r["avatar"] as? String) ?? "",
+                cover: (r["cover_url"] as? String) ?? (r["cover"] as? String) ?? "",
                 adoptCount: (r["adopt_count"] as? NSNumber)?.intValue ?? 0,
                 isOfficial: (r["is_official"] as? NSNumber)?.intValue == 1
             )
@@ -577,7 +676,7 @@ struct APIClient {
     // **故意不实现** —— 界面上也不放入口，避免"点了没反应"。
 
     static func appConfig() async throws -> [String: Any] {
-        try await request("/v1/app/config")
+        try await cacheAndFetch(.appConfig, path: "/v1/app/config", ttl: 1800)
     }
 
     static func changelog() async throws -> [String: Any] {
@@ -608,7 +707,12 @@ struct APIClient {
 
     /// 充值档位列表（公开接口，不需登录即可展示价格）。顶层 `items`。
     static func pointPackages() async throws -> [PointPackage] {
-        let json = try await request("/v1/points/recharge/packages")
+        let json = try await cacheAndFetch(
+            .pointPackages, path: "/v1/points/recharge/packages", ttl: 1800)
+        return parsePointPackages(json)
+    }
+
+    static func parsePointPackages(_ json: [String: Any]) -> [PointPackage] {
         let d = (json["data"] as? [String: Any]) ?? json
         let rows = (d["items"] as? [[String: Any]]) ?? (json["items"] as? [[String: Any]]) ?? []
         return rows.compactMap { r in
@@ -631,7 +735,8 @@ struct APIClient {
 
     /// 墨点余额（需登录）。取不到时调用方显示「—」，不要显示 0。
     static func pointsBalance(token: String?) async throws -> Int {
-        let json = try await request("/v1/points", token: token)
+        let json = try await cacheAndFetch(
+            .pointsHome, path: "/v1/points", scope: cacheScope, ttl: 300, token: token)
         let d = (json["data"] as? [String: Any]) ?? json
         return (d["points"] as? NSNumber)?.intValue ?? (json["points"] as? NSNumber)?.intValue ?? 0
     }
@@ -664,7 +769,12 @@ struct APIClient {
     static let freeMessageBaseline = 15
 
     static func quotaState(token: String?) async throws -> QuotaState {
-        let json = try await request("/v1/quota/state", token: token)
+        let json = try await cacheAndFetch(
+            .quotaState, path: "/v1/quota/state", scope: cacheScope, ttl: 300, token: token)
+        return parseQuotaState(json)
+    }
+
+    static func parseQuotaState(_ json: [String: Any]) -> QuotaState {
         // 外层信封 {"code":200,"data":{...}} 已被 request 摊平到顶层，两种结构都兜一下
         let d = (json["data"] as? [String: Any]) ?? json
         let q = (d["quota"] as? [String: Any]) ?? (json["quota"] as? [String: Any]) ?? d
@@ -693,7 +803,12 @@ struct APIClient {
     }
 
     static func pointsHome(token: String?) async throws -> PointsHome {
-        let json = try await request("/v1/points", token: token)
+        let json = try await cacheAndFetch(
+            .pointsHome, path: "/v1/points", scope: cacheScope, ttl: 300, token: token)
+        return parsePointsHome(json)
+    }
+
+    static func parsePointsHome(_ json: [String: Any]) -> PointsHome {
         let d = (json["data"] as? [String: Any]) ?? json
         let pts = (d["points"] as? NSNumber)?.intValue
             ?? (json["points"] as? NSNumber)?.intValue ?? 0
@@ -842,7 +957,11 @@ struct APIClient {
 
     /// 会员套餐列表（公开接口）。顶层 `items`。
     static func shopProducts() async throws -> [ShopProduct] {
-        let json = try await request("/v1/shop/products")
+        let json = try await cacheAndFetch(.shopProducts, path: "/v1/shop/products", ttl: 1800)
+        return parseShopProducts(json)
+    }
+
+    static func parseShopProducts(_ json: [String: Any]) -> [ShopProduct] {
         let d = (json["data"] as? [String: Any]) ?? json
         let rows = (d["items"] as? [[String: Any]]) ?? (json["items"] as? [[String: Any]]) ?? []
         return rows.compactMap { r in
@@ -921,10 +1040,22 @@ struct APIClient {
     /// 墨点查单：state == "paid" 即到账，points 为到账墨点数。
     static func pointsOrderStatus(orderNo: String, token: String) async throws -> (paid: Bool, points: Int) {
         let enc = orderNo.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderNo
-        let json = try await request("/v1/points/recharge/\(enc)", token: token)
-        let d = (json["data"] as? [String: Any]) ?? json
-        return ((d["state"] as? String) == "paid",
-                (d["points"] as? NSNumber)?.intValue ?? 0)
+        let scope = "points:\(orderNo)"
+        do {
+            let json = try await request("/v1/points/recharge/\(enc)", token: token)
+            let d = (json["data"] as? [String: Any]) ?? json
+            let result = ((d["state"] as? String) == "paid",
+                          (d["points"] as? NSNumber)?.intValue ?? 0)
+            // 2.8：最后一次查单结果落盘。支付完成瞬间网络抖一下也不能把已付订单显示成未付。
+            HardCache.saveJSON(.payOrder, ["paid": result.0, "points": result.1], scope: scope)
+            return result
+        } catch {
+            if let cached = HardCache.cachedJSON(.payOrder, scope: scope) {
+                return ((cached["paid"] as? Bool) ?? false,
+                        (cached["points"] as? NSNumber)?.intValue ?? 0)
+            }
+            throw error
+        }
     }
 
     /// 会员下单。productID 为字符串主键（p30/p90/p365），pay_type 只接受 alipay / wxpay。
@@ -949,7 +1080,8 @@ struct APIClient {
         let used: Int
     }
     static func dsUses(token: String) async throws -> UsesBalance {
-        let json = try await request("/v1/shop/ds-uses", token: token)
+        let json = try await cacheAndFetch(
+            .usesBalance, path: "/v1/shop/ds-uses", scope: cacheScope, ttl: 300, token: token)
         let d = (json["data"] as? [String: Any]) ?? json
         let b = (d["balance"] as? [String: Any]) ?? [:]
         return UsesBalance(
@@ -971,15 +1103,27 @@ struct APIClient {
     /// 会员查单：state == "paid" 即到账，days 为到账天数。
     static func memberOrderStatus(orderID: String, token: String) async throws -> (paid: Bool, days: Int) {
         let enc = orderID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderID
-        let json = try await request("/v1/shop/orders/\(enc)", token: token)
-        let d = (json["data"] as? [String: Any]) ?? json
-        return ((d["state"] as? String) == "paid",
-                (d["days"] as? NSNumber)?.intValue ?? 0)
+        let scope = "member:\(orderID)"
+        do {
+            let json = try await request("/v1/shop/orders/\(enc)", token: token)
+            let d = (json["data"] as? [String: Any]) ?? json
+            let result = ((d["state"] as? String) == "paid",
+                          (d["days"] as? NSNumber)?.intValue ?? 0)
+            HardCache.saveJSON(.payOrder, ["paid": result.0, "days": result.1], scope: scope)
+            return result
+        } catch {
+            if let cached = HardCache.cachedJSON(.payOrder, scope: scope) {
+                return ((cached["paid"] as? Bool) ?? false,
+                        (cached["days"] as? NSNumber)?.intValue ?? 0)
+            }
+            throw error
+        }
     }
 
     /// 会员剩余天数（从 /v1/me 容错解析 membership.days_left；读不到返回 nil，界面显示占位）。
     static func membershipDays(token: String) async throws -> Int? {
-        let json = try await request("/v1/me", token: token)
+        let json = try await cacheAndFetch(
+            .memberState, path: "/v1/me", scope: cacheScope, ttl: 300, token: token)
         let d = (json["data"] as? [String: Any]) ?? json
         guard let m = d["membership"] as? [String: Any] else { return nil }
         return (m["days_left"] as? NSNumber)?.intValue
@@ -1161,7 +1305,12 @@ struct APIClient {
     }
 
     static func emojiPacks(token: String?) async throws -> [EmojiPack] {
-        let json = try await request("/v1/emoji/list", token: token)
+        let json = try await cacheAndFetch(
+            .emojiPacks, path: "/v1/emoji/list", ttl: 1800, token: token)
+        return parseEmojiPacks(json)
+    }
+
+    static func parseEmojiPacks(_ json: [String: Any]) -> [EmojiPack] {
         let d = (json["data"] as? [String: Any]) ?? json
         let rows = (d["rows"] as? [[String: Any]]) ?? (d["items"] as? [[String: Any]]) ?? []
         return rows.compactMap { r in

@@ -76,6 +76,15 @@ final class Session: ObservableObject {
             let json = try await APIClient.me(token: token)
             syncAvatar(from: json)
             NSLog("[Session] cold-start token valid")
+            // 2.8：冷启动预热硬缓存。detached + .utility，不占登录/首帧的 UI 时序；
+            // 用户即使一个页面都不点，广场 / 商品 / 会员 / 额度 / 线路配置也已经落盘。
+            if !email.isEmpty {
+                let preloadToken = token
+                let preloadEmail = email
+                Task.detached(priority: .utility) {
+                    await APIClient.preloadHardCache(token: preloadToken, email: preloadEmail)
+                }
+            }
         } catch {
             var shouldSignOut = false
             if let apiErr = error as? APIError, case let .http(code, _) = apiErr {
@@ -100,6 +109,10 @@ final class Session: ObservableObject {
         if let json = try? await APIClient.me(token: token) { syncAvatar(from: json) }
         // 只探测、不落盘：检测到云端有数据就标记「待确认」，由 ChatListView 弹框
         await CloudBackup.shared.probeForRestoreConfirm(token: token, email: email)
+        // 2.8：登录成功后空闲预热所有硬缓存；失败各自吞掉，不影响登录结果。
+        Task.detached(priority: .utility) {
+            await APIClient.preloadHardCache(token: token, email: email)
+        }
     }
 
     /// 手动刷新头像（头像设置页/登录后补拉）。供 ChatView 在没有头像时兜底调用。

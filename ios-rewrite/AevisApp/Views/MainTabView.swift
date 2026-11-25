@@ -16,14 +16,21 @@ import SwiftUI
 /// （聊天详情在 `ChatView` 里声明）。在外层加会把列表根页的 Dock 一起藏掉。
 /// 商城走 `fullScreenCover`，本来就整屏盖住 Dock。
 struct MainTabView: View {
+    @EnvironmentObject private var session: Session
+
     @State private var selected = 0
     @State private var showShop = false
     /// 商城初始 tab：主页「按次计费」进来时直接落到按次 tab（index 2）
     @State private var shopInitialTab = 0
     /// 会员独立页（2026-11-23 拆页）：与商城各自一张 fullScreenCover，返回层级不串。
     @State private var showMember = false
+    /// 广场（2.8）：改成从右往左滑出的**全屏二级菜单**，不用上下滑 sheet。
+    /// 用同层 ZStack 覆盖，连底部 Dock 一起盖住；转场统一走 AEMotion.pageTransition。
+    @State private var showPlaza = false
+    @State private var plazaTab = 0
 
     var body: some View {
+        ZStack {
         // 背景已上移到 `AevisApp.root` 的 `AppBackgroundHost`（2026-11-25）：
         // 全 App 只有一份背景，登录页 / 全屏页也统一。这里不再自铺，避免同一张图解码两次。
         TabView(selection: $selected) {
@@ -31,7 +38,11 @@ struct MainTabView: View {
                 onShop: { shopInitialTab = 0; showShop = true },
                 onMember: { showMember = true },
                 onBuyQuota: { showMember = true },  // 「用量提升」→ 套餐页 MemberView
-                onPerUse: { shopInitialTab = 2; showShop = true }  // 「按次计费」→ 商城按次 tab
+                onPerUse: { shopInitialTab = 2; showShop = true },  // 「按次计费」→ 商城按次 tab
+                onPlaza: { tab in
+                    plazaTab = tab
+                    withAnimation(AEMotion.pageAnimation) { showPlaza = true }
+                }
             )
                 .modifier(ClearTabBarBackground())
                 .tabItem { Label("主页", systemImage: "house.fill") }
@@ -50,6 +61,17 @@ struct MainTabView: View {
         .tint(AE.accent)   // 选中项跟随品牌墨靛蓝（深色模式自动提亮，不用固定 accentDeep）
         .fullScreenCover(isPresented: $showShop) { ShopView(initialTab: shopInitialTab) }
         .fullScreenCover(isPresented: $showMember) { MemberView() }
+
+        if showPlaza {
+            PlazaView(initialTab: plazaTab, onClose: {
+                withAnimation(AEMotion.pageAnimation) { showPlaza = false }
+            })
+            .environmentObject(session)
+            .transition(AEMotion.pageTransition)
+            .zIndex(1)
+        }
+        }
+        .animation(AEMotion.pageAnimation, value: showPlaza)
     }
 }
 

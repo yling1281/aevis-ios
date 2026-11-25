@@ -11,6 +11,10 @@ struct PlazaView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: Session
 
+    /// 2.8：从主页右滑进入全屏二级菜单时由外层注入关闭动作；
+    /// 独立 sheet 展示时走系统 dismiss。两种入口都不写死返回方式。
+    var onClose: (() -> Void)? = nil
+
     private let tabs = ["人设广场", "表情包"]
     @State private var tab: Int
     /// 切 tab 的方向（true = 往后翻，从右进）。转场方向要跟手势方向一致，
@@ -36,7 +40,7 @@ struct PlazaView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button { dismiss() } label: {
+                Button { close() } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(AE.accent)
@@ -140,15 +144,22 @@ struct PlazaView: View {
     // MARK: - 加载（磁盘硬缓存优先）
 
     private func load() async {
-        // 1) 同步读磁盘：冷启动立刻有内容，不转圈；失败也不影响后续云端拉取
+        // 1) 同步读磁盘：2.8 起优先读统一硬缓存（登录预加载已落盘），
+        //    再退回旧的 PlazaCacheStore，保证升级用户不会看到空页。
         let disk = PlazaCacheStore.load()
-        let hadCache = !disk.personas.isEmpty || !disk.packs.isEmpty
+        let hardPersonas = APIClient.cachedJSON(.squarePersonas)
+            .map(APIClient.parseSquarePersonas) ?? []
+        let hardPacks = APIClient.cachedJSON(.emojiPacks)
+            .map(APIClient.parseEmojiPacks) ?? []
+        let cachedPersonas = hardPersonas.isEmpty ? disk.personas : hardPersonas
+        let cachedPacks = hardPacks.isEmpty ? disk.packs : hardPacks
+        let hadCache = !cachedPersonas.isEmpty || !cachedPacks.isEmpty
         await MainActor.run {
-            personas = disk.personas
-            packs = disk.packs
+            personas = cachedPersonas
+            packs = cachedPacks
             offline = false
-            cacheHint = disk.checkedAt > 0
-                ? "（更新于 \(Self.timeText(disk.checkedAt))）" : ""
+            let at = max(disk.checkedAt, HardCache.savedAt(.squarePersonas))
+            cacheHint = at > 0 ? "（更新于 \(Self.timeText(at))）" : ""
             loading = !hadCache
             failed = false
         }
@@ -167,8 +178,8 @@ struct PlazaView: View {
             }
             return
         }
-        let newPersonas = ps ?? disk.personas
-        let newPacks = es ?? disk.packs
+        let newPersonas = ps ?? cachedPersonas
+        let newPacks = es ?? cachedPacks
         let sig = PlazaCacheStore.signature(personas: newPersonas, packs: newPacks)
         let changed = sig != disk.signature
         if changed {
@@ -202,7 +213,9 @@ struct PlazaView: View {
                 if personas.isEmpty {
                     emptyText("广场还没有已上架的人设")
                 } else {
-                    ForEach(personas) { p in personaRow(p) }
+                    ForEach(Array(personas.enumerated()), id: \.element.id) { pair in
+                        personaRow(pair.element).staggerIn(min(pair.offset, 4))
+                    }
                 }
             }
             .padding(18)
@@ -211,7 +224,7 @@ struct PlazaView: View {
 
     private func personaRow(_ p: APIClient.SquarePersona) -> some View {
         HStack(alignment: .top, spacing: 11) {
-            squareAvatar(p.avatar)
+            squareAvatar(p.avatar, scope: "persona:\(p.id)")
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(p.name)
@@ -271,7 +284,9 @@ struct PlazaView: View {
                 if packs.isEmpty {
                     emptyText("广场还没有已上架的表情包")
                 } else {
-                    ForEach(packs) { pack in emojiPackRow(pack) }
+                    ForEach(Array(packs.enumerated()), id: \.element.id) { pair in
+                        emojiPackRow(pair.element).staggerIn(min(pair.offset, 4))
+                    }
                 }
             }
             .padding(18)
@@ -285,7 +300,7 @@ struct PlazaView: View {
                 expandedPack = open ? nil : pack.id
             } } label: {
                 HStack(alignment: .center, spacing: 11) {
-                    squareAvatar(pack.cover)
+                    squareAvatar(pack.cover, scope: "pack:\(pack.id)")
                     VStack(alignment: .leading, spacing: 4) {
                         Text(pack.name)
                             .font(.system(size: 15, weight: .semibold))
@@ -312,18 +327,15 @@ struct PlazaView: View {
             if open && !pack.items.isEmpty {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
                     ForEach(Array(pack.items.enumerated()), id: \.offset) { pair in
-                        AsyncImage(url: resolveURL(pair.element)) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable().scaledToFit()
-                                    .frame(height: 62)
-                                    .glassCard(cornerRadius: 10, material: .thin)
-                            default:
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(AE.accentSoft)
-                                    .frame(height: 62)
-                            }
+                        CachedRemoteImage(
+                            url: resolveURL(pair.element),
+                            scope: "pack:\(pack.id):\(pair.offset)"
+                        ) {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(AE.accentSoft)
                         }
+                        .frame(height: 62)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                 }
             }
@@ -343,25 +355,13 @@ struct PlazaView: View {
             .padding(.top, 40)
     }
 
-    private func squareAvatar(_ path: String) -> some View {
-        Group {
-            if let url = resolveURL(path) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        ZStack {
-                            AE.accentSoft
-                            Image(systemName: "sparkles").foregroundStyle(AE.textSecondary)
-                        }
-                    }
-                }
-            } else {
-                ZStack {
-                    AE.accentSoft
-                    Image(systemName: "sparkles").foregroundStyle(AE.textSecondary)
-                }
+    private func squareAvatar(_ path: String, scope: String) -> some View {
+        // 2.8 修「广场头像加载不出来」：AsyncImage 用 URLSession.shared，
+        // 直连自签证书必然失败；CachedRemoteImage 统一走硬缓存 + 线路 session。
+        CachedRemoteImage(url: resolveURL(path), scope: scope) {
+            ZStack {
+                AE.accentSoft
+                Image(systemName: "sparkles").foregroundStyle(AE.textSecondary)
             }
         }
         .frame(width: 46, height: 46)
@@ -373,6 +373,10 @@ struct PlazaView: View {
         guard !raw.isEmpty else { return nil }
         if raw.hasPrefix("http://") || raw.hasPrefix("https://") { return URL(string: raw) }
         return URL(string: APIClient.base + raw)
+    }
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
     }
 
     private func showTip(_ text: String) {

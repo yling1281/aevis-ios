@@ -186,6 +186,9 @@ enum AevisHosts {
         if let data = try? JSONSerialization.data(withJSONObject: rows) {
             UserDefaults.standard.set(data, forKey: cacheKey)
         }
+        // 2.8：线路配置也进统一硬缓存。UserDefaults 是轻量备份，
+        // 换机 / 重装后 Documents 还在时能从这里恢复，不必等网络。
+        HardCache.saveJSON(.lineConfig, ["lines": rows])
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: probedKey)
         lock.lock()
         memo = lines
@@ -195,7 +198,11 @@ enum AevisHosts {
     private static func loadCache() -> [APIClient.Line] {
         guard let data = UserDefaults.standard.data(forKey: cacheKey),
               let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: String]]
-        else { return [] }
+        else {
+            // 2.8：UserDefaults 被清掉（重装 / 手动重置）时，从统一硬缓存救回来。
+            guard let json = HardCache.cachedJSON(.lineConfig) else { return [] }
+            return parse(json: json)
+        }
         var out: [APIClient.Line] = []
         for row in rows {
             guard let base = normalizeBase(row["base"]), let id = row["id"], !id.isEmpty else { continue }
@@ -214,6 +221,7 @@ enum AevisHosts {
     static func clear() {
         UserDefaults.standard.removeObject(forKey: cacheKey)
         UserDefaults.standard.removeObject(forKey: probedKey)
+        HardCache.remove(.lineConfig)   // 2.8：两个缓存一起清，否则重置后又被硬缓存救回来
         lock.lock()
         memo = []
         lock.unlock()

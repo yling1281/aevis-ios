@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 自己搓一个人设（2026-11-24）：人设广场的「创建」入口。
 ///
@@ -18,6 +19,8 @@ struct PersonaCreateView: View {
     @State private var avatarURL = ""
     @State private var sending = false
     @State private var tip = ""
+    /// 创作者客服链接：来自 `/v1/growth/config`，不写死；没下发就不显示按钮。
+    @State private var creatorSupportURL = ""
 
     var body: some View {
         ZStack {
@@ -50,6 +53,29 @@ struct PersonaCreateView: View {
                             .foregroundStyle(AE.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
 
+                        if !creatorSupportURL.isEmpty {
+                            Button {
+                                guard let u = URL(string: creatorSupportURL),
+                                      UIApplication.shared.canOpenURL(u) else { return }
+                                UIApplication.shared.open(u, options: [:], completionHandler: nil)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "person.crop.square.fill.and.at.rectangle")
+                                        .font(.system(size: 13))
+                                    Text("创作者客服（企业微信）")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10))
+                                }
+                                .foregroundStyle(AE.accent)
+                                .padding(.horizontal, 12)
+                                .frame(height: 36)
+                                .background(AE.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         if !tip.isEmpty {
                             Text(tip)
                                 .font(.system(size: 12))
@@ -78,6 +104,10 @@ struct PersonaCreateView: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .glassSheetBackground()
+        .task {
+            let cfg = await GrowthAPI.config(force: false)
+            await MainActor.run { creatorSupportURL = cfg?.wechatWorkUrl ?? "" }
+        }
     }
 
     private func field(

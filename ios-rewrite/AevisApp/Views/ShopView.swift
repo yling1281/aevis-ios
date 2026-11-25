@@ -194,6 +194,29 @@ struct ShopView: View {
     // MARK: - 加载 / 刷新
 
     private func load() async {
+        // 2.8：硬缓存先上屏（登录预热已落盘），网络回来再覆盖；失败也不会空页。
+        await MainActor.run {
+            if let raw = APIClient.cachedJSON(.pointPackages) {
+                let cached = APIClient.parsePointPackages(raw)
+                if !cached.isEmpty {
+                    packages = cached
+                    if selectedPackage == nil { selectedPackage = cached.first }
+                }
+            }
+            if let raw = APIClient.cachedJSON(.pointsHome, scope: APIClient.cacheScope) {
+                balance = APIClient.parsePointsHome(raw).points
+            }
+            if let raw = APIClient.cachedJSON(.quotaState, scope: APIClient.cacheScope) {
+                quota = APIClient.parseQuotaState(raw)
+            }
+            if let raw = APIClient.cachedJSON(.shopProducts) {
+                let cached = APIClient.parseShopProducts(raw).filter { $0.kind == "uses" }
+                if !cached.isEmpty {
+                    useProducts = cached
+                    if selectedUse == nil { selectedUse = cached.first }
+                }
+            }
+        }
         async let p = APIClient.pointPackages()
         async let b = APIClient.pointsBalance(token: session.token)
         async let q = APIClient.quotaState(token: session.token)
@@ -256,7 +279,9 @@ struct ShopView: View {
                 Text("选择档位").font(.system(size: 13, weight: .medium)).foregroundStyle(AE.textSecondary)
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                    ForEach(packages) { pkg in packageCell(pkg) }
+                    ForEach(Array(packages.enumerated()), id: \.element.id) { pair in
+                        packageCell(pair.element).staggerIn(min(pair.offset, 3))
+                    }
                 }
 
                 if packages.isEmpty {
@@ -293,6 +318,7 @@ struct ShopView: View {
                        tintOpacity: on ? 0.22 : 0.08,
                        strokeColor: on ? AE.brandPurple : AE.cardStroke,
                        strokeOpacity: on ? 0.9 : 0.18)
+            .shadow(color: AE.shadowColor, radius: 10, y: 4)
         }
         .buttonStyle(AevisPressStyle(scale: 0.97))
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: on)
@@ -358,7 +384,8 @@ struct ShopView: View {
                 Text("1 元 = 50 次 · 默认 100 次起卖 · 所有价格明面展示")
                     .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
 
-                ForEach(useProducts) { pack in
+                ForEach(Array(useProducts.enumerated()), id: \.element.id) { pair in
+                    let pack = pair.element
                     let on = selectedUse?.id == pack.id
                     Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { selectedUse = pack } } label: {
                         VStack(alignment: .leading, spacing: 5) {
@@ -383,8 +410,10 @@ struct ShopView: View {
                                    tintOpacity: on ? 0.20 : 0.08,
                                    strokeColor: on ? AE.brandPurple : AE.cardStroke,
                                    strokeOpacity: on ? 0.8 : 0.18)
+                            .shadow(color: AE.shadowColor, radius: 10, y: 4)
                     }
                     .buttonStyle(AevisPressStyle(scale: 0.97))
+                    .staggerIn(min(pair.offset, 3))
                 }
                 if useProducts.isEmpty {
                     Text("按次商品加载中或暂不可用").font(.system(size: 12))

@@ -146,39 +146,49 @@ final class ImageCache {
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
-    // MARK: 路径（文件名 = URL 的 SHA256）
+    // MARK: 路径（文件名 = scope + URL 的 SHA256）
+    //
+    // 2.8：scope 参与哈希。头像必须跟 uid / persona id 绑定，否则同一个视图被复用去显示
+    // 另一个人时，磁盘上如果两个 URL 恰好一致（例如后端返回空串），就可能串图。
 
-    private func stem(_ url: URL) -> String {
-        SHA256.hash(data: Data(url.absoluteString.utf8))
+    private func stem(_ url: URL, scope: String) -> String {
+        SHA256.hash(data: Data((scope + "|" + url.absoluteString).utf8))
             .map { String(format: "%02x", $0) }
             .joined()
     }
 
-    private func imagePath(_ url: URL) -> URL { dir.appendingPathComponent(stem(url) + ".img") }
-    private func metaPath(_ url: URL) -> URL { dir.appendingPathComponent(stem(url) + ".json") }
+    private func imagePath(_ url: URL, scope: String) -> URL {
+        dir.appendingPathComponent(stem(url, scope: scope) + ".img")
+    }
 
-    private func readMeta(_ url: URL) -> [String: Any] {
-        guard let data = try? Data(contentsOf: metaPath(url)),
+    private func metaPath(_ url: URL, scope: String) -> URL {
+        dir.appendingPathComponent(stem(url, scope: scope) + ".json")
+    }
+
+    private func readMeta(_ url: URL, scope: String) -> [String: Any] {
+        guard let data = try? Data(contentsOf: metaPath(url, scope: scope)),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
         return obj
     }
 
-    private func writeMeta(_ url: URL, _ meta: [String: Any]) {
+    private func writeMeta(_ url: URL, scope: String, _ meta: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: meta) else { return }
-        try? data.write(to: metaPath(url), options: .atomic)
+        try? data.write(to: metaPath(url, scope: scope), options: .atomic)
     }
 
     // MARK: 读 / 校验
 
     /// 磁盘缓存（小图同步读）。没有就 nil —— 调用方直接显示占位，**不要转圈**。
-    func cached(_ url: URL) -> UIImage? {
-        guard let data = try? Data(contentsOf: imagePath(url)) else { return nil }
+    func cached(_ url: URL, scope: String = "") -> UIImage? {
+        guard let data = try? Data(contentsOf: imagePath(url, scope: scope)) else { return nil }
         return UIImage(data: data)
     }
 
     /// 条件请求：真变了才返回新图；304 / 未到校验间隔 / 断网都返回 nil（保留旧图）。
-    func revalidate(_ url: URL) async -> UIImage? {
-        let meta = readMeta(url)
+    /// 2.8：改用 APIClient 的线路 session —— 直连是自签证书，URLSession.shared 会直接 SSL 失败，
+    /// 这正是「广场头像加载不出来」的根因；北京线路仍走 shared。
+    func revalidate(_ url: URL, scope: String = "") async -> UIImage? {
+        let meta = readMeta(url, scope: scope)
         let now = Date().timeIntervalSince1970
         if let checked = meta["checked"] as? Double, now - checked < revalidateInterval { return nil }
 
@@ -192,19 +202,19 @@ final class ImageCache {
         }
 
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await APIClient.mediaSession(for: url).data(for: req)
             guard let http = resp as? HTTPURLResponse else { return nil }
 
             // 304：服务器说没变 —— 只刷新校验时间，图不动
             if http.statusCode == 304 {
                 var m = meta
                 m["checked"] = now
-                writeMeta(url, m)
+                writeMeta(url, scope: scope, m)
                 return nil
             }
             guard (200..<300).contains(http.statusCode), let img = UIImage(data: data) else { return nil }
-            try? data.write(to: imagePath(url), options: .atomic)
-            writeMeta(url, [
+            try? data.write(to: imagePath(url, scope: scope), options: .atomic)
+            writeMeta(url, scope: scope, [
                 "etag": http.value(forHTTPHeaderField: "ETag") ?? "",
                 "lastModified": http.value(forHTTPHeaderField: "Last-Modified") ?? "",
                 "checked": now
@@ -224,6 +234,8 @@ final class ImageCache {
 /// - 后台 304 时不重绘，图变了才更新。
 struct CachedRemoteImage<Placeholder: View>: View {
     let url: URL?
+    /// 身份作用域：uid / persona.id / pack.id。参与磁盘文件名，防止列表复用时串图。
+    var scope: String = ""
     @ViewBuilder var placeholder: () -> Placeholder
 
     @State private var image: UIImage?
@@ -238,15 +250,15 @@ struct CachedRemoteImage<Placeholder: View>: View {
                 placeholder()
             }
         }
-        .task(id: url?.absoluteString) {
-            guard let url else {
-                image = nil
-                return
-            }
+        .task(id: "\(scope)|\(url?.absoluteString ?? "")") {
+            // 2.8 修「头像串图」：身份一变先清空上一张，再读新身份的磁盘图。
+            // 旧版只在 `if let disk` 成功时赋值，新 URL 没有缓存时上一张会一直挂着。
+            image = nil
+            guard let url else { return }
             // 1) 先读磁盘：有就立刻出图（不转圈）
-            if let disk = ImageCache.shared.cached(url) { image = disk }
+            image = HardCache.image(url: url, scope: scope)
             // 2) 后台条件请求：304 什么都不做，真变了才换
-            if let fresh = await ImageCache.shared.revalidate(url) { image = fresh }
+            if let fresh = await HardCache.refreshImage(url: url, scope: scope) { image = fresh }
         }
     }
 }

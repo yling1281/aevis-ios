@@ -500,7 +500,7 @@ struct ChatView: View {
     @ViewBuilder
     private func avatar(_ url: URL?, name: String) -> some View {
         if let url {
-            CachedRemoteImage(url: url) {
+            CachedRemoteImage(url: url, scope: "persona:\(persona.id)") {
                 avatarPlaceholder(name)
             }
             .frame(width: 32, height: 32)

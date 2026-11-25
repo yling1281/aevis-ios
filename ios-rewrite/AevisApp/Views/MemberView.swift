@@ -293,6 +293,23 @@ struct MemberView: View {
     // MARK: - 加载
 
     private func load() async {
+        // 2.8：首帧同步读硬缓存，价格和档位来自服务端下发，客户端不写死 14.9/19.9。
+        if let raw = APIClient.cachedJSON(.shopProducts) {
+            let cached = APIClient.parseShopProducts(raw).filter { $0.kind == "member" }
+            if !cached.isEmpty {
+                await MainActor.run {
+                    products = cached
+                    if selectedProduct == nil { selectedProduct = cached.first }
+                }
+            }
+        }
+        if let raw = APIClient.cachedJSON(.memberState, scope: APIClient.cacheScope) {
+            let d = (raw["data"] as? [String: Any]) ?? raw
+            if let m = d["membership"] as? [String: Any],
+               let n = (m["days_left"] as? NSNumber)?.intValue {
+                await MainActor.run { memberDays = n }
+            }
+        }
         async let s = APIClient.shopProducts()
         async let days = APIClient.membershipDays(token: session.token ?? "")
         let prods = (try? await s) ?? []
@@ -393,7 +410,9 @@ struct MemberView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 1)
 
-                ForEach(products) { prod in memberCell(prod) }
+                ForEach(Array(products.enumerated()), id: \.element.id) { pair in
+                    memberCell(pair.element).staggerIn(min(pair.offset, 3))
+                }
                 if products.isEmpty {
                     Text("套餐加载中或暂不可用")
                         .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
