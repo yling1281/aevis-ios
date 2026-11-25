@@ -40,8 +40,48 @@ struct CharacterSettingsView: View {
     @State private var showClearConfirm = false
     @State private var toast = ""
 
+    /// 一行模型状态。2.8 重做：不再只留一个成功率圆点，
+    /// 现在同时带**当前四态**、**时间竖条**、范围/覆盖/平均响应/官方详情。
     struct ModelHealth {
-        let rate: Double?      // 0...1，nil = 无数据
+        /// 0...1，nil = 无数据（保留字段，卡片仍显示成功率口径）。
+        let rate: Double?
+        /// 当前是否可用。不拿 history 推 —— 那是 30 分钟聚合，会滞后半小时。
+        let live: LiveState
+        /// 竖条序列：true 绿 / false 红；空数组 = 没探测数据，画灰占位。
+        let bars: [Bool]
+        /// 「近 30 分钟」/「近 24 小时」/「暂无探测数据」。
+        let rangeLabel: String
+        let coverageMinutes: Int
+        let avgLatency: Double?
+        /// 官方状态详情；`official_status.stale == true` 时留空，不展示过期结论。
+        let officialDetail: String
+    }
+
+    /// 实时状态四档。与 ServerStatusView 的四态语义一致，但本文件独立实现，
+    /// 不跨文件引用（team-lead 要求只改这一个文件）。
+    enum LiveState: String {
+        case ok
+        case unstable
+        case down
+        case unknown
+
+        var text: String {
+            switch self {
+            case .ok: return "正常"
+            case .unstable: return "波动"
+            case .down: return "异常"
+            case .unknown: return "未监控"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .ok: return Color.hex(0x2FA36B)
+            case .unstable: return Color.hex(0xE0A020)
+            case .down: return Color.hex(0xE5484D)
+            case .unknown: return AE.textSecondary
+            }
+        }
     }
 
     private var modelKey: String { "aevisModel_\(persona.id)" }
@@ -197,11 +237,10 @@ struct CharacterSettingsView: View {
                             .font(.system(size: 14.5, weight: .medium))
                             .foregroundStyle(AE.textPrimary)
                             .lineLimit(1)
-                        if let h = statusByModel[statusKeyFor(effectiveModelID)],
-                           let label = healthLabel(h.rate) {
-                            Text(label.text)
+                        if let h = statusByModel[statusKeyFor(effectiveModelID)] {
+                            Text(h.live.text)
                                 .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(label.color)
+                                .foregroundStyle(h.live.color)
                         }
                     }
                     Spacer(minLength: 0)
@@ -379,12 +418,12 @@ struct CharacterSettingsView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(AE.textPrimary)
                             .lineLimit(1)
-                        if let h = statusByModel[statusKeyFor(m.id)], let lb = healthLabel(h.rate) {
-                            Text(lb.text)
+                        if let h = statusByModel[statusKeyFor(m.id)] {
+                            Text(h.live.text)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(lb.color)
+                                .foregroundStyle(h.live.color)
                                 .padding(.horizontal, 6).padding(.vertical, 1.5)
-                                .background(lb.color.opacity(0.14), in: Capsule())
+                                .background(h.live.color.opacity(0.14), in: Capsule())
                         }
                     }
                     HStack(spacing: 6) {
@@ -404,6 +443,11 @@ struct CharacterSettingsView: View {
                                 .lineLimit(1)
                         }
                     }
+
+                    // 2.8：History 竖条 + 探测元信息。无数据时只写灰字，不画假绿。
+                    if let h = statusByModel[statusKeyFor(m.id)] {
+                        historyBlock(h)
+                    }
                 }
                 Spacer(minLength: 0)
                 if isOn {
@@ -420,6 +464,59 @@ struct CharacterSettingsView: View {
                        strokeOpacity: isOn ? 0.9 : 0.18)
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - 历史竖条（本文件内实现，不跨文件引用）
+
+    /// 12pt 高竖条：绿=通过、红=失败，宽度按可用宽度自适应铺满。
+    /// 用 GeometryReader 而不是固定宽度，卡片在 iPad / 分屏下也能铺满。
+    private func historyBars(_ bars: [Bool]) -> some View {
+        GeometryReader { geo in
+            let usable = max(geo.size.width, 1)
+            let count = max(bars.count, 1)
+            let gap: CGFloat = bars.count > 32 ? 1 : 2
+            let width = max(1, (usable - gap * CGFloat(count - 1)) / CGFloat(count))
+            HStack(spacing: gap) {
+                ForEach(Array(bars.enumerated()), id: \.offset) { pair in
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(pair.element ? Color.hex(0x2FA36B) : Color.hex(0xE5484D))
+                        .frame(width: width, height: 12)
+                }
+            }
+            .frame(width: usable, alignment: .leading)
+        }
+        .frame(height: 12)
+    }
+
+    private func historyBlock(_ h: ModelHealth) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if h.bars.isEmpty {
+                Text("暂无探测数据")
+                    .font(.system(size: 10))
+                    .foregroundStyle(AE.textSecondary)
+            } else {
+                historyBars(h.bars)
+                HStack(spacing: 6) {
+                    Text(h.rangeLabel)
+                    if h.coverageMinutes > 0 {
+                        Text("覆盖 \(h.coverageMinutes) 分钟")
+                    }
+                    if let avg = h.avgLatency {
+                        Text("平均响应 \(String(format: "%.1f", avg)) 秒")
+                    }
+                    if !h.officialDetail.isEmpty {
+                        Text(h.officialDetail)
+                            .lineLimit(1)
+                    }
+                }
+                .font(.system(size: 9.5))
+                .foregroundStyle(AE.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            }
+        }
+        .padding(.top, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - 数据
@@ -439,25 +536,117 @@ struct CharacterSettingsView: View {
         modelLoading = false
     }
 
-    /// 拉模型健康状态（公开接口），按 rows[].model 汇总最近 history 的 ok/total。
+    /// 拉模型健康状态（公开接口）。生产返回 `code:0` + `data.rows[]`，
+    /// 老部署可能给 `code:200`——APIClient.request 两种都接受，这里再兜一次信封。
+    ///
+    /// 时间序列降级顺序：recent（近 30 分钟逐点）→ history（30 分钟一桶，近 24 小时）
+    /// → 都没有就空 bars，界面写「暂无探测数据」，绝不画假绿。
     @MainActor
     private func loadModelStatus() async {
         guard let json = try? await APIClient.request("/v1/models/status") else { return }
+        if let code = (json["code"] as? NSNumber)?.intValue, code != 0 && code != 200 { return }
         let d = (json["data"] as? [String: Any]) ?? json
         let rows = (d["rows"] as? [[String: Any]]) ?? []
         var map: [String: ModelHealth] = [:]
-        for r in rows {
-            guard let model = r["model"] as? String else { continue }
-            let hist = (r["history"] as? [[String: Any]]) ?? []
-            var ok = 0, total = 0
-            for h in hist {
-                ok += (h["ok"] as? NSNumber)?.intValue ?? 0
-                total += (h["total"] as? NSNumber)?.intValue ?? 0
-            }
-            let rate: Double? = total > 0 ? Double(ok) / Double(total) : (r["success_rate"] as? Double)
-            map[normalizedModel(model)] = ModelHealth(rate: rate)
+        for row in rows {
+            guard let model = row["model"] as? String, !model.isEmpty else { continue }
+            map[normalizedModel(model)] = parseModelHealth(row)
         }
         statusByModel = map
+    }
+
+    /// 一行 status 数据 → ModelHealth。所有数字都走 NSNumber，兼容 Int / Double / NSNumber。
+    private func parseModelHealth(_ row: [String: Any]) -> ModelHealth {
+        let avg = (row["avg_latency_sec"] as? NSNumber)?.doubleValue
+        let coverage = (row["coverage_minutes"] as? NSNumber)?.intValue ?? 0
+
+        // 1) recent：1=正常 / 0=异常。兼容 [Int]、[NSNumber]、[Double] 三种桥接。
+        var bars: [Bool] = []
+        var range = ""
+        var rate: Double? = nil
+        if let raw = row["recent"] as? [Any], !raw.isEmpty {
+            let values = raw.compactMap { boolNumber($0) }
+            if values.count == raw.count {
+                bars = values.map { $0 >= 0.5 }
+                rate = Double(bars.filter { $0 }.count) / Double(bars.count)
+                range = "近 30 分钟"
+            }
+        }
+
+        // 2) history：只取 total>0 的桶，ok/total >= 0.5 记绿（team-lead 口径）。
+        var okSum = 0
+        var totalSum = 0
+        var historyBarsValue: [Bool] = []
+        let history = (row["history"] as? [[String: Any]]) ?? []
+        for bucket in history {
+            let total = (bucket["total"] as? NSNumber)?.intValue ?? 0
+            guard total > 0 else { continue }
+            let ok = (bucket["ok"] as? NSNumber)?.intValue ?? 0
+            okSum += ok
+            totalSum += total
+            historyBarsValue.append(Double(ok) / Double(total) >= 0.5)
+        }
+        if bars.isEmpty && !historyBarsValue.isEmpty {
+            bars = historyBarsValue
+            rate = Double(okSum) / Double(totalSum)
+            range = "近 24 小时"
+        }
+        if rate == nil {
+            rate = (row["success_rate"] as? NSNumber)?.doubleValue
+                ?? (row["rate"] as? NSNumber)?.doubleValue
+        }
+        if range.isEmpty { range = bars.isEmpty ? "暂无探测数据" : "近 30 分钟" }
+
+        // 3) 官方状态：stale=true 的结论不展示，避免拿过期信息误导。
+        var officialDetail = ""
+        if let official = row["official_status"] as? [String: Any] {
+            let stale = (official["stale"] as? NSNumber)?.boolValue ?? true
+            if !stale { officialDetail = (official["detail"] as? String) ?? "" }
+        }
+
+        return ModelHealth(
+            rate: rate,
+            live: parseLiveState(row),
+            bars: bars,
+            rangeLabel: range,
+            coverageMinutes: coverage,
+            avgLatency: avg,
+            officialDetail: officialDetail
+        )
+    }
+
+    /// 实时四态：providers[].alive 是最近一次探测结论，优先于聚合 history。
+    /// 没有 providers 时看 status / official_status，两者都没有才「未监控」。
+    private func parseLiveState(_ row: [String: Any]) -> LiveState {
+        let providers = (row["providers"] as? [[String: Any]]) ?? []
+        let anyAlive = providers.contains { p in
+            (p["alive"] as? NSNumber)?.boolValue ?? (p["alive"] as? Bool) ?? false
+        }
+        let status = ((row["status"] as? String) ?? "").lowercased()
+
+        var officialState = ""
+        var officialStale = true
+        if let official = row["official_status"] as? [String: Any] {
+            officialState = ((official["state"] as? String) ?? "").lowercased()
+            officialStale = (official["stale"] as? NSNumber)?.boolValue ?? true
+        }
+        let officialBad = !officialStale
+            && ["down", "outage", "incident", "major_outage"].contains(officialState)
+
+        if officialBad || status == "down" || status == "error" { return .down }
+        if status == "degraded" || status == "warn" || status == "unstable" { return .unstable }
+        if providers.isEmpty { return .unknown }
+        if anyAlive { return .ok }
+        return .down
+    }
+
+    /// Bool / NSNumber / Int / Double 都归一化成 Double，供 recent 的 >=0.5 判定。
+    private func boolNumber(_ value: Any) -> Double? {
+        if let n = value as? NSNumber { return n.doubleValue }
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let b = value as? Bool { return b ? 1 : 0 }
+        return nil
     }
 
     /// 模型 id 归一到「品牌前缀」用于匹配 status 行（deepseek-flash → deepseek）。
@@ -472,13 +661,6 @@ struct CharacterSettingsView: View {
     private func statusKeyFor(_ id: String) -> String {
         if statusByModel[id] != nil { return id }
         return normalizedModel(id)
-    }
-
-    private func healthLabel(_ rate: Double?) -> (text: String, color: Color)? {
-        guard let r = rate else { return nil }
-        if r >= 0.97 { return ("正常", Color.hex(0x2FA36B)) }
-        if r >= 0.80 { return ("波动", Color.hex(0xE0A020)) }
-        return ("异常", Color.hex(0xE5484D))
     }
 
     @MainActor
