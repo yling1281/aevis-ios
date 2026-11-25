@@ -14,6 +14,16 @@ struct ChatView: View {
     var demo: Bool = false
     #endif
 
+    /// 底部「对方发了一条动态　查看」悬浮胶囊的摘要文案。
+    ///
+    /// **传 nil（默认）= 没有未读动态，胶囊不渲染。**
+    /// ⚠️ 数据源待接：`/v1` 目前**没有**「该人设是否有未读动态」的接口
+    /// （`APIClient` 里没有任何 moment/feed 方法），所以这里不造假数据 ——
+    /// 后端给出「有无未读动态 + 摘要 + 跳转 id」之后，把它传进来即可，UI 不用再改。
+    var momentPrompt: String? = nil
+    /// 点「查看」的动作。与 `momentPrompt` 成对出现。
+    var onOpenMoment: (() -> Void)? = nil
+
     @State private var msgs: [Msg] = []
     @State private var input = ""
     @State private var sending = false
@@ -156,54 +166,60 @@ struct ChatView: View {
                 .transition(.opacity)
             }
 
-            HStack(spacing: 8) {
-                // 左：表情包面板（最小可用：静态占位）
-                Button { showStickerSheet = true } label: {
-                    Image(systemName: "face.smiling")
-                        .font(.system(size: 22))
-                        .foregroundStyle(AE.accent)
+            // 底部悬浮区（2026-11-25 按用户参考图）：**不贴屏幕底**，左右各留 12pt。
+            // 输入栏是 22pt 连续圆角的白色玻璃条（white 0.72），不是贴边的一条 `.regularMaterial`。
+            VStack(spacing: 8) {
+                // 悬浮胶囊「对方发了一条动态　查看」——没有未读动态时不渲染（不造假数据）
+                if let moment = activeMomentPrompt {
+                    momentPill(moment)
                 }
-                .accessibilityLabel("表情包")
 
-                TextField(speech.recording ? "正在听你说…" : "说点什么…", text: $input, axis: .vertical)
+                HStack(spacing: 10) {
+                    // 左：猫咪图标（参考图此处是品牌点缀，不做按钮；表情包入口移到右侧加号）
+                    AevisMascotMark(pose: .front, size: 24)
+                        .accessibilityHidden(true)
+
+                    TextField(
+                        speech.recording ? "正在听你说…" : "发消息",
+                        text: $input, axis: .vertical
+                    )
                     .lineLimit(1...4)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .disabled(speech.recording)
 
-                // 右：语音输入（按住说话，微信式）—— 取代原来的 TTS 朗读按钮
-                Image(systemName: speech.recording ? "mic.fill" : "mic")
-                    .font(.system(size: 20))
-                    .foregroundStyle(micPressed ? (cancelZone ? AE.textSecondary : .red) : AE.accent)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        // minimumDistance 0 = 按下即触发；用 translation 判断上滑取消
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { v in
-                                if !micPressed {
-                                    micPressed = true
-                                    speech.baseText = input     // 保留输入框已有内容
-                                    speech.start()
-                                }
-                                cancelZone = v.translation.height < -60
-                            }
-                            .onEnded { _ in
-                                micPressed = false
-                                if cancelZone { speech.cancel() } else { speech.finish() }
-                                cancelZone = false
-                            }
-                    )
-                    .accessibilityLabel("按住说话")
-
-                Button {
-                    Task { await send() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 28))
+                    if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        // 空输入：右麦 + 加号（参考图形态）
+                        micGlyph
+                        Button { showStickerSheet = true } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(AE.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("表情包与更多")
+                    } else {
+                        // 有内容：右侧换成发送键（微信式，不多占一个位置）
+                        Button { Task { await send() } } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 26))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(sending)
+                        .accessibilityLabel("发送")
+                    }
                 }
-                .disabled(sending || input.trimmingCharacters(in: .whitespaces).isEmpty)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.adaptive(
+                            dark: Color.hex(0x232630).opacity(0.72),
+                            light: Color.white.opacity(0.72)
+                        ))
+                )
             }
-            .padding(10)
-            .background(.regularMaterial)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
         // 默认跟随全局背景；设置里打开「聊天页单独设置背景」后只铺聊天专用渐变，
         // 避免花哨全局图片压住气泡文字（2026-11-24）
@@ -363,6 +379,75 @@ struct ChatView: View {
             dark: Color.hex(0x232630).opacity(AEGlass.bubbleDarkFillOpacity),
             light: Color.white.opacity(AEGlass.bubbleFillOpacity)
         )
+    }
+
+    // MARK: - 底部悬浮区（2026-11-25）
+
+    /// 生产环境只认 `momentPrompt`；CI 的 `-demo` 截图给一份样例，
+    /// 这样版式能在打包前被真实截图验证，又不会在线上编造「对方发了动态」。
+    private var activeMomentPrompt: String? {
+        if let moment = momentPrompt, !moment.isEmpty { return moment }
+        #if DEBUG
+        return demo ? "对方发了一条动态" : nil
+        #else
+        return nil
+        #endif
+    }
+
+    /// 悬浮胶囊「对方发了一条动态　查看」。
+    /// 参考图：`white.opacity(0.75)`、全圆角；「查看」用强调色 semibold，其余常规字重。
+    private func momentPill(_ text: String) -> some View {
+        Button {
+            onOpenMoment?()
+        } label: {
+            HStack(spacing: 6) {
+                Text(text)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(AE.textPrimary)
+                    .lineLimit(1)
+                Text("查看")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AE.accent)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 32)
+            .background(
+                Capsule().fill(Color.adaptive(
+                    dark: Color.hex(0x2A2D36).opacity(0.75),
+                    light: Color.white.opacity(0.75)
+                ))
+            )
+        }
+        .buttonStyle(.plain)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .accessibilityLabel("\(text)，查看")
+    }
+
+    /// 输入栏右侧的麦克风：按住说话（微信式），上滑 60pt 取消。
+    /// `minimumDistance: 0` = 按下即触发。
+    private var micGlyph: some View {
+        Image(systemName: speech.recording ? "mic.fill" : "mic")
+            .font(.system(size: 20))
+            .foregroundStyle(micPressed ? (cancelZone ? AE.textSecondary : .red) : AE.accent)
+            .frame(width: 34, height: 34)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        if !micPressed {
+                            micPressed = true
+                            speech.baseText = input     // 保留输入框已有内容
+                            speech.start()
+                        }
+                        cancelZone = v.translation.height < -60
+                    }
+                    .onEnded { _ in
+                        micPressed = false
+                        if cancelZone { speech.cancel() } else { speech.finish() }
+                        cancelZone = false
+                    }
+            )
+            .accessibilityLabel("按住说话")
     }
 
     /// 括号内容变浅：`（…）` / `(…)` 用 60% 前景色（跟安卓同一套）。

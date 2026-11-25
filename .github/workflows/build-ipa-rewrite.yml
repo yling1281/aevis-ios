@@ -29,6 +29,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 静态自检（2026-11-25）：CI #45 那四类错误（@State 缺类型 / `async let` 带 Optional.map /
+      # 漏 await / 漏 try）本地看不出来，等 macos runner 编三分钟才报，太浪费。
+      # 先跑扫描器自测（证明扫描器本身没坏，否则后面的「通过」不可信），再全量扫。
+      # 任一失败直接 fail，不进 xcodebuild。脚本在 ios-rewrite/tools/（注意 working-directory）。
+      - name: Static self-check (Swift)
+        run: |
+          set -eux
+          python3 tools/_ios_selfcheck_selftest.py
+          python3 tools/_ios_selfcheck.py
+
       - name: Toolchain
         run: |
           xcodebuild -version
@@ -201,6 +211,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # 截图 job 也要先过静态自检：它编的是 Debug，出错更早、更快暴露
+      - name: Static self-check (Swift)
+        run: |
+          set -eux
+          python3 tools/_ios_selfcheck_selftest.py
+          python3 tools/_ios_selfcheck.py
 
       - name: Build for simulator
         run: |

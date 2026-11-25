@@ -247,24 +247,57 @@ struct HomeView: View {
     // 这里不再单独维护一份映射表，避免两处映射不一致。
 
     // MARK: - 用量额度卡
+    //
+    // 2026-11-25 按用户参考图重排内部结构（形态照图，不含首页 IA 改动）：
+    // 头部「17pt semibold 标题 + chevron」与「两枚 34pt 黄色胶囊」同一行 →
+    // 52pt heavy 大数字（% 18pt 基线对齐）+ 右侧「已用 N%」13pt →
+    // 9pt 进度条（轨道 #E6E6E8，填充 #BFD9F5→#7EA8DC，圆头）+ 26pt 白底猫脸徽章（上下各溢出 8pt，
+    // 这是整张卡的辨识点）→ 底部 13pt 灰字「还有 N 条 / M月D日 HH:MM 重置」。
+    // 材质一律走 `usageCardGlass()`，别在这里手写。
 
-    /// 旧版「6% 已用」是写死的假进度；现在只显示服务端 quota 的真实百分比。
+    /// 参考图主文字色（近黑，不用纯黑）
+    private var usageInk: Color {
+        Color.adaptive(dark: AE.textPrimary, light: Color.hex(0x1A1A1C))
+    }
+
+    /// 参考图次要文字色 #8A8A8E（深色模式提亮，保持同层级对比）
+    private var usageGray: Color {
+        Color.adaptive(dark: Color.hex(0xB4B4B9), light: Color.hex(0x8A8A8E))
+    }
+
+    /// 进度条轨道 #E6E6E8
+    private var usageTrack: Color {
+        Color.adaptive(dark: Color.hex(0x3A3A3E), light: Color.hex(0xE6E6E8))
+    }
+
+    /// 进度条填充：参考图 #BFD9F5 → #7EA8DC
+    private var usageFill: LinearGradient {
+        LinearGradient(
+            colors: [Color.hex(0xBFD9F5), Color.hex(0x7EA8DC)],
+            startPoint: .leading, endPoint: .trailing
+        )
+    }
+
+    /// 用户要求的「已用 N%」：只显示服务端 quota 的真实百分比，不写死。
     private var usageCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { usageExpanded.toggle() } } label: {
-                HStack(spacing: 6) {
-                    Text("用量额度")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AE.textSecondary)
-                    Image(systemName: usageExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(AE.textSecondary)
-                    Spacer(minLength: 0)
-                }
-            }
-            .buttonStyle(.plain)
-
+        VStack(alignment: .leading, spacing: 12) {
+            // 行 1：标题 + chevron ｜ 右侧两枚黄色胶囊
             HStack(spacing: 8) {
+                Button { withAnimation(.easeInOut(duration: 0.18)) { usageExpanded.toggle() } } label: {
+                    HStack(spacing: 5) {
+                        Text("用量额度")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(usageInk)
+                        Image(systemName: usageExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(usageGray)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(usageExpanded ? "收起用量额度" : "展开用量额度")
+
+                Spacer(minLength: 4)
+
                 Button { onBuyQuota?() } label: {
                     quotaCapsule("用量提升", symbol: "crown.fill", showNew: false)
                 }
@@ -273,96 +306,123 @@ struct HomeView: View {
                     quotaCapsule("按次计费", symbol: nil, showNew: true)
                 }
                 .buttonStyle(.plain)
-                Spacer(minLength: 0)
             }
 
             if usageExpanded {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // 行 2：52pt heavy 大数字 + 18pt 百分比（基线对齐）｜ 右侧「已用 N%」
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
                     if let q = quota {
                         AnimatedNumber(
                             value: q.leftPct,
-                            font: .system(size: 42, weight: .bold, design: .rounded),
-                            color: AE.textPrimary, suffix: "%"
+                            font: .system(size: 52, weight: .heavy, design: .rounded),
+                            color: usageInk
                         )
+                        Text("%")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(usageInk)
+                        Spacer(minLength: 8)
                         Text("已用 \(q.percent)%")
-                            .font(.system(size: 12))
-                            .foregroundStyle(AE.textSecondary)
+                            .font(.system(size: 13))
+                            .foregroundStyle(usageGray)
+                            .monospacedDigit()
                     } else {
                         Text("—")
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .foregroundStyle(AE.textPrimary)
+                            .font(.system(size: 52, weight: .heavy, design: .rounded))
+                            .foregroundStyle(usageInk)
+                        Spacer(minLength: 8)
                         Text("已用 —")
-                            .font(.system(size: 12))
-                            .foregroundStyle(AE.textSecondary)
+                            .font(.system(size: 13))
+                            .foregroundStyle(usageGray)
                     }
                 }
 
-                // 横条：灰 = 已用，蓝渐变 = 剩余；猫头随剩余量停在交界处
+                // 行 3：9pt 进度条（圆头）+ 头部白色猫脸徽章
+                // 徽章 26pt、轨道 9pt → 上下各溢出 8.5pt，正是参考图那个「顶出来」的效果。
                 GeometryReader { geo in
                     let width = max(geo.size.width, 1)
                     let left = CGFloat(min(max(quota?.leftPct ?? 0, 0), 100))
+                    let fillWidth = max(0, width * left / 100)
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.18)).frame(height: 10)
+                        Capsule()
+                            .fill(usageTrack)
+                            .frame(height: 9)
                         if quota != nil {
                             Capsule()
-                                .fill(LinearGradient(
-                                    colors: [Color.hex(0x8FD0FF), Color.hex(0x2F6FE4)],
-                                    startPoint: .leading, endPoint: .trailing))
-                                .frame(width: width * left / 100, height: 10)
-                            AevisMascotMark(pose: quota?.hasQuota == false ? .sleep : .front, size: 28)
-                                .offset(x: max(0, width * left / 100 - 14), y: -2)
-                                .accessibilityHidden(true)
+                                .fill(usageFill)
+                                .frame(width: fillWidth, height: 9)
+                            mascotBadge(hasQuota: quota?.hasQuota ?? true)
+                                // 徽章中心压在填充头部；两端各夹一次，避免溢出卡片内边距
+                                .offset(x: min(max(fillWidth - 13, 0), width - 26))
                         }
                     }
+                    .frame(maxHeight: .infinity)
                 }
-                .frame(height: 16)
+                .frame(height: 26)
 
-                HStack(alignment: .firstTextBaseline) {
+                // 行 4：底部 13pt 灰字，左右两端
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(remainingMessagesLine)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(AE.textSecondary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(usageGray)
                     Spacer(minLength: 6)
                     if let reset = resetTimeLine {
                         Text(reset)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AE.textSecondary)
+                            .font(.system(size: 13))
+                            .foregroundStyle(usageGray)
                             .lineLimit(1)
                     }
                 }
 
-                Divider().opacity(0.4)
+                Divider().opacity(0.35)
                 // 墨点是独立单位，单独一行，不参与本周额度计算
                 Text(balanceLine)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AE.textSecondary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(usageGray)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
         }
         .padding(16)
-        // 「有点透但不是特别透」：白 0.55 + regularMaterial（暗色 黑 0.35），1pt 高光描边。
+        // 「有点透但不是特别透」：ultraThinMaterial + 白 0.62（暗色 黑 0.34），无描边 + 极淡阴影。
         // 见 `GlassComponents.UsageCardGlass`，别在这里手写材质。
-        // 参考图：用量卡是 28pt 连续圆角的玻璃片（数值见 AEGlass）
         .usageCardGlass()
     }
 
-    /// 黄底胶囊：用量提升带猫头，按次计费带 NEW 红标（照参考图）
+    /// 进度条头部的白底猫脸徽章（26pt 白片 + 极淡阴影，猫脸 18pt）。
+    /// 参考图里它上下各溢出 8pt，是这张卡最容易被认出来的特征 —— 别省。
+    private func mascotBadge(hasQuota: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.white)
+                .frame(width: 26, height: 26)
+                .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 1)
+            AevisMascotMark(pose: hasQuota ? .front : .sleep, size: 18)
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// 黄底胶囊（照参考图）：底 `#F5DC96` @0.85，高 34pt，全圆角，14pt 图标 + 14pt medium 文字。
+    /// 「按次计费」右侧挂一枚 NEW 红标，说明这是新入口。
     private func quotaCapsule(_ text: String, symbol: String?, showNew: Bool) -> some View {
-        HStack(spacing: 3) {
-            if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .bold)) }
+        HStack(spacing: 5) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+            }
             Text(text)
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.system(size: 14, weight: .medium))
             if showNew {
                 Text("NEW")
-                    .font(.system(size: 7.5, weight: .heavy))
+                    .font(.system(size: 8, weight: .heavy))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 3).padding(.vertical, 1)
+                    .padding(.horizontal, 3.5).padding(.vertical, 1.5)
                     .background(Color.hex(0xE5484D), in: Capsule())
             }
         }
         .foregroundStyle(AE.accentDeep)
-        .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(Color.hex(0xFFD86B), in: Capsule())
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(Color.hex(0xF5DC96).opacity(0.85), in: Capsule())
+        .contentShape(Capsule())
     }
 
     /// 剩余消息条数。优先级（2026-11-25 修正，顺序别写反）：
