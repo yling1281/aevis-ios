@@ -3,8 +3,13 @@ import UIKit
 
 /// 会员独立页（2026-11-23 从 `ShopView` 迁出）：只承载「套餐」。
 ///
-/// - 四档现价来自 `ShopProduct.priceCents`（1490/2190/4490/8790 分），一律 `specifier:"%.1f"`，
-///   否则 14.9 会被 `%.0f` 吞成 "¥15"；划线原价 `origPriceValue` 用 `¥%.1f`（16.9/24.9/49.9/97.9）。
+/// - 现价来自 `ShopProduct.priceCents`，一律 `specifier:"%.1f"`，
+///   否则 14.9 会被 `%.0f` 吞成 "¥15"；划线原价 `origPriceValue` 用 `¥%.1f`。
+/// - **档位数量由服务端决定，不写死**。2026-11-25 起线上只保留一档（`p_x` ¥14.9 / 30 天），
+///   `p_xl` / `p_xxl` / `p_xllll` 已 `active=0` 下架（行还在，随时可恢复）。所以：
+///   列表是**纵向 `ForEach`**，不是横向分页 —— 一档时就是一张卡，不会留空位、也没有「1/4」这类位置指示；
+///   所有用到 `products.first` 的地方（`discountProduct`、`displayedBenefits`）都走可选绑定，
+///   空数组和单元素数组都不会越界。
 /// - 九折弹窗：**每天第一次进会员页弹一次**（`aevisMemberDiscountLastShownDate` 存本地 yyyy-MM-dd，
 ///   跨天自动重置、同日不重复、可关闭）；页面常驻「限时九折」入口可再次手动查看。
 ///   强制更新逻辑（AppUpdate/UpdateSheet）完全不碰。
@@ -42,15 +47,16 @@ struct MemberView: View {
     @State private var successResult: APIClient.PayVerifyResult? = nil
     @State private var alipayConfirming = false
 
-    /// 会员权益（2026-11-24 产品文案先上 UI）。后端 `/v1/shop/products` 目前只有
-    /// id/title/days/price_cents/week_total/percent/label，**没有结构化权益字段**；
-    /// 这里先按用户口述列出，需后端补 `benefits[]` / `signin_bonus` / `free_minutes` 后再改成动态读取。
+    /// 会员权益（本地兜底文案）。后端 `/v1/shop/products` 已下发 `benefits[]`（4 条），
+    /// 只有老服务端缺字段时才用这里，保证权益区不空白。
+    ///
+    /// 2026-11-25：**删掉「免费时长」**。后端 `benefits[]` 现在不含语音分钟这一项，
+    /// 本地兜底若还留着，服务端字段缺失时会把已下线的权益又摆出来。
     private let benefitItems = [
-        "开通立得墨点",
-        "月卡 · 固定 30 天",
+        "开通立得 300 墨点",
+        "月卡固定 30 天",
         "本周用量一次回满",
-        "每天签到翻倍",
-        "免费时长",
+        "每天签到奖励翻倍",
     ]
 
     /// 后端 `/v1/shop/products` 已下发 `benefits[]`（字符串数组），优先用服务端文案；

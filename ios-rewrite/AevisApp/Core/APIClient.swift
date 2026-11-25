@@ -643,8 +643,15 @@ struct APIClient {
         let percent: Int        // 本周已用百分比 0–100
         let leftPct: Int        // 本周剩余百分比 0–100
         let hasQuota: Bool      // 还有没有可用额度
-        /// 重置时刻（ISO-8601 字符串）。服务端当前 `/v1/quota/state` **尚未下发**，
-        /// 为 nil 时主页不显示「重置」那一行 —— 不写死、不自己编日期。
+        /// 本周剩余额度折成「还能聊多少条」（服务端 `est_messages`，2026-11-25 上线）。
+        ///
+        /// 这个字段存在的原因：旧口径拿 `points.est_messages`（墨点余额 ÷ 均价）当条数，
+        /// 免费用户余额是 0 → 首页恒显示「您大约还有 0 条消息额度」，
+        /// 可他明明还有整周的免费额度。`0` 表示服务端没给（或确实归零），
+        /// 调用方据此回落到「免费基线 × 剩余百分比」。
+        let estMessages: Int
+        /// 重置时刻（ISO-8601 字符串）。服务端未下发时为 nil —— 主页不显示「重置」那一行，
+        /// 不写死、不自己编日期。
         let resetAt: String?
     }
 
@@ -662,6 +669,10 @@ struct APIClient {
             percent: (q["percent"] as? NSNumber)?.intValue ?? 0,
             leftPct: (q["left_pct"] as? NSNumber)?.intValue ?? 0,
             hasQuota: (q["has_quota"] as? Bool) ?? false,
+            // 2026-11-25：服务端 `est_messages`。没这个字段的老版本服务端按 0 处理，
+            // 由 HomeView 回落到「免费基线 × 剩余百分比」。
+            estMessages: (q["est_messages"] as? NSNumber)?.intValue
+                ?? (d["est_messages"] as? NSNumber)?.intValue ?? 0,
             resetAt: (q["reset_at"] as? String) ?? (q["resetAt"] as? String)
                 ?? (q["next_reset"] as? String) ?? (d["reset_at"] as? String)
         )

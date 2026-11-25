@@ -81,14 +81,17 @@ final class AppUpdateCenter: ObservableObject {
             let payload = (json["data"] as? [String: Any]) ?? [:]
             lastCheck = Date()
 
-            guard (payload["update"] as? Bool) == true else {
+            // 服务端布尔兼容（2026-11-25）：`update` / `force` 不能只按 `as? Bool` 读。
+            // 线上实测这两个字段是真 bool，但 RuoYi 侧其他接口有把布尔序列化成 1/0 的先例，
+            // 强更标记一旦被读成 false，用户就直接绕过门禁了 —— 这里一律走宽松解析。
+            guard Self.boolValue(payload["update"]) else {
                 latest = nil
                 return
             }
             latest = UpdateInfo(
                 current: (payload["current"] as? String) ?? ver,
                 latest: (payload["latest"] as? String) ?? "",
-                force: (payload["force"] as? Bool) ?? false,
+                force: Self.boolValue(payload["force"]),
                 notes: (payload["notes"] as? String) ?? "",
                 ipaURL: (payload["ipaUrl"] as? String) ?? "",
                 otaURL: (payload["otaUrl"] as? String) ?? "",
@@ -101,6 +104,21 @@ final class AppUpdateCenter: ObservableObject {
     }
 
     // MARK: - 动作
+
+    /// 宽松布尔解析：真 bool / `1`-`0` / `"true"`-`"false"` 都认。
+    ///
+    /// 只用于 `update` / `force` 这两个**门禁**字段。它们读错的后果不对称：
+    /// 读成 false = 用户绕过强制更新门禁继续用旧版；读成 true 最多多弹一次窗。
+    /// 所以这里宁可宽，不可严。
+    static func boolValue(_ any: Any?) -> Bool {
+        if let b = any as? Bool { return b }
+        if let n = any as? NSNumber { return n.boolValue }
+        if let s = any as? String {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return t == "true" || t == "1" || t == "yes"
+        }
+        return false
+    }
 
     /// 打开安装入口。OTA 优先；否则把 IPA 交给系统下载（用户再到「文件」里签名安装）。
     func openInstall() {

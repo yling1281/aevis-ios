@@ -365,9 +365,20 @@ struct HomeView: View {
         .background(Color.hex(0xFFD86B), in: Capsule())
     }
 
-    /// 剩余消息条数：优先服务端 points.estMessages；没有则用免费基线 × 剩余百分比估算。
+    /// 剩余消息条数。优先级（2026-11-25 修正，顺序别写反）：
+    /// 1. **`quota.estMessages`** —— 服务端按「本周剩余额度」折的条数，会员和免费用户都对；
+    /// 2. `points.estMessages` —— 墨点余额 ÷ 均价，只对**有余额**的用户有意义；
+    /// 3. `freeMessageBaseline × leftPct` —— 前两个都没有时的本地估算。
+    ///
+    /// 旧实现把 2 放在 1 前面，导致免费用户（余额 0）首页恒显示「还有 0 条」，
+    /// 而他实际还有整周的免费额度。
     private var remainingMessagesLine: String {
-        if let p = points { return "您大约还有 \(p.estMessages.formatted()) 条消息额度" }
+        if let q = quota, q.estMessages > 0 {
+            return "您大约还有 \(q.estMessages.formatted()) 条消息额度"
+        }
+        if let p = points, p.estMessages > 0 {
+            return "您大约还有 \(p.estMessages.formatted()) 条消息额度"
+        }
         if let q = quota {
             let n = Int((Double(APIClient.freeMessageBaseline) * Double(q.leftPct) / 100.0).rounded())
             return "您大约还有 \(n) 条消息额度"
@@ -398,8 +409,12 @@ struct HomeView: View {
 
     /// 墨点余额：独立单位，只讲墨点，不再和本周额度混在一行。
     /// 拿不到就「—」，不显示 0、不用 /35 估算。
+    ///
+    /// 2026-11-25：余额为 0 时不再显示「约还能聊 0 条」—— 免费用户本来就是 0，
+    /// 紧贴着上一行「您大约还有 15 条消息额度」写「约还能聊 0 条」，读起来自相矛盾。
     private var balanceLine: String {
         guard let points else { return "墨点余额 —（独立单位，不计入本周额度）" }
+        guard points.points > 0 else { return "墨点余额 0（独立单位，不计入本周额度）" }
         return "墨点余额 \(points.points.formatted()) · 约还能聊 \(points.estMessages.formatted()) 条（独立单位）"
     }
 
