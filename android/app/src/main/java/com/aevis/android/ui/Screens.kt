@@ -1333,6 +1333,8 @@ private fun SubPageHost(
             onBack = back,
             onOpen = { go(it) }
         )
+        // 2026-11-25：社区与活动（增长链接热更新 / 邀请码 / 活动 / 对话日志）
+        route == "growth" -> GrowthScreen(onBack = back)
         route == "serverstatus" -> ServerStatusScreen(onBack = back)
         route == "settings2" -> Settings2Screen(
             onBack = back,

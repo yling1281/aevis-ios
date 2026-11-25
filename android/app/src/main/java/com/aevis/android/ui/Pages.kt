@@ -387,7 +387,8 @@ fun MallScreen(
                     // ---------- 商城 · 会员（2026-11-24 服务端驱动）----------
                     0 -> {
                         // 档位数量 / 价格 / 权益全读 /v1/shop/products，客户端不写死。
-                        // 2026-11-25 线上只有一档 p_x（¥14.9 / 30 天）；以前写死两档已删。
+                        // 2026-11-25 线上只有一档会员 p_x（服务端 1990 分 = ¥19.9/月），
+                        // 此前写死的 14.9 / 21.9 两档已删除；语音分钟权益已下线。
                         val memberProducts = products.filter {
                             it.kind != "uses" && it.priceCents > 0
                         }
@@ -411,9 +412,10 @@ fun MallScreen(
                                     price = "¥%.1f".format(java.util.Locale.US, cents),
                                     days = tr("/ %d 天", p.days),
                                     weeklyPoints = p.weekTotal,
+                                    // 服务端 benefits[] 优先；缺字段时用产品口径占位（语音分钟已下线，不再列）
                                     benefits = p.benefits.ifEmpty {
-                                        listOf(tr("开通立得墨点"), tr("本周用量一次回满"),
-                                            tr("每天签到翻倍"), tr("免费时长"))
+                                        listOf(tr("开通立得 300 墨点"), tr("本周用量一次回满"),
+                                            tr("每天签到翻倍"))
                                     },
                                     bestValue = pi == memberProducts.lastIndex && memberProducts.size > 1,
                                     onBuy = { payOrder(ctx, scope, p.id) }
@@ -503,8 +505,8 @@ fun MallScreen(
 @Composable
 private fun MemberCard(
     tier: String,           // 档位短名（服务端 label，兜"月卡"）
-    origPrice: String,      // 划线原价 "¥16.9"
-    price: String,          // 现价 "¥14.9"
+    origPrice: String,      // 划线原价（服务端 list_price_cents / 现价推算）
+    price: String,          // 现价（服务端 price_cents，如 ¥19.9）
     days: String,           // "/ 30 天"
     weeklyPoints: Int,      // 每周刷新的额度
     benefits: List<String>, // 服务端下发权益文案；空用占位

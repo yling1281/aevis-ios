@@ -219,7 +219,9 @@ fun CheckinScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(V2.sectionGap))
             Text(
-                tr("连续签到奖励会递增：1 → 2 → 3 → 5 → 8 墨点，断签从 1 重新开始。"),
+                // 2026-11-25：签到奖励服务端下发（普通 20 墨点 / 会员翻倍 40），
+                // 不再写死旧口径"1→2→3→5→8"；具体数额以签到按钮/到账提示为准。
+                tr("每天签到得墨点，会员翻倍。具体数额以服务端下发为准，连续签到有额外奖励。"),
                 fontSize = 11.sp, color = ink.copy(alpha = 0.34f), lineHeight = 15.sp,
                 modifier = Modifier.padding(horizontal = V2.gutter)
             )

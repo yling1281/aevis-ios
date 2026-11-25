@@ -2449,7 +2449,7 @@ object Api {
     fun refreshCloudLines() {
         Thread {
             try {
-                // 2026-11-24：香港线路已关闭，改试北京 + 直连 —— 只试一条的话那条挂云更新就断了
+                // 2026-11-25：北京为主 —— 只试一条的话那条挂云更新就断了
                 var res = callOnce(FASTLINE, "GET", "/v1/app/config", null, token())
                 if (res.first <= 0) res = callOnce(DIRECT, "GET", "/v1/app/config", null, token())
                 if (res.first <= 0) return@Thread
@@ -2527,9 +2527,8 @@ object Api {
 
     // ---------------- 线路状态（2026-11-16）----------------
     //
-    // 2026-11-24：香港线路已关闭。当前 App 能打的 API 线路：
-    //   直连 = 机房外网 IP（`DIRECT`），北京 = 隧道反代（`FASTLINE`），备用 = 自签（`API2LINE`）。
-    // 北京那条后端已开 API 反代（原只反代图片）。
+    // 2026-11-25：用户可见的 API 线路只有北京（`FASTLINE`）。
+    // 网络层内部仍保留直连 / 自签常量做兜底，但不作为可选线路展示。
 
     /**
      * 一条**可以被界面看到**的线路。
@@ -2562,22 +2561,14 @@ object Api {
     )
 
     /**
-     * 当前对外提供服务的线路（112，118 加「直连」）。
+     * 当前对外提供服务的线路（2026-11-25：用户明确「服务器就只有北京」）。
      *
-     * 三条都是 HTTPS 入口、都能跑对话（2026-11-24 香港线路已关闭）：
-     *   4. `103.236.72.107:54319`（**直连 · 最佳**，服务商 NAT 直通内部 8788，**0.11–0.13s**）
-     *   1. 北京隧道反代（≈0.20s）
-     *   3. 备用（自签证书，≈1.5s）
-     *
-     * 118：直连那条**升为正式线路并默认首选**（`pinnedLine` 初值 = 它的 id）。
-     * 它的证书是自签 + App 内置信任（`res/raw/aevis_direct_ca.crt`），不需要额外配置。
-     * 界面仍然只显示 label，不露 IP/端口（`host` 只存在于这一层）。
+     * 界面可选线路只保留一条：北京隧道反代（`FASTLINE`，≈0.20s）。
+     * 直连 / 备用 / 原主站入口都从**用户可选列表**里移除（网络层内部兜底常量仍保留，
+     * 但不再作为可选线路显示）。界面只显示 label，不露 IP / 端口。
      */
     private fun endpoints(): List<Endpoint> = listOf(
-        Endpoint(DEFAULT_LINE_ID, DIRECT, "直连 · 最佳", "机房直通"),
-        Endpoint(1, FASTLINE, "北京", "隧道反代"),
-        // 2026-11-24：香港线路（原 Endpoint(2, BASE, "香港")）已按用户要求关闭。
-        Endpoint(3, API2LINE, "备用", "自签线路")
+        Endpoint(1, FASTLINE, "北京", "隧道反代")
     )
 
     fun lines(): List<Line> = endpoints().map {
@@ -2585,15 +2576,13 @@ object Api {
             com.aevis.android.core.I18n.tr(it.noteKey), true)
     }
 
-    /** 默认首选：直连（id 4）。`pinnedLine = 0`（自动）时竞速的优先候选就是它。*/
-    private const val DEFAULT_LINE_ID = 4
+    /** 2026-11-25：用户明确「服务器只有北京」，只有一个可选线路（id 1）；此常量保留仅为兼容旧引用。*/
+    private const val DEFAULT_LINE_ID = 1
 
     /**
      * 用户手动选的线路 id；`0` = 自动（**竞速**：直连 vs 北京，谁先通走谁）。
-     * 2026-11-16（112）：以前是 `preferDirect: Boolean` 两态，第三条起没法表达。
-     * 118：默认仍是 0（自动），但自动的**首选候选固定是直连**（`endpoints()` 第一位），
-     *      这样既满足「直连优先」，又能在直连挂掉时靠竞速/兜底秒切。
-     *      手动选某条 = 用户明确表态，就**不再竞速**，严格走它（连挂两次才兜底）。
+     * 2026-11-25：服务器只有北京一条，`pinnedLine` 实际只可能是 0（自动）或 1（北京）。
+     * 网络层仍保留直连/备用常量做内部兜底，但它们不再出现在 `lines()` 的可选列表里。
      */
     @Volatile
     private var pinnedLine: Int = 0
@@ -2617,8 +2606,8 @@ object Api {
         if (byActive != null) return com.aevis.android.core.I18n.tr(byActive.labelKey)
         val e = endpoints().firstOrNull { it.id == pinnedLine }
         if (e != null) return com.aevis.android.core.I18n.tr(e.labelKey)
-        // 2026-11-24：香港线路已关闭，兜底改报"直连"
-        return com.aevis.android.core.I18n.tr("直连")
+        // 2026-11-25：只有北京一条线路，兜底报北京
+        return com.aevis.android.core.I18n.tr("北京")
     }
 
     /** 当前正在用的是不是直连。*/
@@ -2801,7 +2790,7 @@ object Api {
     }
 
     fun pingLine(direct: Boolean): Long {
-        // 2026-11-24：香港线路已关闭，非直连改测北京
+        // 2026-11-25：非直连改测北京
         val host = if (direct) DIRECT else FASTLINE
         val t0 = System.currentTimeMillis()
         var conn: HttpURLConnection? = null
@@ -2919,6 +2908,107 @@ object Api {
         post("/v1/web/auth/cancel", JSONObject().put("ticket", ticket), token())
     }
 
+    // ---------------- 增长 / 链接热更新（2026-11-25，对标 iOS GrowthAPI）----------------
+    //
+    // 服务端四个链接可后台热更新，客户端**不写死 URL**：每次进页面 force 拉一次，
+    // 断网用本地缓存兜底。取不到就显示"暂无"，不编造活动 / 群链接。
+
+    data class GrowthConfig(
+        val groupJoinUrl: String = "",
+        val wechatWorkUrl: String = "",
+        val activityUrl: String = "",
+        val inviteBaseUrl: String = "",
+        val ok: Boolean = false
+    ) {
+        val hasAny: Boolean get() =
+            groupJoinUrl.isNotEmpty() || wechatWorkUrl.isNotEmpty() ||
+                activityUrl.isNotEmpty() || inviteBaseUrl.isNotEmpty()
+    }
+
+    data class GrowthActivity(
+        val id: String, val title: String, val summary: String,
+        val url: String, val rewardPoints: Int,
+        val startAt: String, val endAt: String
+    )
+
+    data class InviteResult(val ok: Boolean, val points: Int, val message: String)
+
+    data class ChatLogEntry(
+        val id: String, val role: String, val content: String, val createdAt: String
+    )
+
+    /** 拉增长链接配置（ok=false 表示网络失败，调用方用缓存）。*/
+    fun growthConfig(): GrowthConfig {
+        val (code, json) = get("/v1/growth/config", token())
+        if (code !in 200..299) return GrowthConfig()
+        val d = json.optJSONObject("data") ?: json
+        return GrowthConfig(
+            groupJoinUrl = d.optString("groupJoinUrl"),
+            wechatWorkUrl = d.optString("wechatWorkUrl"),
+            activityUrl = d.optString("activityUrl"),
+            inviteBaseUrl = d.optString("inviteBaseUrl"),
+            ok = true
+        )
+    }
+
+    fun growthActivities(): List<GrowthActivity> {
+        val (code, json) = get("/v1/growth/activities", token())
+        if (code !in 200..299) return emptyList()
+        val d = json.optJSONObject("data") ?: json
+        val arr = d.optJSONArray("rows") ?: return emptyList()
+        val out = ArrayList<GrowthActivity>(arr.length())
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            val id = r.optString("id").ifEmpty { r.optInt("id").toString() }
+            if (id.isBlank() || id == "0") continue
+            out.add(
+                GrowthActivity(
+                    id = id, title = r.optString("title"), summary = r.optString("summary"),
+                    url = r.optString("url"), rewardPoints = r.optInt("rewardPoints"),
+                    startAt = r.optString("startAt"), endAt = r.optString("endAt")
+                )
+            )
+        }
+        return out
+    }
+
+    fun bindInvite(code: String): InviteResult {
+        val trimmed = code.trim()
+        if (trimmed.isEmpty()) return InviteResult(false, 0, "请先填写邀请码")
+        val (c, j) = post("/v1/growth/invite/bind", JSONObject().put("code", trimmed), token())
+        if (c !in 200..299) return InviteResult(false, 0, "网络异常（HTTP $c）")
+        val d = j.optJSONObject("data") ?: j
+        return InviteResult(
+            ok = d.optBoolean("ok", false),
+            points = d.optInt("points", 0),
+            message = d.optString("message").ifEmpty { j.optString("msg") }
+        )
+    }
+
+    /** 对话日志第一页。cursor 翻页由调用方另发（这里只做第一页 + 可选 cursor）。*/
+    fun chatLogs(cursor: String = "", limit: Int = 20): Pair<List<ChatLogEntry>, String> {
+        var path = "/v1/chat/logs?limit=$limit"
+        if (cursor.isNotEmpty()) {
+            path += "&cursor=" + java.net.URLEncoder.encode(cursor, "UTF-8")
+        }
+        val (code, json) = get(path, token())
+        if (code !in 200..299) return emptyList<ChatLogEntry>() to ""
+        val d = json.optJSONObject("data") ?: json
+        val arr = d.optJSONArray("rows") ?: return emptyList<ChatLogEntry>() to ""
+        val out = ArrayList<ChatLogEntry>(arr.length())
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            out.add(
+                ChatLogEntry(
+                    id = r.optString("id").ifEmpty { r.optInt("id").toString() },
+                    role = r.optString("role"), content = r.optString("content"),
+                    createdAt = r.optString("createdAt")
+                )
+            )
+        }
+        return out to d.optString("nextCursor")
+    }
+
     /** 需要额外头的 POST（站内信认 `X-Account`）。*/
     private fun postWith(
         path: String,
@@ -2927,7 +3017,7 @@ object Api {
         token: String?
     ): Pair<Int, JSONObject> {
         var last: Pair<Int, JSONObject> = -1 to JSONObject().put("msg", "网络异常")
-        // 2026-11-24：香港线路已关闭，两条候选改直连 / 北京
+        // 2026-11-25：两条候选改直连 / 北京
         for (base in listOf(if (preferDirect) DIRECT else FASTLINE,
                             if (preferDirect) FASTLINE else DIRECT)) {
             val r = callOnce(base, "POST", path, body, token, headers)
@@ -2947,7 +3037,7 @@ object Api {
     private fun getWith(path: String, headers: Map<String, String>,
                         token: String?): Pair<Int, JSONObject> {
         var last: Pair<Int, JSONObject> = -1 to JSONObject().put("msg", "网络异常")
-        // 2026-11-24：香港线路已关闭，两条候选改直连 / 北京
+        // 2026-11-25：两条候选改直连 / 北京
         for (base in listOf(if (preferDirect) DIRECT else FASTLINE,
                             if (preferDirect) FASTLINE else DIRECT)) {
             val r = callOnce(base, "GET", path, null, token, headers)
@@ -3021,7 +3111,7 @@ object Api {
         if (winner != null) order.add(winner)
         if (primary != null && !order.contains(primary)) order.add(primary)
         for (e in eps) if (!order.contains(e.host)) order.add(e.host)
-        // 2026-11-24：香港线路已关闭，兜底改直连 / 北京
+        // 2026-11-25：兜底改直连 / 北京
         if (preferDirect) {
             if (!order.contains(DIRECT)) order.add(DIRECT)
             if (!order.contains(FASTLINE)) order.add(FASTLINE)

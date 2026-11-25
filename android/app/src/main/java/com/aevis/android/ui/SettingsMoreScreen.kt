@@ -113,6 +113,11 @@ private fun moreGroups(): List<Pair<String, List<MoreItem>>> = listOf(
         MoreItem(
             "settings2", tr("通用配置"), tr("主题、背景、弹窗"),
             R.drawable.ic_set_sliders, MoreAction.Route("settings2")
+        ),
+        // 2026-11-25：增长入口（群聊/企微客服/活动/邀请），链接后台热更新
+        MoreItem(
+            "growth", tr("社区与活动"), tr("群聊、客服、活动、邀请"),
+            R.drawable.ic_row_addfriend, MoreAction.Route("growth")
         )
     ),
     tr("数据管理") to listOf(

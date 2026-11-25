@@ -140,7 +140,9 @@ fun ModelScreen(onBack: () -> Unit) {
                                     Text(
                                         Api.shortLabel(m.id), fontSize = V2.body,
                                         fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
-                                        color = if (on) V2.accent else ink
+                                        color = if (on) V2.accent else ink,
+                                        // 2026-11-25：长模型名不换行、不吃掉右侧状态区
+                                        maxLines = 1
                                     )
                                     if (on) {
                                         Spacer(Modifier.width(6.dp))
@@ -161,7 +163,8 @@ fun ModelScreen(onBack: () -> Unit) {
                                             append(" 墨点/次")
                                         }
                                     },
-                                    fontSize = 11.sp, color = ink.copy(alpha = 0.42f)
+                                    fontSize = 11.sp, color = ink.copy(alpha = 0.42f),
+                                    maxLines = 1
                                 )
                                 // 覆盖 / 平均响应（有才显示）
                                 if (st != null && (st.coverageMinutes > 0 || st.avgLatencySec != null)) {
@@ -180,7 +183,8 @@ fun ModelScreen(onBack: () -> Unit) {
                                                 append(tr("聚合探测"))
                                             }
                                         },
-                                        fontSize = 10.sp, color = ink.copy(alpha = 0.35f)
+                                        fontSize = 10.sp, color = ink.copy(alpha = 0.35f),
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -210,17 +214,22 @@ fun ModelScreen(onBack: () -> Unit) {
  */
 @Composable
 private fun StatePill(st: Api.ModelStatus?) {
+    // 2026-11-25：四态颜色按明暗主题各给一支，保证深色底下也读得清。
+    val dark = isDarkTheme()
     val (text, color) = when (st?.state ?: Api.ModelStatus.UNKNOWN) {
-        Api.ModelStatus.OK -> tr("正常") to Color(0xFF2E9E5B)
-        Api.ModelStatus.UNSTABLE -> tr("波动") to Color(0xFFD98A2B)
-        Api.ModelStatus.DOWN -> tr("异常") to Color(0xFFD9483C)
-        else -> tr("未监控") to MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        Api.ModelStatus.OK -> tr("正常") to if (dark) Color(0xFF5FD89A) else Color(0xFF218A4E)
+        Api.ModelStatus.UNSTABLE -> tr("波动") to if (dark) Color(0xFFF0B45A) else Color(0xFFB36A12)
+        Api.ModelStatus.DOWN -> tr("异常") to if (dark) Color(0xFFFF7B70) else Color(0xFFC9352A)
+        else -> tr("未监控") to MaterialTheme.colorScheme.onSurface.copy(
+            alpha = if (dark) 0.5f else 0.42f
+        )
     }
     Column(horizontalAlignment = Alignment.End) {
         Text(
             text, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = color,
+            maxLines = 1,
             modifier = Modifier.clip(squircle(7.dp))
-                .background(color.copy(alpha = 0.13f))
+                .background(color.copy(alpha = if (dark) 0.18f else 0.13f))
                 .padding(horizontal = 9.dp, vertical = 3.dp)
         )
         if (st != null && st.officialState.isNotBlank()) {
@@ -243,17 +252,24 @@ private fun StatePill(st: Api.ModelStatus?) {
 private fun StatusBars(st: Api.ModelStatus?) {
     val samples = st?.samples.orEmpty()
     val ink = MaterialTheme.colorScheme.onSurface
+    val dark = isDarkTheme()
     if (samples.isEmpty()) {
         Text(
             tr("暂无探测数据"), fontSize = 9.5.sp,
-            color = ink.copy(alpha = 0.32f), modifier = Modifier.padding(top = 2.dp)
+            color = ink.copy(alpha = if (dark) 0.4f else 0.32f),
+            modifier = Modifier.padding(top = 2.dp)
         )
         return
     }
-    val green = Color(0xFF3FBF6F)
-    val red = Color(0xFFE05A4E)
-    val gray = ink.copy(alpha = 0.14f)
-    val w = 78.dp
+    val green = if (dark) Color(0xFF5FD89A) else Color(0xFF3FBF6F)
+    val red = if (dark) Color(0xFFFF7B70) else Color(0xFFE05A4E)
+    // 2026-11-25：窄屏自适应宽度（WebView 里窄机型不溢出）；最多 78dp，至少 44dp
+    val w = with(androidx.compose.ui.platform.LocalDensity.current) {
+        val maxW = 78.dp.toPx()
+        val minW = 44.dp.toPx()
+        val avail = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp.toPx() * 0.22f
+        avail.coerceIn(minW, maxW).toDp()
+    }
     Canvas(Modifier.size(width = w, height = 12.dp)) {
         val n = samples.size.coerceAtLeast(1)
         val gap = 1f
@@ -262,7 +278,8 @@ private fun StatusBars(st: Api.ModelStatus?) {
             val ok = samples[i]
             val h = if (ok) size.height else size.height * 0.55f
             drawRoundRect(
-                color = green,
+                // 2026-11-25 修：异常格必须画红，之前无论 ok 都画绿（用户看不到异常）
+                color = if (ok) green else red,
                 topLeft = Offset(i * (bw + gap), size.height - h),
                 size = Size(bw, h),
                 cornerRadius = CornerRadius(1f, 1f)
