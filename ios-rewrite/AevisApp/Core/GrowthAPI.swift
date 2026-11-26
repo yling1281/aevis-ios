@@ -12,11 +12,13 @@ enum GrowthAPI {
     struct GrowthConfig {
         var groupJoinUrl: String = ""
         var wechatWorkUrl: String = ""
+        var wechatWorkQrUrl: String = ""
         var activityUrl: String = ""
         var inviteBaseUrl: String = ""
 
         var hasAnyEntry: Bool {
             !groupJoinUrl.isEmpty || !wechatWorkUrl.isEmpty
+                || !wechatWorkQrUrl.isEmpty
                 || !activityUrl.isEmpty || !inviteBaseUrl.isEmpty
         }
     }
@@ -93,6 +95,7 @@ enum GrowthAPI {
         return GrowthConfig(
             groupJoinUrl: (d["groupJoinUrl"] as? String) ?? "",
             wechatWorkUrl: (d["wechatWorkUrl"] as? String) ?? "",
+            wechatWorkQrUrl: (d["wechatWorkQrUrl"] as? String) ?? "",
             activityUrl: (d["activityUrl"] as? String) ?? "",
             inviteBaseUrl: (d["inviteBaseUrl"] as? String) ?? ""
         )

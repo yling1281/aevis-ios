@@ -79,13 +79,22 @@ fun GrowthScreen(onBack: () -> Unit) {
                 )
             }
 
-            // ---- 四个入口链接（有才显示，不写死 URL）----
-            val links = listOf(
-                tr("加入群聊") to cfg.groupJoinUrl,
-                tr("企业微信客服") to cfg.wechatWorkUrl,
-                tr("活动中心") to cfg.activityUrl,
-                tr("邀请好友") to cfg.inviteBaseUrl
-            ).filter { it.second.isNotEmpty() }
+            // ---- 入口链接（有才显示，不写死 URL；2026-11-25 按 flag 门禁）----
+            val links = buildList {
+                if (Api.featureEnabled("growth")) {
+                    add(tr("加入群聊") to cfg.groupJoinUrl)
+                    add(tr("活动中心") to cfg.activityUrl)
+                }
+                // 企微客服 = 工单入口；企微二维码单独一个开关
+                if (Api.featureEnabled("tickets")) add(tr("企业微信客服") to cfg.wechatWorkUrl)
+                if (Api.featureEnabled("wecomQr")) {
+                    add(tr("扫码联系客服") to (
+                        if (cfg.wechatWorkQrUrl.startsWith("http")) cfg.wechatWorkQrUrl
+                        else Api.baseUrl() + cfg.wechatWorkQrUrl
+                    ))
+                }
+                if (Api.featureEnabled("invite")) add(tr("邀请好友") to cfg.inviteBaseUrl)
+            }.filter { it.second.isNotEmpty() }
             if (links.isNotEmpty()) {
                 V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 6.dp), pad = 0.dp) {
                     links.forEachIndexed { i, (label, url) ->
@@ -115,7 +124,8 @@ fun GrowthScreen(onBack: () -> Unit) {
                 )
             }
 
-            // ---- 邀请码绑定 ----
+            // ---- 邀请码绑定（invite 开关）----
+            if (Api.featureEnabled("invite")) {
             Spacer(Modifier.height(14.dp))
             V2Card(Modifier.padding(horizontal = V2.gutter)) {
                 Text(tr("绑定邀请码"), fontSize = V2.sub, fontWeight = FontWeight.SemiBold)
@@ -153,9 +163,10 @@ fun GrowthScreen(onBack: () -> Unit) {
                         color = if (inviteCode.isNotBlank()) Color.White else ink.copy(alpha = 0.4f))
                 }
             }
+            }
 
             // ---- 活动列表 ----
-            if (activities.isNotEmpty()) {
+            if (Api.featureEnabled("growth") && activities.isNotEmpty()) {
                 Spacer(Modifier.height(14.dp))
                 Text(tr("进行中的活动"), fontSize = V2.sub, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = V2.gutter))
@@ -186,8 +197,8 @@ fun GrowthScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ---- 对话日志（第一页）----
-            if (logs.isNotEmpty()) {
+            // ---- 对话日志（第一页，growth 开关）----
+            if (Api.featureEnabled("growth") && logs.isNotEmpty()) {
                 Spacer(Modifier.height(14.dp))
                 Text(tr("对话记录"), fontSize = V2.sub, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = V2.gutter))

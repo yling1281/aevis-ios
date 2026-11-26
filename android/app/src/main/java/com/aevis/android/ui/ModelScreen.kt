@@ -95,8 +95,9 @@ fun ModelScreen(onBack: () -> Unit) {
         SubPageHeader(title = "模型", onBack = onBack)
 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            // 2026-11-25：文案与 iOS / 服务端口径同步 —— 百分比和竖条统一优先近 30 分钟
             Text(
-                tr("竖条是最近的探测历史（绿正常 / 红异常 / 灰没数据）；右侧是当前状态。"),
+                tr("可用率与竖条优先显示近 30 分钟探测；服务端没有 recent 时才回落近 24 小时。绿正常 / 红异常 / 灰没数据。"),
                 fontSize = V2.micro, color = ink.copy(alpha = 0.45f), lineHeight = 16.sp,
                 modifier = Modifier.padding(horizontal = V2.gutter, vertical = 6.dp)
             )
@@ -191,10 +192,22 @@ fun ModelScreen(onBack: () -> Unit) {
 
                             Spacer(Modifier.width(10.dp))
 
-                            // 右：当前状态胶囊（四态）+ 历史竖条
+                            // 右：当前状态胶囊（四态）+ 可用率（近 30 分钟优先）+ 竖条
                             Column(horizontalAlignment = Alignment.End) {
                                 StatePill(st)
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.height(4.dp))
+                                // 2026-11-25：百分比和竖条同一口径 —— recent 优先，
+                                // 只有 recent 完全为空才回落 history 并如实写「近 24 小时」。
+                                if (st != null && st.samples.isNotEmpty()) {
+                                    Text(
+                                        tr("%s · 可用率 %.1f%%",
+                                            st.rangeLabel.ifBlank { tr("近 30 分钟") },
+                                            st.rate * 100),
+                                        fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                                        color = ink.copy(alpha = 0.6f), maxLines = 1
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                }
                                 StatusBars(st)
                             }
                         }
@@ -244,9 +257,10 @@ private fun StatePill(st: Api.ModelStatus?) {
 }
 
 /**
- * 历史竖条（12dp 高、每格宽约 3dp）。
- * 绿=正常 / 红=异常 / 灰=没数据（samples 空 → 画一条灰占位并写「暂无探测数据」）。
- * 位置：本文件 [StatusBars]，画法参考 SettingsMoreScreen 的 RelayModel.beats。
+ * 探测竖条（12dp 高、每格宽约 3dp）。
+ * 2026-11-25：`samples` 由 Api.modelsStatus 固定按 **recent 近 30 分钟优先**算出，
+ * 只有 recent 完全为空才回落 history 近 24 小时；绿=正常 / 红=异常 / 灰=没数据。
+ * 位置：本文件 [StatusBars]。
  */
 @Composable
 private fun StatusBars(st: Api.ModelStatus?) {

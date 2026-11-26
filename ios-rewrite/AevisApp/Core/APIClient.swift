@@ -43,14 +43,12 @@ struct APIClient {
     /// 自动就能看到云端下发的线路，不用改一行；`AevisHosts` 也拿这张内置表做
     /// 拉配置的起点（避免 `lines` → `allAccountLines` → 拉配置的环）。
     ///
-    /// 顺序 = 回落顺序：直连 → 北京。UI 只显示名字，地址不上屏。
+    /// 顺序 = 回落顺序：仅北京一条。UI 只显示名字，地址不上屏。
     static let builtInLines: [Line] = [
         // name 用纯地名，不出现 IP、日期、「自签证书/隧道」等工程词。
-        // 顺序 = 回落顺序：直连 → 北京，不要打乱。
-        // 原第三条境外备用线路已于 2026-11 关闭（延迟高且不稳），此处不再保留条目；
+        // 2026-11-25 按用户要求收敛为只有北京；直连/境外备用线路均已移除。
         // 老用户本地若存着已下线线路的 id，`activeLine` 找不到会自然回落到首条，不会崩。
-        Line(id: "direct", name: "直连", base: "https://103.236.72.107:54319",     pinning: true,  note: "最快"),
-        Line(id: "bj",     name: "北京", base: "https://q7m3ax.lingyan.cyou",        pinning: false, note: "备用"),
+        Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou", pinning: false, note: "备用"),
     ]
 
     /// 生效中的线路表：内置 ∪ 云端下发（按 base 去重、内置优先、云端已按实测 RTT 排序）。
@@ -62,6 +60,29 @@ struct APIClient {
     private static let activeKey = "apiLineId"
     /// 已知失败线路的 id 集合（持久化）：失败后降权，下次启动不优先撞它。
     private static let failedKey = "apiFailedLines"
+
+    // MARK: - 自动换线（2026-11-25 调度契约）
+    //
+    // 只在自动模式下生效；用户手动选线会把 apiAutoLine 置 false，这里**绝不**改那个键，
+    // 否则会把用户的手动选择悄悄覆盖掉。用户点「自动选择」才会恢复。
+    private static let slowThresholdMs = 3000
+    private static let autoSwitchCooldown: TimeInterval = 60
+    /// 候选 RTT 至少快 20% 才换（<= 当前 × 0.8），避免来回跳。
+    private static let minRTTImprovement: Double = 0.8
+    /// 连续慢请求计数；任何一次低于阈值的请求都清零。
+    private static var slowStreak = 0
+    private static var lastAutoSwitchAt: Date?
+    /// 防止并发 preload 时多个请求同时判定换线。
+    private static var autoSwitching = false
+
+    /// 自动模式是否开启。键不存在 = 默认自动（与 ServerStatusView 的 @AppStorage 默认 true 一致）。
+    /// 用 `object(forKey:)` 而不是 `bool(forKey:)`：后者在键不存在时也返回 false，会把默认自动误判成手动。
+    static var autoLineEnabled: Bool {
+        guard let raw = UserDefaults.standard.object(forKey: "apiAutoLine") else { return true }
+        if let b = raw as? Bool { return b }
+        if let n = raw as? NSNumber { return n.boolValue }
+        return true
+    }
 
     /// 用户明确选择的线路（不经失败降权）。默认 `direct`（2026-11-24 恢复直连）。
     /// 注意老用户本地可能存着 "bj"，那沿用其选择；只有从未选过的用户才默认直连。
@@ -185,6 +206,8 @@ struct APIClient {
 
     // MARK: - 底层
 
+    /// 所有请求的唯一入口。记录本次耗时，满足「连续慢 / 线路繁忙」时按最佳候选自动换线。
+    /// 换线逻辑在 `noteRequestDuration` 里，仅在自动模式下生效，且不动 `apiAutoLine`。
     static func request(
         _ path: String,
         method: String = "GET",
@@ -192,7 +215,27 @@ struct APIClient {
         token: String? = nil,
         account: String? = nil
     ) async throws -> [String: Any] {
-        // 默认走「自动回落」：按 orderedLines（直连→北京）逐条试，
+        let started = Date()
+        do {
+            let json = try await performRequest(
+                path, method: method, body: body, token: token, account: account)
+            await noteRequestDuration(Date().timeIntervalSince(started))
+            return json
+        } catch {
+            await noteRequestDuration(Date().timeIntervalSince(started))
+            throw error
+        }
+    }
+
+    /// 真正的请求体（回落循环）。从原 `request` 原样拆出，便于外层统一计时。
+    private static func performRequest(
+        _ path: String,
+        method: String,
+        body: [String: Any]?,
+        token: String?,
+        account: String?
+    ) async throws -> [String: Any] {
+        // 默认走「自动回落」：按 orderedLines 逐条试，
         // 只有线路级错误（SSL/连不上/超时/5xx）才换线；业务错误（401/402/4xx）立即抛。
         // 成功后确立该线路为首选并持久化 —— 真机直连 SSL 失败一次后，下次启动直接走北京，
         // 不再每次先撞直连卡几秒。所有调用方无需改动即获得回落能力。
@@ -223,6 +266,47 @@ struct APIClient {
         }
         trialLineID = nil
         throw lastError ?? APIError.http(0, "所有线路不可用")
+    }
+
+    /// 记录一次请求耗时并按需触发自动换线检查。
+    /// 触发条件（任一，且仅自动模式）：连续 2 次 > 3000ms，或当前线路最近一次 busy=true。
+    private static func noteRequestDuration(_ seconds: TimeInterval) async {
+        if Int(seconds * 1000) > slowThresholdMs {
+            slowStreak += 1
+        } else {
+            slowStreak = 0
+        }
+        guard slowStreak >= 2 || AevisHosts.isBusy(currentLine.id) else { return }
+        await autoSwitchIfNeeded()
+    }
+
+    /// 自动换线：实时探当前线路与候选，满足条件时切到 RTT 至少快 20% 的非繁忙线路。
+    /// 60 秒冷却；内部换线绝不把 `apiAutoLine` 关掉（只有用户手动选线/自动选择才会改它）。
+    private static func autoSwitchIfNeeded() async {
+        guard autoLineEnabled, !autoSwitching else { return }
+        if let last = lastAutoSwitchAt,
+           Date().timeIntervalSince(last) < autoSwitchCooldown { return }
+        autoSwitching = true
+        defer { autoSwitching = false }
+
+        let current = currentLine
+        guard !current.base.isEmpty else { return }
+        let candidates = lines.filter { !$0.base.isEmpty && $0.id != current.id }
+        guard !candidates.isEmpty else { return }
+
+        // 当前 + 候选一起探：结果写进 AevisHosts.pingState，排序 / 状态页 / 换线共用
+        await AevisHosts.probeAndRecord([current] + candidates)
+        let currentBusy = AevisHosts.isBusy(current.id)
+        guard currentBusy || slowStreak >= 2 else { return }
+        guard let currentRTT = AevisHosts.latency(current.id), currentRTT > 0 else { return }
+        guard let best = AevisHosts.bestCandidate(excluding: current.id) else { return }
+        guard Double(best.rtt) <= Double(currentRTT) * minRTTImprovement else { return }
+
+        setActiveLine(best.line.id)
+        lastAutoSwitchAt = Date()
+        slowStreak = 0
+        lastSwitchNote = "已自动切换到 \(best.line.name)"
+        NSLog("[AutoLine] 换线：\(currentRTT)ms -> \(best.line.name) \(best.rtt)ms")
     }
 
     /// 单次请求（指定线路，不改全局状态）。`request` 的回落循环用它。
@@ -1535,7 +1619,7 @@ struct APIClient {
         }
     }
 
-    /// 一次 `/v1/ping` 实测（毫秒）；不可达返回 nil。给 `AevisHosts` 排线路用。
+    /// 一次 `/v1/ping` 实测，同时拿 RTT（毫秒）与 `data.busy`。不可达返回 nil。
     ///
     /// 判定口径（2026-11-25，别改）：
     /// - **2xx/3xx → 可达**
@@ -1545,13 +1629,27 @@ struct APIClient {
     /// - **超时 / 连接失败 / TLS 失败 → 不可达**
     /// - **404 及其它 4xx/5xx → 不可达**：与 `probe()` 保持一致 ——
     ///   「nginx 活着但没挂 API」是半死状态，不能当可用线路收进候选。
-    static func pingLatency(_ line: Line, timeout: TimeInterval = 2) async -> Int? {
+    ///
+    /// `busy` 读不到时按 false 处理（负载字段缺失不能让探针失败）。
+    static func pingInfo(_ line: Line, timeout: TimeInterval = 2) async -> (rtt: Int, busy: Bool)? {
         let t0 = Date()
         guard let r = await rawGet("/v1/ping", line: line, timeout: timeout) else { return nil }
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
-        if (200..<400).contains(r.status) { return ms }
-        if r.status == 429 || r.status == 503 { return ms }
-        return nil
+        guard (200..<400).contains(r.status) || r.status == 429 || r.status == 503 else { return nil }
+        let json = (try? JSONSerialization.jsonObject(with: r.data)) as? [String: Any] ?? [:]
+        let data = (json["data"] as? [String: Any]) ?? json
+        let rawBusy = data["busy"] ?? json["busy"]
+        var busy = false
+        if let b = rawBusy as? Bool { busy = b }
+        else if let n = rawBusy as? NSNumber { busy = n.boolValue }
+        return (rtt: ms, busy: busy)
+    }
+
+    /// 一次 `/v1/ping` 实测（毫秒）；不可达返回 nil。给 `AevisHosts` 排线路用。
+    ///
+    /// 保留原行为与方法名供其它调用点使用；内部复用 `pingInfo`，只取 RTT。
+    static func pingLatency(_ line: Line, timeout: TimeInterval = 2) async -> Int? {
+        (await pingInfo(line, timeout: timeout))?.rtt
     }
 
     /// 探一条线路：`GET {base}/v1/app/config`，2s 超时，3 次取中位数。

@@ -11,13 +11,16 @@ struct GrowthView: View {
     @State private var inviteResult: GrowthAPI.InviteResult? = nil
     @State private var tip = ""
     @State private var binding = false
+    @State private var showQr = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 14) {
                 entryCard.staggerIn(0)
                 activityCard.staggerIn(1)
-                inviteCard.staggerIn(2)
+                if AevisHosts.featureEnabled("invite") {
+                    inviteCard.staggerIn(2)
+                }
                 if !tip.isEmpty {
                     Text(tip)
                         .font(.system(size: 12))
@@ -31,7 +34,10 @@ struct GrowthView: View {
         .background(Color.clear)
         .navigationTitle("创作者与活动")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showQr) { qrSheet }
         .task { await load() }
+        // 二级页收起底部 Dock（设置页 push 进来时才会露出 tab 栏）。
+        .toolbar(.hidden, for: .tabBar)
     }
 
     // MARK: - 入口（链接来自服务端）
@@ -55,6 +61,33 @@ struct GrowthView: View {
                 subtitle: config?.wechatWorkUrl.isEmpty == false ? "企业微信客服" : "暂无数据",
                 url: config?.wechatWorkUrl
             )
+            // 企业微信二维码是独立功能模块：受 wecomQr 开关控制，默认关闭。
+            if AevisHosts.featureEnabled("wecomQr"),
+               let qr = config?.wechatWorkQrUrl, !qr.isEmpty {
+                Divider().opacity(0.25)
+                Button { showQr = true } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "qrcode")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(AE.accent)
+                            .frame(width: 26, alignment: .center)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("扫码联系客服")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(AE.textPrimary)
+                            Text("企业微信二维码")
+                                .font(.system(size: 11))
+                                .foregroundStyle(AE.textSecondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AE.textSecondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             if let activityUrl = config?.activityUrl, !activityUrl.isEmpty {
                 Divider().opacity(0.25)
                 entryRow(
@@ -110,6 +143,44 @@ struct GrowthView: View {
             return
         }
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
+    // MARK: - 企业微信二维码
+
+    private var qrImageURL: URL? {
+        guard let path = config?.wechatWorkQrUrl, !path.isEmpty else { return nil }
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            return URL(string: path)
+        }
+        return URL(string: APIClient.activeLine.base + path)
+    }
+
+    private var qrSheet: some View {
+        VStack(spacing: 16) {
+            Text("企业微信二维码")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AE.textPrimary)
+            if let url = qrImageURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                    case .failure:
+                        Text("二维码加载失败").foregroundStyle(AE.textSecondary)
+                    @unknown default:
+                        ProgressView()
+                    }
+                }
+                .frame(width: 260, height: 260)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Text("暂无二维码").foregroundStyle(AE.textSecondary)
+            }
+            Button("关闭") { showQr = false }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(24)
     }
 
     // MARK: - 活动列表

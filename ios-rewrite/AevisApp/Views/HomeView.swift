@@ -331,14 +331,19 @@ struct HomeView: View {
 
                 Spacer(minLength: 4)
 
-                Button { onBuyQuota?() } label: {
-                    quotaCapsule("用量提升", symbol: "crown.fill", showNew: false)
+                // 会员 / 商城入口按服务端开关开放；关掉时这两枚胶囊直接不出现。
+                if AevisHosts.featureEnabled("member") {
+                    Button { onBuyQuota?() } label: {
+                        quotaCapsule("用量提升", symbol: "crown.fill", showNew: false)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                Button { onPerUse?() } label: {
-                    quotaCapsule("按次计费", symbol: nil, showNew: true)
+                if AevisHosts.featureEnabled("shop") {
+                    Button { onPerUse?() } label: {
+                        quotaCapsule("按次计费", symbol: nil, showNew: true)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
             if usageExpanded {
@@ -663,20 +668,32 @@ struct HomeView: View {
     // MARK: - 九宫格
 
     private struct HomeEntry: Identifiable {
-        let id = UUID()
         let label: String
         let symbol: String
         let color: Color
-        let badge: String = ""
+        /// 用 label 当稳定 id：`serviceItems` 是计算属性，用 UUID 会让每次重绘都重建格子。
+        var id: String { label }
     }
 
-    /// 只放真正能跳的入口：商城 / 会员 / 人设广场 / 表情包广场；没做的功能不加按钮。
-    private let serviceItems: [HomeEntry] = [
-        HomeEntry(label: "商城", symbol: "bag.fill", color: Color.hex(0xE8913F)),
-        HomeEntry(label: "会员", symbol: "crown.fill", color: Color.hex(0xE5484D)),
-        HomeEntry(label: "人设广场", symbol: "person.2.fill", color: Color.hex(0x6C7BC4)),
-        HomeEntry(label: "表情包", symbol: "face.smiling.fill", color: Color.hex(0x48A88B)),
-    ]
+    /// 只放真正能跳的入口，且逐项受服务端开关约束：
+    /// 商城 → shop / 会员 → member / 人设广场 → plaza / 表情包 → stickers。
+    /// 默认全关（服务端不下命令），此时服务宫格为空 —— 这是预期行为。
+    private var serviceItems: [HomeEntry] {
+        var items: [HomeEntry] = []
+        if AevisHosts.featureEnabled("shop") {
+            items.append(HomeEntry(label: "商城", symbol: "bag.fill", color: Color.hex(0xE8913F)))
+        }
+        if AevisHosts.featureEnabled("member") {
+            items.append(HomeEntry(label: "会员", symbol: "crown.fill", color: Color.hex(0xE5484D)))
+        }
+        if AevisHosts.featureEnabled("plaza") {
+            items.append(HomeEntry(label: "人设广场", symbol: "person.2.fill", color: Color.hex(0x6C7BC4)))
+        }
+        if AevisHosts.featureEnabled("stickers") {
+            items.append(HomeEntry(label: "表情包", symbol: "face.smiling.fill", color: Color.hex(0x48A88B)))
+        }
+        return items
+    }
 
     private var serviceGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {

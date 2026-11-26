@@ -5,8 +5,9 @@ import Foundation
 /// 服务器状态（2026-11-22 新增，照用户给的「服务器状态」参考图做）。
 ///
 /// 两块内容都是**真实数据**，没有假按钮：
-/// 1. 服务器：`APIClient.lines` 的每条线路（直连 / 北京，名字和条数都直接读 APIClient），
-///    逐条 `APIClient.lineLatency(_:)` 实测延迟，列表按实测毫秒升序展示（不通置后）；
+/// 1. 服务器：`APIClient.lines` 的每条线路（名字和条数都直接读 APIClient），
+///    逐条 `APIClient.pingInfo(_:)` 实测延迟与 busy，列表按实测毫秒升序展示（不通置后，
+///    busy 的显示「繁忙」标记但仍可选）；
 ///    点某行 = `APIClient.setActiveLine(id)`（持久化键 `apiLineId`，与 APIClient 内部一致）。
 ///    「自动选择」= 按 `APIClient.lines` 的回落顺序自动切，标记存 `apiAutoLine`。
 /// 2. 模型：`GET /v1/models/status`（服务端 `srv_edit/aevis_providers.py` 里就是给官网
@@ -17,8 +18,8 @@ import Foundation
 ///
 /// **实时状态与成功率分开看**（用户反馈过「模型挂了还显示正常」）：
 /// - 状态标签（正常/波动/异常/未监控）来自 `rows[].providers[].alive`，监控每 60 秒探一次；
-/// - 百分比与竖条优先用 `recent`（近 30 分钟逐点 1/0），没有 `recent` 才回落 `history`
-///   （30 分钟一桶，近 24 小时）；两种范围会在标题右上角如实写出；
+/// - 百分比与竖条统一用 `recent`（近 30 分钟逐点 1/0），范围标签固定「近 30 分钟」；
+///   只有 `recent` 完全缺失 / 空数组才回落 `history`（30 分钟一桶，近 24 小时）并如实写出；
 /// - 顶部「数据更新于…」用非空探测桶的 `t + bucket_sec` 判断，不用接口的 `at`（那是请求时刻）。
 ///
 /// 本文件自己发请求（不改 APIClient，别的地方在用），复用 `APIClient.session`
@@ -31,6 +32,8 @@ struct ServerStatusView: View {
 
     // 线路延迟：只存成功的，缺 = 不通
     @State private var latencies: [String: Int] = [:]
+    /// 最近一次 /v1/ping 标记 busy=true 的线路 id（有则列表显示「繁忙」）。
+    @State private var busyLines: Set<String> = []
     @State private var probed = false
     @State private var probing = false
     @State private var activeID = APIClient.activeLine.id
@@ -97,9 +100,16 @@ struct ServerStatusView: View {
     }
 
     /// 分组规则：model 名（不区分大小写）包含 key 就归到这组。
-    /// DeepSeek / 双子星(gemini) / Claude 是我们实际在卖的三个模型家族。
+    ///
+    /// **必须覆盖全部在售模型**：2026-11-26 用户「我们不是只做 7 个模型吗」——
+    /// 接口 `/v1/models/status` 就返回 7 个（deepseek-chat/flash/reasoner/v4-pro、
+    /// glm-5.3、kimi-k3、kimi-k3.1）。以前只分 DeepSeek/双子星/Claude 三组，
+    /// GLM 和 Kimi 不落任何一组 → 整张卡被丢掉，用户看到的就是「显示不全」。
+    /// 以后新增厂商，**先在这里加一条**，否则等于隐藏。
     private let groupSpecs: [(id: String, title: String, key: String)] = [
         ("deepseek", "DeepSeek", "deepseek"),
+        ("glm",      "智谱 GLM",  "glm"),
+        ("kimi",     "Kimi",     "kimi"),
         ("gemini",   "双子星",    "gemini"),
         ("claude",   "Claude",   "claude")
     ]
@@ -120,7 +130,10 @@ struct ServerStatusView: View {
             VStack(spacing: 16) {
                 currentCard
 
-                freshnessRow
+                // 模型状态是独立功能模块（modelStatus），默认关闭；线路列表与手动/自动换线不受影响。
+                if AevisHosts.featureEnabled("modelStatus") {
+                    freshnessRow
+                }
 
                 groupCard(title: "服务器") {
                     autoRow
@@ -130,11 +143,13 @@ struct ServerStatusView: View {
                     }
                 }
 
-                modelsBlock
+                if AevisHosts.featureEnabled("modelStatus") {
+                    modelsBlock
 
-                hint("模型左侧标签（正常 / 波动 / 异常 / 未监控）按服务端最近一次探测的 providers 判定，是「此刻还能不能用」；右侧百分比与竖条是时间范围内的成功率（有 recent 用近 30 分钟，否则回落 history 的近 24 小时），两者不是一回事。延迟超过 3 秒记为不通。")
-                if usesProviderAggregate {
-                    hint("百分比与竖条为 provider 级聚合：按模型挂载渠道的探测逐分钟合并，非逐模型对话探测。")
+                    hint("模型左侧标签（正常 / 波动 / 异常 / 未监控）按服务端最近一次探测的 providers 判定，是「此刻还能不能用」；右侧百分比与竖条统一是近 30 分钟的探测结果（服务端没有 recent 时才回落近 24 小时），两者不是一回事。延迟超过 3 秒记为不通。")
+                    if usesProviderAggregate {
+                        hint("百分比与竖条为 provider 级聚合：按模型挂载渠道的探测逐分钟合并，非逐模型对话探测。")
+                    }
                 }
             }
             .padding(.horizontal, 18)
@@ -327,6 +342,16 @@ struct ServerStatusView: View {
                     Text(line.note)
                         .font(.system(size: 11))
                         .foregroundStyle(AE.textSecondary)
+                }
+
+                // 服务器人多：/v1/ping 的 busy=true 时如实标出来（线路仍可选，不禁用）
+                if busyLines.contains(line.id) {
+                    Text("繁忙")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(warnOrange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(warnOrange.opacity(0.14), in: Capsule())
                 }
 
                 if activeID == line.id {
@@ -541,7 +566,7 @@ struct ServerStatusView: View {
     }
 
     /// 一根根细竖条：目标 3pt 宽、14pt 高、圆角 1.5，从左到右是时间顺序。
-    /// 根数不写死（recent 有几个点画几根 / history 有几个非空桶画几根）；
+    /// 根数不写死（默认 recent 有几个点画几根 / 仅当 recent 完全为空才按 history 非空桶画）；
     /// 根数少时把多余宽度摊进间距把整行铺满，根数多时自动变细以免溢出。
     /// 算每根竖条的宽度与间距：根数少时把富余宽度摊进间距，根数多时自动变细，整行铺满不溢出。
     /// ⚠️ 必须放在普通函数里：ViewBuilder 闭包内不允许 `var` 与赋值语句
@@ -745,13 +770,14 @@ struct ServerStatusView: View {
         String(format: "%.0f%%", rate * 100)
     }
 
-    /// 顶部右侧的时间范围：按实际数据源写（有 recent 用「近 30 分钟」，否则「近 24 小时」）。
-    /// 混着出现时两个都写，不统一成一个，避免骗人。
+    /// 顶部右侧的时间范围：统一近 30 分钟口径。
+    /// 只要有一张卡用的是 recent 就写「近 30 分钟」；全部卡片都只能回落 history 时，
+    /// 才如实写「近 24 小时」。不再出现「近 30 分钟 / 近 24 小时」这种混合口径。
     private var seriesRangeLabel: String {
         let labels = Set(groups.flatMap { $0.models }.map { $0.rangeLabel })
-        if labels.isEmpty { return "近 24 小时" }
-        if labels.count == 1 { return labels.first ?? "近 24 小时" }
-        return "近 30 分钟 / 近 24 小时"
+        if labels.contains("近 30 分钟") { return "近 30 分钟" }
+        if labels.contains("近 24 小时") { return "近 24 小时" }
+        return "近 30 分钟"   // 还没数据 / 全部空数据：默认口径，不写 24 小时
     }
 
     /// 服务端是否下发了「provider 级聚合」口径（方案 A 新增可选字段）。
@@ -815,17 +841,28 @@ struct ServerStatusView: View {
         await MainActor.run { probing = true }
         let lines = APIClient.lines
         var result: [String: Int] = [:]
-        await withTaskGroup(of: (String, Int?).self) { group in
+        var busy: Set<String> = []
+        // 一次 /v1/ping 同时拿 RTT 与 busy：少一轮网络，且延迟口径与自动换线一致。
+        await withTaskGroup(of: (String, (rtt: Int, busy: Bool)?).self) { group in
             for l in lines {
-                group.addTask { (l.id, await APIClient.lineLatency(l)) }
+                group.addTask {
+                    let info = await APIClient.pingInfo(l)
+                    if let info { AevisHosts.recordPing(l.id, rtt: info.rtt, busy: info.busy) }
+                    return (l.id, info)
+                }
             }
-            for await (id, ms) in group {
-                if let ms { result[id] = ms }
+            for await (id, info) in group {
+                if let info {
+                    result[id] = info.rtt
+                    if info.busy { busy.insert(id) }
+                }
             }
         }
         let finalResult = result
+        let finalBusy = busy
         await MainActor.run {
             latencies = finalResult
+            busyLines = finalBusy
             probed = true
             probing = false
         }
@@ -961,18 +998,21 @@ struct ServerStatusView: View {
                 unstableCount: unstable,
                 downCount: down,
                 unknownCount: unknown,
-                models: Array(list.prefix(6))
+                models: list
             )
         }
+        // 空组不显示：没在卖的厂商不该占一条「暂无调用记录」的位置。
+        .filter { !$0.models.isEmpty || $0.matched > 0 }
     }
 
-    /// 解析一行模型。时间序列按契约降级：
-    /// 1. `recent`（近 30 分钟，1=正常 0=异常）→ 竖条与百分比都用它，范围「近 30 分钟」
-    /// 2. 没有 `recent` → 用 `history`（30 分钟一桶，共 24 小时），只取有探测量的桶，
-    ///    桶内全成功算绿、否则红；范围「近 24 小时」
-    /// 3. 两者都没有 → `hasData = false`，卡片显示「—」和一条灰色占位条
+    /// 解析一行模型。时间序列**统一近 30 分钟口径**：
+    /// 1. `recent`（近 30 分钟，1=正常 0=异常）→ 竖条与百分比都用它，范围标签「近 30 分钟」。
+    /// 2. 只有 `recent` 字段完全缺失 / 空数组才回落 `history`（30 分钟一桶，共 24 小时），
+    ///    只取有探测量的桶，桶内全成功算绿、否则红；此时如实写「近 24 小时」。
+    ///    `recent` 存在但内容无效时**不回落**，按无数据显示，避免拿 24h 旧口径冒充 30 分钟。
+    /// 3. 两者都没有 → `hasData = false`，卡片显示「—」和一条灰色占位条。
     ///
-    /// `avg_latency_sec` 有才显示「平均响应」，没有就 nil（界面不占位、不编数字）。
+    /// `avg_latency_sec` 有才显示「平均响应」（延迟），没有就 nil（界面不占位、不编数字）。
     private func build(_ row: [String: Any]) -> ModelStatus? {
         let model = (row["model"] as? String) ?? ""
         guard !model.isEmpty else { return nil }
@@ -984,20 +1024,23 @@ struct ServerStatusView: View {
         var total = 0
         var range = ""
 
-        // 1) recent：近 30 分钟逐点序列（契约 1=正常 / 0=异常；按 ≥0.5 判绿，兼容 0.0~1.0 的写法）
-        if let raw = row["recent"] as? [Any], !raw.isEmpty {
+        // 1) recent：近 30 分钟逐点序列（契约 1=正常 / 0=异常；按 ≥0.5 判绿，兼容 0.0~1.0 的写法）。
+        //    只要服务端给了非空的 recent，就以它为准：竖条和百分比都取这份，范围写「近 30 分钟」。
+        let recentRaw = row["recent"] as? [Any]
+        if let raw = recentRaw, !raw.isEmpty {
             let values = raw.compactMap { ($0 as? NSNumber)?.doubleValue }
             if values.count == raw.count, !values.isEmpty {
                 samples = values.map { $0 >= 0.5 }
                 let ok = samples.filter { $0 }.count
                 rate = Double(ok) / Double(values.count)
                 total = values.count
-                range = "近 30 分钟"
             }
+            range = "近 30 分钟"   // recent 存在就锁 30 分钟口径，内容无效也不偷换 24h
         }
 
-        // 2) 降级：history 30 分钟一桶（空桶跳过，不把「没探测过」画成红）
-        if samples.isEmpty {
+        // 2) 只有 recent 完全缺失 / 空数组，才回落 history（30 分钟一桶）。
+        //    空桶跳过，不把「没探测过」画成红；范围如实写「近 24 小时」。
+        if recentRaw == nil || (recentRaw?.isEmpty ?? true) {
             let history = (row["history"] as? [[String: Any]]) ?? []
             var okSum = 0
             var totalSum = 0
@@ -1028,7 +1071,8 @@ struct ServerStatusView: View {
             live: liveStatus(row),
             rate: min(max(rate, 0), 1),
             samples: samples,
-            rangeLabel: range.isEmpty ? "近 24 小时" : range,
+            // 没有数据时也按默认口径写「近 30 分钟」，不要凭空冒出 24 小时口径。
+            rangeLabel: range.isEmpty ? "近 30 分钟" : range,
             avgLatency: avg,
             total: total,
             probes: probes,

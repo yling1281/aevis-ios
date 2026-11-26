@@ -110,16 +110,17 @@ private fun moreGroups(): List<Pair<String, List<MoreItem>>> = listOf(
             "inbox", tr("通知管理"), tr("站内信、更新提醒"),
             R.drawable.ic_set_bell, MoreAction.Route("inbox")
         ),
-        MoreItem(
+        // 2026-11-25：安卓端把「扩展配置」映射到通用配置页，受 plugins 开关控制
+        if (Api.featureEnabled("plugins")) MoreItem(
             "settings2", tr("通用配置"), tr("主题、背景、弹窗"),
             R.drawable.ic_set_sliders, MoreAction.Route("settings2")
-        ),
+        ) else null,
         // 2026-11-25：增长入口（群聊/企微客服/活动/邀请），链接后台热更新
-        MoreItem(
+        if (Api.featureEnabled("growth")) MoreItem(
             "growth", tr("社区与活动"), tr("群聊、客服、活动、邀请"),
             R.drawable.ic_row_addfriend, MoreAction.Route("growth")
-        )
-    ),
+        ) else null
+    ).filterNotNull(),
     tr("数据管理") to listOf(
         MoreItem(
             "permission", tr("权限控制"), tr("相机、相册、通知"),
@@ -139,8 +140,13 @@ private fun moreGroups(): List<Pair<String, List<MoreItem>>> = listOf(
         )
     ),
     tr("软件设置") to listOf(
-        MoreItem(
+        // 2026-11-25：完整状态页受 serverStatus 开关；但「关于 → 线路状态」永远可达，
+        // 保证手动选线后总能恢复自动模式，不会把自己锁死。
+        if (Api.featureEnabled("serverStatus")) MoreItem(
             "serverstatus", tr("服务器状态"), tr("线路延迟、模型成功率"),
+            R.drawable.ic_set_monitor, MoreAction.Route("serverstatus")
+        ) else MoreItem(
+            "serverstatus_basic", tr("线路状态"), tr("延迟、繁忙 / 自动选择"),
             R.drawable.ic_set_monitor, MoreAction.Route("serverstatus")
         ),
         MoreItem(
@@ -231,24 +237,46 @@ private fun MoreRow(
  *   · 柱子**一张 Canvas** 循环 `drawRoundRect`（不是 50 个 Box），高度固定 12dp；
  *   · 线路探测**只跑一次**（`LaunchedEffect(tick)` 里并发测完一次性写回状态），
  *     不再让每行的 `LaunchedEffect(line.id, tick)` 自己加 tick 触发重测；
- *   · `/v1/relay/status` 走 `Api` 的进程内缓存（5 分钟），进页面先用缓存渲染再后台刷新；
- *   · 所有网络（`pingLineById` / `relayStatus`）都在 `Dispatchers.IO`，组合函数里没有任何同步请求。
+ *   · 模型区 2026-11-25 起用 `/v1/models/status`（recent 近 30 分钟优先），
+ *     拿不到才回落 `/v1/relay/status` 的近 24 小时 beats，并如实标注范围；
+ *   · 所有网络（`pingLineById` / `modelsStatus` / `relayStatus`）都在 `Dispatchers.IO`，
+ *     组合函数里没有任何同步请求。
  */
 @Composable
 fun ServerStatusScreen(onBack: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     var tick by remember { mutableIntStateOf(0) }
-    // 先吃进程内缓存：第一帧就有内容，不用等 13KB 回来
-    var stats by remember { mutableStateOf<List<Api.RelayModel>?>(Api.relayStatusCached()) }
+    // 2026-11-25：统一用 `/v1/models/status`（recent 近 30 分钟优先），
+    // 与 ModelScreen / iOS ServerStatusView 同口径；失败才回落 relayStatus 的近 24 小时 beats。
+    var stats by remember { mutableStateOf<List<Api.ModelStatus>?>(null) }
     // id → 探测结果（null = 还没测出来）。114 起是 `PingResult`（能分辨超时/TLS/HTTP）
     val latency = remember { mutableStateMapOf<Int, Api.PingResult>() }
 
     // 模型统计：进页面拉一次；5 分钟内命中缓存。点「刷新」才 force 真正重拉。
     LaunchedEffect(tick) {
         val fresh = withContext(Dispatchers.IO) {
-            runCatching { Api.relayStatus(force = tick > 0) }.getOrNull()
+            val sm = runCatching { Api.modelsStatus() }.getOrNull()
+            if (!sm.isNullOrEmpty()) sm else {
+                // 兜底：relayStatus 的 beats（近 24 小时）转成同款状态行，不编造近 30 分钟数据
+                runCatching { Api.relayStatus(force = tick > 0) }.getOrNull().orEmpty().map { r ->
+                    val samples = r.beats.map { it == 1 }
+                    val st = when {
+                        samples.isEmpty() || r.uptime24 == null -> Api.ModelStatus.UNKNOWN
+                        r.uptime24 >= 0.95 -> Api.ModelStatus.OK
+                        r.uptime24 >= 0.8 -> Api.ModelStatus.UNSTABLE
+                        else -> Api.ModelStatus.DOWN
+                    }
+                    Api.ModelStatus(
+                        model = r.model, state = st, samples = samples,
+                        rangeLabel = "近 24 小时", rate = r.uptime24 ?: 0.0,
+                        avgLatencySec = r.ping?.let { it / 1000.0 },
+                        recentSource = "", coverageMinutes = 0,
+                        officialState = "", officialDetail = ""
+                    )
+                }
+            }
         }
-        if (fresh != null) stats = fresh
+        if (fresh.isNotEmpty()) stats = fresh
     }
 
     // 线路探测：**只在这里跑**（进页面一次 / 点刷新 / 点某一行时 tick++）。
@@ -329,11 +357,13 @@ fun ServerStatusScreen(onBack: () -> Unit) {
 
                     // 有几条显示几条，按实测延迟升序：通的在前（按 ms），
                     // 其它失败排中间，超时排最后，还没测出来的垫最前（灰点，等结果）。
+                    // 2026-11-25：busy 的排到后面但**不删除**（没得选时还能用）
                     fun rank(p: Api.PingResult?): Int = when {
                         p == null -> -1
-                        p.fail == Api.PingFail.NONE -> 0
-                        p.fail == Api.PingFail.TIMEOUT -> 2
-                        else -> 1
+                        p.fail == Api.PingFail.NONE && !p.busy -> 0
+                        p.fail == Api.PingFail.NONE && p.busy -> 1
+                        p.fail == Api.PingFail.TIMEOUT -> 3
+                        else -> 2
                     }
                     val ordered = Api.lines().filter { it.chat }.sortedWith(
                         compareBy(
@@ -341,6 +371,10 @@ fun ServerStatusScreen(onBack: () -> Unit) {
                             { latency[it.id]?.ms ?: Long.MAX_VALUE }
                         )
                     )
+                    val fastestId = ordered.firstOrNull {
+                        val p = latency[it.id]
+                        p?.fail == Api.PingFail.NONE && !p.busy
+                    }?.id ?: -1
                     // 118：勾选跟着**实际在用的那条**走（竞速赢家），没跑过请求才回落到用户选择
                     val activeId = Api.activeLineId().takeIf { it > 0 } ?: Api.currentLineId()
                     ordered.forEach { line ->
@@ -348,7 +382,8 @@ fun ServerStatusScreen(onBack: () -> Unit) {
                         ServerRow(
                             line = line,
                             ping = latency[line.id],
-                            selected = activeId == line.id
+                            selected = activeId == line.id,
+                            fastest = line.id == fastestId
                         ) {
                             // 失败行也能点：切过去 + 重测（tick++ 触发上面那个探测 Effect）
                             Api.setLineById(line.id)
@@ -358,28 +393,31 @@ fun ServerStatusScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ---------- 模型 ----------
-            item(key = "models-title") { SectionTitle(tr("模型")) }
-            val list = stats
-            when {
-                list == null -> item(key = "models-loading") {
-                    V2Card(Modifier.padding(horizontal = V2.gutter)) {
-                        Text(
-                            tr("正在读取统计…"), fontSize = 12.sp,
-                            color = ink.copy(alpha = 0.45f)
-                        )
+            // ---------- 模型（2026-11-25：modelStatus flag 门禁）----------
+            // 线路状态属于基础入口，始终保留；只有模型状态区受开关控制。
+            if (Api.featureEnabled("modelStatus")) {
+                item(key = "models-title") { SectionTitle(tr("模型")) }
+                val list = stats
+                when {
+                    list == null -> item(key = "models-loading") {
+                        V2Card(Modifier.padding(horizontal = V2.gutter)) {
+                            Text(
+                                tr("正在读取统计…"), fontSize = 12.sp,
+                                color = ink.copy(alpha = 0.45f)
+                            )
+                        }
                     }
-                }
-                list.isEmpty() -> item(key = "models-empty") {
-                    V2Card(Modifier.padding(horizontal = V2.gutter)) {
-                        Text(
-                            tr("暂无模型状态"), fontSize = 12.sp,
-                            color = ink.copy(alpha = 0.45f)
-                        )
+                    list.isEmpty() -> item(key = "models-empty") {
+                        V2Card(Modifier.padding(horizontal = V2.gutter)) {
+                            Text(
+                                tr("暂无模型状态"), fontSize = 12.sp,
+                                color = ink.copy(alpha = 0.45f)
+                            )
+                        }
                     }
-                }
-                else -> items(list, key = { it.model }) { st ->
-                    ModelStatCard(st, ink)
+                    else -> items(list, key = { it.model }) { st ->
+                        ModelStatCard(st, ink)
+                    }
                 }
             }
         }
@@ -421,6 +459,7 @@ private fun ServerRow(
     line: Api.Line,
     ping: Api.PingResult?,
     selected: Boolean,
+    fastest: Boolean = false,
     onClick: () -> Unit
 ) {
     val ink = MaterialTheme.colorScheme.onSurface
@@ -432,7 +471,7 @@ private fun ServerRow(
         // 状态点（114 四态）：绿=通 / 橙=超时 / 红=TLS、HTTP 5xx、网络错 / 灰=还没测出来
         val dot = when {
             ping == null -> ink.copy(alpha = 0.18f)
-            ping.fail == Api.PingFail.NONE -> Color(0xFF3FBF6F)
+            ping.fail == Api.PingFail.NONE && !ping.busy -> Color(0xFF3FBF6F)
             ping.fail == Api.PingFail.TIMEOUT -> Color(0xFFE0902E)
             else -> Color(0xFFE5484D)
         }
@@ -441,6 +480,14 @@ private fun ServerRow(
         Text(line.label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.width(6.dp))
         Text(line.note, fontSize = 10.5.sp, color = ink.copy(alpha = 0.4f))
+        // 2026-11-25：服务端人多 → 标「繁忙」；最快的非繁忙线路标「最快」
+        if (ping?.busy == true) {
+            Spacer(Modifier.width(6.dp))
+            Text(tr("繁忙"), fontSize = 10.sp, color = V2.alert)
+        } else if (fastest && ping?.fail == Api.PingFail.NONE) {
+            Spacer(Modifier.width(6.dp))
+            Text(tr("最快"), fontSize = 10.sp, color = Color(0xFF3FBF6F))
+        }
         Spacer(Modifier.weight(1f))
         Text(
             when {
@@ -469,51 +516,62 @@ private fun ServerRow(
     }
 }
 
+/**
+ * 模型状态卡（2026-11-25 统一口径）：延迟 + 可用率 + 一排探测竖条。
+ * `samples` / `rate` / `rangeLabel` 由 Api.modelsStatus 固定 recent 优先：
+ * 有 recent 就是「近 30 分钟」，只有 recent 完全为空才回落 history 写「近 24 小时」。
+ */
 @Composable
-private fun ModelStatCard(st: Api.RelayModel, ink: Color) {
+private fun ModelStatCard(st: Api.ModelStatus, ink: Color) {
     V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 5.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(st.name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                if (st.vendor.isNotBlank() || st.note.isNotBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        listOf(st.vendor, st.note).filter { it.isNotBlank() }.joinToString(" · "),
-                        fontSize = 10.5.sp, color = ink.copy(alpha = 0.42f)
-                    )
-                }
+                Text(Api.shortLabel(st.model), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(2.dp))
+                // 只有服务端给了 avg_latency_sec 才显示延迟，不占位、不编数字
                 Text(
-                    when {
-                        st.ping == null -> tr("平均响应 —")
-                        st.ping >= 1000 -> tr("平均响应 %.1f 秒", st.ping / 1000.0)
-                        else -> tr("平均响应 %d ms", st.ping)
-                    },
+                    if (st.avgLatencySec == null) tr("平均响应 —")
+                    else tr("平均响应 %.1f 秒", st.avgLatencySec),
                     fontSize = 11.sp, color = ink.copy(alpha = 0.45f)
                 )
+                if (st.coverageMinutes > 0 || st.recentSource == "provider_aggregate") {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        buildString {
+                            if (st.coverageMinutes > 0) append(tr("覆盖 %d 分钟", st.coverageMinutes))
+                            if (st.recentSource == "provider_aggregate") {
+                                if (isNotEmpty()) append(" · ")
+                                append(tr("聚合探测"))
+                            }
+                        },
+                        fontSize = 10.sp, color = ink.copy(alpha = 0.35f)
+                    )
+                }
             }
             Text(
-                if (st.uptime24 == null) "—" else "%.1f%%".format(st.uptime24 * 100),
+                if (st.samples.isEmpty()) "—" else "%.1f%%".format(st.rate * 100),
                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                color = if (st.uptime24 == null) ink.copy(alpha = 0.3f) else ink
+                color = if (st.samples.isEmpty()) ink.copy(alpha = 0.3f) else ink
             )
         }
 
-        // 柱子：beats 是**近 24 小时**的 50 个 30 分钟槽（不是 30 分钟，标签别写错）
-        if (st.beats.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                tr("近 24 小时"), fontSize = 9.5.sp, color = ink.copy(alpha = 0.35f)
-            )
+        // 竖条：和数据百分比同一口径（recent 近 30 分钟优先，空才回落近 24 小时）
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (st.samples.isEmpty()) tr("暂无探测数据")
+            else st.rangeLabel.ifBlank { tr("近 30 分钟") },
+            fontSize = 9.5.sp, color = ink.copy(alpha = 0.35f)
+        )
+        if (st.samples.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
-            val beats = st.beats
+            val samples = st.samples
             // 115：高度固定 12dp —— 单卡不再撑 30dp 的图，50 个模型叠起来差出一屏
             Canvas(Modifier.fillMaxWidth().height(12.dp)) {
-                val n = beats.size.coerceAtLeast(1)
+                val n = samples.size.coerceAtLeast(1)
                 val gap = 1.5.dp.toPx()
                 val w = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1f)
                 for (i in 0 until n) {
-                    val ok = beats[i] == 1
+                    val ok = samples[i]
                     val h = if (ok) size.height else size.height * 0.55f
                     drawRoundRect(
                         color = if (ok) Color(0xFF3FBF6F) else Color(0xFFE05A4E),

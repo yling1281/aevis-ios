@@ -1037,7 +1037,11 @@ fun InboxScreen(onBack: () -> Unit) {
  * 第一版是个死页面：一个字母 A 当图标、线路是一串只读文字、没有任何操作。
  */
 @Composable
-fun AboutScreen(onBack: () -> Unit, onOpenChangelog: () -> Unit = {}) {
+fun AboutScreen(
+    onBack: () -> Unit,
+    onOpenChangelog: () -> Unit = {},
+    onOpenServerStatus: () -> Unit = {}
+) {
     val ink = MaterialTheme.colorScheme.onSurface
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1139,6 +1143,9 @@ V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
                     onClick = { line = Api.switchLine() },
                     hint = "点一下切换"
                 )
+                RowDividerPublic()
+                // 2026-11-25：线路状态 / 自动选择是基础入口，任何开关下都可达
+                AboutRow("线路状态", tr("延迟与繁忙"), onClick = onOpenServerStatus)
                 RowDividerPublic()
                 AboutRow("账号", Api.email().ifEmpty { "未登录" })
             }

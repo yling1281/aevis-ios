@@ -412,11 +412,13 @@ private data class Tab(val id: String, val title: String)
 fun Shell(onSignOut: () -> Unit) {
     // 2026-11-15 按忆伴的 Dock 改：主页放第一位（用量额度 + 服务 + 发现 + 好友）
     // 2026-11-15 用户：「发现页的话就没必要了」→ 去掉，只留三个
-    val tabs = listOf(
-        Tab("home", "主页"),
-        Tab("chat", "聊天"),
-        Tab("me", "我")
-    )
+    // 2026-11-25：chat flag 关时隐藏「聊天」tab（默认全关是预期）；主页 + 我永远在。
+    val chatTabOn = Api.featureEnabled("chat")
+    val tabs = buildList {
+        add(Tab("home", "主页"))
+        if (chatTabOn) add(Tab("chat", "聊天"))
+        add(Tab("me", "我"))
+    }
     var idx by remember { mutableIntStateOf(0) }
     // 二级页面（2026-11-14）：商城 / 浏览器 / 站内信 / 关于。
     // 之前这些东西全是 Toast，用户：「你啥也不行」。
@@ -904,6 +906,7 @@ fun Shell(onSignOut: () -> Unit) {
                                 onOpenPage = { goLater(it) },
                                 // 「查看全部 N 个 →」跳到聊天 tab（首页自己切不了 tab）
                                 onOpenChatList = { tabLater(1) },
+                                chatTabOn = chatTabOn,
                                 bottomInset = dockHeight
                             )
                             1 -> ChatTab(
@@ -1198,6 +1201,17 @@ internal fun fmtBackupTime(at: Long): String = runCatching {
  * `page = x` 一律换成 `go(x)`，`page = null` 换成 `back()` —— 行为完全不变，
  * 只是把"改路由"这件事收口，以后要加守卫（未登录 / 未保存提示）只改一处。
  */
+/**
+ * 2026-11-25 模块开关门禁：flag 关时页面不渲染，给一句说明而不是白屏。
+ * 入口列表（tab / 首页宫格 / 设置行）各自也会按同一个 flag 隐藏，这里是第二道闸。
+ * ⚠️ 登录 / 协议 / 线路状态**不走**这里，避免开关配错把自己锁死。
+ */
+@Composable
+internal fun FeatureGate(flag: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+    if (com.aevis.android.data.Api.featureEnabled(flag)) content()
+    else ComingSoonScreen(com.aevis.android.core.I18n.tr("该功能暂未开放"), onBack = onBack)
+}
+
 @Composable
 private fun SubPageHost(
     route: String,
@@ -1279,19 +1293,26 @@ private fun SubPageHost(
         //   `mall`  = 商城：会员 / 音色包 / 墨点
         //   `mallpt`= 商城·墨点那一段（首页额度卡的「充值」直接落这儿）
         //   `plaza` = 广场：人设 / 表情包
-        route == "mall" ->
+        route == "mall" -> FeatureGate("shop", back) {
             MallScreen(
                 onBack = back, onOpenPersona = { go("persona:" + it) },
                 title = "商城", isPlaza = false
             )
-        route == "mallpt" ->
+        }
+        route == "mallpt" -> FeatureGate("shop", back) {
             MallScreen(
                 onBack = back, onOpenPersona = { go("persona:" + it) },
                 title = "商城", isPlaza = false, startTab = 2
             )
+        }
         route == "browser" -> BrowserScreen(onBack = back)
         route == "inbox" -> InboxScreen(onBack = back)
-        route == "about" -> AboutScreen(onBack = back, onOpenChangelog = { go("changelog") })
+        route == "about" -> AboutScreen(
+            onBack = back,
+            onOpenChangelog = { go("changelog") },
+            // 2026-11-25：线路状态基础入口永远可达，不受 serverStatus 开关影响
+            onOpenServerStatus = { go("serverstatus") }
+        )
         route == "changelog" -> ChangeLogScreen(onBack = back)
         route == "music" -> MusicScreen(onBack = back)
         route == "chatlook" ->
@@ -1312,11 +1333,11 @@ private fun SubPageHost(
         route.startsWith("diary:") ->
             DiaryScreen(onBack = back, onlyPid = route.removePrefix("diary:"))
         route == "font" -> FontScreen(onBack = back)
-        route == "models" -> ModelScreen(onBack = back)
+        route == "models" -> FeatureGate("modelStatus", back) { ModelScreen(onBack = back) }
         route == "wxbind" -> WxBindScreen(onBack = back)
-        route == "checkin" -> CheckinScreen(onBack = back)
-        route == "recharge" -> RechargeScreen(onBack = back)
-        route.startsWith("chat:") ->
+        route == "checkin" -> FeatureGate("growth", back) { CheckinScreen(onBack = back) }
+        route == "recharge" -> FeatureGate("member", back) { RechargeScreen(onBack = back) }
+        route.startsWith("chat:") -> FeatureGate("chat", back) {
             ChatScreen(
                 pid = route.removePrefix("chat:"),
                 onBack = back,
@@ -1326,6 +1347,7 @@ private fun SubPageHost(
                 onOpenDiary = { setBackTo("chat:" + it); go("diary:" + it) },
                 onOpenModels = { setBackTo("chat:" + it); go("models") }
             )
+        }
         // 个人账号页（2026-11-16，92）：头像+昵称点进来
         route == "account" -> AccountCardScreen(
             onBack = back,
@@ -1342,28 +1364,30 @@ private fun SubPageHost(
             onOpen = { go(it) }
         )
         // 2026-11-25：社区与活动（增长链接热更新 / 邀请码 / 活动 / 对话日志）
-        route == "growth" -> GrowthScreen(onBack = back)
+        route == "growth" -> FeatureGate("growth", back) { GrowthScreen(onBack = back) }
+        // 线路状态属于基础入口：不受 serverStatus 开关隐藏，否则配错会把自己锁死
         route == "serverstatus" -> ServerStatusScreen(onBack = back)
-        route == "settings2" -> Settings2Screen(
-            onBack = back,
-            onOpenPage = { go(it) }
-        )
-        route == "plaza" ->
+        route == "settings2" -> FeatureGate("plugins", back) {
+            Settings2Screen(onBack = back, onOpenPage = { go(it) })
+        }
+        route == "plaza" -> FeatureGate("plaza", back) {
             MallScreen(
                 onBack = back, onOpenPersona = { go("persona:" + it) },
                 // 2026-11-24「创建」入口：广场里能自己搓人设（本地创建）
                 onCreatePersona = { go("personanew") },
                 title = "广场", isPlaza = true
             )
+        }
         // 2026-11-24：首页用量卡「按次计费」直接落到商城的按次 tab（index 3）
-        route == "mallcall" ->
+        route == "mallcall" -> FeatureGate("shop", back) {
             MallScreen(
                 onBack = back, onOpenPersona = { go("persona:" + it) },
                 title = "商城", isPlaza = false, startTab = 3
             )
+        }
         route == "group" -> ComingSoonScreen(tr("群聊"), onBack = back)
         // 2026-11-16：表情包不再是「即将上线」，接的是能看的那一版
-        route == "emoji" -> EmojiScreen(onBack = back)
+        route == "emoji" -> FeatureGate("stickers", back) { EmojiScreen(onBack = back) }
         // 资源库（2026-11-16，129）：本地消息里的照片 / 视频 / 文档
         route == "library" -> LibraryScreen(onBack = back)
         route == "moments" -> MomentsScreen(onBack = back)
@@ -1642,6 +1666,8 @@ private fun RowDivider() {
 private fun HomeTab(
     onOpenPage: (String) -> Unit,
     onOpenChatList: () -> Unit,
+    // 2026-11-25：chat 关时「好友」区块不渲染，避免 tab 下标错位
+    chatTabOn: Boolean = true,
     // BUG-B：Dock 的实际高度（由 Shell 用 onGloballyPositioned 量出来传进来，不写死）
     bottomInset: androidx.compose.ui.unit.Dp = 0.dp
 ) {
@@ -1762,41 +1788,46 @@ private fun HomeTab(
                     tint = ink.copy(alpha = 0.35f), modifier = Modifier.size(14.dp)
                 )
                 Spacer(Modifier.weight(1f))
-                // 用量提升：黄底猫头，跳会员 / 套餐页
-                Row(
-                    Modifier.clip(squircle(9.dp))
-                        .background(Color(0xFFFFD66B))
-                        .tapable { onOpenPage("mall") }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        painterResource(R.drawable.ic_cat_line), null,
-                        tint = Color(0xFF6B4E00), modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(tr("用量提升"), fontSize = 10.5.sp,
-                        fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3600))
-                }
-                Spacer(Modifier.width(6.dp))
-                // 按次计费：黄底 + NEW 红标，跳商城「按次」tab
-                Box(
-                    Modifier.clip(squircle(9.dp))
-                        .background(Color(0xFFFFD66B))
-                        .tapable { onOpenPage("mallcall") }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(tr("按次计费"), fontSize = 10.5.sp,
-                            fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3600))
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "NEW", fontSize = 7.5.sp, fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.clip(squircle(4.dp))
-                                .background(Color(0xFFE5484D))
-                                .padding(horizontal = 3.dp, vertical = 1.dp)
+                // 2026-11-25：会员 / 商城入口按 flag 门禁（默认关）
+                if (Api.featureEnabled("member")) {
+                    // 用量提升：黄底猫头，跳会员 / 套餐页
+                    Row(
+                        Modifier.clip(squircle(9.dp))
+                            .background(Color(0xFFFFD66B))
+                            .tapable { onOpenPage("mall") }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_cat_line), null,
+                            tint = Color(0xFF6B4E00), modifier = Modifier.size(15.dp)
                         )
+                        Spacer(Modifier.width(4.dp))
+                        Text(tr("用量提升"), fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3600))
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (Api.featureEnabled("shop")) {
+                    // 按次计费：黄底 + NEW 红标，跳商城「按次」tab
+                    Box(
+                        Modifier.clip(squircle(9.dp))
+                            .background(Color(0xFFFFD66B))
+                            .tapable { onOpenPage("mallcall") }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(tr("按次计费"), fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3600))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "NEW", fontSize = 7.5.sp, fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.clip(squircle(4.dp))
+                                    .background(Color(0xFFE5484D))
+                                    .padding(horizontal = 3.dp, vertical = 1.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1882,24 +1913,26 @@ private fun HomeTab(
                 Modifier.padding(vertical = 10.dp),
                 thickness = 0.5.dp, color = ink.copy(alpha = 0.08f)
             )
-            Row(
-                Modifier.fillMaxWidth().tapable { onOpenPage("mallpt") },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    tr("墨点余额"), fontSize = V2.tiny, color = ink.copy(alpha = 0.55f)
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    if (points >= 0) "$points" else "—",
-                    fontSize = V2.sub, fontWeight = FontWeight.SemiBold,
-                    color = pointAccentColor()
-                )
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    painterResource(R.drawable.ic_chevron_right), null,
-                    tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(14.dp)
-                )
+            if (Api.featureEnabled("shop")) {
+                Row(
+                    Modifier.fillMaxWidth().tapable { onOpenPage("mallpt") },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        tr("墨点余额"), fontSize = V2.tiny, color = ink.copy(alpha = 0.55f)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (points >= 0) "$points" else "—",
+                        fontSize = V2.sub, fontWeight = FontWeight.SemiBold,
+                        color = pointAccentColor()
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        painterResource(R.drawable.ic_chevron_right), null,
+                        tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
 
@@ -1914,17 +1947,23 @@ private fun HomeTab(
             Row(Modifier.fillMaxWidth()) {
                 // 路由口径：`mall` = 商城、`plaza` = 广场、`mallpt` = 商城·墨点那一段、
                 // `cloud` = 云空间。判断"该跳哪个"看用户点的那颗按钮叫什么。
-                HomeIcon(tr("商城"), R.drawable.ic_tab_contacts, Modifier.weight(1f)) { onOpenPage("mall") }
-                HomeIcon(tr("装扮"), R.drawable.ic_row_emoji, Modifier.weight(1f)) { onOpenPage("chatlook") }
+                // 2026-11-25：每个宫格按对应 flag 隐藏（默认全关是预期）
+                if (Api.featureEnabled("shop"))
+                    HomeIcon(tr("商城"), R.drawable.ic_tab_contacts, Modifier.weight(1f)) { onOpenPage("mall") }
+                if (Api.featureEnabled("stickers"))
+                    HomeIcon(tr("装扮"), R.drawable.ic_row_emoji, Modifier.weight(1f)) { onOpenPage("chatlook") }
                 HomeIcon(tr("日记"), R.drawable.ic_row_diary, Modifier.weight(1f)) { onOpenPage("diary") }
-                HomeIcon(tr("模型"), R.drawable.ic_row_chart, Modifier.weight(1f)) { onOpenPage("models") }
+                if (Api.featureEnabled("modelStatus"))
+                    HomeIcon(tr("模型"), R.drawable.ic_row_chart, Modifier.weight(1f)) { onOpenPage("models") }
             }
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth()) {
                 HomeIcon(tr("云空间"), R.drawable.ic_row_layers, Modifier.weight(1f)) { onOpenPage("cloud") }
                 // 「会员」跟「商城」进同一个页面（商城第一段就是会员），标题都是「商城」
-                HomeIcon(tr("会员"), R.drawable.ic_row_persona, Modifier.weight(1f)) { onOpenPage("mall") }
+                if (Api.featureEnabled("member"))
+                    HomeIcon(tr("会员"), R.drawable.ic_row_persona, Modifier.weight(1f)) { onOpenPage("mall") }
                 HomeIcon(tr("字体"), R.drawable.ic_row_emoji, Modifier.weight(1f)) { onOpenPage("font") }
+                // 「更多」是基础设置入口，保持可达（里面有线路状态）
                 HomeIcon(tr("更多"), R.drawable.ic_row_status, Modifier.weight(1f)) { onOpenPage("settingsmore") }
             }
         }
@@ -1935,9 +1974,11 @@ private fun HomeTab(
         SectionTitle(tr("发现"))
         V2Card(Modifier.padding(horizontal = V2.gutter)) {
             Row(Modifier.fillMaxWidth()) {
-                HomeIcon(tr("广场"), R.drawable.ic_tab_contacts, Modifier.weight(1f)) { onOpenPage("plaza") }
+                if (Api.featureEnabled("plaza"))
+                    HomeIcon(tr("广场"), R.drawable.ic_tab_contacts, Modifier.weight(1f)) { onOpenPage("plaza") }
                 HomeIcon(tr("朋友圈"), R.drawable.ic_tab_chat, Modifier.weight(1f)) { onOpenPage("moments") }
-                HomeIcon(tr("签到"), R.drawable.ic_row_bell, Modifier.weight(1f)) { onOpenPage("checkin") }
+                if (Api.featureEnabled("growth"))
+                    HomeIcon(tr("签到"), R.drawable.ic_row_bell, Modifier.weight(1f)) { onOpenPage("checkin") }
                 // 群聊：2026-11-16 改成进 QQ 群（群号还没给，先弹说明，不编群号）
                 HomeIcon(tr("群聊"), R.drawable.ic_tab_chat, Modifier.weight(1f)) { qqGroupAsk = true }
             }
@@ -1949,7 +1990,7 @@ private fun HomeTab(
         // 用户：横排头像只看得见小字，认不出谁是谁 → 换成聊天列表那种行：
         // 44dp 头像 + 名字（15sp Medium）+ chevron，行高 60dp，卡内 0.5dp 分割线。
         // 最多 5 行，多的收成「查看全部 N 个 →」（跳到聊天 tab）。
-        if (persons.isNotEmpty()) {
+        if (chatTabOn && persons.isNotEmpty()) {
             SectionTitle(tr("好友"))
             V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
                 persons.take(5).forEachIndexed { i, p ->
@@ -3108,8 +3149,11 @@ private fun MeTab(
             }
             MeDivider()
             MeRow(R.drawable.ic_diary, "日记", tr("它每天自己写的那一篇")) { onOpenDiary() }
-            MeDivider()
-            MeRow(R.drawable.ic_cpu, "模型", tr("用哪个模型聊天，看在线状态")) { onOpenModels() }
+            // 2026-11-25：模型状态区按 flag 门禁
+            if (Api.featureEnabled("modelStatus")) {
+                MeDivider()
+                MeRow(R.drawable.ic_cpu, "模型", tr("用哪个模型聊天，看在线状态")) { onOpenModels() }
+            }
             MeDivider()
             MeRow(R.drawable.ic_font, "字体", tr("日记用哪个字体，可导入")) { onOpenFont() }
             MeDivider()

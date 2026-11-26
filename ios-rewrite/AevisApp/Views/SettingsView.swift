@@ -55,10 +55,15 @@ struct SettingsView: View {
                     }
 
                     sectionCard(title: "配置", icon: "slider.horizontal.3") {
-                        navRow(icon: "server.rack", title: "服务器状态", value: currentLineText) {
-                            ServerStatusView()
-                        }
+                        // 线路状态基础展示：永远可见、不跳转。开关配错也不能把用户锁死。
+                        lineStatusBaseRow
                         innerDivider
+                        if AevisHosts.featureEnabled("serverStatus") {
+                            navRow(icon: "server.rack", title: "服务器状态", value: currentLineText) {
+                                ServerStatusView()
+                            }
+                            innerDivider
+                        }
                         navRow(icon: "paintbrush", title: "主题配置", value: themeText) {
                             ThemeSettingsView()
                         }
@@ -90,10 +95,12 @@ struct SettingsView: View {
                             CheckInView()
                         }
                         innerDivider
-                        navRow(icon: "person.2.fill", title: "创作者与活动", value: "") {
-                            GrowthView()
+                        if AevisHosts.featureEnabled("growth") {
+                            navRow(icon: "person.2.fill", title: "创作者与活动", value: "") {
+                                GrowthView()
+                            }
+                            innerDivider
                         }
-                        innerDivider
                         navRow(icon: "doc.text.magnifyingglass", title: "对话日志", value: "") {
                             ChatLogsView()
                         }
@@ -367,6 +374,26 @@ struct SettingsView: View {
     /// 当前生效线路（自动回落时显示自动选中的那条）。真实值取自 APIClient，不写死。
     private var currentLineText: String {
         APIClient.activeLine.name
+    }
+
+    /// 线路状态基础行：只读展示当前线路，不依赖任何功能开关。
+    /// 「服务器状态」详情页可以随 flag 隐藏，但这一行始终在，避免开关配错把基础状态也藏掉。
+    private var lineStatusBaseRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AE.accent)
+                .frame(width: 22, alignment: .center)
+            Text("当前线路")
+                .font(.system(size: 14.5))
+                .foregroundStyle(AE.textPrimary)
+            Spacer(minLength: 8)
+            Text(currentLineText)
+                .font(.system(size: 12.5))
+                .foregroundStyle(AE.textSecondary)
+                .lineLimit(1)
+        }
+        .frame(height: 40)
     }
 
     /// 当前背景：有自定义图显示「自定义」，否则显示预设名（详细调节在主题配置页）

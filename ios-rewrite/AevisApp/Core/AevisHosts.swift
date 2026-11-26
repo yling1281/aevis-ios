@@ -20,19 +20,32 @@ import Foundation
 ///
 /// 缓存：合并结果存 `UserDefaults`，冷启动不联网也能用上一轮的结论；
 /// 云端返回空/解析失败时**保留旧缓存**，绝不把用户打回"只有内置两条"然后再也回不来。
+///
+/// 2026-11-25 第二期（调度契约）：
+/// - `/v1/app/config` 的 `data.features` 一起解析落缓存，客户端统一用 `featureEnabled(_:)` 读，
+///   **键不存在 = false**（服务端不下命令即默认关闭）；
+/// - **每次进程启动都拉一次**，不再有 6 小时 TTL 拦截（失败/空配置仍留旧缓存）；
+/// - `/v1/ping` 同时读 `data.busy`，排序时把繁忙线路**排到后面但不删除**，
+///   自动换线也复用这份实测结果。
 enum AevisHosts {
 
     // MARK: - 存储键
 
-    private static let cacheKey = "aevisCloudLines"       // JSON 数组：[{id,name,base}]
-    private static let probedKey = "aevisCloudLinesAt"    // 上次实测时间（秒）
-
-    /// 实测结果的最长保鲜期（秒）。超过就重新测 —— 线路质量会变，不能吃一辈子旧数据。
-    private static let probeTTL: TimeInterval = 6 * 60 * 60
+    private static let cacheKey = "aevisCloudLines"        // JSON 数组：[{id,name,base}]
+    private static let featureCacheKey = "aevisFeatureFlags" // JSON 字典：{featureName: Bool}
+    /// 服务端**是否真的下发过** features 对象。
+    /// `false` = 后端还没部署开关接口 → 走「兼容旧版全开」，绝不因为拿不到配置把模块全藏了。
+    /// `true`  = 服务端已接管，未出现的键一律按 false（用户口径：不下命令就是关）。
+    private static let featureSyncKey = "aevisFeatureSynced"
+    private static var memoFeatureSynced: Bool?
 
     /// 内存缓存：避免每次读 `APIClient.lines` 都去解一次 JSON。
     /// `nil` = 还没初始化过；空数组 = 确实没有云端线路。
     private static var memo: [APIClient.Line]?
+    /// 功能开关的内存镜像（`nil` = 还没从磁盘读过）。
+    private static var memoFeatures: [String: Bool]?
+    /// 最近一次 `/v1/ping`：线路 id → (RTT 毫秒, busy)。排序 / 状态页 / 自动换线共用。
+    private static var pingState: [String: (rtt: Int, busy: Bool)] = [:]
 
     private static let lock = NSLock()
 
@@ -61,6 +74,59 @@ enum AevisHosts {
         let cached = loadCache()
         memo = cached
         return cached
+    }
+
+    // MARK: - 功能开关（App 内模块门禁）
+
+    /// 统一读取口：**键不存在 = false**（服务端未配置 / 读不到 = 不下命令 = 默认关闭）。
+    /// SwiftUI 视图直接调它决定入口显示与否；已打开页面下次启动按新值生效。
+    static func featureEnabled(_ name: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        // 服务端从没下发过 features（后端未部署 / 新装用户还没拉到配置）：
+        // 保持老版本行为，模块全部可见。否则发版当天用户会看到一个被掏空的 App。
+        if !featureSyncedLocked() { return true }
+        if let memoFeatures { return memoFeatures[name] ?? false }
+        let cached = loadFeatures()
+        memoFeatures = cached
+        return cached[name] ?? false
+    }
+
+    /// 开关是否已由服务端接管（读内存 → 读磁盘）。调用方需已持锁。
+    private static func featureSyncedLocked() -> Bool {
+        if let memoFeatureSynced { return memoFeatureSynced }
+        let synced = UserDefaults.standard.bool(forKey: featureSyncKey)
+        memoFeatureSynced = synced
+        return synced
+    }
+
+    /// 从 `/v1/app/config` 解析 `data.features`。
+    /// 返回 nil = 服务端没下这个对象 / 下发了空对象 → 调用方保留旧缓存，不把用户打回全关。
+    static func parseFeatures(_ json: [String: Any]) -> [String: Bool]? {
+        let data = (json["data"] as? [String: Any]) ?? json
+        let raw = (data["features"] as? [String: Any]) ?? (json["features"] as? [String: Any])
+        guard let raw, !raw.isEmpty else { return nil }
+        var out: [String: Bool] = [:]
+        for (k, v) in raw {
+            if let b = boolValue(v) { out[k] = b }
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    /// 先读 UserDefaults；被清掉（重装 / 手动重置）时从 `.lineConfig` 硬缓存救回来。
+    private static func loadFeatures() -> [String: Bool] {
+        if let data = UserDefaults.standard.data(forKey: featureCacheKey),
+           let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            var out: [String: Bool] = [:]
+            for (k, v) in raw { if let b = boolValue(v) { out[k] = b } }
+            return out
+        }
+        guard let json = HardCache.cachedJSON(.lineConfig) else { return [:] }
+        let data = (json["data"] as? [String: Any]) ?? json
+        guard let raw = data["features"] as? [String: Any] else { return [:] }
+        var out: [String: Bool] = [:]
+        for (k, v) in raw { if let b = boolValue(v) { out[k] = b } }
+        return out
     }
 
     // MARK: - 解析
@@ -108,90 +174,141 @@ enum AevisHosts {
 
     // MARK: - 刷新（启动时调一次）
 
-    /// 拉云端线路 → 解析 → 按 `/v1/ping` 实测 RTT 排序 → 落缓存。
+    /// 拉云端配置 → 解析线路与开关 → 实测排序 → 落缓存。
+    ///
+    /// **每次 App 进程启动都拉一次**，不再用 6 小时 TTL 拦截（热更新靠服务端开关，
+    /// 拦截会让用户永远吃旧值）。失败 / 空配置分支保留旧缓存，下次启动仍会再拉。
     ///
     /// 用 `APIClient.rawGet` 而不是 `request`：后者会读 `lines` → 读 `allAccountLines` →
     /// 回到这里，是环。`rawGet` 在**指定线路**上裸发一次请求，不参与回落。
+    /// 调度入口**固定北京**（2026-11-25 用户口径），与 `builtInLines` 解耦。
+    /// 内置线路以后加新主力（新机）也绝不从新机拉配置 —— 调度源只有一个，避免两套真源。
+    private static let configLine = APIClient.Line(
+        id: "bj-config", name: "北京", base: "https://q7m3ax.lingyan.cyou",
+        pinning: false, note: ""
+    )
+
     static func refresh() async {
-        if !shouldProbe() { return }        // TTL 内且已有缓存：不必再联网
+        guard !configLine.base.isEmpty,
+              let r = await APIClient.rawGet("/v1/app/config", line: configLine, timeout: 5),
+              (200..<400).contains(r.status),
+              let json = (try? JSONSerialization.jsonObject(with: r.data)) as? [String: Any]
+        else { return }   // 调度机不可达：保留旧缓存，下次启动再拉
 
-        for line in APIClient.builtInLines where !line.base.isEmpty {
-            guard let r = await APIClient.rawGet("/v1/app/config", line: line, timeout: 5),
-                  (200..<400).contains(r.status),
-                  let json = (try? JSONSerialization.jsonObject(with: r.data)) as? [String: Any]
-            else { continue }
-
-            let parsed = parse(json: json)
-            if parsed.isEmpty {
-                // 云端确实没配 / 全被过滤掉：**不要**用空结果覆盖旧缓存。
-                // 服务端一次配置失误不该把用户的线路表清空。
-                return
-            }
-            let ranked = await rankByLatency(parsed)
-            store(ranked)
+        let parsed = parse(json: json)
+        if parsed.isEmpty {
+            // 云端确实没配 / 全被过滤掉：**不要**用空结果覆盖旧缓存。
+            // 服务端一次配置失误不该把用户的线路表 / 开关表清空。
             return
         }
-        // 一条内置线路都没拉到：保留旧缓存，不做任何写入
+        // features 空对象 = 保留旧开关；lines 有值才继续。
+        let parsedFeatures = parseFeatures(json)
+        let features = parsedFeatures ?? loadFeatures()
+        // 内置 ∪ 云端一起探：排序要 RTT，自动换线要 busy，共用一份实测结果。
+        await probeAndRecord(merge(builtIn: APIClient.builtInLines, cloud: parsed))
+        let ranked = rankByLatency(parsed)
+        store(ranked, features: features, synced: parsedFeatures != nil)
     }
 
-    // MARK: - 实测排序
+    // MARK: - 实测排序 / ping 状态
 
-    /// 按 `/v1/ping` 实测 RTT 升序；不可达的直接剔除。
-    ///
-    /// 并发测：串行测 4 条就是 4 个超时叠起来，启动会被拖住。
-    /// 并发上限 4 条，本 App 的线路数量在这个量级。
-    static func rankByLatency(_ lines: [APIClient.Line]) async -> [APIClient.Line] {
-        guard !lines.isEmpty else { return [] }
-
-        // 结果用"索引 → 延迟"收集，避免并发写同一个数组
-        let results: [Int: Int] = await withTaskGroup(of: (Int, Int?).self) { group in
-            for (idx, line) in lines.enumerated() {
-                group.addTask { (idx, await APIClient.pingLatency(line)) }
+    /// 并发探一组线路，结果记入 `pingState`（供排序、状态页、自动换线共用）。
+    /// 并发上限就是线路条数，本 App 在这个量级；单条超时只有 2 秒。
+    static func probeAndRecord(_ lines: [APIClient.Line]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for line in lines where !line.base.isEmpty {
+                group.addTask {
+                    if let info = await APIClient.pingInfo(line) {
+                        recordPing(line.id, rtt: info.rtt, busy: info.busy)
+                    }
+                }
             }
-            var acc: [Int: Int] = [:]
-            for await (idx, rtt) in group {
-                if let rtt { acc[idx] = rtt }
-            }
-            return acc
+            for await _ in group { }
         }
+    }
 
-        // 可达的按 RTT 升序；同 RTT 按原序（稳定，不会每次刷新都跳）
-        let reachable = lines.enumerated()
-            .filter { results[$0.offset] != nil }
+    /// 记入单次实测结果（状态页探测后也调它，保证自动换线吃到的 busy 不是过期的）。
+    static func recordPing(_ id: String, rtt: Int, busy: Bool) {
+        lock.lock()
+        pingState[id] = (rtt, busy)
+        lock.unlock()
+    }
+
+    /// 最近一次 ping 的 busy 标记。没测过 = false（探针读不到负载时也是 false）。
+    static func isBusy(_ lineID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pingState[lineID]?.busy ?? false
+    }
+
+    /// 最近一次 ping 的 RTT（毫秒）。没测过 = nil。
+    static func latency(_ lineID: String) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pingState[lineID]?.rtt
+    }
+
+    /// 最佳候选：可达、非 busy、RTT 最小；排除当前线路。自动换线专用。
+    static func bestCandidate(excluding id: String) -> (line: APIClient.Line, rtt: Int)? {
+        // 先取线路表：`allAccountLines` 内部也会拿 lock，持锁调用会死锁。
+        let pool = APIClient.lines.filter { !$0.base.isEmpty && $0.id != id }
+        lock.lock()
+        defer { lock.unlock() }
+        var best: (line: APIClient.Line, rtt: Int)?
+        for line in pool {
+            guard let s = pingState[line.id], !s.busy else { continue }
+            if let cur = best {
+                if s.rtt < cur.rtt { best = (line, s.rtt) }
+            } else {
+                best = (line, s.rtt)
+            }
+        }
+        return best
+    }
+
+    /// 按 `/v1/ping` 实测结果排序：**非 busy 的按 RTT 升序在前，busy 的排到后面（不删除）**；
+    /// 不可达的仍从候选里剔除（连不通的地址只会让回落白等一个超时，比误报更糟）。
+    /// 同 RTT / 同 busy 按原序，稳定不跳。
+    static func rankByLatency(_ lines: [APIClient.Line]) -> [APIClient.Line] {
+        guard !lines.isEmpty else { return [] }
+        lock.lock()
+        defer { lock.unlock() }
+        return lines.enumerated()
+            .filter { pingState[$0.element.id] != nil }
             .sorted { a, b in
-                let la = results[a.offset] ?? Int.max
-                let lb = results[b.offset] ?? Int.max
-                return la == lb ? a.offset < b.offset : la < lb
+                let sa = pingState[a.element.id]!
+                let sb = pingState[b.element.id]!
+                if sa.busy != sb.busy { return !sa.busy }
+                if sa.rtt != sb.rtt { return sa.rtt < sb.rtt }
+                return a.offset < b.offset
             }
             .map { $0.element }
-
-        return reachable
     }
 
     // MARK: - 缓存
 
-    private static func shouldProbe() -> Bool {
-        let at = UserDefaults.standard.double(forKey: probedKey)
-        guard at > 0 else { return true }
-        let age = Date().timeIntervalSince1970 - at
-        // 缓存为空时必须重测（可能是首次启动 / 上次全不可达）
-        if cloudLines.isEmpty { return true }
-        return age > probeTTL || age < 0     // age < 0：用户把系统时间往回调过
-    }
-
-    private static func store(_ lines: [APIClient.Line]) {
+    private static func store(_ lines: [APIClient.Line], features: [String: Bool], synced: Bool = false) {
         let rows: [[String: String]] = lines.map {
             ["id": $0.id, "name": $0.name, "base": $0.base]
         }
         if let data = try? JSONSerialization.data(withJSONObject: rows) {
             UserDefaults.standard.set(data, forKey: cacheKey)
         }
+        var featureAny: [String: Any] = [:]
+        for (k, v) in features { featureAny[k] = v }
+        if let data = try? JSONSerialization.data(withJSONObject: featureAny) {
+            UserDefaults.standard.set(data, forKey: featureCacheKey)
+        }
         // 2.8：线路配置也进统一硬缓存。UserDefaults 是轻量备份，
         // 换机 / 重装后 Documents 还在时能从这里恢复，不必等网络。
-        HardCache.saveJSON(.lineConfig, ["lines": rows])
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: probedKey)
+        // features 和 lines 放同一个 .lineConfig，避免为开关新增 HardCache 枚举值。
+        HardCache.saveJSON(.lineConfig, ["lines": rows, "features": featureAny])
+        // 只有服务端真的下发了 features，才把开关交给它管；否则维持「全开」兼容态。
+        if synced { UserDefaults.standard.set(true, forKey: featureSyncKey) }
         lock.lock()
         memo = lines
+        memoFeatures = features
+        if synced { memoFeatureSynced = true }
         lock.unlock()
     }
 
@@ -220,10 +337,14 @@ enum AevisHosts {
     /// 清空云端缓存（状态页「重置线路」用；也让下次启动必然重新拉一遍）。
     static func clear() {
         UserDefaults.standard.removeObject(forKey: cacheKey)
-        UserDefaults.standard.removeObject(forKey: probedKey)
+        UserDefaults.standard.removeObject(forKey: featureCacheKey)
+        UserDefaults.standard.removeObject(forKey: featureSyncKey)   // 回到「全开」兼容态，下次启动重新拉
         HardCache.remove(.lineConfig)   // 2.8：两个缓存一起清，否则重置后又被硬缓存救回来
         lock.lock()
         memo = []
+        memoFeatures = [:]
+        memoFeatureSynced = nil
+        pingState = [:]
         lock.unlock()
     }
 

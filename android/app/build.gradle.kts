@@ -24,12 +24,13 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 192
+        versionCode = 193
         // 2026-11-16（113）：版本名跟着 build 走（112 → 1.1.02，113 → 1.1.03）；
         // 界面上只显示 versionName，versionCode 只给系统覆盖安装用。
         // 2026-11-24：1.1.91 → 1.1.92，带「App 内直接下载安装 APK」，开更新提醒。
+        // 2026-11-25：1.1.92 → 1.1.93，versionCode 192 → 193。
         // run24 runner 卡住，改注释重触发。
-        versionName = "1.1.92"
+        versionName = "1.1.93"
     }
 
     signingConfigs {

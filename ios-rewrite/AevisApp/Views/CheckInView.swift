@@ -51,6 +51,9 @@ struct CheckInView: View {
         .background(AppBackground())
         .appBackgroundIntensity(AEGlass.veilDefault)
         .task { await load() }
+        // 从设置页 push 进来时收起底部 Dock（1.0 的 bug：签到页下面露出 tab 栏）。
+        // 从主页 sheet 弹出时这条是空操作，不影响现有观感。
+        .toolbar(.hidden, for: .tabBar)
     }
 
     // MARK: - 主卡

@@ -35,14 +35,16 @@ struct MainTabView: View {
         // 全 App 只有一份背景，登录页 / 全屏页也统一。这里不再自铺，避免同一张图解码两次。
         TabView(selection: $selected) {
             HomeView(
-                onShop: { shopInitialTab = 0; showShop = true },
-                onMember: { showMember = true },
-                onBuyQuota: { showMember = true },  // 「用量提升」→ 套餐页 MemberView
-                onPerUse: { shopInitialTab = 2; showShop = true },  // 「按次计费」→ 商城按次 tab
-                onPlaza: { tab in
+                // 功能入口按服务端开关开放；默认全关是预期行为。
+                // 传 nil 后 HomeView 内部的兜底弹层也不会被触发（入口格已隐藏）。
+                onShop: AevisHosts.featureEnabled("shop") ? { shopInitialTab = 0; showShop = true } : nil,
+                onMember: AevisHosts.featureEnabled("member") ? { showMember = true } : nil,
+                onBuyQuota: AevisHosts.featureEnabled("member") ? { showMember = true } : nil,
+                onPerUse: AevisHosts.featureEnabled("shop") ? { shopInitialTab = 2; showShop = true } : nil,
+                onPlaza: (AevisHosts.featureEnabled("plaza") || AevisHosts.featureEnabled("stickers")) ? { tab in
                     plazaTab = tab
                     withAnimation(AEMotion.pageAnimation) { showPlaza = true }
-                }
+                } : nil
             )
                 .modifier(ClearTabBarBackground())
                 .tabItem { Label("主页", systemImage: "house.fill") }
@@ -74,6 +76,8 @@ struct MainTabView: View {
         .animation(AEMotion.pageAnimation, value: showPlaza)
         // 聊天加号面板里「去表情包 tab 下载」：直接右滑打开广场表情包页。
         .onReceive(NotificationCenter.default.publisher(for: CharacterSettingsView.openStickerPlaza)) { _ in
+            // 聊天加号面板的「去表情包 tab」同样受开关约束，关掉后这条通知不再拉起广场。
+            guard AevisHosts.featureEnabled("stickers") || AevisHosts.featureEnabled("plaza") else { return }
             plazaTab = 1
             withAnimation(AEMotion.pageAnimation) { showPlaza = true }
         }

@@ -56,6 +56,7 @@ struct ChatLogsView: View {
         .navigationTitle("对话日志")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private func logRow(_ entry: GrowthAPI.ChatLogEntry) -> some View {

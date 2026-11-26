@@ -78,6 +78,57 @@ object Api {
     @Volatile
     private var cloudBases: List<String> = emptyList()
 
+    // ---------------- 2026-11-25：功能开关 / 自动换线状态 ----------------
+
+    /** `/v1/app/config` 的 `data.features` 落盘前缀。**服务端接管后键不存在 = false**（默认关）。*/
+    private const val FEATURE_PREF = "aevis_feature_"
+
+    /**
+     * 服务端是否真的下发过 features。
+     * false = 后端还没部署开关接口 → 兼容旧版「全开」，否则发版当天模块会被整片隐藏。
+     * true  = 服务端已接管，未出现的键一律 false。
+     */
+    private const val FEATURE_SYNCED = "aevis_feature_synced"
+
+    /** 请求耗时超过这个值算「慢」，连续 2 次触发自动换线评估。*/
+    private const val SLOW_MS = 3000L
+
+    /** 自动换线冷却，避免线在两条之间来回跳。*/
+    private const val SWITCH_COOLDOWN_MS = 60_000L
+
+    /** 候选至少要快 20%（ms <= 当前 * 0.8）才值得换。*/
+    private const val SWITCH_GAIN = 0.8
+
+    /** 每条线路最近一次 `/v1/ping` 的实测结果。ms<=0 = 探测失败。*/
+    private class Probed {
+        @Volatile var ms: Long = -1L
+        @Volatile var busy: Boolean = false
+    }
+
+    private val probed = java.util.concurrent.ConcurrentHashMap<String, Probed>()
+
+    /** 当前线路连续几次「成功请求」超过 [SLOW_MS]。*/
+    @Volatile
+    private var slowStreak = 0
+
+    /** 上一次自动换线的时间戳。*/
+    @Volatile
+    private var lastAutoSwitchAt = 0L
+
+    /** 自动换线的探测线程全局只允许一个，避免慢请求风暴。*/
+    private val autoSwitching = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * 功能模块开关。服务端没下发 / 读不到 = **false**（默认关）。
+     * 每次进程启动都会从北京拉一次配置写回缓存，所以这里是热更新入口。
+     */
+    fun featureEnabled(name: String): Boolean {
+        // 服务端从没下发过 features（后端未部署 / 新装用户还没拉到配置）：
+        // 沿用老版本行为，模块全部可见，避免升级后 App 变空壳。
+        if (!prefs().getBoolean(FEATURE_SYNCED, false)) return true
+        return prefs().getBoolean(FEATURE_PREF + name, false)
+    }
+
     // ---------------- 登录的三种方式（与 iOS LoginView 一一对应）----------------
 
     /** 验证码登录第 1 步：给邮箱发 6 位码。**只发给已注册的邮箱**。 */
@@ -2167,22 +2218,41 @@ object Api {
                 }
             }
 
-            // 历史：recent 近 30 分钟逐点（>=0.5 判绿）；没有则用 history 30 分钟分桶
+            // 2026-11-25 固定口径（与 iOS build / 官网一致）：
+            //   ① `recent`（近 30 分钟逐点，>=0.5 判绿）非空 → 竖条和可用率**都用它**，范围锁「近 30 分钟」；
+            //      recent 存在但内容无效时**不回落**，按无数据显示，不拿 24h 旧口径冒充 30 分钟。
+            //   ② 只有 recent 字段缺失 / 空数组才回落 `history`（30 分钟一桶，近 24 小时），如实写范围。
+            //   ③ 两者都没有 → 空 samples，界面显示「— / 暂无探测数据」，绝不编造。
             val samples = ArrayList<Boolean>()
             var okSum = 0
             var totalSum = 0
             var range = ""
             val recent = row.optJSONArray("recent")
-            if (recent != null && recent.length() > 0) {
+            val recentPresent = recent != null && recent.length() > 0
+            if (recent != null && recentPresent) {
+                val vals = ArrayList<Double>()
+                var valid = true
                 for (k in 0 until recent.length()) {
-                    val ok = recent.optDouble(k, 0.0) >= 0.5
-                    samples.add(ok)
-                    if (ok) okSum++
-                    totalSum++
+                    val v = recent.opt(k)
+                    val num = when (v) {
+                        is Number -> v.toDouble()
+                        is Boolean -> if (v) 1.0 else 0.0
+                        else -> Double.NaN
+                    }
+                    if (num.isNaN()) { valid = false; break }
+                    vals.add(num)
                 }
-                range = "近 30 分钟"
+                if (valid && vals.isNotEmpty()) {
+                    for (v in vals) {
+                        val ok = v >= 0.5
+                        samples.add(ok)
+                        if (ok) okSum++
+                        totalSum++
+                    }
+                }
+                range = "近 30 分钟"   // recent 存在就锁 30 分钟口径，内容无效也不偷换 24h
             }
-            if (samples.isEmpty()) {
+            if (!recentPresent) {
                 val history = row.optJSONArray("history")
                 if (history != null) {
                     for (k in 0 until history.length()) {
@@ -2198,6 +2268,8 @@ object Api {
                 }
             }
             val rate = if (totalSum > 0) (okSum.toDouble() / totalSum).coerceIn(0.0, 1.0) else 0.0
+            // 没数据时也按默认口径写「近 30 分钟」，不要凭空冒出 24 小时口径
+            if (range.isEmpty()) range = "近 30 分钟"
 
             // 官方状态：stale=false 才显示（过期结论不摆给用户）
             var officialState = ""
@@ -2445,7 +2517,8 @@ object Api {
         refreshCloudLines()
     }
 
-    /// 拉 `/v1/app/config` 更新线路列表。失败就继续用缓存，不打扰用户。
+    /// 拉 `/v1/app/config` 更新功能开关 + 线路列表。失败就继续用缓存，不打扰用户。
+    /// 每次 `init()` 都拉，没有 TTL；空 features 不清缓存（别把用户打回全关）。
     fun refreshCloudLines() {
         Thread {
             try {
@@ -2453,16 +2526,45 @@ object Api {
                 var res = callOnce(FASTLINE, "GET", "/v1/app/config", null, token())
                 if (res.first <= 0) res = callOnce(DIRECT, "GET", "/v1/app/config", null, token())
                 if (res.first <= 0) return@Thread
-                val arr = res.second.optJSONObject("data")?.optJSONArray("lines") ?: return@Thread
-                val out = ArrayList<String>()
-                for (i in 0 until arr.length()) {
-                    val base = arr.optJSONObject(i)?.optString("base").orEmpty().trim()
-                    if (base.startsWith("http")) out.add(base)
+                val data = res.second.optJSONObject("data") ?: return@Thread
+
+                // ---- 功能模块开关（2026-11-25）----
+                // 服务端没下发 / 空对象 → 一个键都不写，保留上次缓存（离线可用）。
+                val features = data.optJSONObject("features")
+                if (features != null && features.length() > 0) {
+                    val ed = prefs().edit()
+                    val names = features.keys()
+                    while (names.hasNext()) {
+                        val n = names.next()
+                        val v = features.opt(n)
+                        val on = when (v) {
+                            is Boolean -> v
+                            is Number -> v.toInt() != 0
+                            is String -> v.equals("true", ignoreCase = true) || v == "1"
+                            else -> false
+                        }
+                        ed.putBoolean(FEATURE_PREF + n, on)
+                    }
+                    // 只有真拿到非空 features 才把模块控制权交给服务端
+                    ed.putBoolean(FEATURE_SYNCED, true)
+                    ed.apply()
                 }
-                if (out.isNotEmpty()) {
-                    cloudBases = out
-                    prefs().edit().putString("cloud_lines", out.joinToString(",")).apply()
+
+                // ---- 线路列表（原有逻辑不变）----
+                val arr = data.optJSONArray("lines")
+                if (arr != null) {
+                    val out = ArrayList<String>()
+                    for (i in 0 until arr.length()) {
+                        val base = arr.optJSONObject(i)?.optString("base").orEmpty().trim()
+                        if (base.startsWith("http")) out.add(base)
+                    }
+                    if (out.isNotEmpty()) {
+                        cloudBases = out
+                        prefs().edit().putString("cloud_lines", out.joinToString(",")).apply()
+                    }
                 }
+                // 拿到配置顺手探一遍所有候选：自动换线要靠这里的 RTT / busy 判断。
+                probeAll()
             } catch (e: Exception) {
                 // 云更新是保底手段，拿不到就安静用现有的
             }
@@ -2742,6 +2844,16 @@ object Api {
     data class PingResult(
         val ms: Long,
         val fail: PingFail = PingFail.NONE,
+        val detail: String = "",
+        // 2026-11-25：`/v1/ping` 的 `data.busy`（人多）。状态页据此显示「繁忙」并排到后面。
+        val busy: Boolean = false
+    )
+
+    /** 一次 `/v1/ping` 的结果：往返耗时 + 服务端负载标记。*/
+    data class PingDetail(
+        val ms: Long,
+        val busy: Boolean,
+        val fail: PingFail = PingFail.NONE,
         val detail: String = ""
     )
 
@@ -2759,33 +2871,138 @@ object Api {
     fun pingLineById(id: Int): PingResult {
         val host = endpoints().firstOrNull { it.id == id }?.host
             ?: return PingResult(-1, PingFail.NET, "未配置")
+        // 2026-11-25：探针改打 `/v1/ping`（零 DB / 零鉴权 / no-store），
+        // 一次请求同时拿到 RTT 和 `data.busy`；读不到负载时 busy=false，探针照常算通。
+        val p = probeDetail(host)
+        val detail = if (p.detail.isNotBlank()) p.detail else p.fail.name
+        val r = PingResult(p.ms, p.fail, detail, p.busy)
+        noteProbe(host, p)
+        return r
+    }
+
+    /** 把一次探测结果写进进程内缓存，供自动换线/状态页共用。*/
+    private fun noteProbe(host: String, p: PingDetail) {
+        if (p.ms > 0 || p.busy) {
+            val x = probed.getOrPut(host) { Probed() }
+            x.ms = p.ms
+            x.busy = p.busy
+        }
+    }
+
+    /**
+     * 打 `/v1/ping` 读 `data.busy`（人多 = true），同时量 RTT。
+     * 负载读不到时 busy=false、**不让探针失败**。
+     */
+    private fun probeDetail(host: String): PingDetail {
         val t0 = System.currentTimeMillis()
         var conn: HttpURLConnection? = null
         return try {
-            conn = (URL(host + "/v1/app/config").openConnection() as HttpURLConnection).apply {
+            conn = (URL(host + "/v1/ping").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 4000
                 readTimeout = 6000
+                useCaches = false
             }
             val code = conn.responseCode
             val dt = System.currentTimeMillis() - t0
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() } ?: ""
+            val busy = runCatching {
+                val j = JSONObject(text)
+                (j.optJSONObject("data") ?: j).optBoolean("busy", false)
+            }.getOrDefault(false)
             when {
-                dt >= 6000 -> PingResult(-1, PingFail.TIMEOUT)
+                dt >= 6000 -> PingDetail(-1, false, PingFail.TIMEOUT)
                 // 4xx 也算通：链路和证书都活着，只是这个探针路径不被允许
-                code >= 500 -> PingResult(dt, PingFail.HTTP, code.toString())
-                else -> PingResult(dt)
+                code >= 500 -> PingDetail(dt, busy, PingFail.HTTP, code.toString())
+                else -> PingDetail(dt, busy)
             }
         } catch (e: javax.net.ssl.SSLException) {
-            // SSLHandshakeException / 证书链不认 —— 自签证书没进 network_security_config 就是这一档
-            PingResult(-1, PingFail.TLS, e.javaClass.simpleName)
+            PingDetail(-1, false, PingFail.TLS, e.javaClass.simpleName)
         } catch (e: java.security.cert.CertificateException) {
-            PingResult(-1, PingFail.TLS, e.javaClass.simpleName)
+            PingDetail(-1, false, PingFail.TLS, e.javaClass.simpleName)
         } catch (e: java.net.SocketTimeoutException) {
-            PingResult(-1, PingFail.TIMEOUT)
+            PingDetail(-1, false, PingFail.TIMEOUT)
         } catch (e: Exception) {
-            PingResult(-1, PingFail.NET, e.javaClass.simpleName)
+            PingDetail(-1, false, PingFail.NET, e.javaClass.simpleName)
         } finally {
             runCatching { conn?.disconnect() }
+        }
+    }
+
+    /** 探测所有候选线路（内置 ∪ 云端），结果写回 [probed] 供排序/自动换线用。*/
+    private fun probeAll(): Map<String, PingDetail> {
+        val hosts = (endpoints().map { it.host } + cloudBases).distinct()
+        val out = LinkedHashMap<String, PingDetail>()
+        for (h in hosts) {
+            val p = probeDetail(h)
+            out[h] = p
+            noteProbe(h, p)
+        }
+        return out
+    }
+
+    /** 界面读：某条线路最近一次 ping 是不是「繁忙」。*/
+    fun isLineBusy(id: Int): Boolean {
+        val host = endpoints().firstOrNull { it.id == id }?.host ?: return false
+        return probed[host]?.busy ?: false
+    }
+
+    /** 当前是否在自动模式（0 = 自动；手动选线后为具体 id，不再自动换）。*/
+    fun isAutoMode(): Boolean = pinnedLine == 0
+
+    /**
+     * 自动换线：慢（连续 2 次请求 >3s）或当前线路 busy=true，且仅在自动模式下。
+     * 切到「最快、非繁忙、且至少快 20%」的候选；60 秒冷却。
+     * 探测线程全局只有一个，避免慢请求风暴叠加。
+     */
+    private fun scheduleAutoSwitch(reason: String) {
+        if (pinnedLine != 0) return                       // 用户手动选线后自动模式关闭
+        val cur = activeHost ?: return
+        if (System.currentTimeMillis() - lastAutoSwitchAt < SWITCH_COOLDOWN_MS) return
+        if (!autoSwitching.compareAndSet(false, true)) return
+        Thread {
+            try {
+                val details = probeAll()
+                val curInfo = probed[cur]
+                // 探测期间可能已经被别的快请求把 slowStreak 归零 —— 以当下状态为准
+                if (slowStreak < 2 && curInfo?.busy != true) {
+                    android.util.Log.i("AevisLine", "自动换线评估（$reason）：当前不慢也不忙，跳过")
+                    return@Thread
+                }
+                val curMs = curInfo?.ms?.takeIf { it > 0 } ?: SLOW_MS
+                // busy 的候选排到后面（这里直接排除）；至少快 20% 才换，避免来回跳
+                val best = details.filter { (h, p) ->
+                    h != cur && p.ms > 0 && !p.busy && p.ms <= curMs * SWITCH_GAIN
+                }.minByOrNull { it.value.ms }
+                val now = System.currentTimeMillis()
+                if (best == null || now - lastAutoSwitchAt < SWITCH_COOLDOWN_MS) {
+                    if (best == null) android.util.Log.i("AevisLine", "自动换线：没有快 20% 的非繁忙候选")
+                    return@Thread
+                }
+                activeHost = best.key
+                activeAt = now
+                lastAutoSwitchAt = now
+                slowStreak = 0
+                lineFailStreak = 0
+                preferDirect = (best.key == DIRECT)
+                android.util.Log.i(
+                    "AevisLine",
+                    "自动换线（$reason）→ ${labelOf(best.key)}，${curMs}ms → ${best.value.ms}ms"
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("AevisLine", "自动换线失败：${e.javaClass.simpleName}")
+            } finally {
+                autoSwitching.set(false)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** 记一次成功请求的耗时；连续 2 次 >3s 或当前线路忙 → 自动换线评估。*/
+    private fun noteRequestLatency(host: String, ms: Long) {
+        slowStreak = if (ms > SLOW_MS) slowStreak + 1 else 0
+        if (slowStreak >= 2 || probed[host]?.busy == true) {
+            scheduleAutoSwitch(if (slowStreak >= 2) "连续慢请求" else "线路繁忙")
         }
     }
 
@@ -2916,12 +3133,14 @@ object Api {
     data class GrowthConfig(
         val groupJoinUrl: String = "",
         val wechatWorkUrl: String = "",
+        val wechatWorkQrUrl: String = "",
         val activityUrl: String = "",
         val inviteBaseUrl: String = "",
         val ok: Boolean = false
     ) {
         val hasAny: Boolean get() =
             groupJoinUrl.isNotEmpty() || wechatWorkUrl.isNotEmpty() ||
+                wechatWorkQrUrl.isNotEmpty() ||
                 activityUrl.isNotEmpty() || inviteBaseUrl.isNotEmpty()
     }
 
@@ -2945,6 +3164,7 @@ object Api {
         return GrowthConfig(
             groupJoinUrl = d.optString("groupJoinUrl"),
             wechatWorkUrl = d.optString("wechatWorkUrl"),
+            wechatWorkQrUrl = d.optString("wechatWorkQrUrl"),
             activityUrl = d.optString("activityUrl"),
             inviteBaseUrl = d.optString("inviteBaseUrl"),
             ok = true
@@ -3148,6 +3368,7 @@ object Api {
     private fun callOnce(host: String, method: String, path: String, body: JSONObject?,
                          token: String?, extra: Map<String, String> = emptyMap())
             : Pair<Int, JSONObject> {
+        val t0 = System.currentTimeMillis()
         var conn: HttpURLConnection? = null
         return try {
             conn = (URL(host + path).openConnection() as HttpURLConnection).apply {
@@ -3165,6 +3386,8 @@ object Api {
             val code = conn.responseCode
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                 ?.bufferedReader()?.use { it.readText() } ?: ""
+            // 2026-11-25：成功请求记耗时，连续 2 次 >3s（或当前线忙）触发自动换线评估
+            if (code > 0) noteRequestLatency(host, System.currentTimeMillis() - t0)
             code to (runCatching { JSONObject(text) }.getOrElse { JSONObject() })
         } catch (e: Exception) {
             -1 to JSONObject().put("msg", e.message ?: "网络异常")
