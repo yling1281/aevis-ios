@@ -123,6 +123,9 @@ struct AevisApp: App {
                 // 恢复直连的一次性迁移：老用户 apiLineId=bj / apiFailedLines 含 direct 时，
                 // 重置到直连并清掉旧失败标记（只做一次，之后用户手动选择优先）。
                 APIClient.migrateToDirectIfNeeded()
+                // 2026-11-27：4-4（101）重新做主线，北京降为备用 —— 把还钉在 bj 的老用户
+                // 迁回主线路（同样只做一次，之后用户手动选择优先）。
+                APIClient.migrateToMainLineIfNeeded()
                 // 动态下发线路（2026-11-25）：从 `/v1/app/config` 拉云端线路表，
                 // 按 `/v1/ping` 实测 RTT 排序后落缓存。**独立 Task** ——
                 // 它最坏要等一个 5 秒超时，绝不能挡住下面的强更检查（门禁优先级更高）。
