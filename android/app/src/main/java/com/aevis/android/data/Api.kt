@@ -2118,8 +2118,10 @@ object Api {
         val discountPercent: Int = 100,
         val benefits: List<String> = emptyList(),
         val grantPoints: Int = 0,
-        /// 额度包到账墨点（服务端 points；老服务端只给 grant_points，两个都认）
+        /// 额度包到账额度点数（服务端 points；老服务端只给 grant_points，两个都认）
         val points: Int = 0,
+        /// 额度包折算的可聊条数（服务端 est_messages，端上别自己除法）
+        val estMessages: Int = 0,
         val freeMinutes: Int = 0,
         val signinBonus: Int = 0,
         val usesPerYuan: Int = 0,
@@ -2155,7 +2157,8 @@ object Api {
                     usesPerYuan = r.optInt("uses_per_yuan"),
                     minSellUses = r.optInt("min_sell_uses"),
                     points = if (r.has("points")) r.optInt("points")
-                             else r.optInt("grant_points")
+                             else r.optInt("grant_points"),
+                    estMessages = r.optInt("est_messages")
                 )
             )
         }

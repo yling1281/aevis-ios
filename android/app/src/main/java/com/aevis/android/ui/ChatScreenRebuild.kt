@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -113,6 +114,8 @@ fun ChatScreen(
     var sending by remember(pid) { mutableStateOf(false) }
     var err by remember(pid) { mutableStateOf("") }
     var plusOpen by remember(pid) { mutableStateOf(false) }
+    /// 左上角三点的二级菜单（2026-11-27）。自绘 Dialog，不用系统菜单。
+    var moreOpen by remember(pid) { mutableStateOf(false) }
     var panel by remember(pid) { mutableStateOf(0) }
     var uploading by remember(pid) { mutableStateOf(false) }
     var loaded by remember(pid) { mutableStateOf(false) }
@@ -266,6 +269,10 @@ fun ChatScreen(
                     contentAlignment = Alignment.Center
                 ) { Text("‹", fontSize = 27.sp, color = InkDark) }
 
+                // 左上角三点：点开自绘二级菜单（角色设置/编辑人设/聊天外观/日记/清空）
+                CircleIcon(R.drawable.ic_menu) { moreOpen = true }
+                Spacer(Modifier.width(4.dp))
+
                 Column(Modifier.weight(1f)) {
                     Text(
                         charName.ifBlank { "聊天" },
@@ -281,8 +288,24 @@ fun ChatScreen(
 
                 // 180：书=角色设定、日记=笔记本，语义要分开 → 日记用 ic_diary（工程里本来就有）
                 CircleIcon(R.drawable.ic_diary) { onOpenDiary(pid) }
-                Spacer(Modifier.width(6.dp))
-                CircleIcon(R.drawable.ic_menu) { onOpenRoleSet(pid) }
+            }
+
+            // 三点二级菜单（自绘，不走系统菜单）
+            if (moreOpen) {
+                ChatMoreDialog(
+                    name = charName.ifBlank { "聊天" },
+                    hasMessages = msgs.isNotEmpty(),
+                    onClose = { moreOpen = false },
+                    onRoleSet = { moreOpen = false; onOpenRoleSet(pid) },
+                    onPersona = { moreOpen = false; onOpenPersona(pid) },
+                    onLook = { moreOpen = false; onOpenLook(pid) },
+                    onDiary = { moreOpen = false; onOpenDiary(pid) },
+                    onClear = {
+                        moreOpen = false
+                        msgs = emptyList()
+                        runCatching { Api.saveConv(pid, emptyList()) }
+                    }
+                )
             }
 
             if (err.isNotBlank()) {
@@ -587,4 +610,66 @@ private fun MeBubbleAvatar() {
         else null
     }
     Avatar(bmp, "我")
+}
+
+/** 会话二级菜单（2026-11-27）：自绘卡片，不用系统菜单。*/
+@Composable
+private fun ChatMoreDialog(
+    name: String,
+    hasMessages: Boolean,
+    onClose: () -> Unit,
+    onRoleSet: () -> Unit,
+    onPersona: () -> Unit,
+    onLook: () -> Unit,
+    onDiary: () -> Unit,
+    onClear: () -> Unit
+) {
+    Dialog(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().clip(squircle(20.dp)).background(Color.White)
+        ) {
+            Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 4.dp)) {
+                Text(
+                    name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    color = InkDark, maxLines = 1
+                )
+                Text("会话操作", fontSize = 11.sp, color = InkDim)
+            }
+            ChatMenuRow("角色设置") { onRoleSet() }
+            ChatMenuRow("编辑人设") { onPersona() }
+            ChatMenuRow("聊天外观") { onLook() }
+            ChatMenuRow("聊天日记") { onDiary() }
+            ChatMenuRow("清空本会话", enabled = hasMessages, danger = true) { onClear() }
+            Box(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(0.5.dp)
+                    .background(InkDim.copy(alpha = 0.12f))
+            )
+            ChatMenuRow("取消") { onClose() }
+            Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
+private fun ChatMenuRow(
+    text: String,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .tapable { if (enabled) onClick() }
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text, fontSize = 15.sp,
+            color = when {
+                danger -> Color(0xFFD9534F)
+                !enabled -> InkDim.copy(alpha = 0.4f)
+                else -> InkDark
+            }
+        )
+    }
 }

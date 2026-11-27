@@ -706,7 +706,7 @@ internal fun QuotaSection(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            tr("一次到账 · 永久有效 · 不占每周额度"),
+            tr("一次到账聊天额度 · 不随周一清零 · 不占每周额度"),
             fontSize = V2.micro, color = ink.copy(alpha = 0.45f)
         )
         Spacer(Modifier.height(12.dp))
@@ -777,8 +777,15 @@ private fun QuotaCard(p: Api.ShopProduct, bestValue: Boolean, onBuy: () -> Unit)
             value = p.points,
             style = TextStyle(fontSize = V2.body, fontWeight = FontWeight.SemiBold),
             color = ink,
-            suffix = tr(" 墨点")
+            suffix = tr(" 点聊天额度")
         )
+        if (p.estMessages > 0) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                tr("约 ") + p.estMessages + tr(" 条消息"),
+                fontSize = V2.micro, color = V2.accent
+            )
+        }
         Spacer(Modifier.height(8.dp))
         p.benefits.forEach { BenefitLine(it) }
 
