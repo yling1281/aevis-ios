@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import UIKit
 
 /// 所有网络请求。
@@ -192,8 +193,65 @@ struct APIClient {
     ///
     /// 2026-11-27：白名单从「只有 103 的 54319」扩到「4-4 的 api.lingyan.cyou:443」，
     /// 端口不再写死，只认 host —— 换端口不用再发版。
+    /// 2026-11-27 修（用户报「独立IP 线路不通」）：老实现是拿到 `serverTrust` 后原样
+    /// `URLCredential(trust:)` 丢回去，iOS 12 之后系统仍会自己验一遍 —— 自签证书验不过，
+    /// 直接 `-1202`，于是主线路被判定不通、只剩备用线路能连。
+    ///
+    /// 现在改成**真钉**：把 `Aevis Direct CA` 作为附加信任锚塞进 trust 再求值，
+    /// 求值通过才放行，不通过直接 cancel（不回退默认流程，避免二次鉴权把请求挂住）。
+    ///
+    /// `SecTrustSetAnchorCertificatesOnly(false)`：系统根证书依然有效。
+    /// 这样以后 4-4 换成公网证书（Let's Encrypt 等）时**老客户端不用发版**也不会被打死。
     final class PinDelegate: NSObject, URLSessionDelegate {
         static let hosts: Set<String> = ["api.lingyan.cyou", "103.236.72.107"]
+
+        /// `Aevis Direct CA` 的 PEM（与安卓 `res/raw/aevis_direct_ca.crt` 同一张，10 年）。
+        /// 写死在源码里而不是走 bundle 资源：省掉 pbxproj 资源引用，CI 少一个坏点。
+        private static let caPEM = """
+        -----BEGIN CERTIFICATE-----
+        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
+        -----END CERTIFICATE-----
+        """
+
+        /// PEM → SecCertificate（解析失败 = 空数组，调用方退回默认校验，不至于整条线路瘫掉）
+        static let anchors: [SecCertificate] = {
+            let body = caPEM
+                .replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "")
+                .replacingOccurrences(of: "-----END CERTIFICATE-----", with: "")
+                .components(separatedBy: .whitespacesAndNewlines)
+                .joined()
+            guard let der = Data(base64Encoded: body),
+                  let cert = SecCertificateCreateWithData(nil, der as CFData) else { return [] }
+            return [cert]
+        }()
 
         func urlSession(
             _ session: URLSession,
@@ -202,11 +260,19 @@ struct APIClient {
         ) {
             guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
                   Self.hosts.contains(challenge.protectionSpace.host),
-                  let trust = challenge.protectionSpace.serverTrust else {
+                  let trust = challenge.protectionSpace.serverTrust,
+                  !Self.anchors.isEmpty else {
                 completionHandler(.performDefaultHandling, nil)
                 return
             }
-            completionHandler(.useCredential, URLCredential(trust: trust))
+            SecTrustSetAnchorCertificates(trust, Self.anchors as CFArray)
+            SecTrustSetAnchorCertificatesOnly(trust, false)
+            var error: CFError?
+            if SecTrustEvaluateWithError(trust, &error) {
+                completionHandler(.useCredential, URLCredential(trust: trust))
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
         }
     }
 
