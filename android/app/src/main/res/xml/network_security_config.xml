@@ -14,6 +14,17 @@
         </trust-anchors>
     </base-config>
 
+    <!-- 主服务器（2026-11-27：用户明确 4-4 = 101.251.167.55，域名 api.lingyan.cyou）：
+         它的 80/443 对海外不可达，Let's Encrypt 签不出来，所以用同一张
+         `Aevis Direct CA` 签了 10 年证书。这里补上该域名的信任，否则主线路握手失败。 -->
+    <domain-config>
+        <domain includeSubdomains="false">api.lingyan.cyou</domain>
+        <trust-anchors>
+            <certificates src="@raw/aevis_direct_ca" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
     <!-- 直连（机房 IP 直通，最快那条） -->
     <domain-config>
         <domain includeSubdomains="false">103.236.72.107</domain>

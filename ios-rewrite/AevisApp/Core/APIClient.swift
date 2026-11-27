@@ -47,11 +47,10 @@ struct APIClient {
     /// **4-4（101.251.167.55，域名 api.lingyan.cyou）是主服务器，北京是备用，
     /// 香港只做加速（不进线路表）**。
     ///
-    /// 主线路走公网 CA + 443 直连，不需要自签 pinning；`103.236.72.107:54319`
-    /// 作为网络层内部兜底常量保留（`PinDelegate` 仍认它），但不再出现在线路表里。
+    /// 主线路走自签 CA（`Aevis Direct CA`，10 年），靠 `PinDelegate` 按 host 放行。
     static let builtInLines: [Line] = [
         Line(id: "direct", name: "独立IP", base: "https://api.lingyan.cyou",
-             pinning: false, note: "主线路"),
+             pinning: true, note: "主线路"),
         Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",
              pinning: false, note: "备用"),
     ]
@@ -187,11 +186,14 @@ struct APIClient {
 
     // MARK: - 自签证书 pinning（仅 host:port 一处）
 
-    /// 只对「直连」这条的 host + 端口接受 server trust，其它一律系统默认校验。
-    /// **不允许**从服务端下发开关；这里写死。
+    /// 主服务器用**自签 CA**（`Aevis Direct CA`）签的证书：101 的 80/443 对海外不可达，
+    /// Let's Encrypt 的 HTTP-01 走不通，签不出公网证书。所以这里按 host 白名单放行
+    /// serverTrust，host 之外的请求一律走系统默认校验（不允许服务端下发开关，写死）。
+    ///
+    /// 2026-11-27：白名单从「只有 103 的 54319」扩到「4-4 的 api.lingyan.cyou:443」，
+    /// 端口不再写死，只认 host —— 换端口不用再发版。
     final class PinDelegate: NSObject, URLSessionDelegate {
-        static let host = "103.236.72.107"
-        static let port = 54319
+        static let hosts: Set<String> = ["api.lingyan.cyou", "103.236.72.107"]
 
         func urlSession(
             _ session: URLSession,
@@ -199,8 +201,7 @@ struct APIClient {
             completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
         ) {
             guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-                  challenge.protectionSpace.host == Self.host,
-                  challenge.protectionSpace.port == Self.port,
+                  Self.hosts.contains(challenge.protectionSpace.host),
                   let trust = challenge.protectionSpace.serverTrust else {
                 completionHandler(.performDefaultHandling, nil)
                 return
