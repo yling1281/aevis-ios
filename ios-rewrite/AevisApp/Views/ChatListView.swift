@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 /// 会话列表（2026-11-22 视觉重做）。
 ///
@@ -28,6 +30,19 @@ struct ChatListView: View {
     @State private var restoreToast = ""
     /// 长按菜单选中的「要打开角色设置」的角色。
     @State private var settingsPersona: Persona?
+    /// 三点二级菜单当前针对的角色（2026-11-27）。
+    @State private var menuPersona: Persona?
+    /// 编辑人设（菜单入口）：单独一个 sheet，避免和角色设置混用。
+    @State private var editPersona: Persona?
+    /// 点行进入聊天：不再用 NavigationLink 包整行，否则行内三点会被链接吞掉点击。
+    @State private var openPersona: Persona?
+    /// 重命名备注。
+    @State private var renameTarget: Persona?
+    @State private var renameText = ""
+    /// 导出：生成文件后弹系统分享。
+    @State private var shareURL: URL?
+    @State private var showImporter = false
+    @State private var actionToast = ""
 
     var body: some View {
         NavigationStack {
@@ -161,30 +176,147 @@ struct ChatListView: View {
 
     // MARK: - 列表
 
+    /// 置顶的排最前，其余保持服务端给的顺序（不重排，避免列表跳来跳去）。
+    private var orderedPersonas: [Persona] {
+        let pinned = personas.filter { LocalStore.isPinned($0.id) }
+        let rest = personas.filter { !LocalStore.isPinned($0.id) }
+        return pinned + rest
+    }
+
     private var list: some View {
         LazyVStack(spacing: 12) {
-            ForEach(personas) { p in
-                NavigationLink {
-                    ChatView(persona: p)
+            ForEach(orderedPersonas) { p in
+                Button {
+                    openPersona = p
                 } label: {
                     row(p)
                 }
                 .buttonStyle(.plain)
-                // 长按 → 角色设置（不占用行内空间，不破坏现有布局）
-                .contextMenu {
+                .overlay(alignment: .bottomTrailing) {
+                    // 三点点位在行按钮之上，独立响应；不会被「进聊天」吞掉。
                     Button {
-                        settingsPersona = p
+                        menuPersona = p
                     } label: {
-                        Label("角色设置", systemImage: "slider.horizontal.3")
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(AE.textSecondary.opacity(0.55))
+                            .frame(width: 40, height: 34)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 2)
+                    .padding(.bottom, 4)
+                    .accessibilityLabel("更多操作")
                 }
             }
         }
-        // 长按菜单选「角色设置」→ sheet 呈现（NavigationStack 包裹以支持标题）
+        .navigationDestination(isPresented: Binding(
+            get: { openPersona != nil },
+            set: { if !$0 { openPersona = nil } }
+        )) {
+            if let p = openPersona { ChatView(persona: p) }
+        }
+        // 角色设置（长按/菜单共用同一个 sheet）
         .sheet(item: $settingsPersona) { p in
             NavigationStack {
                 CharacterSettingsView(persona: p)
             }
+        }
+        // 编辑人设（菜单入口）
+        .sheet(item: $editPersona) { p in
+            NavigationStack {
+                CharacterSettingsView(persona: p, startInProfileEdit: true)
+            }
+        }
+        // 三点二级菜单：自绘面板（不用系统 Menu）
+        .sheet(item: $menuPersona) { p in
+            ConvMenuSheet(
+                name: LocalStore.displayName(p.id, fallback: p.name),
+                avatar: avatarURL(p),
+                pinned: LocalStore.isPinned(p.id),
+                hasMessages: !LocalStore.load(pid: p.id).isEmpty,
+                onSettings: { settingsPersona = p },
+                onEditProfile: { editPersona = p },
+                onTogglePin: {
+                    let on = LocalStore.togglePinned(p.id)
+                    actionToast = on ? "已置顶" : "已取消置顶"
+                },
+                onRename: {
+                    renameText = LocalStore.alias(p.id)
+                    renameTarget = p
+                },
+                onExport: exportChats,
+                onImport: { showImporter = true },
+                onClear: {
+                    LocalStore.clearConv(p.id)
+                    actionToast = "已清空本会话"
+                },
+                onDelete: {
+                    LocalStore.deleteConv(p.id)
+                    personas.removeAll { $0.id == p.id }
+                    actionToast = "已删除会话"
+                }
+            )
+        }
+        .sheet(isPresented: Binding(
+            get: { shareURL != nil },
+            set: { if !$0 { shareURL = nil } }
+        )) {
+            if let url = shareURL { ActivityView(items: [url]) }
+        }
+        .fileImporter(isPresented: $showImporter,
+                      allowedContentTypes: [.json],
+                      allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                do {
+                    let r = try LocalStore.importChatArchive(from: url)
+                    actionToast = "已导入 \(r.convs) 个会话，新增 \(r.msgs) 条"
+                    Task { await reload() }
+                } catch {
+                    actionToast = "导入失败：\(error.localizedDescription)"
+                }
+            case .failure(let e):
+                actionToast = "导入失败：\(e.localizedDescription)"
+            }
+        }
+        .alert("重命名备注", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("给她起个名字", text: $renameText)
+            Button("保存") {
+                if let p = renameTarget { LocalStore.setAlias(p.id, renameText) }
+                renameTarget = nil
+                actionToast = "已保存备注"
+            }
+            Button("取消", role: .cancel) { renameTarget = nil }
+        } message: {
+            Text("只改本机显示名，不影响角色本身。")
+        }
+        .overlay(alignment: .bottom) {
+            if !actionToast.isEmpty {
+                Text(actionToast)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(AE.accentDeep.opacity(0.92)))
+                    .padding(.bottom, 18)
+                    .transition(.opacity)
+                    .task {
+                        try? await Task.sleep(nanoseconds: 1_800_000_000)
+                        actionToast = ""
+                    }
+            }
+        }
+    }
+
+    private func exportChats() {
+        if let url = LocalStore.exportChatArchive() {
+            shareURL = url
+        } else {
+            actionToast = "导出失败，请重试"
         }
     }
 
@@ -193,11 +325,17 @@ struct ChatListView: View {
             avatar(p)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(p.name)
+                HStack(spacing: 6) {
+                    // 备注名优先：用户自己起的名字盖过角色原名（本地生效，不写服务端）
+                    Text(LocalStore.displayName(p.id, fallback: p.name))
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(AE.textPrimary)
                         .lineLimit(1)
+                    if LocalStore.isPinned(p.id) {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(AE.accent.opacity(0.75))
+                    }
                     if LocalStore.unread(p.id) > 0 { unreadBadge }
                     Spacer(minLength: 0)
                 }
@@ -214,9 +352,8 @@ struct ChatListView: View {
                 Text(timeText(p.id))
                     .font(.system(size: 11))
                     .foregroundStyle(AE.textSecondary.opacity(0.8))
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AE.textSecondary.opacity(0.45))
+                // 右下角留给三点按钮（overlay 定位到同一位置）
+                Color.clear.frame(width: 20, height: 18)
             }
         }
         .padding(.horizontal, 14)
@@ -378,4 +515,150 @@ struct ChatListView: View {
         }
         loading = false
     }
+}
+
+// MARK: - 会话二级菜单（2026-11-27）
+//
+// 用户要求「点人物三点，自己做二级菜单」，所以这里不用系统 Menu / contextMenu，
+// 统一一张自绘卡片：角色操作 + 数据操作 + 危险操作三段，视觉与 App 其它面板一致。
+
+struct ConvMenuSheet: View {
+    let name: String
+    let avatar: URL?
+    let pinned: Bool
+    let hasMessages: Bool
+    /// 会话页里不需要「导入整包」（那是列表页的事），传 false 隐藏这一行。
+    var showsImport: Bool = true
+
+    var onSettings: () -> Void = {}
+    var onEditProfile: () -> Void = {}
+    var onTogglePin: () -> Void = {}
+    var onRename: () -> Void = {}
+    var onExport: () -> Void = {}
+    var onImport: () -> Void = {}
+    var onClear: () -> Void = {}
+    var onDelete: () -> Void = {}
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 14) {
+                header
+                group {
+                    item("slider.horizontal.3", "角色设置") { fire(onSettings) }
+                    sep
+                    item("person.crop.circle", "编辑人设") { fire(onEditProfile) }
+                    sep
+                    item("pin", pinned ? "取消置顶" : "置顶会话") { fire(onTogglePin) }
+                    sep
+                    item("pencil", "重命名备注") { fire(onRename) }
+                }
+                group {
+                    item("square.and.arrow.up", "导出聊天记录") { fire(onExport) }
+                    if showsImport {
+                        sep
+                        item("square.and.arrow.down", "导入聊天记录") { fire(onImport) }
+                    }
+                    sep
+                    item("eraser", "清空本会话") { fire(onClear) }
+                        .disabled(!hasMessages)
+                        .opacity(hasMessages ? 1 : 0.4)
+                }
+                group {
+                    item("trash", "删除会话", danger: true) { fire(onDelete) }
+                }
+                Button {
+                    dismiss()
+                } label: {
+                    Text("取消")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(AE.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .glassCard(cornerRadius: 16, material: .thin, tintOpacity: 0.08)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 26)
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            CachedRemoteImage(url: avatar, scope: "menu:\(name)") {
+                Circle().fill(AE.accentSoft)
+                    .overlay(
+                        Text(String(name.prefix(1)))
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AE.accent)
+                    )
+            }
+            .frame(width: 42, height: 42)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AE.textPrimary)
+                    .lineLimit(1)
+                Text(pinned ? "已置顶 · 记录存本机" : "记录存本机 · 不上传")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AE.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func group<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(spacing: 0) { content() }
+            .glassCard(cornerRadius: 16, material: .regular, tintOpacity: 0.08)
+    }
+
+    private var sep: some View {
+        Rectangle().fill(AE.cardStroke.opacity(0.16))
+            .frame(height: 0.5).padding(.leading, 46)
+    }
+
+    private func item(_ icon: String, _ title: String,
+                      danger: Bool = false,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 22)
+                    .foregroundStyle(danger ? Color.red : AE.accent)
+                Text(title)
+                    .font(.system(size: 15))
+                    .foregroundStyle(danger ? Color.red : AE.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func fire(_ action: @escaping () -> Void) {
+        dismiss()
+        // sheet 收起动画期间改父状态容易被吞，挪到下一轮 runloop。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { action() }
+    }
+}
+
+/// 系统分享面板（导出聊天记录用）。
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

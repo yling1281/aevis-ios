@@ -1036,8 +1036,10 @@ struct APIClient {
         var checkinBonusMultiplier: Int = 0
         var usesPerYuan: Int = 0
         var minSellUses: Int = 0
-        /// 聊天额度包到账墨点数（kind == "quota" 时有效）
+        /// 聊天额度包到账额度点数（kind == "quota" 时有效）
         var points: Int = 0
+        /// 额度包折算的可聊条数（服务端按实际均价算，端上别自己除法）
+        var estMessages: Int = 0
         var chargeModels: [String] = []
         /// DeepSeek 按次 token 上限：{model: ["max_tokens": n, "input_chars": n]}
         var tokenCaps: [String: [String: Any]] = [:]
@@ -1081,6 +1083,7 @@ struct APIClient {
                 // 额度包：服务端下发 points，老服务端只给 grant_points，两个都认
                 points: (r["points"] as? NSNumber)?.intValue
                     ?? (r["grant_points"] as? NSNumber)?.intValue ?? 0,
+                estMessages: (r["est_messages"] as? NSNumber)?.intValue ?? 0,
                 chargeModels: (r["charge_models"] as? [String]) ?? [],
                 tokenCaps: (r["token_caps"] as? [String: [String: Any]]) ?? [:]
             )

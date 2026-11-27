@@ -121,7 +121,160 @@ extension LocalStore {
     }
 }
 
-// MARK: - 头像磁盘缓存（2026-11-24：硬缓存 + 条件请求）
+// MARK: - 会话二级菜单需要的本地操作（2026-11-27）
+//
+// 全部落在本机：置顶/备注走 UserDefaults，清空/删除改 convs.json，
+// 导出/导入是一个自包含 JSON（换机迁移用），不依赖服务端。
+
+extension LocalStore {
+    private static func pinKey(_ pid: String) -> String { "convpin_\(pid)" }
+    private static func aliasKey(_ pid: String) -> String { "convalias_\(pid)" }
+
+    static func isPinned(_ pid: String) -> Bool {
+        UserDefaults.standard.bool(forKey: pinKey(pid))
+    }
+
+    static func setPinned(_ pid: String, _ on: Bool) {
+        UserDefaults.standard.set(on, forKey: pinKey(pid))
+    }
+
+    /// 返回操作后的状态，方便 UI 立刻翻转文案。
+    @discardableResult
+    static func togglePinned(_ pid: String) -> Bool {
+        let next = !isPinned(pid)
+        setPinned(pid, next)
+        return next
+    }
+
+    /// 备注名（用户自己起的名字）。空 = 没设过。
+    static func alias(_ pid: String) -> String {
+        (UserDefaults.standard.string(forKey: aliasKey(pid)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func setAlias(_ pid: String, _ name: String) {
+        let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { UserDefaults.standard.removeObject(forKey: aliasKey(pid)) }
+        else { UserDefaults.standard.set(t, forKey: aliasKey(pid)) }
+    }
+
+    /// 列表上该显示的名字：有备注用备注，没有用角色原名。
+    static func displayName(_ pid: String, fallback: String) -> String {
+        let a = alias(pid)
+        return a.isEmpty ? fallback : a
+    }
+
+    /// 清空某个会话的消息，角色本身保留（下次进去还是这个人）。
+    static func clearConv(_ pid: String) {
+        var dict = (try? Data(contentsOf: convsURL))
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+        dict[pid] = [[String: Any]]()
+        if let data = try? JSONSerialization.data(withJSONObject: dict) {
+            try? data.write(to: convsURL)
+        }
+        setUnread(pid, 0)
+    }
+
+    /// 彻底删掉这个会话：消息 + 时间 + 未读 + 备注 + 置顶标记一起清。
+    static func deleteConv(_ pid: String) {
+        var dict = (try? Data(contentsOf: convsURL))
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+        dict.removeValue(forKey: pid)
+        if let data = try? JSONSerialization.data(withJSONObject: dict) {
+            try? data.write(to: convsURL)
+        }
+        let d = UserDefaults.standard
+        d.removeObject(forKey: "convAt_\(pid)")
+        d.removeObject(forKey: "unread_\(pid)")
+        d.removeObject(forKey: aliasKey(pid))
+        d.removeObject(forKey: pinKey(pid))
+    }
+
+    /// 会话最后一条消息的摘要（导出/列表预览共用）。
+    static func lastLine(_ pid: String) -> String {
+        guard let last = load(pid: pid).last else { return "" }
+        if !last.img.isEmpty { return "[图片]" }
+        if last.content.hasPrefix("[语音]") { return "[语音]" }
+        return last.content.replacingOccurrences(of: "\n", with: " ")
+    }
+
+    // MARK: - 导出 / 导入（换机迁移）
+
+    struct ChatArchive: Codable {
+        var app: String
+        var schema: Int
+        var exportedAt: String
+        var convs: [String: [[String: String]]]
+        var aliases: [String: String]
+        var pins: [String]
+    }
+
+    /// 生成导出文件，返回可分享的 URL；失败返回 nil。
+    static func exportChatArchive() -> URL? {
+        let raw = exportAll()          // [pid: [[String: Any]]]
+        var convs: [String: [[String: String]]] = [:]
+        for (pid, rows) in raw {
+            convs[pid] = rows.map { row in
+                var out: [String: String] = [:]
+                for (k, v) in row {
+                    if let s = v as? String { out[k] = s }
+                }
+                return out
+            }
+        }
+        // 备注 / 置顶：扫一遍已知 pid（convs 的 key + 本地角色缓存）
+        var aliases: [String: String] = [:]
+        var pins: [String] = []
+        var pids = Set(convs.keys)
+        for p in loadPersonas() { pids.insert(p.id) }
+        for pid in pids {
+            let a = alias(pid)
+            if !a.isEmpty { aliases[pid] = a }
+            if isPinned(pid) { pins.append(pid) }
+        }
+        let fmt = ISO8601DateFormatter()
+        let archive = ChatArchive(app: "aevis", schema: 1,
+                                  exportedAt: fmt.string(from: Date()),
+                                  convs: convs, aliases: aliases, pins: pins)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? enc.encode(archive) else { return nil }
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("exports", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd-HHmm"
+        let url = dir.appendingPathComponent("aevis-chat-\(df.string(from: Date())).json")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            NSLog("[LocalStore] export failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// 导入导出文件。只补不覆盖（复用 merge 的去重规则），返回 (会话数, 新增消息数)。
+    static func importChatArchive(from url: URL) throws -> (convs: Int, msgs: Int) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: url)
+        let dec = JSONDecoder()
+        let archive = try dec.decode(ChatArchive.self, from: data)
+        var cloud: [String: [[String: Any]]] = [:]
+        for (pid, rows) in archive.convs {
+            cloud[pid] = rows.map { $0 as [String: Any] }
+        }
+        let added = merge(cloud: cloud)
+        for (pid, name) in archive.aliases where alias(pid).isEmpty {
+            setAlias(pid, name)
+        }
+        for pid in archive.pins { setPinned(pid, true) }
+        return (archive.convs.count, added)
+    }
+}
+
+
 //
 // 用户要求：「头像如果在的话就硬缓存，检测到更新了才给你更新」。
 // 做法：

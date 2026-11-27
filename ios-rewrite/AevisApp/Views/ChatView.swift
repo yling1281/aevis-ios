@@ -55,6 +55,16 @@ struct ChatView: View {
     /// 人设改名后本地标题跟着变（不重建 ChatView）。
     @State private var titleName = ""
 
+    // MARK: - 左上角三点 · 自绘二级菜单（2026-11-27）
+    @State private var showMoreMenu = false
+    @State private var showSettings = false
+    @State private var showEditProfile = false
+    @State private var showCreatePersona = false
+    @State private var showRename = false
+    @State private var renameText = ""
+    @State private var chatToast = ""
+    @State private var shareURL: URL?
+
     // MARK: - 语音输入（本地 ASR，2026-11-24；替代原来的 TTS）
     /// 录音/识别/权限全在这里，视图只读它的状态。
     @StateObject private var speech = SpeechInput()
@@ -242,44 +252,103 @@ struct ChatView: View {
         // 系统侧滑照常可用（navigationBarBackButtonHidden 只影响箭头，不影响手势）。
         .navigationBarBackButtonHidden(true)
         .toolbar {
+            // 左上角：返回 + 三点（2026-11-27 按用户要求把三点从右上挪到人物左上角）
             ToolbarItem(placement: .navigationBarLeading) {
-                Button { dismiss() } label: {
-                    HStack(spacing: 2) {
+                HStack(spacing: 14) {
+                    Button { dismiss() } label: {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("返回").font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(AE.accent)
+                            .frame(width: 24, height: 28)
+                            .contentShape(Rectangle())
                     }
-                    .foregroundStyle(AE.accent)
+                    .accessibilityLabel("返回聊天列表")
+
+                    Button { showMoreMenu = true } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(AE.accent)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("更多操作")
                 }
-                .accessibilityLabel("返回聊天列表")
             }
-            // 右上角三个点：编辑人设 / 创建人设 / 角色设置
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    NavigationLink {
-                        CharacterSettingsView(persona: persona, startInProfileEdit: true)
-                    } label: {
-                        Label("编辑当前人设", systemImage: "person.crop.circle")
-                    }
-                    NavigationLink {
-                        PersonaCreateView { _ in
-                            Task { await reloadPersonaConfig() }
-                        }
-                        .environmentObject(session)
-                    } label: {
-                        Label("添加/创建人设", systemImage: "plus.circle")
-                    }
-                    NavigationLink {
-                        CharacterSettingsView(persona: persona)
-                    } label: {
-                        Label("角色设置", systemImage: "slider.horizontal.3")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(AE.accent)
+        }
+        // 三点 → 自绘二级菜单（不用系统 Menu）
+        .sheet(isPresented: $showMoreMenu) {
+            ConvMenuSheet(
+                name: titleName.isEmpty ? persona.name : titleName,
+                avatar: URL(string: persona.avatar),
+                pinned: LocalStore.isPinned(persona.id),
+                hasMessages: !msgs.isEmpty,
+                showsImport: false,
+                onSettings: { showSettings = true },
+                onEditProfile: { showEditProfile = true },
+                onTogglePin: {
+                    let on = LocalStore.togglePinned(persona.id)
+                    chatToast = on ? "已置顶" : "已取消置顶"
+                },
+                onRename: {
+                    renameText = LocalStore.alias(persona.id)
+                    showRename = true
+                },
+                onExport: {
+                    if let u = LocalStore.exportChatArchive() { shareURL = u }
+                    else { chatToast = "导出失败，请重试" }
+                },
+                onImport: {},
+                onClear: {
+                    msgs = []
+                    LocalStore.save(pid: persona.id, msgs: [])
+                    chatToast = "已清空本会话"
+                },
+                onDelete: {
+                    LocalStore.deleteConv(persona.id)
+                    dismiss()
                 }
-                .accessibilityLabel("更多操作")
+            )
+        }
+        .sheet(isPresented: Binding(
+            get: { shareURL != nil },
+            set: { if !$0 { shareURL = nil } }
+        )) {
+            if let url = shareURL { ActivityView(items: [url]) }
+        }
+        .navigationDestination(isPresented: $showSettings) {
+            CharacterSettingsView(persona: persona)
+        }
+        .navigationDestination(isPresented: $showEditProfile) {
+            CharacterSettingsView(persona: persona, startInProfileEdit: true)
+        }
+        .navigationDestination(isPresented: $showCreatePersona) {
+            PersonaCreateView { _ in
+                Task { await reloadPersonaConfig() }
+            }
+            .environmentObject(session)
+        }
+        .alert("重命名备注", isPresented: $showRename) {
+            TextField("给她起个名字", text: $renameText)
+            Button("保存") {
+                LocalStore.setAlias(persona.id, renameText)
+                chatToast = "已保存备注"
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只改本机显示名，不影响角色本身。")
+        }
+        .overlay(alignment: .bottom) {
+            if !chatToast.isEmpty {
+                Text(chatToast)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(AE.accentDeep.opacity(0.92)))
+                    .padding(.bottom, 90)
+                    .task {
+                        try? await Task.sleep(nanoseconds: 1_600_000_000)
+                        chatToast = ""
+                    }
             }
         }
         .sheet(isPresented: $showStickerSheet) { stickerSheet }

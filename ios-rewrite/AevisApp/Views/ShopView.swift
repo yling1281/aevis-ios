@@ -470,7 +470,7 @@ struct ShopView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("聊天额度").font(.system(size: 16, weight: .semibold)).foregroundStyle(AE.textPrimary)
-                Text("一次性到账墨点，不过期 · 不占每周额度 · 不改变会员身份")
+                Text("一次性到账聊天额度，不随周一清零 · 不占每周额度 · 不改变会员身份")
                     .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -501,10 +501,14 @@ struct ShopView: View {
                                     font: .system(size: 26, weight: .bold, design: .rounded),
                                     color: AE.textPrimary
                                 )
-                                Text("墨点").font(.system(size: 13, weight: .medium))
+                                Text("点聊天额度").font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(AE.textSecondary)
                                 Spacer()
-                                if unit > 0 {
+                                if pack.estMessages > 0 {
+                                    Text("约 \(pack.estMessages) 条")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(AE.memberAccent)
+                                } else if unit > 0 {
                                     Text(String(format: "%.2f 分/点", unit))
                                         .font(.system(size: 11)).foregroundStyle(AE.textSecondary)
                                 }
