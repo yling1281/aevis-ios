@@ -52,11 +52,14 @@ struct MemberView: View {
     ///
     /// 2026-11-25：**删掉「免费时长」**。后端 `benefits[]` 现在不含语音分钟这一项，
     /// 本地兜底若还留着，服务端字段缺失时会把已下线的权益又摆出来。
+    /// 2026-11-27 会员权益口径（用户原话）：「会员是签到加每日赠送，每日签到加充值卡」
+    /// → 权益只讲签到 / 每日赠送 / 充值卡 / 有效期，**不把聊天额度包塞进会员页**。
     private let benefitItems = [
+        "每日签到，会员双倍奖励",
+        "每日赠送墨点，每周一到账",
+        "充值卡 · 墨点充值会员专享",
         "开通立得 300 墨点",
-        "月卡固定 30 天",
-        "本周用量一次回满",
-        "每天签到奖励翻倍",
+        "固定 30 天，到期不自动续费",
     ]
 
     /// 后端 `/v1/shop/products` 已下发 `benefits[]`（字符串数组），优先用服务端文案；
@@ -90,7 +93,7 @@ struct MemberView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Text("会员").font(.system(size: 17, weight: .semibold)).foregroundStyle(AE.textPrimary)
+                Text("AEVIS 会员").font(.system(size: 17, weight: .semibold)).foregroundStyle(AE.textPrimary)
                 Spacer()
                 // 常驻入口：同日已弹过仍可手动查看九折详情
                 Button { showDiscount = true } label: {
@@ -123,7 +126,7 @@ struct MemberView: View {
         .background(AppBackground())
         // 贴底支付栏（2026-11-25）：开通按钮不跟着滚。
         .safeAreaInset(edge: .bottom, spacing: 0) { stickyPayBar }
-        .navigationTitle("会员")
+        .navigationTitle("AEVIS 会员")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .sheet(isPresented: $showDiscount) { discountSheet }
@@ -140,7 +143,7 @@ struct MemberView: View {
             payButton(enabled: selectedProduct != nil, action: { showChannelPicker = true }) {
                 HStack(spacing: 0) {
                     if let p = selectedProduct {
-                        Text("开通 \(p.label.isEmpty ? "套餐" : p.label) 用量 · \(p.days) 天 ¥")
+                        Text("开通 AEVIS 会员 · \(p.days) 天 ¥")
                         AnimatedNumber(
                             value: Double(p.priceCents) / 100, specifier: "%.1f",
                             font: .system(size: 15, weight: .semibold), color: .white
@@ -266,7 +269,7 @@ struct MemberView: View {
                     )
                     Text("/月").font(.system(size: 11)).foregroundStyle(AE.textSecondary)
                 }
-                Text("\(p.label.isEmpty ? "套餐" : p.label) · 固定 \(p.days) 天")
+                Text("AEVIS 会员 · 固定 \(p.days) 天")
                     .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
             }
             Text("划线原价 ¥\(discountProduct.map { String(format: "%.1f", origPriceValue($0.priceCents)) } ?? "—")，现价为原价九折。每天首次进入会员页提醒一次。")
@@ -339,23 +342,12 @@ struct MemberView: View {
     private var memberTab: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 12) {
-                // 先给免费用量基线，让用户知道不开套餐也有约 15 条/周
-                HStack(spacing: 8) {
-                    Image(systemName: "gift.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(AE.brandPurple)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("免费用量基线")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AE.textPrimary)
-                        Text("不开套餐也有约 \(APIClient.freeMessageBaseline) 条消息 / 周")
-                            .font(.system(size: 11))
-                            .foregroundStyle(AE.textSecondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(13)
-                .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.14)
+                // 会员定位说明。用量/额度详情在独立的「用量」页，这里不混着讲（2026-11-26 用户要求）
+                Text("一个会员，解锁全部能力。30 天有效，到期不自动续费。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AE.textSecondary)
+                    .padding(.horizontal, 2)
+                    .padding(.bottom, 2)
 
                 // R2.7：未开通（nil 或 <=0）时整块「当前方案」不渲染
                 if let d = memberDays, d > 0 {
@@ -403,7 +395,7 @@ struct MemberView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("用量越多越划算 · 固定 30 天 · 每周一刷新额度")
+                Text("固定 30 天 · 权益立即生效 · 每周一刷新")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(AE.brandPurple)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -418,28 +410,21 @@ struct MemberView: View {
                         .frame(maxWidth: .infinity).padding(.top, 20)
                 }
 
-                // 选中档位的用量/倍数：数字用 AnimatedNumber 翻动，与档位名 spring 联动
+                // 选中项摘要：只说明「哪一档会员 / 多久 / 多少钱」，不展示用量倍数
                 if let p = selectedProduct {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(p.label.isEmpty ? "套餐" : p.label) 用量")
+                    HStack(spacing: 7) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(AE.memberAccent)
+                        Text("AEVIS 会员 · \(p.days) 天")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(AE.textPrimary)
-                            .animation(.spring(response: 0.32, dampingFraction: 0.82),
-                                       value: selectedProduct?.id)
+                        Spacer(minLength: 6)
                         AnimatedNumber(
-                            value: p.percent,
-                            font: .system(size: 18, weight: .bold, design: .rounded),
-                            color: AE.memberAccent, suffix: "%"
+                            value: Double(p.priceCents) / 100, specifier: "¥%.1f",
+                            font: .system(size: 13.5, weight: .bold, design: .rounded),
+                            color: AE.memberAccent
                         )
-                        Text("· 基础用量的 ")
-                            .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
-                        AnimatedNumber(
-                            value: Double(p.percent) / 100.0, specifier: "%.1f",
-                            font: .system(size: 12.5, weight: .medium), color: AE.textSecondary
-                        )
-                        Text(" 倍")
-                            .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
-                        Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .glassCard(cornerRadius: 14, material: .thin, tintOpacity: 0.12)
@@ -458,25 +443,18 @@ struct MemberView: View {
     }
 
     private func usageLine(_ prod: APIClient.ShopProduct, ratio: Double) -> some View {
-        let f = Font.system(size: 12.5)
-        let c = AE.textSecondary
-        return HStack(spacing: 0) {
-            if prod.percent > 100 {
-                Text("是基础用量的 ")
-                AnimatedNumber(value: ratio, specifier: "%.1f", font: f, color: c)
-                Text(" 倍 · ")
-            } else {
-                Text("基础用量")
-                if prod.percent > 0 { Text(" · ") }
-            }
-            if prod.percent > 0 {
-                AnimatedNumber(value: prod.percent, font: f, color: c, suffix: "%")
-            }
-        }
-        .font(f)
-        .foregroundStyle(c)
-        .lineLimit(1)
-        .minimumScaleFactor(0.85)
+        // 会员卡只讲权益，不讲「基础用量倍数」—— 那是「用量」页的内容（2026-11-26 拆分）
+        var parts: [String] = []
+        if prod.grantPoints > 0 { parts.append("开通赠 \(prod.grantPoints) 墨点") }
+        // 「每周 N 条」是额度口径，会员页不这么讲；这里只说每日赠送（按周一到账）。
+        if prod.weekTotal > 0 { parts.append("每周赠送 \(prod.weekTotal) 墨点") }
+        if prod.signinBonus > 1 { parts.append("签到 ×\(prod.signinBonus)") }
+        let text = parts.isEmpty ? "30 天全功能" : parts.joined(separator: " · ")
+        return Text(text)
+            .font(.system(size: 12.5))
+            .foregroundStyle(AE.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
     }
 
     private var strikeLine: some View {
@@ -491,7 +469,7 @@ struct MemberView: View {
     private func memberCell(_ prod: APIClient.ShopProduct) -> some View {
         let on = selectedProduct?.id == prod.id
         let label = prod.label.isEmpty ? (prod.title.isEmpty ? "\(prod.days) 天" : prod.title) : prod.label
-        let name = "\(label) 用量"
+        let name = "AEVIS 会员"
         let ratio = Double(prod.percent) / 100.0
         let recommended = prod.id == "p_xl"
         let orig = origPriceValue(prod.priceCents)
@@ -518,10 +496,6 @@ struct MemberView: View {
                         }
                     }
                     usageLine(prod, ratio: ratio)
-                    // 服务端明面价：list_price_cents / discount_percent（未虚标则与现价一致）
-                    Text("面价 ¥\(String(format: "%.2f", Double(prod.listPriceCents > 0 ? prod.listPriceCents : prod.priceCents) / 100)) · \(prod.discountPercent)%")
-                        .font(.system(size: 10))
-                        .foregroundStyle(AE.textSecondary)
                 }
                 Spacer(minLength: 6)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -591,7 +565,7 @@ struct MemberView: View {
             // 2.8：微信 / 支付宝都进同一个聚合二维码弹窗，不再跳外部浏览器。
             activePay = ActivePay(
                 order: order,
-                title: "开通 \(prod.label.isEmpty ? "套餐" : prod.label) 用量 · \(prod.days) 天",
+                title: "开通 AEVIS 会员 · \(prod.days) 天",
                 channel: channel.rawValue
             )
             showWeChatQR = true

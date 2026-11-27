@@ -35,6 +35,9 @@ struct ShopView: View {
     /// 后端 /v1/shop/products 的按次商品（kind=="uses"）
     @State private var useProducts: [APIClient.ShopProduct] = []
     @State private var selectedUse: APIClient.ShopProduct? = nil
+    /// 聊天额度包（kind=="quota"）：一次性到账墨点，不续会员、不占周额度
+    @State private var quotaProducts: [APIClient.ShopProduct] = []
+    @State private var selectedQuota: APIClient.ShopProduct? = nil
     @State private var usesLeft: Int? = nil
     @State private var tip = ""
 
@@ -45,6 +48,8 @@ struct ShopView: View {
         let title: String
         /// 用户下单时选的渠道；聚合码下两边二维码一样，仅用于回落文案。
         let channel: String
+        /// 额度包订单：到账是墨点（grant_points），不是会员天数
+        var isQuota: Bool = false
     }
     @State private var showChannelPicker = false
     @State private var activePay: ActivePay? = nil
@@ -90,7 +95,7 @@ struct ShopView: View {
             .padding(.horizontal, 18)
             .padding(.top, 10)
 
-            SegmentedTabs(tabs: ["墨点", "重置卡", "按次"], selected: Binding(
+            SegmentedTabs(tabs: ["墨点", "重置卡", "按次", "额度"], selected: Binding(
                 get: { tab },
                 set: { new in if new != tab { prevTab = tab; tab = new } }
             ))
@@ -160,6 +165,19 @@ struct ShopView: View {
                     }
                 }
             }
+        } else if tab == 3 {
+            payBarShell {
+                payButton(enabled: selectedQuota != nil, action: { showChannelPicker = true }) {
+                    HStack(spacing: 0) {
+                        Text("购买 \(selectedQuota?.points ?? 0) 墨点 · ¥")
+                        AnimatedNumber(
+                            value: Double(selectedQuota?.priceCents ?? 0) / 100,
+                            specifier: "%.2f",
+                            font: .system(size: 15, weight: .semibold), color: .white
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -186,7 +204,8 @@ struct ShopView: View {
         switch index {
         case 0: pointsTab
         case 1: resetCardTab
-        default: perUseTab
+        case 2: perUseTab
+        default: quotaTab
         }
     }
 
@@ -214,6 +233,11 @@ struct ShopView: View {
                     useProducts = cached
                     if selectedUse == nil { selectedUse = cached.first }
                 }
+                let cachedQuota = APIClient.parseShopProducts(raw).filter { $0.kind == "quota" }
+                if !cachedQuota.isEmpty {
+                    quotaProducts = cachedQuota
+                    if selectedQuota == nil { selectedQuota = cachedQuota.first }
+                }
             }
         }
         async let p = APIClient.pointPackages()
@@ -231,14 +255,17 @@ struct ShopView: View {
         var uses: Int? = nil
         if let t = session.token { uses = (try? await APIClient.dsUses(token: t))?.left }
         let useList = allProducts.filter { $0.kind == "uses" }
+        let quotaList = allProducts.filter { $0.kind == "quota" }
         await MainActor.run {
             packages = pkgs
             balance = bal
             quota = qt
             useProducts = useList
+            quotaProducts = quotaList
             usesLeft = uses
             if selectedPackage == nil { selectedPackage = pkgs.first }
             if selectedUse == nil { selectedUse = useList.first }
+            if selectedQuota == nil { selectedQuota = quotaList.first }
         }
     }
 
@@ -437,6 +464,82 @@ struct ShopView: View {
         }
     }
 
+    // MARK: - tab 3 聊天额度（与会员彻底分开：买的是量，不是身份）
+
+    private var quotaTab: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("聊天额度").font(.system(size: 16, weight: .semibold)).foregroundStyle(AE.textPrimary)
+                Text("一次性到账墨点，不过期 · 不占每周额度 · 不改变会员身份")
+                    .font(.system(size: 12)).foregroundStyle(AE.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(Array(quotaProducts.enumerated()), id: \.element.id) { pair in
+                    let pack = pair.element
+                    let on = selectedQuota?.id == pack.id
+                    let unit = pack.points > 0 ? Double(pack.priceCents) / Double(pack.points) : 0
+                    Button {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) { selectedQuota = pack }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(pack.label.isEmpty ? pack.title : pack.label)
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(AE.memberAccent)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(AE.memberAccent.opacity(0.12), in: Capsule())
+                                Spacer()
+                                AnimatedNumber(
+                                    value: Double(pack.priceCents) / 100, specifier: "¥%.2f",
+                                    font: .system(size: 20, weight: .bold, design: .rounded),
+                                    color: AE.accent
+                                )
+                            }
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                AnimatedNumber(
+                                    value: pack.points,
+                                    font: .system(size: 26, weight: .bold, design: .rounded),
+                                    color: AE.textPrimary
+                                )
+                                Text("墨点").font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(AE.textSecondary)
+                                Spacer()
+                                if unit > 0 {
+                                    Text(String(format: "%.2f 分/点", unit))
+                                        .font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+                                }
+                            }
+                            ForEach(pack.benefits, id: \.self) { line in
+                                Text(line).font(.system(size: 11)).foregroundStyle(AE.textSecondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(15)
+                        .glassCard(cornerRadius: 16, material: .regular,
+                                   tintOpacity: on ? 0.22 : 0.08,
+                                   strokeColor: on ? AE.memberAccent : AE.cardStroke,
+                                   strokeOpacity: on ? 0.75 : 0.18)
+                        .shadow(color: AE.shadowColor, radius: on ? 12 : 8, y: 4)
+                    }
+                    .buttonStyle(AevisPressStyle(scale: 0.97))
+                    .staggerIn(min(pair.offset, 3))
+                }
+                if quotaProducts.isEmpty {
+                    Text("额度包加载中或暂不可用").font(.system(size: 12))
+                        .foregroundStyle(AE.textSecondary).frame(maxWidth: .infinity).padding(.top, 20)
+                }
+
+                Text("会员给的是身份与每日赠送，额度买的是聊天量。两者可叠加，互不替代。")
+                    .font(.system(size: 11.5)).foregroundStyle(AE.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassCard(cornerRadius: AE.cardRadius, material: .thin, tintOpacity: 0.10)
+            }
+            .padding(18)
+        }
+    }
+
     // MARK: - 通用按钮
 
     /// 主操作按钮：内容由调用方给，数字可塞 `AnimatedNumber`。
@@ -474,9 +577,15 @@ struct ShopView: View {
         do {
             let order: APIClient.PayOrder
             let title: String
+            var isQuota = false
             if tab == 2, let use = selectedUse {
                 order = try await APIClient.memberOrder(productID: use.id, payType: channel.rawValue, token: token)
                 title = "购买 \(use.uses) 次"
+            } else if tab == 3, let q = selectedQuota {
+                // 额度包走同一个下单接口（/v1/shop/order），kind=quota 由服务端识别
+                order = try await APIClient.memberOrder(productID: q.id, payType: channel.rawValue, token: token)
+                title = "购买 \(q.points) 墨点"
+                isQuota = true
             } else if let pkg = selectedPackage {
                 order = try await APIClient.pointsRecharge(
                     package: pkg.code, payType: channel.rawValue, token: token)
@@ -484,7 +593,7 @@ struct ShopView: View {
             } else { return }
             guard !order.qrContent.isEmpty else { showTip("支付链接为空，请稍后重试"); return }
             // 2.8：微信 / 支付宝不再分两套流程 —— 两边都进同一个聚合二维码弹窗。
-            activePay = ActivePay(order: order, title: title, channel: channel.rawValue)
+            activePay = ActivePay(order: order, title: title, channel: channel.rawValue, isQuota: isQuota)
             showWeChatQR = true
         } catch {
             showTip("下单失败：\(error.localizedDescription)")
@@ -495,6 +604,12 @@ struct ShopView: View {
     private func verifyActivePay() async throws -> APIClient.PayVerifyResult {
         guard let active = activePay, let token = session.token else {
             throw APIError.decode("订单信息丢失，请重新下单")
+        }
+        // 额度包：到账是墨点，不是会员天数 —— 单独一条查询路径，避免显示成「0 天会员」
+        if active.isQuota {
+            let r = try await APIClient.quotaOrderStatus(orderID: active.order.orderID, token: token)
+            let pts = r.points > 0 ? r.points : (selectedQuota?.points ?? 0)
+            return APIClient.PayVerifyResult(paid: r.paid, amount: pts, unit: "墨点")
         }
         switch active.order.kind {
         case .points:

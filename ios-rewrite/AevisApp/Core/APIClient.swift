@@ -568,10 +568,12 @@ struct APIClient {
         )
     }
 
-    /// 采用（喜欢）广场人设：公开接口，返回最新 adoptCount。
+    /// 采用（喜欢）广场人设：返回最新 adoptCount。
+    /// 必须带 token：后端要据此把「我采用的」写进人设库，否则只加计数、进不了聊天列表。
     @discardableResult
-    static func adoptPersona(id: String) async throws -> Int {
-        let json = try await request("/v1/psquare/adopt", method: "POST", body: ["id": id])
+    static func adoptPersona(id: String, token: String? = nil) async throws -> Int {
+        let json = try await request(
+            "/v1/psquare/adopt", method: "POST", body: ["id": id], token: token)
         let d = (json["data"] as? [String: Any]) ?? json
         return (d["adoptCount"] as? NSNumber)?.intValue ?? 0
     }
@@ -1034,6 +1036,8 @@ struct APIClient {
         var checkinBonusMultiplier: Int = 0
         var usesPerYuan: Int = 0
         var minSellUses: Int = 0
+        /// 聊天额度包到账墨点数（kind == "quota" 时有效）
+        var points: Int = 0
         var chargeModels: [String] = []
         /// DeepSeek 按次 token 上限：{model: ["max_tokens": n, "input_chars": n]}
         var tokenCaps: [String: [String: Any]] = [:]
@@ -1074,6 +1078,9 @@ struct APIClient {
                 checkinBonusMultiplier: (r["checkin_bonus_multiplier"] as? NSNumber)?.intValue ?? 0,
                 usesPerYuan: (r["uses_per_yuan"] as? NSNumber)?.intValue ?? 0,
                 minSellUses: (r["min_sell_uses"] as? NSNumber)?.intValue ?? 0,
+                // 额度包：服务端下发 points，老服务端只给 grant_points，两个都认
+                points: (r["points"] as? NSNumber)?.intValue
+                    ?? (r["grant_points"] as? NSNumber)?.intValue ?? 0,
                 chargeModels: (r["charge_models"] as? [String]) ?? [],
                 tokenCaps: (r["token_caps"] as? [String: [String: Any]]) ?? [:]
             )
@@ -1202,8 +1209,7 @@ struct APIClient {
     }
 
     /// 会员查单：state == "paid" 即到账，days 为到账天数。
-    static func memberOrderStatus(orderID: String, token: String) async throws -> (paid: Bool, days: Int) {
-        let enc = orderID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderID
+    static func memberOrderStatus(orderID: String, token: String) async throws -> (paid: Bool, days: Int) {        let enc = orderID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderID
         let scope = "member:\(orderID)"
         do {
             let json = try await request("/v1/shop/orders/\(enc)", token: token)
@@ -1219,6 +1225,16 @@ struct APIClient {
             }
             throw error
         }
+    }
+
+    /// 聊天额度包查单：state == "paid" 即到账，points 为实际到账墨点。
+    /// 走同一个 `/v1/shop/orders/<id>`，只是取 grant_points 而不是 days —— 额度包不加会员天数。
+    static func quotaOrderStatus(orderID: String, token: String) async throws -> (paid: Bool, points: Int) {
+        let enc = orderID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? orderID
+        let json = try await request("/v1/shop/orders/\(enc)", token: token)
+        let d = (json["data"] as? [String: Any]) ?? json
+        return ((d["state"] as? String) == "paid",
+                (d["grant_points"] as? NSNumber)?.intValue ?? 0)
     }
 
     /// 会员剩余天数（从 /v1/me 容错解析 membership.days_left；读不到返回 nil，界面显示占位）。

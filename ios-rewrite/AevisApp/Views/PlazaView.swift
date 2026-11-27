@@ -270,8 +270,10 @@ struct PlazaView: View {
     @MainActor
     private func adopt(_ p: APIClient.SquarePersona) async {
         do {
-            _ = try await APIClient.adoptPersona(id: p.id)
+            // 带 token：后端据此把我的采用记录写进人设库，聊天列表才看得到这个人设
+            _ = try await APIClient.adoptPersona(id: p.id, token: session.token)
             adopted.insert(p.id)
+            showTip("已加入我的角色，可在聊天列表找到")
         } catch {
             showTip("采用失败：\(error.localizedDescription)")
         }

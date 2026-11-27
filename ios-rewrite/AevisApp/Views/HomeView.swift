@@ -33,6 +33,8 @@ struct HomeView: View {
     /// 真实用量（2026-11-24）：本周额度百分比 + 墨点余额 / 可聊条数。
     /// 取不到就是 nil，卡片显示「—」—— **不写死 92%、不按 /35 估算**。
     @State private var quota: APIClient.QuotaState? = nil
+    /// 用量条上小狗徽章的滑动进度（0 = 最左，= leftPct 时到位）。进页面时从 0 滑过去。
+    @State private var mascotProgress: CGFloat = 0
     @State private var points: APIClient.PointsHome? = nil
 
     /// 问候区（2026-11-24）：昵称 / 头像来自 `/v1/me`，天气来自 wttr.in（定位优先，南昌兜底）。
@@ -376,10 +378,11 @@ struct HomeView: View {
 
                 // 行 3：9pt 进度条（圆头）+ 头部白色猫脸徽章
                 // 徽章 26pt、轨道 9pt → 上下各溢出 8.5pt，正是参考图那个「顶出来」的效果。
+                // 2026-11-26 用户要求：进页面时小狗要从最左边滑到当前用量位置，不是静态出现的。
                 GeometryReader { geo in
                     let width = max(geo.size.width, 1)
-                    let left = CGFloat(min(max(quota?.leftPct ?? 0, 0), 100))
-                    let fillWidth = max(0, width * left / 100)
+                    let target = CGFloat(min(max(quota?.leftPct ?? 0, 0), 100))
+                    let animated = width * mascotProgress / 100
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(usageTrack)
@@ -387,13 +390,15 @@ struct HomeView: View {
                         if quota != nil {
                             Capsule()
                                 .fill(usageFill)
-                                .frame(width: fillWidth, height: 9)
+                                .frame(width: max(animated, 9), height: 9)
                             mascotBadge(hasQuota: quota?.hasQuota ?? true)
                                 // 徽章中心压在填充头部；两端各夹一次，避免溢出卡片内边距
-                                .offset(x: min(max(fillWidth - 13, 0), width - 26))
+                                .offset(x: min(max(animated - 13, 0), width - 26))
                         }
                     }
                     .frame(maxHeight: .infinity)
+                    .onAppear { slideMascot(to: target) }
+                    .onChange(of: target) { _, newValue in slideMascot(to: newValue) }
                 }
                 .frame(height: 26)
 
@@ -433,6 +438,18 @@ struct HomeView: View {
             AevisMascotMark(pose: hasQuota ? .front : .sleep, size: 18)
         }
         .accessibilityHidden(true)
+    }
+
+    /// 让小狗徽章从最左边滑到当前用量位置（2026-11-26 用户要求有动效，不要静态出现）。
+    /// 减弱动效时直接到位。
+    private func slideMascot(to pct: CGFloat) {
+        if UIAccessibility.isReduceMotionEnabled {
+            mascotProgress = pct
+            return
+        }
+        withAnimation(.spring(response: 1.05, dampingFraction: 0.78).delay(0.12)) {
+            mascotProgress = pct
+        }
     }
 
     /// 黄底胶囊（2.8 按用户反馈缩小）：底 `#F5DC96` @0.85，高 26pt（原 34），
