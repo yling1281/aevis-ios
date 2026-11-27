@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.activity.compose.BackHandler
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.text.BasicTextField
@@ -145,10 +146,11 @@ fun MallScreen(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // 商城多一段「按次」（2026-11-24，对标 iOS ShopView）：DeepSeek 按次计费。
-    // index 保持：0 会员 / 1 音色包 / 2 墨点（mallpt 的 startTab=2 不受影响）/ 3 按次。
+    // 商城多两段（2026-11-27）：会员 / 额度 彻底分开（用户：「会员是签到+赠送+充值卡，
+    // 额度是聊天额度，两个不一样的东西」）。index 保持向后兼容：
+    //   0 会员 / 1 额度 / 2 墨点（mallpt startTab=2 不受影响）/ 3 按次（startTab=3）/ 4 音色包
     val tabNames = if (isPlaza) listOf(tr("人设"), tr("表情包"))
-    else listOf(tr("会员"), tr("音色包"), tr("墨点"), tr("按次"))
+    else listOf(tr("会员"), tr("额度"), tr("墨点"), tr("按次"), tr("音色包"))
 
     var tab by remember { mutableIntStateOf(startTab.coerceIn(0, tabNames.size - 1)) }
     // 2026-11-24 硬缓存：冷启动先同步读本地缓存 → 立刻显示；云端有更新才覆盖。
@@ -173,6 +175,47 @@ fun MallScreen(
     }
     // 广场里点表情 → 大图预览（跟表情页同一个 sheet）
     var preview by remember { mutableStateOf<String?>(null) }
+
+    // 商城下单（会员 / 额度共用）：走 /v1/shop/order，本地出二维码 + 轮询查单。
+    // 2026-11-27 之前会员走 /v1/pay/session（只给收银台跳转，没聚合码也轮询不到到账），
+    // 现在与 iOS 同源。
+    var shopPay by remember { mutableStateOf<PayInfo?>(null) }
+    var shopPaying by remember { mutableStateOf(false) }
+
+    fun buyShopProduct(p: Api.ShopProduct) {
+        if (shopPaying) return
+        shopPaying = true
+        scope.launch(Dispatchers.IO) {
+            val o = runCatching {
+                Api.shopOrder(p.id, com.aevis.android.core.ChatPrefs.payChannel)
+            }.getOrNull()
+            withContext(Dispatchers.Main) {
+                shopPaying = false
+                if (o == null) {
+                    Toast.makeText(
+                        ctx, Api.lastPayError.ifBlank { "下单失败" }, Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    val got = when {
+                        o.points > 0 -> "%d 墨点".format(o.points)
+                        p.points > 0 -> "%d 墨点".format(p.points)
+                        o.uses > 0 -> "%d 次".format(o.uses)
+                        o.days > 0 -> "%d 天".format(o.days)
+                        else -> p.title
+                    }
+                    shopPay = PayInfo(
+                        orderNo = o.orderId,
+                        title = p.title,
+                        amountYuan = "%.2f".format(java.util.Locale.US, p.priceCents / 100.0),
+                        qty = got,
+                        qrContent = o.qrContent,
+                        kind = if (p.kind == "quota") "quota" else "member",
+                        shop = true
+                    )
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (!isPlaza) {
@@ -399,7 +442,7 @@ fun MallScreen(
                         // 2026-11-25 线上只有一档会员 p_x（服务端 1990 分 = ¥19.9/月），
                         // 此前写死的 14.9 / 21.9 两档已删除；语音分钟权益已下线。
                         val memberProducts = products.filter {
-                            it.kind != "uses" && it.priceCents > 0
+                            it.kind == "member" && it.priceCents > 0
                         }
                         if (memberProducts.isEmpty()) {
                             Text(
@@ -427,14 +470,26 @@ fun MallScreen(
                                             tr("每天签到翻倍"))
                                     },
                                     bestValue = pi == memberProducts.lastIndex && memberProducts.size > 1,
-                                    onBuy = { payOrder(ctx, scope, p.id) }
+                                    onBuy = { buyShopProduct(p) }
                                 )
                             }
                         }
                     }
 
+                    // ---------- 商城 · 额度（2026-11-27 新增，聊天额度包）----------
+                    1 -> QuotaSection(
+                        serverProducts = products.filter { it.kind == "quota" },
+                        onBuy = { buyShopProduct(it) }
+                    )
+
+                    // ---------- 商城 · 墨点（真能买）----------
+                    2 -> PointPacks()
+
+                    // ---------- 商城 · 按次（2026-11-24，对标 iOS ShopView）----------
+                    3 -> PerCallSection(products.filter { it.kind == "uses" })
+
                     // ---------- 商城 · 音色包（还没接，禁用）----------
-                    1 -> {
+                    else -> {
                         V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
                             listOf(
                                 Triple("voice_10", "10 元", "1 万字"),
@@ -481,11 +536,6 @@ fun MallScreen(
                         )
                     }
 
-                    // ---------- 商城 · 墨点（真能买）----------
-                    2 -> PointPacks()
-
-                    // ---------- 商城 · 按次（2026-11-24，对标 iOS ShopView tab2）----------
-                    else -> PerCallSection(products.filter { it.kind == "uses" })
                 }
             }
                     Spacer(Modifier.height(30.dp))
@@ -498,6 +548,20 @@ fun MallScreen(
     val pv = preview
     if (pv != null) {
         EmojiPreviewSheet(url = pv, onDismiss = { preview = null })
+    }
+
+    // 商城下单弹层（会员 / 额度共用，和充值页同一个 PayDialog）
+    val sp = shopPay
+    if (sp != null) {
+        PayDialog(
+            info = sp,
+            onClose = { shopPay = null },
+            onPaid = { qty ->
+                shopPay = null
+                Toast.makeText(ctx, "已到账 $qty", Toast.LENGTH_LONG).show()
+                com.aevis.android.core.ChatPrefs.bumpUi()
+            }
+        )
     }
 }
 
@@ -617,6 +681,126 @@ private fun BenefitLine(text: String) {
         )
         Spacer(Modifier.width(7.dp))
         Text(text, fontSize = V2.tiny, color = ink.copy(alpha = 0.75f))
+    }
+}
+
+/**
+ * 聊天额度包（2026-11-27 新增）。
+ *
+ * 用户原话：「除了会员还有一个额度，XXL 那个……那个是聊天额度，会员是签到加每日赠送，
+ * 每日签到加充值卡」——所以这里是**独立一栏**，不和会员混：
+ *   · 一次性到账墨点，永久有效，不随会员到期清零
+ *   · 不占每周额度，也不改变会员身份
+ * 商品来自 `/v1/shop/products` 里 `kind=="quota"`；下单走 `/v1/shop/order`（与 iOS 同源）。
+ */
+@Composable
+internal fun QuotaSection(
+    serverProducts: List<Api.ShopProduct>,
+    onBuy: (Api.ShopProduct) -> Unit
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    Column(Modifier.padding(horizontal = V2.gutter)) {
+        Text(
+            tr("聊天额度包"), fontSize = V2.sub,
+            fontWeight = FontWeight.SemiBold, color = ink
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            tr("一次到账 · 永久有效 · 不占每周额度"),
+            fontSize = V2.micro, color = ink.copy(alpha = 0.45f)
+        )
+        Spacer(Modifier.height(12.dp))
+
+        if (serverProducts.isEmpty()) {
+            Text(
+                tr("额度包加载中或暂不可用"),
+                fontSize = V2.tiny, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.padding(vertical = 26.dp)
+            )
+        } else {
+            serverProducts.forEachIndexed { i, p ->
+                if (i > 0) Spacer(Modifier.height(14.dp))
+                QuotaCard(
+                    p = p,
+                    bestValue = i == serverProducts.lastIndex && serverProducts.size > 1,
+                    onBuy = { onBuy(p) }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Text(
+            tr("额度包只加聊天额度，不改变会员身份；开通会员请到「会员」。"),
+            fontSize = V2.micro, color = ink.copy(alpha = 0.4f), lineHeight = 17.sp
+        )
+    }
+}
+
+/** 额度包卡片：价格 → 到账墨点（数字翻动）→ 权益 → 通栏按钮。*/
+@Composable
+private fun QuotaCard(p: Api.ShopProduct, bestValue: Boolean, onBuy: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    V2Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                p.label.ifBlank { tr("额度包") }, fontSize = 10.sp, color = V2.accent,
+                modifier = Modifier.clip(squircle(6.dp))
+                    .background(V2.accent.copy(alpha = 0.13f))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            )
+            Spacer(Modifier.weight(1f))
+            if (bestValue) {
+                Text(
+                    tr("更划算"), fontSize = 10.sp, color = V2.accent,
+                    modifier = Modifier.clip(squircle(6.dp))
+                        .background(V2.accent.copy(alpha = 0.13f))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "¥%.1f".format(java.util.Locale.US, p.priceCents / 100.0),
+                fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                color = V2.accent, letterSpacing = (-1).sp
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                tr("/ 一次"), fontSize = 12.sp, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        AnimatedNumber(
+            value = p.points,
+            style = TextStyle(fontSize = V2.body, fontWeight = FontWeight.SemiBold),
+            color = ink,
+            suffix = tr(" 墨点")
+        )
+        Spacer(Modifier.height(8.dp))
+        p.benefits.forEach { BenefitLine(it) }
+
+        Spacer(Modifier.height(14.dp))
+        Box(
+            Modifier.fillMaxWidth()
+                .clip(squircle(14.dp))
+                .background(V2.accent)
+                .tapable { onBuy() }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                tr("立即购买"), fontSize = V2.body, fontWeight = FontWeight.Medium,
+                color = Color.White
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            tr("一次性到账，用完为止；不随会员到期清零。"),
+            fontSize = V2.micro, color = ink.copy(alpha = 0.4f)
+        )
     }
 }
 

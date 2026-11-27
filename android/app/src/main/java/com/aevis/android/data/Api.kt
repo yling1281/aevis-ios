@@ -2112,12 +2112,14 @@ object Api {
         val weekTotal: Int = 0,
         val percent: Int = 0,
         val label: String = "",
-        val kind: String = "member",   // "member" / "uses"
+        val kind: String = "member",   // "member" / "uses" / "quota"
         val uses: Int = 0,
         val listPriceCents: Int = 0,   // 面价（划线原价）；0 = 没给
         val discountPercent: Int = 100,
         val benefits: List<String> = emptyList(),
         val grantPoints: Int = 0,
+        /// 额度包到账墨点（服务端 points；老服务端只给 grant_points，两个都认）
+        val points: Int = 0,
         val freeMinutes: Int = 0,
         val signinBonus: Int = 0,
         val usesPerYuan: Int = 0,
@@ -2151,11 +2153,74 @@ object Api {
                     freeMinutes = r.optInt("free_minutes"),
                     signinBonus = r.optInt("signin_bonus"),
                     usesPerYuan = r.optInt("uses_per_yuan"),
-                    minSellUses = r.optInt("min_sell_uses")
+                    minSellUses = r.optInt("min_sell_uses"),
+                    points = if (r.has("points")) r.optInt("points")
+                             else r.optInt("grant_points")
                 )
             )
         }
         return out
+    }
+
+    // ---------------- 商城下单 / 查单（对齐 iOS /v1/shop/order）----------------
+    //
+    // 2026-11-27：会员、额度包（kind=quota）、按次共用这一条链路。
+    // 之前商城会员走 /v1/pay/session（只给收银台跳转，没有聚合码、也没法轮询到账）；
+    // 换成 /v1/shop/order 后与 iOS 完全同源：下单拿 order_id + pay_link，
+    // 查单看 state == "paid"。
+
+    data class ShopOrder(
+        val orderId: String,
+        val payUrl: String,
+        val payLink: String,
+        val kind: String,
+        val days: Int,
+        val points: Int,
+        val uses: Int
+    ) {
+        val qrContent: String get() = payLink.ifBlank { payUrl }
+    }
+
+    /** POST /v1/shop/order。失败返回 null，原因进 [lastPayError]。*/
+    fun shopOrder(productId: String, payType: String = "wxpay"): ShopOrder? {
+        lastPayError = ""
+        val (c, j) = post(
+            "/v1/shop/order",
+            JSONObject().put("product_id", productId).put("pay_type", payType),
+            token()
+        )
+        if (c !in 200..299) { lastPayError = "HTTP $c"; return null }
+        val code = j.optInt("code", -1)
+        if (code != 200 && code != 0) {
+            lastPayError = j.optString("msg").ifBlank { "下单失败" }
+            return null
+        }
+        val d = j.optJSONObject("data") ?: run { lastPayError = "返回格式不对"; return null }
+        val oid = d.optString("order_id")
+        if (oid.isBlank()) { lastPayError = "下单没有返回订单号"; return null }
+        return ShopOrder(
+            orderId = oid,
+            payUrl = d.optString("pay_url"),
+            payLink = d.optString("pay_link").ifBlank { d.optString("payLink") },
+            kind = d.optString("kind", "member"),
+            days = d.optInt("days"),
+            points = d.optInt("points"),
+            uses = d.optInt("uses")
+        )
+    }
+
+    /** GET /v1/shop/orders/<id>：state=paid 即到账，amount 为到账墨点/天数/次数。*/
+    fun shopOrderStatus(orderId: String): Pair<String, Int> {
+        val (c, j) = get("/v1/shop/orders/" + URLEncoder.encode(orderId, "UTF-8"), token())
+        if (c !in 200..299) return "" to 0
+        val d = j.optJSONObject("data") ?: return "" to 0
+        val st = d.optString("state")
+        val amount = when {
+            d.has("points") && d.optInt("points") > 0 -> d.optInt("points")
+            d.optInt("uses") > 0 -> d.optInt("uses")
+            else -> d.optInt("days")
+        }
+        return st to amount
     }
 
     // ---------------- 模型状态（2026-11-24，对标官网 / iOS /v1/models/status）----------------

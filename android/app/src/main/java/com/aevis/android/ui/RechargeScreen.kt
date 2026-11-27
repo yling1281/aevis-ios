@@ -428,12 +428,19 @@ internal fun PointPacks() {
 }
 
 
-/** 会员档位（2026-11-18，182）：7/30/90 天，走 `/v1/pay/member/qr`。*/
+/**
+ * AEVIS 会员（2026-11-27 重做）。
+ *
+ * 旧的 7/30/90 天三档已从服务端下架（`MEMBER_PRICE_CENTS` 只剩 `member_x` = 19.90/30 天），
+ * 这里跟着收敛成服务端驱动：商品、价格、权益全读 `/v1/shop/products` 的 `kind=="member"`，
+ * 下单走 `/v1/shop/order`（与 iOS 的 MemberView 同一条链路）。
+ */
 @Composable
 internal fun MemberPacks() {
     val ink = MaterialTheme.colorScheme.onSurface
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    var products by remember { mutableStateOf<List<Api.ShopProduct>>(emptyList()) }
     var paying by remember { mutableStateOf(false) }
     var payInfo by remember { mutableStateOf<PayInfo?>(null) }
     payInfo?.let { info ->
@@ -447,56 +454,93 @@ internal fun MemberPacks() {
             }
         )
     }
-    val plans = listOf(
-        Triple("member_7d", "7 天", "6.00"),
-        Triple("member_30d", "30 天", "18.00"),
-        Triple("member_90d", "90 天", "45.00")
-    )
+    LaunchedEffect(Unit) {
+        products = withContext(Dispatchers.IO) {
+            runCatching { Api.shopProducts() }.getOrDefault(emptyList())
+        }.filter { it.kind == "member" && it.priceCents > 0 }
+    }
+
     V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
-        plans.forEachIndexed { i, (code, label, yuan) ->
+        if (products.isEmpty()) {
+            Text(
+                tr("会员档位加载中…"), fontSize = 11.5.sp, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.padding(horizontal = V2.gutter, vertical = 16.dp)
+            )
+            return@V2Card
+        }
+        products.forEachIndexed { i, p ->
             if (i > 0) Box(
                 Modifier.fillMaxWidth().height(0.5.dp).background(ink.copy(alpha = 0.07f))
             )
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            Column(
+                Modifier.fillMaxWidth()
                     .tapable {
                         if (paying) return@tapable
                         paying = true
                         scope.launch(Dispatchers.IO) {
-                            val m = runCatching { Api.memberQr(code) }.getOrNull()
+                            val o = runCatching {
+                                Api.shopOrder(p.id, com.aevis.android.core.ChatPrefs.payChannel)
+                            }.getOrNull()
                             withContext(Dispatchers.Main) {
                                 paying = false
-                                if (m != null) {
-                                    payInfo = PayInfo(
-                                        m.orderNo, "Aevis 会员 ${m.days} 天",
-                                        m.amountYuan, "${m.days} 天", m.qrContent, "member"
-                                    )
-                                } else {
+                                if (o == null) {
                                     Toast.makeText(
-                                        ctx, Api.lastPayError.ifBlank { "下单失败" }, Toast.LENGTH_LONG
+                                        ctx, Api.lastPayError.ifBlank { "下单失败" },
+                                        Toast.LENGTH_LONG
                                     ).show()
+                                } else {
+                                    payInfo = PayInfo(
+                                        orderNo = o.orderId,
+                                        title = p.title.ifBlank { "AEVIS 会员" },
+                                        amountYuan = "%.2f".format(
+                                            java.util.Locale.US, p.priceCents / 100.0
+                                        ),
+                                        qty = "%d 天".format(if (o.days > 0) o.days else p.days),
+                                        qrContent = o.qrContent,
+                                        kind = "member", shop = true
+                                    )
                                 }
                             }
                         }
                     }
-                    .padding(horizontal = V2.gutter, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = V2.gutter, vertical = 12.dp)
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(label + "会员", fontSize = V2.body, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(2.dp))
-                    Text("到期后自动失效，可续期", fontSize = 11.sp, color = ink.copy(alpha = 0.42f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            p.title.ifBlank { "AEVIS 会员" }, fontSize = V2.body,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "%d 天 · 固定期限，可续期".format(p.days),
+                            fontSize = 11.sp, color = ink.copy(alpha = 0.42f)
+                        )
+                    }
+                    Text(
+                        "¥%.1f".format(java.util.Locale.US, p.priceCents / 100.0),
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold
+                    )
                 }
-                Text("¥$yuan", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                if (p.benefits.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        p.benefits.joinToString(" · "),
+                        fontSize = 10.5.sp, color = ink.copy(alpha = 0.5f), lineHeight = 15.sp
+                    )
+                }
             }
         }
     }
 }
 
-/** 弹层数据（积分/会员共用）。*/
+/** 弹层数据（积分/会员/额度共用）。*/
 internal data class PayInfo(
     val orderNo: String, val title: String, val amountYuan: String,
-    val qty: String, val qrContent: String, val kind: String
+    val qty: String, val qrContent: String, val kind: String,
+    /// 2026-11-27：商城订单（/v1/shop/order）查单走 /v1/shop/orders/<id>，
+    /// 墨点充值仍走 /v1/points/recharge/<no>。两个接口的 state 字段口径一致。
+    val shop: Boolean = false
 )
 
 /**
@@ -522,6 +566,11 @@ internal fun PayDialog(info: PayInfo, onClose: () -> Unit, onPaid: (String) -> U
             .format(java.util.Date())
     }
 
+    // 查单分流（2026-11-27）：商城订单 → /v1/shop/orders/<id>；墨点充值 → /v1/points/recharge/<no>
+    val poll: (PayInfo) -> Pair<String, Int> = { i ->
+        if (i.shop) Api.shopOrderStatus(i.orderNo) else Api.rechargeStatus(i.orderNo)
+    }
+
     LaunchedEffect(info.orderNo) {
         launch {
             while (secs > 0) {
@@ -533,7 +582,7 @@ internal fun PayDialog(info: PayInfo, onClose: () -> Unit, onPaid: (String) -> U
             kotlinx.coroutines.delay(2000)
             if (paid) break
             val (st, _) = withContext(Dispatchers.IO) {
-                runCatching { Api.rechargeStatus(info.orderNo) }.getOrDefault("" to 0)
+                runCatching { poll(info) }.getOrDefault("" to 0)
             }
             if (st == "paid") { paid = true; onPaid(info.qty); break }
             if (st == "closed" || secs <= 0) break
@@ -544,7 +593,12 @@ internal fun PayDialog(info: PayInfo, onClose: () -> Unit, onPaid: (String) -> U
         V2Card(Modifier.fillMaxWidth().padding(horizontal = 22.dp), pad = 18.dp) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    if (paid) "充值成功" else if (info.kind == "member") "微信/支付宝扫码开通会员" else "微信/支付宝扫码支付",
+                    if (paid) "充值成功"
+                    else when (info.kind) {
+                        "member" -> "微信/支付宝扫码开通会员"
+                        "quota" -> "微信/支付宝扫码购买额度"
+                        else -> "微信/支付宝扫码支付"
+                    },
                     fontSize = 15.sp, fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(8.dp))
@@ -607,7 +661,7 @@ internal fun PayDialog(info: PayInfo, onClose: () -> Unit, onPaid: (String) -> U
                                 .tapable {
                                     kotlinx.coroutines.MainScope().launch {
                                         val (st, _) = withContext(Dispatchers.IO) {
-                                            runCatching { Api.rechargeStatus(info.orderNo) }
+                                            runCatching { poll(info) }
                                                 .getOrDefault("" to 0)
                                         }
                                         if (st == "paid") { paid = true; onPaid(info.qty) }
