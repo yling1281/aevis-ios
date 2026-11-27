@@ -398,7 +398,9 @@ struct HomeView: View {
                     }
                     .frame(maxHeight: .infinity)
                     .onAppear { slideMascot(to: target) }
-                    .onChange(of: target) { _, newValue in slideMascot(to: newValue) }
+                    // 最低支持 iOS 16：不能用 iOS 17 的 `onChange(of:initial:_:)` 双参签名，
+                    // 走单参旧签名（Xcode 16 会提示 deprecated，但仍是 iOS16 唯一可用写法）。
+                    .onChange(of: target) { newValue in slideMascot(to: newValue) }
                 }
                 .frame(height: 26)
 
