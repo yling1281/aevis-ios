@@ -41,12 +41,22 @@ struct PlazaView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
+                // 2026-11-27（用户报「打开了能打开、返不回」）：
+                // 原来只有一个 17pt 的 chevron，热区不到 20pt，还贴着状态栏，
+                // 手指稍偏就点不到，看着就像"没反应"。这里加文字 + 44pt 热区 + contentShape，
+                // 并在整页补一个右滑关闭手势兜底（见 body 末尾的 dragGesture）。
                 Button { close() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(AE.accent)
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text("返回").font(.system(size: 15))
+                    }
+                    .foregroundStyle(AE.accent)
+                    .frame(minWidth: 64, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("返回")
                 Spacer()
                 Text("广场").font(.system(size: 17, weight: .semibold)).foregroundStyle(AE.textPrimary)
                 Spacer()
@@ -133,6 +143,18 @@ struct PlazaView: View {
             }
         }
         .background(AppBackground())
+        // 右滑关闭兜底：跟 iOS 原生返回手势一个方向，手指从左边往右划就能退，
+        // 不用非得点准左上角那个按钮（用户反馈"返不回"就是点不准）。
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { v in
+                    if v.translation.width > 90,
+                       abs(v.translation.height) < abs(v.translation.width) {
+                        close()
+                    }
+                }
+        )
         .task { await load() }
         .sheet(isPresented: $showCreate) {
             PersonaCreateView { _ in
