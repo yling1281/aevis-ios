@@ -137,6 +137,24 @@ struct APIClient {
         Self.session = makeSession(for: activeLine)
     }
 
+    /// 2026-11-27（用户第三次报「直连还是不行」）：清掉**所有**线路失败标记。
+    ///
+    /// 为什么必须再加一次：`migrateToMainLineIfNeeded` 只在第一次启动跑一次，之后
+    /// 只要独立 IP 失败过（哪怕当时是因为 103 的 54319 端口已经关了、或者证书链缺失），
+    /// `apiFailedLines` 就把 "direct" 钉死，主线永远排在最后 → 用户看到的就是「直连不行」。
+    /// 老版本里那条 "direct" 还可能指向 `103.236.72.107:54319`（现在压根没监听）。
+    /// 所以这次直接整表清空 + 强制首选 direct，只做一次。
+    private static let mainLineResetKey = "apiMainLine20261127b"
+
+    static func resetLineFailuresOnce() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: mainLineResetKey) else { return }
+        d.set(true, forKey: mainLineResetKey)
+        d.removeObject(forKey: failedKey)
+        d.set("direct", forKey: activeKey)
+        Self.session = makeSession(for: activeLine)
+    }
+
     static func migrateToDirectIfNeeded() {
         let d = UserDefaults.standard
         guard !d.bool(forKey: directRestoreKey) else { return }
