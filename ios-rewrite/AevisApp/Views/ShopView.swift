@@ -138,7 +138,8 @@ struct ShopView: View {
     private var stickyPayBar: some View {
         if tab == 0 {
             payBarShell {
-                payButton(enabled: selectedPackage != nil, action: { showChannelPicker = true }) {
+                // 2026-11-27 用户：聚合支付，不再让用户选微信/支付宝，点了直接出二维码。
+                payButton(enabled: selectedPackage != nil, action: { Task { await startPay(.wxpay) } }) {
                     HStack(spacing: 0) {
                         Text("立即充值")
                         if let sel = selectedPackage {
@@ -154,7 +155,7 @@ struct ShopView: View {
             }
         } else if tab == 2 {
             payBarShell {
-                payButton(enabled: selectedUse != nil, action: { showChannelPicker = true }) {
+                payButton(enabled: selectedUse != nil, action: { Task { await startPay(.wxpay) } }) {
                     HStack(spacing: 0) {
                         Text("购买 \(selectedUse?.uses ?? 0) 次 · ¥")
                         AnimatedNumber(
@@ -167,9 +168,10 @@ struct ShopView: View {
             }
         } else if tab == 3 {
             payBarShell {
-                payButton(enabled: selectedQuota != nil, action: { showChannelPicker = true }) {
+                payButton(enabled: selectedQuota != nil, action: { Task { await startPay(.wxpay) } }) {
                     HStack(spacing: 0) {
-                        Text("购买 \(selectedQuota?.points ?? 0) 墨点 · ¥")
+                        // 额度包不是墨点，按钮上别说「N 墨点」（2026-11-27 用户口径）
+                        Text("购买额度 · ¥")
                         AnimatedNumber(
                             value: Double(selectedQuota?.priceCents ?? 0) / 100,
                             specifier: "%.2f",
@@ -477,7 +479,6 @@ struct ShopView: View {
                 ForEach(Array(quotaProducts.enumerated()), id: \.element.id) { pair in
                     let pack = pair.element
                     let on = selectedQuota?.id == pack.id
-                    let unit = pack.points > 0 ? Double(pack.priceCents) / Double(pack.points) : 0
                     Button {
                         withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) { selectedQuota = pack }
                     } label: {
@@ -496,22 +497,23 @@ struct ShopView: View {
                                 )
                             }
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                // 2026-11-27 用户：「额度是百分比，按 token 来，和模型」。
+                                // 不再展示「N 点」和「约 N 条」——条数随模型浮动太大，会误导。
+                                // 单位统一成「万 token」，扣费仍按真实 token×模型单价。
                                 AnimatedNumber(
-                                    value: pack.points,
+                                    value: Double(pack.tokensTotal > 0
+                                                  ? pack.tokensTotal
+                                                  : pack.points * 4500) / 10000.0,
+                                    specifier: "%.0f",
                                     font: .system(size: 26, weight: .bold, design: .rounded),
                                     color: AE.textPrimary
                                 )
-                                Text("点聊天额度").font(.system(size: 13, weight: .medium))
+                                Text("万 token 额度").font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(AE.textSecondary)
                                 Spacer()
-                                if pack.estMessages > 0 {
-                                    Text("约 \(pack.estMessages) 条")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(AE.memberAccent)
-                                } else if unit > 0 {
-                                    Text(String(format: "%.2f 分/点", unit))
-                                        .font(.system(size: 11)).foregroundStyle(AE.textSecondary)
-                                }
+                                Text("按模型折算")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(AE.memberAccent)
                             }
                             ForEach(pack.benefits, id: \.self) { line in
                                 Text(line).font(.system(size: 11)).foregroundStyle(AE.textSecondary)
@@ -609,11 +611,11 @@ struct ShopView: View {
         guard let active = activePay, let token = session.token else {
             throw APIError.decode("订单信息丢失，请重新下单")
         }
-        // 额度包：到账是墨点，不是会员天数 —— 单独一条查询路径，避免显示成「0 天会员」
+        // 额度包：到账的是**额度**（不是墨点），单独一条查询路径。
         if active.isQuota {
             let r = try await APIClient.quotaOrderStatus(orderID: active.order.orderID, token: token)
             let pts = r.points > 0 ? r.points : (selectedQuota?.points ?? 0)
-            return APIClient.PayVerifyResult(paid: r.paid, amount: pts, unit: "墨点")
+            return APIClient.PayVerifyResult(paid: r.paid, amount: pts, unit: "额度")
         }
         switch active.order.kind {
         case .points:

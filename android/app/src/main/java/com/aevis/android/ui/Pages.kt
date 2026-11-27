@@ -187,7 +187,8 @@ fun MallScreen(
         shopPaying = true
         scope.launch(Dispatchers.IO) {
             val o = runCatching {
-                Api.shopOrder(p.id, com.aevis.android.core.ChatPrefs.payChannel)
+                // 2026-11-27：聚合支付，固定 wxpay（服务端按扫码 UA 自动分流微信/支付宝）
+                Api.shopOrder(p.id, "wxpay")
             }.getOrNull()
             withContext(Dispatchers.Main) {
                 shopPaying = false
@@ -773,19 +774,19 @@ private fun QuotaCard(p: Api.ShopProduct, bestValue: Boolean, onBuy: () -> Unit)
             )
         }
         Spacer(Modifier.height(6.dp))
+        // 2026-11-27 用户：「额度是百分比，按 token 来，和模型」。
+        // 不再展示「N 点 / 约 N 条」，统一讲「万 token」——条数随模型浮动太大，会误导。
         AnimatedNumber(
-            value = p.points,
+            value = (if (p.tokensTotal > 0) p.tokensTotal else p.points * 4500) / 10000,
             style = TextStyle(fontSize = V2.body, fontWeight = FontWeight.SemiBold),
             color = ink,
-            suffix = tr(" 点聊天额度")
+            suffix = tr(" 万 token 额度")
         )
-        if (p.estMessages > 0) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                tr("约 ") + p.estMessages + tr(" 条消息"),
-                fontSize = V2.micro, color = V2.accent
-            )
-        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            tr("按实际 token 扣，模型越贵扣得越多"),
+            fontSize = V2.micro, color = V2.accent
+        )
         Spacer(Modifier.height(8.dp))
         p.benefits.forEach { BenefitLine(it) }
 

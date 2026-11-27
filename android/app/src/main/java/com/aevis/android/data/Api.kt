@@ -1685,7 +1685,12 @@ object Api {
         val resetAt: String = "",  // 重置时间（ISO-8601，取不到留空不显示）
         // 2026-11-25 服务端新增：本周剩余额度折成"还能聊多少条"（会员/免费都对）。
         // 0 = 老服务端没给，调用方回落到「免费基线 × 剩余百分比」。
-        val estMessages: Int = 0
+        val estMessages: Int = 0,
+        // 2026-11-27 用户：「额度是百分比，按 token 来，和模型」。
+        // tokensLeft = 剩余 token 当量（服务端折算好，端上不自己除）；
+        // packPct = 买断额度包剩余百分比。
+        val tokensLeft: Int = 0,
+        val packPct: Int = 0
     )
 
     fun quotaState(): QuotaState? {
@@ -1707,6 +1712,12 @@ object Api {
             resetAt = reset,
             estMessages = q.optInt("est_messages", 0).let {
                 if (it > 0) it else d.optInt("est_messages", 0)
+            },
+            tokensLeft = q.optInt("tokens_left", 0).let {
+                if (it > 0) it else d.optInt("tokens_left", 0)
+            },
+            packPct = q.optInt("pack_pct", 0).let {
+                if (it > 0) it else d.optInt("pack_pct", 0)
             }
         )
     }
@@ -2122,6 +2133,8 @@ object Api {
         val points: Int = 0,
         /// 额度包折算的可聊条数（服务端 est_messages，端上别自己除法）
         val estMessages: Int = 0,
+        /// 额度包折算的 token 当量（2026-11-27：额度按 token 讲，不再讲条数）
+        val tokensTotal: Int = 0,
         val freeMinutes: Int = 0,
         val signinBonus: Int = 0,
         val usesPerYuan: Int = 0,
@@ -2158,7 +2171,8 @@ object Api {
                     minSellUses = r.optInt("min_sell_uses"),
                     points = if (r.has("points")) r.optInt("points")
                              else r.optInt("grant_points"),
-                    estMessages = r.optInt("est_messages")
+                    estMessages = r.optInt("est_messages"),
+                    tokensTotal = r.optInt("tokens_total")
                 )
             )
         }

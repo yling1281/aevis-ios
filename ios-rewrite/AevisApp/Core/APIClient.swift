@@ -43,12 +43,17 @@ struct APIClient {
     /// 自动就能看到云端下发的线路，不用改一行；`AevisHosts` 也拿这张内置表做
     /// 拉配置的起点（避免 `lines` → `allAccountLines` → 拉配置的环）。
     ///
-    /// 顺序 = 回落顺序：仅北京一条。UI 只显示名字，地址不上屏。
+    /// 顺序 = 回落顺序。2026-11-27 用户拍板三地分工：
+    /// **独立 IP 的 4-4 是主服务器，北京是备用，香港只做加速（不进线路表）**。
+    ///
+    /// - 4-4（`103.236.72.107:54319`）：机房只映射了这一个 HTTPS 端口，自签证书靠
+    ///   `PinDelegate` 放行。它是对海外可达的那台（新机海外连不上，已下线）。
+    /// - 北京（`q7m3ax.lingyan.cyou`）：公网 CA，国内快，主线路连不上时自动回落。
     static let builtInLines: [Line] = [
-        // name 用纯地名，不出现 IP、日期、「自签证书/隧道」等工程词。
-        // 2026-11-25 按用户要求收敛为只有北京；直连/境外备用线路均已移除。
-        // 老用户本地若存着已下线线路的 id，`activeLine` 找不到会自然回落到首条，不会崩。
-        Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou", pinning: false, note: "备用"),
+        Line(id: "direct", name: "独立IP", base: "https://103.236.72.107:54319",
+             pinning: true, note: "主线路"),
+        Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",
+             pinning: false, note: "备用"),
     ]
 
     /// 生效中的线路表：内置 ∪ 云端下发（按 base 去重、内置优先、云端已按实测 RTT 排序）。
@@ -845,6 +850,11 @@ struct APIClient {
         /// 可他明明还有整周的免费额度。`0` 表示服务端没给（或确实归零），
         /// 调用方据此回落到「免费基线 × 剩余百分比」。
         let estMessages: Int
+        /// 剩余额度折成的 token 当量（2026-11-27 上线，`tokens_left`）。
+        /// 用户口径是「额度按 token 讲」，所以首页主文案优先用它；0 = 服务端没给。
+        let tokensLeft: Int
+        /// 买断额度包还剩百分之几（`pack_pct`，没买过包时为 0）。
+        let packPct: Int
         /// 重置时刻（ISO-8601 字符串）。服务端未下发时为 nil —— 主页不显示「重置」那一行，
         /// 不写死、不自己编日期。
         let resetAt: String?
@@ -873,6 +883,10 @@ struct APIClient {
             // 由 HomeView 回落到「免费基线 × 剩余百分比」。
             estMessages: (q["est_messages"] as? NSNumber)?.intValue
                 ?? (d["est_messages"] as? NSNumber)?.intValue ?? 0,
+            tokensLeft: (q["tokens_left"] as? NSNumber)?.intValue
+                ?? (d["tokens_left"] as? NSNumber)?.intValue ?? 0,
+            packPct: (q["pack_pct"] as? NSNumber)?.intValue
+                ?? (d["pack_pct"] as? NSNumber)?.intValue ?? 0,
             resetAt: (q["reset_at"] as? String) ?? (q["resetAt"] as? String)
                 ?? (q["next_reset"] as? String) ?? (d["reset_at"] as? String)
         )
@@ -1040,6 +1054,8 @@ struct APIClient {
         var points: Int = 0
         /// 额度包折算的可聊条数（服务端按实际均价算，端上别自己除法）
         var estMessages: Int = 0
+        /// 额度包折算的 token 当量（2026-11-27：额度按 token 讲，不再讲条数）
+        var tokensTotal: Int = 0
         var chargeModels: [String] = []
         /// DeepSeek 按次 token 上限：{model: ["max_tokens": n, "input_chars": n]}
         var tokenCaps: [String: [String: Any]] = [:]
@@ -1084,6 +1100,7 @@ struct APIClient {
                 points: (r["points"] as? NSNumber)?.intValue
                     ?? (r["grant_points"] as? NSNumber)?.intValue ?? 0,
                 estMessages: (r["est_messages"] as? NSNumber)?.intValue ?? 0,
+                tokensTotal: (r["tokens_total"] as? NSNumber)?.intValue ?? 0,
                 chargeModels: (r["charge_models"] as? [String]) ?? [],
                 tokenCaps: (r["token_caps"] as? [String: [String: Any]]) ?? [:]
             )

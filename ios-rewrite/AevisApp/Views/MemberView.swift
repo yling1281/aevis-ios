@@ -140,7 +140,8 @@ struct MemberView: View {
     private var stickyPayBar: some View {
         VStack(spacing: 0) {
             Divider().opacity(0.18)
-            payButton(enabled: selectedProduct != nil, action: { showChannelPicker = true }) {
+            // 2026-11-27 用户：聚合支付，不再让用户选微信/支付宝，点了直接出二维码。
+            payButton(enabled: selectedProduct != nil, action: { Task { await startPay(.wxpay) } }) {
                 HStack(spacing: 0) {
                     if let p = selectedProduct {
                         Text("开通 AEVIS 会员 · \(p.days) 天 ¥")

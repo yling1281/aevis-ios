@@ -328,8 +328,9 @@ internal fun PointPacks() {
         Triple("pt_128", "128 元", 12800)
     )
 
-    // 182：支付方式（默认记上次）+ 扫码弹层宿主
-    var channel by remember { mutableStateOf(com.aevis.android.core.ChatPrefs.payChannel) }
+    // 2026-11-27 用户：聚合支付 —— 不再让用户选微信/支付宝，点套餐直接出同一张二维码，
+    // 扫码的 App（微信/支付宝）由服务端按 UA 自动分流。
+    val channel = "wxpay"
     var paying by remember { mutableStateOf(false) }
     var payInfo by remember { mutableStateOf<PayInfo?>(null) }
     payInfo?.let { info ->
@@ -344,42 +345,7 @@ internal fun PointPacks() {
         )
     }
 
-    // 方式芯片（微信 / 支付宝都可用）
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 6.dp)
-            .height(40.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        listOf(
-            Triple("wxpay", "微信支付", R.drawable.ic_wx),
-            Triple("alipay", "支付宝", R.drawable.ic_alipay)
-        ).forEach { (k, label, iconRes) ->
-            val on = channel == k
-            Row(
-                Modifier.clip(RoundedCornerShape(9.dp))
-                    // 2026-11-24：选中态用语义色（白底深字 / 暗底浅字），夜间不再糊成一片
-                    .background(if (on) ink else ink.copy(alpha = 0.05f))
-                    .tapable {
-                        channel = k
-                        com.aevis.android.core.ChatPrefs.payChannel = k
-                    }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    painterResource(iconRes), contentDescription = null,
-                    tint = Color.Unspecified, modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    label, fontSize = 12.sp,
-                    // 选中态文字跟背景反相（明底深字 / 暗底浅字）
-                    color = if (on) onColorFor(ink) else ink.copy(alpha = 0.7f)
-                )
-            }
-        }
-    }
+    // 2026-11-27：支付方式芯片整条移除（聚合二维码，微信/支付宝扫同一张）。
     V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
         packs.forEachIndexed { i, (code, label, pts) ->
             if (i > 0) Box(
@@ -479,7 +445,8 @@ internal fun MemberPacks() {
                         paying = true
                         scope.launch(Dispatchers.IO) {
                             val o = runCatching {
-                                Api.shopOrder(p.id, com.aevis.android.core.ChatPrefs.payChannel)
+                                // 2026-11-27：聚合支付，固定 wxpay
+                                Api.shopOrder(p.id, "wxpay")
                             }.getOrNull()
                             withContext(Dispatchers.Main) {
                                 paying = false

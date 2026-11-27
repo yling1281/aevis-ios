@@ -24,14 +24,16 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 195
+        versionCode = 196
         // 2026-11-16（113）：版本名跟着 build 走（112 → 1.1.02，113 → 1.1.03）；
         // 界面上只显示 versionName，versionCode 只给系统覆盖安装用。
         // 2026-11-24：1.1.91 → 1.1.92，带「App 内直接下载安装 APK」，开更新提醒。
         // 2026-11-25：1.1.92 → 1.1.93，versionCode 192 → 193。
         // 2026-11-27：1.1.93 → 1.1.94。商城「额度」独立栏 + 会员单档 19.9 接入
         //             /v1/shop/order（与 iOS 同源），老 7/30/90 天档位全部下线。
-        versionName = "1.1.95"
+        // 2026-11-27：1.1.95 → 1.1.96。聚合支付（不再选微信/支付宝，直接出码）；
+        //             额度改「百分比 + 万 token」口径；线路收敛为 独立IP(4-4) 主 / 北京 备。
+        versionName = "1.1.96"
     }
 
     signingConfigs {

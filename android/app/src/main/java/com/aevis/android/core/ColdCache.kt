@@ -106,7 +106,9 @@ object ColdCache {
                 JSONObject()
                     .put("active", q.active).put("percent", q.percent).put("left_pct", q.leftPct)
                     .put("has_quota", q.hasQuota).put("reset_at", q.resetAt)
-                    .put("est_messages", q.estMessages).toString()
+                    .put("est_messages", q.estMessages)
+                    // 2026-11-27：额度按 token 讲，冷启动也要能显示「约 N 万 token」
+                    .put("tokens_left", q.tokensLeft).put("pack_pct", q.packPct).toString()
             )
         }
     }
@@ -118,7 +120,8 @@ object ColdCache {
             Api.QuotaState(
                 active = o.optBoolean("active"), percent = o.optInt("percent"),
                 leftPct = o.optInt("left_pct"), hasQuota = o.optBoolean("has_quota"),
-                resetAt = o.optString("reset_at"), estMessages = o.optInt("est_messages")
+                resetAt = o.optString("reset_at"), estMessages = o.optInt("est_messages"),
+                tokensLeft = o.optInt("tokens_left"), packPct = o.optInt("pack_pct")
             )
         }.getOrNull()
     }

@@ -478,25 +478,21 @@ struct HomeView: View {
         .contentShape(Capsule())
     }
 
-    /// 剩余消息条数。优先级（2026-11-25 修正，顺序别写反）：
-    /// 1. **`quota.estMessages`** —— 服务端按「本周剩余额度」折的条数，会员和免费用户都对；
-    /// 2. `points.estMessages` —— 墨点余额 ÷ 均价，只对**有余额**的用户有意义；
-    /// 3. `freeMessageBaseline × leftPct` —— 前两个都没有时的本地估算。
+    /// 剩余额度文案（2026-11-27 用户：「额度是百分比，按 token 来，和模型」）。
     ///
-    /// 旧实现把 2 放在 1 前面，导致免费用户（余额 0）首页恒显示「还有 0 条」，
-    /// 而他实际还有整周的免费额度。
+    /// 主口径换成「剩百分之几 + 约多少万 token」：
+    /// - 百分比是唯一的进度真源（服务端 `left_pct`，用完为止，不随模型变）；
+    /// - token 是当量参考（服务端按实际均价折算好，端上不自己除），
+    ///   同一个百分比在不同模型下对应的条数差很多，讲 token 才不会误导。
+    /// 老服务端没有 `tokens_left` 时只显示百分比，绝不瞎编数字。
     private var remainingMessagesLine: String {
-        if let q = quota, q.estMessages > 0 {
-            return "您大约还有 \(q.estMessages.formatted()) 条消息额度"
+        guard let q = quota else { return "本周额度 —" }
+        let pct = max(0, min(100, q.leftPct))
+        if q.tokensLeft > 0 {
+            let wan = Double(q.tokensLeft) / 10000.0
+            return String(format: "本周额度剩 %d%% · 约 %.0f 万 token", pct, wan)
         }
-        if let p = points, p.estMessages > 0 {
-            return "您大约还有 \(p.estMessages.formatted()) 条消息额度"
-        }
-        if let q = quota {
-            let n = Int((Double(APIClient.freeMessageBaseline) * Double(q.leftPct) / 100.0).rounded())
-            return "您大约还有 \(n) 条消息额度"
-        }
-        return "您大约还有 — 条消息额度"
+        return "本周额度剩 \(pct)%"
     }
 
     /// 重置时间只认服务端下发字段；没有就不显示这一行，绝不写死日期。

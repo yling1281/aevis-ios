@@ -1881,21 +1881,20 @@ private fun HomeTab(
             }
             Spacer(Modifier.height(10.dp))
 
-            // 底部：左 = 本周剩余额度折成的条数，右 = 重置时间（取不到不显示）
-            // 口径照 iOS：① quota.est_messages（服务端，会员/免费都对）→
-            //            ② 免费基线 15 × 剩余百分比 → ③ 断网也无基线时显示「—」
-            val freeBaseline = 15
-            val leftMessages = when {
-                q != null && q.estMessages > 0 -> q.estMessages
-                q != null -> (freeBaseline * q.leftPct / 100.0).let { n ->
-                    if (n > 0) kotlin.math.round(n).toInt() else 0
-                }
-                else -> -1   // 没拿到额度，不写死条数
-            }
+            // 底部：左 = 本周额度剩余百分比 + token 当量，右 = 重置时间（取不到不显示）
+            // 2026-11-27 用户：「额度是百分比，按 token 来，和模型」——
+            // 百分比是进度真源，token 是当量参考；条数口径已废弃（随模型浮动太大）。
+            val leftTokens = q?.tokensLeft ?: 0
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (leftMessages >= 0) tr("您大约还有 %d 条消息额度", leftMessages)
-                    else tr("您大约还有 — 条消息额度"),
+                    when {
+                        q == null -> tr("本周额度 —")
+                        leftTokens > 0 -> tr(
+                            "本周额度剩 %d%% · 约 %d 万 token",
+                            q.leftPct, leftTokens / 10000
+                        )
+                        else -> tr("本周额度剩 %d%%", q.leftPct)
+                    },
                     fontSize = V2.tiny, color = ink.copy(alpha = 0.62f)
                 )
                 Spacer(Modifier.weight(1f))
