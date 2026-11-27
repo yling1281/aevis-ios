@@ -45,7 +45,7 @@ struct APIClient {
     ///
     /// 顺序 = 回落顺序。2026-11-27 用户拍板三地分工：
     /// **4-4（101.251.167.55，域名 api.lingyan.cyou）是主服务器，北京是备用，
-    /// 香港只做加速（不进线路表）**。
+    /// 加速节点只做媒体缓存、不进线路表**。
     ///
     /// 主线路走自签 CA（`Aevis Direct CA`，10 年），靠 `PinDelegate` 按 host 放行。
     static let builtInLines: [Line] = [
