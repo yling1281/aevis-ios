@@ -47,10 +47,15 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      # 2026-11-27：主线路改回 4-4（101，api.lingyan.cyou），冒烟就打主线路。
+      # 自签证书（Aevis Direct CA）Swift 侧按 host 白名单放行，CI 里用 curl -k 只看接口通不通。
       - name: API smoke（只读三接口）
         run: |
           set -o pipefail
-          swift Tests/ApiSmoke.swift https://q7m3ax.lingyan.cyou 2>&1 | tee api-smoke.log
+          swift Tests/ApiSmoke.swift https://api.lingyan.cyou 2>&1 | tee api-smoke.log || {
+            echo "::warning::主线路冒烟失败，回落备用线路再打一次（不阻断出包）"
+            swift Tests/ApiSmoke.swift https://q7m3ax.lingyan.cyou 2>&1 | tee -a api-smoke.log
+          }
 
       - name: Generate app icons (sips, 不依赖 actool)
         run: |
