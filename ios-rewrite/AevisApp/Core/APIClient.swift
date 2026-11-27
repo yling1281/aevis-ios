@@ -44,14 +44,14 @@ struct APIClient {
     /// 拉配置的起点（避免 `lines` → `allAccountLines` → 拉配置的环）。
     ///
     /// 顺序 = 回落顺序。2026-11-27 用户拍板三地分工：
-    /// **独立 IP 的 4-4 是主服务器，北京是备用，香港只做加速（不进线路表）**。
+    /// **4-4（101.251.167.55，域名 api.lingyan.cyou）是主服务器，北京是备用，
+    /// 香港只做加速（不进线路表）**。
     ///
-    /// - 4-4（`103.236.72.107:54319`）：机房只映射了这一个 HTTPS 端口，自签证书靠
-    ///   `PinDelegate` 放行。它是对海外可达的那台（新机海外连不上，已下线）。
-    /// - 北京（`q7m3ax.lingyan.cyou`）：公网 CA，国内快，主线路连不上时自动回落。
+    /// 主线路走公网 CA + 443 直连，不需要自签 pinning；`103.236.72.107:54319`
+    /// 作为网络层内部兜底常量保留（`PinDelegate` 仍认它），但不再出现在线路表里。
     static let builtInLines: [Line] = [
-        Line(id: "direct", name: "独立IP", base: "https://103.236.72.107:54319",
-             pinning: true, note: "主线路"),
+        Line(id: "direct", name: "独立IP", base: "https://api.lingyan.cyou",
+             pinning: false, note: "主线路"),
         Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",
              pinning: false, note: "备用"),
     ]
@@ -122,6 +122,21 @@ struct APIClient {
     /// 刚恢复的直连。这里重置为直连并清掉其失败标记；只做一次，之后用户在服务器状态页
     /// 手动选过就尊重其选择。
     private static let directRestoreKey = "apiDirectRestored20261124"
+
+    /// 2026-11-27 三地分工上线：4-4（独立 IP）重新做主线，北京降为备用。
+    /// 老用户本地可能还钉在 "bj"，不迁移的话永远走不到新的主线路 —— 只改一次，
+    /// 之后用户在服务器状态页的手动选择照旧被尊重。
+    private static let mainLineKey = "apiMainLine20261127"
+    static func migrateToMainLineIfNeeded() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: mainLineKey) else { return }
+        d.set(true, forKey: mainLineKey)
+        d.set("direct", forKey: activeKey)
+        clearLineFailed("direct")
+        clearLineFailed("bj")
+        Self.session = makeSession(for: activeLine)
+    }
+
     static func migrateToDirectIfNeeded() {
         let d = UserDefaults.standard
         guard !d.bool(forKey: directRestoreKey) else { return }

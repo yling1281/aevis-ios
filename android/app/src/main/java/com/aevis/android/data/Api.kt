@@ -34,6 +34,12 @@ object Api {
 
     private val BASE get() = d("Mi4uKilgdXU2MzQ9Izs0dDkjNS91Kig1Pnc7KjN1Oz8sMyk=")
 
+    /**
+     * 主服务器（2026-11-27）：用户明确「4-4 就是 101.251.167.55」，
+     * 对外域名 `api.lingyan.cyou`（A 记录指向它），公网 CA 证书、443 直连，不需要任何信任例外。
+     */
+    private val MAIN get() = d("Mi4uKilgdXU7KjN0NjM0PSM7NHQ5IzUv")
+
     /// 直连线路（2026-11-14）：机房新开的外网 54319 → 内网 5533，
     /// 不经过反代、不依赖域名。
     /// 自签 TLS：CA 打在 `res/raw/aevis_direct_ca.crt`，
@@ -2659,7 +2665,7 @@ object Api {
         val h = activeHost
         if (h != null && activeIsFresh()) return h
         return endpoints().firstOrNull { it.id == pinnedLine }?.host
-            ?: (if (preferDirect) DIRECT else FASTLINE)
+            ?: (if (preferDirect) MAIN else FASTLINE)
     }
 
     /**
@@ -2751,8 +2757,16 @@ object Api {
      * 直连 / 备用 / 原主站入口都从**用户可选列表**里移除（网络层内部兜底常量仍保留，
      * 但不再作为可选线路显示）。界面只显示 label，不露 IP / 端口。
      */
+    /**
+     * 可选线路表（界面只显示 label/note，不显示地址）。
+     *
+     * 2026-11-27 用户拍板：**独立 IP 的 4-4 是主服务器，北京是备用，香港只做加速**
+     * （香港不进线路表，它承接的是图片/语音的边缘缓存，见 img.lingyan.cyou）。
+     * 新机（101.251.167.55）海外不可达，已从线路表移除。
+     */
     private fun endpoints(): List<Endpoint> = listOf(
-        Endpoint(1, FASTLINE, "北京", "隧道反代")
+        Endpoint(3, MAIN, "独立IP", "主线路"),
+        Endpoint(1, FASTLINE, "北京", "备用")
     )
 
     fun lines(): List<Line> = endpoints().map {
