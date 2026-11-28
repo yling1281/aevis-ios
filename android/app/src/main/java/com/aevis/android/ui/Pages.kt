@@ -1021,7 +1021,7 @@ private fun RowDividerPublic() {
  * 内置浏览器（2026-11-14 第二版）。
  *
  * 用户：「浏览器你不应该跟那个一样吗？是输入网址的，默认用那个微软的搜索引擎」——
- * 第一版只是个全屏 WebView，没有地址栏，打开就是 aevis.cn，用户没法输网址。
+ * 第一版只是个全屏 WebView，没有地址栏，打开就是 aevis.lingyan.cyou，用户没法输网址。
  * 现在：顶部一条地址栏，默认首页是 Bing（cn.bing.com）；
  * 输入的东西像网址就直接去，不像就当关键词丢给 Bing 搜。
  */
@@ -1289,11 +1289,11 @@ fun AboutScreen(
             }
 
 V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
-                AboutLink("官网", "https://aevis.cn")
+                AboutLink("官网", "https://aevis.lingyan.cyou")
                 RowDividerPublic()
-                AboutLink("隐私政策", "https://aevis.cn/privacy")
+                AboutLink("隐私政策", "https://aevis.lingyan.cyou/privacy")
                 RowDividerPublic()
-                AboutLink("服务条款", "https://aevis.cn/terms")
+                AboutLink("服务条款", "https://aevis.lingyan.cyou/terms")
                 RowDividerPublic()
                 AboutRow(
                     "检查更新",

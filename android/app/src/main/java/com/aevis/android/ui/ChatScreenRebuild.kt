@@ -1,10 +1,14 @@
 package com.aevis.android.ui
 
-import com.aevis.android.R
-import androidx.compose.ui.res.painterResource
-import androidx.compose.material3.Icon
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.speech.tts.TextToSpeech
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -16,32 +20,47 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.aevis.android.R
 import com.aevis.android.core.BackgroundStore
 import com.aevis.android.core.ChatPrefs
 import com.aevis.android.core.LocalPersonaStore
@@ -51,15 +70,28 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 /**
- * 聊天页（第 4 版，按用户逐条 bug 修）。
- * 默认贴底 / 顶栏名字 / 双头头像 / 单行输入 + imePadding / 面板动效 /
- * 一条条发（标点兜底）/ 麦克风=本地 TTS / 日记与设置分开入口。
+ * 聊天页（2026-11-29 第 5 版：按 iOS `ChatView.swift` 重做）。
+ *
+ * 这一版不是调色，是整页重做：
+ * - 顶部栏：iOS inline 样式（返回 / 三点在左，标题居中，状态小字）。
+ * - 消息：连续圆角玻璃气泡、双方头像按设置显示、字体/括号变浅按角色设置生效。
+ * - 滚动：只有贴底时才跟随新消息，翻历史时不拽回；保留"加载更早"横幅。
+ * - 底部：悬浮胶囊输入栏（22 连续圆角、白 0.72）、猫咪标记、麦克风=语音输入、
+ *   加号=表情包半窗；不再是贴边的工具栏。
+ * - 菜单：三点改成半窗，跟 iOS `ConvMenuSheet` 一致。
+ *
+ * 发送链路（Api.chat / 拆条 / 人设 system prompt）保持不动，只换皮和交互壳。
  */
 
 internal fun chatAnnotated(
-    text: String, normal: Color, dim: Color, visibleLen: Int = -1
+    text: String,
+    normal: Color,
+    dim: Color,
+    visibleLen: Int = -1,
+    dimEnabled: Boolean = true
 ): AnnotatedString {
     val limit = if (visibleLen >= 0) minOf(visibleLen, text.length) else text.length
     return buildAnnotatedString {
@@ -67,14 +99,17 @@ internal fun chatAnnotated(
         for (i in 0 until limit) {
             val c = text[i]
             when (c) {
-                '（', '(', '【', '[' -> { depth++; withStyle(SpanStyle(color = dim)) { append(c) } }
+                '（', '(', '【', '[' -> {
+                    depth++
+                    withStyle(SpanStyle(color = if (dimEnabled) dim else normal)) { append(c) }
+                }
                 '）', ')', '】', ']' -> {
-                    withStyle(SpanStyle(color = dim)) { append(c) }
+                    withStyle(SpanStyle(color = if (dimEnabled) dim else normal)) { append(c) }
                     if (depth > 0) depth--
                 }
                 else -> {
-                    if (depth > 0) withStyle(SpanStyle(color = dim)) { append(c) }
-                    else withStyle(SpanStyle(color = normal)) { append(c) }
+                    val useDim = dimEnabled && depth > 0
+                    withStyle(SpanStyle(color = if (useDim) dim else normal)) { append(c) }
                 }
             }
         }
@@ -85,15 +120,7 @@ internal fun loadMemes(ctx: android.content.Context): List<String> = emptyList()
 internal fun appendMemes(list: List<String>): String = ""
 internal fun statusOf(pid: Long, kind: Int): String = ""
 
-// 2026-11-29 全量向 iOS 靠齐：气泡改半透明磨砂（对齐 AEGlass）。
-// iOS：AI 气泡 white.opacity(0.70)、我的气泡深靛蓝半透明、圆角20连续、无描边。
-private val BubbleWhite = Color.White.copy(alpha = 0.70f)   // = iOS AEGlass.bubbleFillOpacity
-private val MineBlue = Color(0xFF2F3A56).copy(alpha = 0.86f) // 深墨靛蓝实底（我的气泡，白字）
-private val BubbleInk = Color(0xFF1C2231)                    // = iOS AE.textPrimary（AI 气泡深字）
-private val InkDark = Color(0xFF1B1D2A)
-private val InkDim = Color(0xFF6B7189)
-private val AccentBlue = Color(0xFF4A5676)                   // = iOS AE.accentLift（去亮蓝）
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     pid: String,
@@ -109,27 +136,66 @@ fun ChatScreen(
     val focus = LocalFocusManager.current
 
     val persona = remember(pid) { runCatching { LocalPersonaStore.find(pid) }.getOrNull() }
-    val charName = persona?.name ?: ""
-    val charAvatar = persona?.avatar ?: ""
+    val charName = persona?.name.orEmpty()
+    val charAvatar = persona?.avatar.orEmpty()
 
     var msgs by remember(pid) { mutableStateOf<List<Api.Msg>>(emptyList()) }
     var input by remember(pid) { mutableStateOf("") }
     var sending by remember(pid) { mutableStateOf(false) }
     var err by remember(pid) { mutableStateOf("") }
-    var plusOpen by remember(pid) { mutableStateOf(false) }
-    /// 左上角三点的二级菜单（2026-11-27）。自绘 Dialog，不用系统菜单。
-    var moreOpen by remember(pid) { mutableStateOf(false) }
-    var panel by remember(pid) { mutableStateOf(0) }
-    var uploading by remember(pid) { mutableStateOf(false) }
     var loaded by remember(pid) { mutableStateOf(false) }
+    var scrollTick by remember(pid) { mutableIntStateOf(0) }
+    var moreOpen by remember(pid) { mutableStateOf(false) }
+    var stickerOpen by remember(pid) { mutableStateOf(false) }
+    var packs by remember(pid) { mutableStateOf<List<Api.EmojiPack>>(emptyList()) }
+    var speechHint by remember(pid) { mutableStateOf("") }
+    var listening by remember(pid) { mutableStateOf(false) }
 
-    var ttsReady by remember { mutableStateOf(false) }
-    val tts = remember {
-        runCatching { TextToSpeech(ctx) { st -> ttsReady = st == TextToSpeech.SUCCESS } }.getOrNull()
+    // 角色级外观设置：uiVersion 变了就重组，设置页改完返回立刻生效。
+    val uiVer = ChatPrefs.uiVersion
+    val fontSp = remember(pid, uiVer) { ChatPrefs.msgFontSpOf(pid) }
+    val lineSp = remember(pid, uiVer) { ChatPrefs.msgLineSpOf(pid) }
+    val annotDim = remember(pid, uiVer) { ChatPrefs.annotDimOf(pid) }
+    val avatarMode = remember(pid, uiVer) { ChatPrefs.avatarModeOf(pid) }
+    val enterSend = remember(pid, uiVer) { ChatPrefs.enterSendOf(pid) }
+    val showStatus = remember(pid, uiVer) { ChatPrefs.showReplyStatusOf(pid) }
+    val bubbleStyle = ChatPrefs.bubbleStyle.coerceIn(0, 2)
+    val avatarSize = ChatPrefs.avatarSize.dp.coerceIn(28.dp, 48.dp)
+    val bubbleGap = ChatPrefs.gap.dp
+    val widthPct = ChatPrefs.bubbleWidthPct / 100f
+
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val ink = if (dark) Color(0xFFF2F1EC) else Color(0xFF1C2231)
+    val dimInk = ink.copy(alpha = 0.55f)
+    val accent = if (dark) V2.accentDark else V2.accent
+    val glassFill = if (dark) Color(0xFF232630).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.72f)
+    val veil = if (dark) Color.Black.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.32f)
+
+    // 气泡：iOS 浅色双方都是白玻璃；深色才分深靛蓝 / 深灰。用户自定义色优先。
+    fun bubbleFill(mine: Boolean): Color {
+        val custom = if (mine) ChatPrefs.mineBubble else ChatPrefs.aiBubble
+        if (mine && custom != 0xFF9B8AF0.toInt()) return Color(custom)
+        if (!mine && custom != 0) return Color(custom)
+        return when {
+            mine && dark -> Color(0xFF2E3A57).copy(alpha = 0.68f)
+            mine -> Color.White.copy(alpha = 0.70f)
+            dark -> Color(0xFF232630).copy(alpha = 0.62f)
+            else -> Color.White.copy(alpha = 0.70f)
+        }
     }
-    DisposableEffect(Unit) {
-        onDispose { runCatching { tts?.stop(); tts?.shutdown() } }
+    val bubbleText = if (dark) Color(0xFFF2F1EC) else Color(0xFF1C2231)
+
+    // 语音输入（Android 侧对标 iOS SpeechInput：结果写进输入框，不自动发送）。
+    val speech = remember {
+        AndroidSpeech(ctx, onText = { input = it }, onState = { active, hint ->
+            listening = active
+            speechHint = hint
+        })
     }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) speech.start(input) else speechHint = "未授权麦克风，无法语音输入"
+    }
+    DisposableEffect(Unit) { onDispose { speech.destroy() } }
 
     val avatarBmp = remember(charAvatar) {
         runCatching {
@@ -144,28 +210,31 @@ fun ChatScreen(
     }
 
     val listState = rememberLazyListState()
-    // 188：分页渲染 —— 数据层仍是全量（loadConv 不变），只控制"画多少条"。
-    // 3648 条一次性渲染会明显卡顿，且滚动位置容易跳。
+    // 分页渲染：数据层仍全量，只控制画多少条（长会话不卡）。
     var shown by remember(pid) { mutableIntStateOf(80) }
     val render = remember(msgs, shown) {
         if (msgs.size <= shown) msgs else msgs.takeLast(shown)
     }
-    // 189：滚到最顶附近自动加载（按钮保留兜底）。防抖：用 lastAuto 记录上次触发时的 shown。
     var lastAuto by remember(pid) { mutableIntStateOf(-1) }
-    LaunchedEffect(listState, msgs.size, shown) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { idx ->
-                if (idx <= 2 && msgs.size > shown && lastAuto != shown) {
-                    lastAuto = shown
-                    shown = minOf(shown + 200, msgs.size)
-                }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }.collect { idx ->
+            if (idx <= 2 && msgs.size > shown && lastAuto != shown) {
+                lastAuto = shown
+                shown = minOf(shown + 200, msgs.size)
             }
+        }
     }
 
-    LaunchedEffect(loaded, msgs.size) {
-        // 189 修复：列表只渲染 render（最近 shown 条），不带"加载更早"横幅时最后一项索引是 render.lastIndex。
-        // 之前用 msgs.lastIndex（全量索引）会越界 → 点进长会话直接闪退。
-        if (loaded && render.isNotEmpty()) {
+    // 微信式贴底跟随：用户上翻看历史时不拽回底部。
+    var stickBottom by remember(pid) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val li = listState.layoutInfo
+            li.visibleItemsInfo.lastOrNull()?.index == li.totalItemsCount - 1
+        }.collect { stickBottom = it }
+    }
+    LaunchedEffect(loaded, render.size, scrollTick, stickBottom) {
+        if (loaded && render.isNotEmpty() && stickBottom) {
             val extra = if (msgs.size > shown) 1 else 0
             val target = (render.size - 1 + extra).coerceAtLeast(0)
             runCatching { listState.scrollToItem(target) }
@@ -176,54 +245,42 @@ fun ChatScreen(
         val after = msgs + Api.Msg("assistant", text)
         msgs = after
         Api.saveConv(pid, after)
+        scrollTick++
     }
 
-    val pickImage = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        uploading = true
         scope.launch {
-            val path = withContext(Dispatchers.IO) {
-                runCatching { Api.uploadImage(ctx, uri) }.getOrNull()
-            }
-            uploading = false
-            if (path.isNullOrBlank()) err = "图片上传失败"
-            else {
-                val after = msgs + Api.Msg("user", "[图片]")
+            val path = withContext(Dispatchers.IO) { runCatching { Api.uploadImage(ctx, uri) }.getOrNull() }
+            if (path.isNullOrBlank()) {
+                err = "图片上传失败"
+            } else {
+                val after = msgs + Api.Msg("user", "[图片]", img = path)
                 msgs = after
                 Api.saveConv(pid, after)
-                plusOpen = false
+                stickBottom = true
+                scrollTick++
             }
         }
     }
 
-    fun speakLast() {
-        val last = msgs.lastOrNull { it.role != "user" }?.content
-        if (last.isNullOrBlank()) { err = "还没有可以朗读的消息"; return }
-        if (!ttsReady) { err = "语音引擎没就绪"; return }
-        runCatching {
-            tts?.language = java.util.Locale.CHINA
-            tts?.speak(last, TextToSpeech.QUEUE_FLUSH, null, "aevis")
-        }
-    }
-
-    fun send() {
-        val text = input.trim()
+    fun sendText(raw: String) {
+        val text = raw.trim()
         if (text.isEmpty() || sending) return
         input = ""
         err = ""
-        plusOpen = false
         focus.clearFocus()
+        stickBottom = true
         val withUser = msgs + Api.Msg("user", text)
         msgs = withUser
         Api.saveConv(pid, withUser)
+        scrollTick++
         sending = true
         scope.launch {
             val isOs = ChatPrefs.chatMode == 1
             val sys = buildString {
                 if (charName.isNotBlank()) appendLine("你叫$charName。")
-                val pText = persona?.persona ?: ""
+                val pText = persona?.persona.orEmpty()
                 if (pText.isNotBlank()) appendLine("你的人设：" + pText.take(2000))
                 if (isOs) {
                     appendLine("【内心 OS 模式】这一轮只写一段内心独白，200-600 字；可以用括号写动作神态；不分条、不加小标题。")
@@ -232,11 +289,9 @@ fun ChatScreen(
                 }
                 appendLine("【状态标记】回复最后单独一行输出 [[状态]]两到六个字，用户看不到。")
             }
-            val reply = withContext(Dispatchers.IO) {
-                Api.chat("deepseek-flash", withUser.takeLast(20), sys)
-            }
+            val reply = withContext(Dispatchers.IO) { Api.chat("deepseek-flash", withUser.takeLast(20), sys) }
             if (reply.isNullOrBlank()) {
-                err = Api.lastChatError.ifBlank { "发送失败" }
+                err = Api.lastChatError.ifBlank { "发送失败，可点右侧重发" }
                 sending = false
                 return@launch
             }
@@ -256,256 +311,311 @@ fun ChatScreen(
         }
     }
 
+    fun send() { sendText(input.trim()) }
+
+    fun resend() {
+        val idx = msgs.indexOfLast { it.role == "user" }
+        if (idx < 0) return
+        val text = msgs[idx].content
+        msgs = msgs.take(idx)
+        Api.saveConv(pid, msgs)
+        sendText(text)
+    }
+
+    fun sendSticker(url: String) {
+        val after = msgs + Api.Msg("user", "[表情]", img = url)
+        msgs = after
+        Api.saveConv(pid, after)
+        stickBottom = true
+        scrollTick++
+    }
+
+    LaunchedEffect(stickerOpen) {
+        if (stickerOpen && packs.isEmpty()) {
+            packs = withContext(Dispatchers.IO) { runCatching { Api.emojiPacks() }.getOrDefault(emptyList()) }
+        }
+    }
+
+    val screenW = LocalConfiguration.current.screenWidthDp.dp
+    val maxBubble = (screenW * widthPct - avatarSize - bubbleGap - 16.dp).coerceAtLeast(160.dp)
+    val bubbleShape = when (bubbleStyle) {
+        1 -> RoundedCornerShape(8.dp)
+        2 -> RoundedCornerShape(3.dp)
+        else -> squircle(V2.bubbleRadius)
+    }
+
     Box(Modifier.fillMaxSize()) {
         BackgroundStore.renderBg(
             ctx, ChatPrefs.bgKind, ChatPrefs.bgPreset,
-            ChatPrefs.bgBlur, ChatPrefs.bgOpacity, ChatPrefs.bgVersion
+            ChatPrefs.bgBlur, ChatPrefs.bgDim, ChatPrefs.bgVersion
         )
+        // iOS veilChat：轻白膜/黑膜压住花哨背景，文字靠气泡承载。
+        Box(Modifier.fillMaxSize().background(veil))
 
         Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(50)).tapable { onBack() },
-                    contentAlignment = Alignment.Center
-                ) { Text("‹", fontSize = 27.sp, color = InkDark) }
-
-                // 左上角三点：点开自绘二级菜单（角色设置/编辑人设/聊天外观/日记/清空）
-                CircleIcon(R.drawable.ic_menu) { moreOpen = true }
-                Spacer(Modifier.width(4.dp))
-
-                Column(Modifier.weight(1f)) {
+            // ── 顶部栏（iOS inline） ───────────────────────────────────────
+            Box(Modifier.fillMaxWidth().height(56.dp)) {
+                Row(
+                    Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircleIcon(R.drawable.ic_chevron, accent, rotate = 180f, onClick = onBack)
+                    Spacer(Modifier.width(4.dp))
+                    CircleIcon(R.drawable.ic_menu, accent) { moreOpen = true }
+                }
+                Column(
+                    Modifier.align(Alignment.Center).padding(horizontal = 92.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
-                        charName.ifBlank { "聊天" },
-                        fontSize = 17.sp, fontWeight = FontWeight.Bold, color = InkDark, maxLines = 1
+                        charName.ifBlank { "聊天" }, fontSize = V2.title,
+                        fontWeight = FontWeight.SemiBold, color = ink, maxLines = 1
                     )
+                    if (showStatus) {
+                        Text(
+                            if (sending) "正在输入…" else "在线 · 上下文 ${ChatPrefs.ctxWindow} 条",
+                            fontSize = V2.micro, color = if (sending) accent else dimInk, maxLines = 1
+                        )
+                    }
+                }
+                Box(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
+                    CircleIcon(R.drawable.ic_diary, accent) { onOpenDiary(pid) }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = err.isNotBlank(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(err, fontSize = V2.tiny, color = V2.alert, modifier = Modifier.weight(1f))
                     Text(
-                        // 177：真·显示上下文条数
-                        if (sending) "正在输入…"
-                        else "在线 · 上下文 ${com.aevis.android.core.ChatPrefs.ctxWindow} 条",
-                        fontSize = 11.sp, color = if (sending) AccentBlue else InkDim, maxLines = 1
+                        "重发", fontSize = V2.tiny, color = accent,
+                        modifier = Modifier.tapable { resend() }
                     )
                 }
-
-                // 180：书=角色设定、日记=笔记本，语义要分开 → 日记用 ic_diary（工程里本来就有）
-                CircleIcon(R.drawable.ic_diary) { onOpenDiary(pid) }
             }
 
-            // 三点二级菜单（自绘，不走系统菜单）
-            if (moreOpen) {
-                ChatMoreDialog(
-                    name = charName.ifBlank { "聊天" },
-                    hasMessages = msgs.isNotEmpty(),
-                    onClose = { moreOpen = false },
-                    onRoleSet = { moreOpen = false; onOpenRoleSet(pid) },
-                    onPersona = { moreOpen = false; onOpenPersona(pid) },
-                    onLook = { moreOpen = false; onOpenLook(pid) },
-                    onDiary = { moreOpen = false; onOpenDiary(pid) },
-                    onClear = {
-                        moreOpen = false
-                        msgs = emptyList()
-                        runCatching { Api.saveConv(pid, emptyList()) }
-                    }
-                )
-            }
-
-            if (err.isNotBlank()) {
-                Text(
-                    err, fontSize = 12.sp, color = Color(0xFFD9534F),
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
-                )
-            }
-
+            // ── 消息列表 ──────────────────────────────────────────────────
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (msgs.size > shown) {
                     item(key = "loadMore") {
-                        // 189：顶部**横幅**（浅底条），不再做成普通文字行 ——
-                        // 用户会误以为消息被删了，必须一眼看出"共 N 条，只是未展开"。
                         Row(
-                            Modifier.fillMaxWidth()
-                                .background(InkDim.copy(alpha = 0.07f))
+                            Modifier.fillMaxWidth().clip(squircle(14.dp))
+                                .background(glassFill)
                                 .tapable {
                                     val added = minOf(200, msgs.size - shown)
                                     val keepIdx = listState.firstVisibleItemIndex
                                     val keepOff = listState.firstVisibleItemScrollOffset
                                     shown += added
-                                    kotlinx.coroutines.MainScope().launch {
-                                        runCatching {
-                                            listState.scrollToItem(keepIdx + added + 1, keepOff)
-                                        }
+                                    stickBottom = false
+                                    scope.launch {
+                                        runCatching { listState.scrollToItem(keepIdx + added + 1, keepOff) }
                                     }
                                 }
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                "已显示最近 ${shown} 条 / 共 ${msgs.size} 条",
-                                fontSize = 11.5.sp, color = InkDim
-                            )
+                            Text("已显示最近 $shown 条 / 共 ${msgs.size} 条", fontSize = V2.tiny, color = dimInk)
                             Spacer(Modifier.weight(1f))
-                            Text(
-                                "加载更早",
-                                fontSize = 11.5.sp, color = AccentBlue
-                            )
+                            Text("加载更早", fontSize = V2.tiny, color = accent)
                         }
                     }
                 }
-                itemsIndexed(render) { i, m ->
+                itemsIndexed(render) { _, m ->
                     val mine = m.role == "user"
-                    if (i > 0 && i % 14 == 0) {
-                        Text(
-                            "· · ·", fontSize = 11.sp, color = InkDim.copy(alpha = 0.55f),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            textAlign = TextAlign.Center
-                        )
+                    val showAvatar = when {
+                        mine -> avatarMode == 0
+                        else -> avatarMode != 2
                     }
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                        Modifier.fillMaxWidth(),
                         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
                         verticalAlignment = Alignment.Top
                     ) {
-                        if (!mine) {
-                            Avatar(avatarBmp, charName)
-                            Spacer(Modifier.width(8.dp))
+                        if (!mine && showAvatar) {
+                            Avatar(avatarBmp, charName, avatarSize)
+                            Spacer(Modifier.width(bubbleGap))
                         }
+                        if (mine) Spacer(Modifier.weight(1f, fill = false).widthIn(min = 24.dp))
                         Box(
-                            Modifier.widthIn(max = 258.dp)
-                                .clip(squircle(V2.bubbleRadius))   // iOS 连续圆角 20
-                                .background(if (mine) MineBlue else BubbleWhite)
-                                .padding(horizontal = 13.dp, vertical = 10.dp)
+                            Modifier.widthIn(max = maxBubble)
+                                .clip(bubbleShape)
+                                .background(bubbleFill(mine))
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
                         ) {
-                            // 我的气泡深墨底配白字；对方气泡半透明白配深字（对齐 iOS）
-                            Text(
-                                text = chatAnnotated(m.content,
-                                    if (mine) Color.White else BubbleInk,
-                                    if (mine) Color.White.copy(alpha = 0.75f) else InkDim),
-                                fontSize = 15.sp, lineHeight = 23.sp
-                            )
+                            if (m.img.isNotBlank()) {
+                                EmojiImage(
+                                    url = m.img,
+                                    modifier = Modifier.size(120.dp),
+                                    radius = V2.bubbleRadius
+                                )
+                            } else {
+                                Text(
+                                    text = chatAnnotated(m.content, bubbleText, dimInk, dimEnabled = annotDim),
+                                    fontSize = fontSp.sp, lineHeight = lineSp.sp
+                                )
+                            }
                         }
                         if (mine) {
-                            Spacer(Modifier.width(8.dp))
-                            // 177：写死 null 就是"换了头像聊天页不变"的真因
-                            MeBubbleAvatar()
+                            Spacer(Modifier.width(bubbleGap))
+                            if (showAvatar) MeBubbleAvatar(avatarSize)
+                        } else {
+                            Spacer(Modifier.weight(1f, fill = false).widthIn(min = 24.dp))
                         }
                     }
                 }
-            }
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier.weight(1f).height(42.dp)
-                        .clip(RoundedCornerShape(21.dp))
-                        .background(BubbleWhite)
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (input.isEmpty() && !plusOpen) {
-                        Text("输入消息", fontSize = 14.sp, color = InkDim.copy(alpha = 0.65f))
+                if (sending) {
+                    item(key = "typing") {
+                        Text(
+                            "正在输入…", fontSize = V2.tiny, color = dimInk,
+                            modifier = Modifier.padding(start = 14.dp)
+                        )
                     }
-                    BasicTextField(
-                        value = input,
-                        onValueChange = { if (!plusOpen) input = it },
-                        readOnly = plusOpen,
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = InkDark),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-
-                if (input.isNotBlank() && !plusOpen) {
-                    SendKey(sending) { send() }
-                } else {
-                    CircleIcon(R.drawable.ic_volume) { speakLast() }
-                }
-                Spacer(Modifier.width(8.dp))
-
-                val rot by animateFloatAsState(
-                    targetValue = if (plusOpen) 45f else 0f,
-                    animationSpec = spring(dampingRatio = 0.55f),
-                    label = "plus"
-                )
-                Box(
-                    Modifier.size(42.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(if (plusOpen) MineBlue else BubbleWhite)
-                        .tapable {
-                            plusOpen = !plusOpen
-                            if (plusOpen) focus.clearFocus()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "＋", fontSize = 20.sp,
-                        color = if (plusOpen) Color.White else InkDark,
-                        modifier = Modifier.graphicsLayer { rotationZ = rot }
-                    )
                 }
             }
 
+            // ── 底部悬浮输入栏 ────────────────────────────────────────────
             AnimatedVisibility(
-                visible = plusOpen,
+                visible = speechHint.isNotBlank(),
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                Column(
-                    Modifier.fillMaxWidth()
-                        .background(Color(0xF7F7F9FF))
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp)
+                        .clip(squircle(12.dp)).background(glassFill)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (panel == 0) "功能" else "表情包",
-                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkDim
+                    Text(
+                        speechHint, fontSize = V2.tiny,
+                        color = if (listening) accent else V2.alert,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            Column(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .navigationBarsPadding()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        .clip(squircle(22.dp)).background(glassFill)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier.size(26.dp), contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_cat_line), contentDescription = null,
+                            tint = accent, modifier = Modifier.size(22.dp)
                         )
-                        Spacer(Modifier.weight(1f))
-                        if (panel == 1) {
-                            Text(
-                                "返回", fontSize = 12.sp, color = AccentBlue,
-                                modifier = Modifier.tapable { panel = 0 }
-                            )
-                        }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    if (panel == 0) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-                            PanelItem("相册", uploading) { pickImage.launch("image/*") }
-                            PanelItem("拍照", false) { pickImage.launch("image/*") }
-                            PanelItem("表情", false) { panel = 1 }
-                            PanelItem("背景", false) { onOpenLook(pid) }
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.weight(1f).heightIn(min = 30.dp), contentAlignment = Alignment.CenterStart) {
+                        if (input.isEmpty()) {
+                            Text(if (listening) "正在听你说…" else "发消息", fontSize = V2.body, color = dimInk.copy(alpha = 0.7f))
+                        }
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            enabled = !listening,
+                            singleLine = enterSend,
+                            maxLines = if (enterSend) 1 else 4,
+                            textStyle = TextStyle(fontSize = V2.body, color = ink),
+                            keyboardActions = KeyboardActions(onDone = { if (enterSend) send() }),
+                            keyboardOptions = KeyboardOptions(
+                                imeAction = if (enterSend) ImeAction.Done else ImeAction.Default
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    if (input.trim().isNotBlank()) {
+                        InputCircle(accent) { send() }
+                    } else {
+                        InputIcon(R.drawable.ic_row_mic, accent) {
+                            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO)
+                                == PackageManager.PERMISSION_GRANTED
+                            ) speech.start(input) else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        PlusKey(accent) { stickerOpen = true }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 三点半窗（iOS ConvMenuSheet） ─────────────────────────────────────
+    if (moreOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { moreOpen = false },
+            containerColor = frostedSheetColor()
+        ) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 18.dp)) {
+                Text(
+                    charName.ifBlank { "聊天" }, fontSize = V2.title,
+                    fontWeight = FontWeight.SemiBold, color = ink,
+                    modifier = Modifier.padding(horizontal = V2.gutter, vertical = 10.dp)
+                )
+                ChatMenuRow("角色设置") { moreOpen = false; onOpenRoleSet(pid) }
+                ChatMenuRow("编辑人设") { moreOpen = false; onOpenPersona(pid) }
+                ChatMenuRow("模型设置") { moreOpen = false; onOpenModels(pid) }
+                ChatMenuRow("聊天外观") { moreOpen = false; onOpenLook(pid) }
+                ChatMenuRow("聊天日记") { moreOpen = false; onOpenDiary(pid) }
+                ChatMenuRow("清空本会话", enabled = msgs.isNotEmpty(), danger = true) {
+                    moreOpen = false
+                    msgs = emptyList()
+                    runCatching { Api.saveConv(pid, emptyList()) }
+                }
+                ChatMenuRow("取消") { moreOpen = false }
+            }
+        }
+    }
+
+    // ── 表情包半窗（iOS stickerSheet） ────────────────────────────────────
+    if (stickerOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { stickerOpen = false },
+            containerColor = frostedSheetColor()
+        ) {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.78f)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 8.dp)) {
+                    Text("表情包", fontSize = V2.title, fontWeight = FontWeight.SemiBold, color = ink)
+                    Spacer(Modifier.weight(1f))
+                    Text("完成", fontSize = V2.body, color = accent, modifier = Modifier.tapable { stickerOpen = false })
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SheetAction("相册") { stickerOpen = false; pickImage.launch("image/*") }
+                    SheetAction("背景") { stickerOpen = false; onOpenLook(pid) }
+                    SheetAction("外观") { stickerOpen = false; onOpenLook(pid) }
+                }
+                Box(Modifier.weight(1f)) {
+                    if (packs.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("还没有下载的表情包", fontSize = V2.body, color = dimInk)
                         }
                     } else {
-                        val emojis = listOf(
-                            "🥺", "😭", "🥰", "😤", "😴", "🙈",
-                            "💔", "✨", "🐱", "🍚", "🌙", "❤️",
-                            "😳", "🤍", "🎀", "📎"
-                        )
-                        Column {
-                            emojis.chunked(4).forEach { rowItems ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    rowItems.forEach { e ->
-                                        Box(
-                                            Modifier.height(64.dp).weight(1f)
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(Color.White)
-                                                .tapable {
-                                                    input = input + e
-                                                    plusOpen = false
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) { Text(e, fontSize = 26.sp) }
-                                    }
-                                }
-                                Spacer(Modifier.height(10.dp))
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                            EmojiGallery(packs) { url ->
+                                sendSticker(url)
+                                stickerOpen = false
                             }
                         }
                     }
@@ -515,145 +625,111 @@ fun ChatScreen(
     }
 }
 
+/** iOS 头像：白环 + 深墨靛蓝渐变占位 + 首字；有本地图直接用图。 */
 @Composable
-private fun Avatar(bmp: android.graphics.Bitmap?, name: String) {
+private fun Avatar(bmp: android.graphics.Bitmap?, name: String, size: Dp) {
     Box(
-        Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(Color(0xE6FFFFFF)),
+        Modifier.size(size + 2.dp).clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.85f))
+            .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+            .padding(1.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (bmp != null) {
-            Image(
-                bitmap = bmp.asImageBitmap(), contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(50))
-            )
-        } else {
-            Text(
-                name.take(1).ifBlank { "?" },
-                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkDark
-            )
+        Box(
+            Modifier.fillMaxSize().clip(CircleShape)
+                .background(Brush.linearGradient(listOf(V2.accentLift, V2.accentDeep))),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(), contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                )
+            } else {
+                Text(
+                    name.take(1).ifBlank { "?" }, fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold, color = Color.White
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SendKey(sending: Boolean, onClick: () -> Unit) {
-    val scale by animateFloatAsState(
-        targetValue = if (sending) 0.92f else 1f,
-        animationSpec = spring(dampingRatio = 0.45f),
-        label = "send"
-    )
-    Box(
-        Modifier.size(42.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(50))
-            .background(AccentBlue)
-            .tapable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        if (sending) {
-            Text("·", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        } else {
-            Icon(
-                painterResource(R.drawable.ic_send), contentDescription = "发送",
-                tint = Color.White, modifier = Modifier.size(18.dp)
-            )
-        }
+private fun MeBubbleAvatar(size: Dp) {
+    val f = com.aevis.android.core.AvatarStore.file("me")
+    val bmp = remember(f.length()) {
+        if (f.exists() && f.length() > 64)
+            com.aevis.android.data.decodeSampledFile(f.absolutePath, 128, 128) else null
     }
+    Avatar(bmp, "我", size)
 }
 
-/** 177：矢量图标版（emoji 换成 drawable）。*/
 @Composable
-private fun CircleIcon(@androidx.annotation.DrawableRes icon: Int, onClick: () -> Unit) {
+private fun CircleIcon(
+    @androidx.annotation.DrawableRes icon: Int,
+    tint: Color,
+    rotate: Float = 0f,
+    onClick: () -> Unit
+) {
     Box(
-        Modifier.size(38.dp).clip(RoundedCornerShape(50))
-            .background(Color(0xE6FFFFFF))
-            .tapable { onClick() },
+        Modifier.size(36.dp).clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.62f))
+            .tapable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            painterResource(icon), contentDescription = null,
-            tint = InkDark, modifier = Modifier.size(18.dp)
+            painterResource(icon), contentDescription = null, tint = tint,
+            modifier = Modifier.size(19.dp).graphicsLayer { rotationZ = rotate }
         )
     }
 }
 
 @Composable
-private fun CircleIcon(symbol: String, onClick: () -> Unit) {
+private fun InputIcon(@androidx.annotation.DrawableRes icon: Int, tint: Color, onClick: () -> Unit) {
+    Box(Modifier.size(34.dp).tapable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun InputCircle(tint: Color, onClick: () -> Unit) {
+    val scale by animateFloatAsState(targetValue = 1f, animationSpec = spring(), label = "sendScale")
     Box(
-        Modifier.size(38.dp).clip(RoundedCornerShape(50))
-            .background(Color(0xE6FFFFFF))
-            .tapable { onClick() },
+        Modifier.size(30.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape).background(tint).tapable(onClick = onClick),
         contentAlignment = Alignment.Center
-    ) { Text(symbol, fontSize = 14.sp, color = InkDark) }
-}
-
-@Composable
-private fun PanelItem(label: String, busy: Boolean, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(56.dp).clip(RoundedCornerShape(16.dp))
-                .background(Color.White)
-                .tapable { if (!busy) onClick() },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(if (busy) "…" else label.take(1), fontSize = 17.sp, color = InkDark)
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(label, fontSize = 11.5.sp, color = InkDim)
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_send), contentDescription = "发送",
+            tint = Color.White, modifier = Modifier.size(16.dp)
+        )
     }
 }
 
-/**
- * 我方气泡头像（2026-11-17，177）：读本地 `AvatarStore.file("me")`，
- * 128 采样解码；「我」页换头像后这里立即跟着变。
- */
 @Composable
-private fun MeBubbleAvatar() {
-    val f = com.aevis.android.core.AvatarStore.file("me")
-    val bmp = remember(f.length()) {
-        if (f.exists() && f.length() > 64)
-            com.aevis.android.data.decodeSampledFile(f.absolutePath, 128, 128)
-        else null
+private fun PlusKey(tint: Color, onClick: () -> Unit) {
+    val rot by animateFloatAsState(targetValue = 0f, animationSpec = spring(), label = "plus")
+    Box(
+        Modifier.size(30.dp).clip(CircleShape).background(tint).tapable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            "＋", fontSize = 18.sp, color = Color.White,
+            modifier = Modifier.graphicsLayer { rotationZ = rot }
+        )
     }
-    Avatar(bmp, "我")
 }
 
-/** 会话二级菜单（2026-11-27）：自绘卡片，不用系统菜单。*/
 @Composable
-private fun ChatMoreDialog(
-    name: String,
-    hasMessages: Boolean,
-    onClose: () -> Unit,
-    onRoleSet: () -> Unit,
-    onPersona: () -> Unit,
-    onLook: () -> Unit,
-    onDiary: () -> Unit,
-    onClear: () -> Unit
-) {
-    Dialog(onDismissRequest = onClose) {
-        Column(
-            Modifier.fillMaxWidth().clip(squircle(20.dp)).background(Color.White)
-        ) {
-            Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 4.dp)) {
-                Text(
-                    name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                    color = InkDark, maxLines = 1
-                )
-                Text("会话操作", fontSize = 11.sp, color = InkDim)
-            }
-            ChatMenuRow("角色设置") { onRoleSet() }
-            ChatMenuRow("编辑人设") { onPersona() }
-            ChatMenuRow("聊天外观") { onLook() }
-            ChatMenuRow("聊天日记") { onDiary() }
-            ChatMenuRow("清空本会话", enabled = hasMessages, danger = true) { onClear() }
-            Box(
-                Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(0.5.dp)
-                    .background(InkDim.copy(alpha = 0.12f))
-            )
-            ChatMenuRow("取消") { onClose() }
-            Spacer(Modifier.height(4.dp))
-        }
+private fun SheetAction(label: String, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(squircle(14.dp)).background(Color.White.copy(alpha = 0.65f))
+            .tapable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, fontSize = V2.tiny, color = V2.accent)
     }
 }
 
@@ -665,18 +741,70 @@ private fun ChatMenuRow(
     onClick: () -> Unit
 ) {
     Box(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            .tapable { if (enabled) onClick() }
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).tapable { if (enabled) onClick() }
+            .padding(horizontal = V2.gutter, vertical = 12.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Text(
-            text, fontSize = 15.sp,
+            text, fontSize = V2.body,
             color = when {
-                danger -> Color(0xFFD9534F)
-                !enabled -> InkDim.copy(alpha = 0.4f)
-                else -> InkDark
+                danger -> V2.alert
+                !enabled -> dimColor()
+                else -> inkColor()
             }
         )
+    }
+}
+
+@Composable
+private fun inkColor(): Color =
+    if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) Color(0xFFF2F1EC) else Color(0xFF1C2231)
+
+@Composable
+private fun dimColor(): Color = inkColor().copy(alpha = 0.4f)
+
+/** Android 语音输入：结果只写输入框，不自动发送（与 iOS SpeechInput 同口径）。 */
+private class AndroidSpeech(
+    ctx: Context,
+    private val onText: (String) -> Unit,
+    private val onState: (Boolean, String) -> Unit
+) : RecognitionListener {
+    private val recognizer: SpeechRecognizer? = runCatching { SpeechRecognizer.createSpeechRecognizer(ctx) }.getOrNull()
+    private var base = ""
+
+    fun start(current: String) {
+        val r = recognizer
+        if (r == null) { onState(false, "语音识别不可用"); return }
+        base = current
+        r.setRecognitionListener(this)
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINA.toString())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "正在听你说…")
+        }
+        onState(true, "正在听你说，说完自动结束")
+        runCatching { r.startListening(intent) }.onFailure { onState(false, "语音识别启动失败") }
+    }
+
+    fun destroy() { runCatching { recognizer?.destroy() } }
+
+    override fun onReadyForSpeech(params: Bundle?) {}
+    override fun onBeginningOfSpeech() {}
+    override fun onRmsChanged(rmsdB: Float) {}
+    override fun onBufferReceived(buffer: ByteArray?) {}
+    override fun onEndOfSpeech() { onState(false, "") }
+    override fun onError(error: Int) { onState(false, "语音识别失败，请重试") }
+    override fun onEvent(eventType: Int, params: Bundle?) {}
+
+    override fun onResults(results: Bundle?) {
+        val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+        if (text.isNotBlank()) onText(base + text)
+        onState(false, "")
+    }
+
+    override fun onPartialResults(partialResults: Bundle?) {
+        val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+        if (text.isNotBlank()) onText(base + text)
     }
 }

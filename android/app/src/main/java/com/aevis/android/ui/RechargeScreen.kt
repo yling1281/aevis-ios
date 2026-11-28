@@ -39,7 +39,7 @@ import kotlinx.coroutines.withContext
  * 用户：「充值页面也没做」+「不管选的是微信还是支付宝，都通通直接跳到这个收银台」。
  *
  * 所以这里**不自己做微信/支付宝按钮** —— 点套餐统一跳我们自己的收银台：
- *   `https://aevis.cn/pay/?product=pt_30&name=<用户名>`
+ *   `https://aevis.lingyan.cyou/pay/?product=pt_30&name=<用户名>`
  * 收银台里再选支付方式，手机端会直接用 `weixin://` / `alipays://` 拉起 App。
  *
  * 商品名和订单号由收银台拼（`用户名 商品名 订单号`），后台对账能认出是谁买的。
