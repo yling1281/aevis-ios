@@ -29,6 +29,7 @@ import com.aevis.android.R
 import com.aevis.android.core.I18n.tr
 import com.aevis.android.data.Api
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -162,6 +163,7 @@ internal object PayState {
 internal fun PaySheetHost() {
     val sku = PayState.sku ?: return
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val ink = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
     var phase by remember { mutableStateOf(0) }   // 0 创建中 / 1 就绪 / 2 失败
     var payUrl by remember { mutableStateOf("") }
@@ -170,8 +172,24 @@ internal fun PaySheetHost() {
     var payLink by remember { mutableStateOf("") }
     var err by remember { mutableStateOf("") }
 
-    LaunchedEffect(sku) {
+    // 2026-11-28 到账检测：收银台只给跳转地址、拿不到订单号，所以用
+    // 「下单前的余额 / 会员到期」做快照，付款后每 3 秒比一次 —— 变了就是到账了。
+    // 这是唯一不依赖服务端新增订单查询接口、又能给用户确定反馈的办法。
+    var beforeSnap by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var paid by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    // 失败后重试：加一个计数当 LaunchedEffect 的 key，不用重开半窗
+    var retry by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(sku, retry) {
         phase = 0
+        paid = false
+        beforeSnap = withContext(Dispatchers.IO) {
+            runCatching {
+                val w = Api.wallet()
+                Pair(w?.points ?: -1, w?.member?.planEnd.orEmpty())
+            }.getOrNull()
+        }
         val r = withContext(Dispatchers.IO) { runCatching { Api.paySessionInfoV2(sku) }.getOrNull() }
         if (r == null) {
             phase = 2
@@ -182,6 +200,37 @@ internal fun PaySheetHost() {
             payLink = r.payLink
             phase = 1
         }
+    }
+
+    // 到账轮询：只在「二维码已出」的阶段跑，成功后停。
+    LaunchedEffect(phase, sku) {
+        if (phase != 1) return@LaunchedEffect
+        val base = beforeSnap
+        repeat(200) {                    // 最长约 10 分钟
+            delay(3000)
+            if (paid) return@LaunchedEffect
+            val now = withContext(Dispatchers.IO) {
+                runCatching {
+                    val w = Api.wallet()
+                    Pair(w?.points ?: -1, w?.member?.planEnd.orEmpty())
+                }.getOrNull()
+            } ?: return@repeat
+            if (base != null) {
+                val gotPoints = base.first >= 0 && now.first > base.first
+                val gotMember = now.second.isNotBlank() && now.second != base.second
+                if (gotPoints || gotMember) {
+                    paid = true
+                    return@LaunchedEffect
+                }
+            }
+        }
+    }
+
+    // 成功后停 1.2 秒自动关半窗，让用户看到「支付成功」
+    LaunchedEffect(paid) {
+        if (!paid) return@LaunchedEffect
+        delay(1400)
+        PayState.clear()
     }
 
     androidx.compose.material3.ModalBottomSheet(
@@ -196,9 +245,10 @@ internal fun PaySheetHost() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                when (phase) {
-                    0 -> "正在创建订单…"
-                    1 -> "扫码支付"
+                when {
+                    paid -> "支付成功"
+                    phase == 0 -> "正在创建订单…"
+                    phase == 1 -> "扫码支付"
                     else -> "下单失败"
                 },
                 fontSize = 16.sp, fontWeight = FontWeight.SemiBold
@@ -214,6 +264,25 @@ internal fun PaySheetHost() {
                     Spacer(Modifier.height(18.dp))
                 }
                 1 -> {
+                    if (paid) {
+                        // 2026-11-28：付款成功后给一个确定的结束态，别让用户对着
+                        // 已经付过的二维码发呆（之前付完钱 App 里毫无反馈）。
+                        Box(
+                            Modifier.size(66.dp).clip(squircle(33.dp))
+                                .background(androidx.compose.ui.graphics.Color(0xFF34C759)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("✓", fontSize = 34.sp,
+                                color = androidx.compose.ui.graphics.Color.White,
+                                fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text("支付成功", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        Text("已到账，余额已更新", fontSize = 12.sp,
+                            color = ink.copy(alpha = 0.5f))
+                        Spacer(Modifier.height(14.dp))
+                    } else {
                     // 2026-11-25 聚合码：优先 pay_link（微信/支付宝扫同一张码按 UA 分流），
                     // 没有则退回 code_url（微信 Native）/ 收银台地址。
                     val content = payLink.ifBlank { codeUrl.ifBlank { payUrl } }
@@ -276,12 +345,64 @@ internal fun PaySheetHost() {
                         Text("用浏览器打开", fontSize = V2.sub, color = ink.copy(alpha = 0.65f))
                     }
                     Spacer(Modifier.height(10.dp))
+                    // 「我已完成支付」：立即比对一次余额/会员，没变就老实说还没到账，
+                    // 别让用户以为按钮能催单。到账了就直接进成功态。
+                    Box(
+                        Modifier.fillMaxWidth().clip(squircle(14.dp))
+                            .background(V2.accent.copy(alpha = 0.12f))
+                            .tapable {
+                                if (checking) return@tapable
+                                checking = true
+                                scope.launch {
+                                    val base = beforeSnap
+                                    val now = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            val w = Api.wallet()
+                                            Pair(w?.points ?: -1, w?.member?.planEnd.orEmpty())
+                                        }.getOrNull()
+                                    }
+                                    if (base != null && now != null) {
+                                        val got = (base.first >= 0 && now.first > base.first) ||
+                                                (now.second.isNotBlank() && now.second != base.second)
+                                        if (got) paid = true
+                                        else Toast.makeText(ctx, "还没到账，再等几秒",
+                                            Toast.LENGTH_SHORT).show()
+                                    }
+                                    checking = false
+                                }
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(if (checking) "正在确认…" else "我已完成支付",
+                            fontSize = V2.sub, color = V2.accent,
+                            fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    }
                 }
                 else -> {
                     Text(
                         err, fontSize = 13.sp, color = V2.alert, lineHeight = 20.sp
                     )
                     Spacer(Modifier.height(16.dp))
+                    Box(
+                        Modifier.fillMaxWidth().clip(squircle(14.dp))
+                            .background(V2.accent)
+                            .tapable {
+                                // 重新下单：回到「创建中」，失败原因清掉
+                                err = ""
+                                phase = 0
+                                retry += 1
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("重试", fontSize = V2.sub,
+                            color = androidx.compose.ui.graphics.Color.White,
+                            fontWeight = FontWeight.Medium)
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Box(
                         Modifier.fillMaxWidth().clip(squircle(14.dp))
                             .background(ink.copy(alpha = 0.06f))

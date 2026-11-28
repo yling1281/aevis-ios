@@ -31,6 +31,7 @@
 		A10000000000000000000018 /* PaySuccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* PaySuccessView.swift */; };
 		A10000000000000000000019 /* AnimatedNumber.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* AnimatedNumber.swift */; };
 		A10000000000000000000020 /* AccountCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* AccountCenterView.swift */; };
+		A10000000000000000000035 /* QQBindView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000035 /* QQBindView.swift */; };
 		A10000000000000000000021 /* ServerStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* ServerStatusView.swift */; };
 		A10000000000000000000022 /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThemeSettingsView.swift */; };
 		A10000000000000000000023 /* CharacterSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* CharacterSettingsView.swift */; };
@@ -53,6 +54,10 @@
 		A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* AppIcon60x60@2x.png */; };
 		A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppIcon60x60@3x.png */; };
 		A20000000000000000000003 /* AppIcon1024.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* AppIcon1024.png */; };
+		A20000000000000000000011 /* brand-qq.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* brand-qq.png */; };
+		A20000000000000000000012 /* brand-wechat.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000012 /* brand-wechat.png */; };
+		A20000000000000000000013 /* brand-wechatpay.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* brand-wechatpay.png */; };
+		A20000000000000000000014 /* brand-alipay.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000014 /* brand-alipay.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -82,6 +87,7 @@
 		B10000000000000000000018 /* PaySuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaySuccessView.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* AnimatedNumber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedNumber.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* AccountCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountCenterView.swift; sourceTree = "<group>"; };
+		B10000000000000000000035 /* QQBindView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QQBindView.swift; sourceTree = "<group>"; };
 		B10000000000000000000021 /* ServerStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatusView.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
 		B10000000000000000000023 /* CharacterSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterSettingsView.swift; sourceTree = "<group>"; };
@@ -101,6 +107,10 @@
 		B10000000000000000000032 /* CheckInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckInView.swift; sourceTree = "<group>"; };
 		B10000000000000000000033 /* GrowthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowthView.swift; sourceTree = "<group>"; };
 		B10000000000000000000034 /* ChatLogsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatLogsView.swift; sourceTree = "<group>"; };
+		B20000000000000000000011 /* brand-qq.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "brand-qq.png"; sourceTree = "<group>"; };
+		B20000000000000000000012 /* brand-wechat.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "brand-wechat.png"; sourceTree = "<group>"; };
+		B20000000000000000000013 /* brand-wechatpay.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "brand-wechatpay.png"; sourceTree = "<group>"; };
+		B20000000000000000000014 /* brand-alipay.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "brand-alipay.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -180,6 +190,7 @@
 				B10000000000000000000018 /* PaySuccessView.swift */,
 				B10000000000000000000019 /* AnimatedNumber.swift */,
 				B10000000000000000000020 /* AccountCenterView.swift */,
+				B10000000000000000000035 /* QQBindView.swift */,
 				B10000000000000000000021 /* ServerStatusView.swift */,
 				B10000000000000000000022 /* ThemeSettingsView.swift */,
 				B10000000000000000000023 /* CharacterSettingsView.swift */,
@@ -221,6 +232,10 @@
 				B20000000000000000000002 /* AppIcon60x60@3x.png */,
 				B20000000000000000000003 /* AppIcon1024.png */,
 				B20000000000000000000004 /* icon-source.png */,
+				B20000000000000000000011 /* brand-qq.png */,
+				B20000000000000000000012 /* brand-wechat.png */,
+				B20000000000000000000013 /* brand-wechatpay.png */,
+				B20000000000000000000014 /* brand-alipay.png */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -287,6 +302,10 @@
 				A20000000000000000000001 /* AppIcon60x60@2x.png in Resources */,
 				A20000000000000000000002 /* AppIcon60x60@3x.png in Resources */,
 				A20000000000000000000003 /* AppIcon1024.png in Resources */,
+				A20000000000000000000011 /* brand-qq.png in Resources */,
+				A20000000000000000000012 /* brand-wechat.png in Resources */,
+				A20000000000000000000013 /* brand-wechatpay.png in Resources */,
+				A20000000000000000000014 /* brand-alipay.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,6 +340,7 @@
 				A10000000000000000000018 /* PaySuccessView.swift in Sources */,
 				A10000000000000000000019 /* AnimatedNumber.swift in Sources */,
 				A10000000000000000000020 /* AccountCenterView.swift in Sources */,
+				A10000000000000000000035 /* QQBindView.swift in Sources */,
 				A10000000000000000000021 /* ServerStatusView.swift in Sources */,
 				A10000000000000000000022 /* ThemeSettingsView.swift in Sources */,
 				A10000000000000000000023 /* CharacterSettingsView.swift in Sources */,

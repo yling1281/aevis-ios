@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 支付渠道的品牌标识与整行组件（2026-11-25）。
 ///
@@ -49,9 +50,18 @@ enum PayBrand: String, CaseIterable, Identifiable {
         case .alipay: return "alipay"
         }
     }
+
+    /// 2026-11-28：换成官方彩色图标（Resources 里的 PNG，已抠掉白边）。
+    /// 取不到才退回下面的矢量画法，保证任何构建方式都不会白块。
+    var imageName: String {
+        switch self {
+        case .wechat: return "brand-wechatpay"
+        case .alipay: return "brand-alipay"
+        }
+    }
 }
 
-/// 品牌圆形标识：品牌色实心底 + 白色官方字形。
+/// 品牌圆形标识：优先用官方 PNG，取不到时用品牌色实心 + 白色字形兜底。
 ///
 /// 用法：`PayBrandMark(brand: .wechat, size: 40)`
 struct PayBrandMark: View {
@@ -60,25 +70,29 @@ struct PayBrandMark: View {
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(brand.tint)
-                .frame(width: size, height: size)
+            if let img = UIImage(named: brand.imageName) {
+                Image(uiImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
+            } else {
+                Circle()
+                    .fill(brand.tint)
+                    .frame(width: size, height: size)
 
-            switch brand {
-            case .wechat:
-                // 双气泡：微信官方标识的核心结构（两个重叠对话框 + 四只眼睛）。
-                // SF Symbol 的 bubble.left.and.bubble.right.fill 就是同一结构，眼睛用两个白点补。
-                ZStack {
+                switch brand {
+                case .wechat:
                     Image(systemName: "bubble.left.and.bubble.right.fill")
                         .font(.system(size: size * 0.52, weight: .regular))
                         .foregroundStyle(.white)
+                case .alipay:
+                    Text("支")
+                        .font(.system(size: size * 0.56, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .offset(y: -size * 0.02)
                 }
-            case .alipay:
-                // 支付宝 Logo 本体就是「支」字，用重体让它在小尺寸下也认得出来。
-                Text("支")
-                    .font(.system(size: size * 0.56, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-                    .offset(y: -size * 0.02)
             }
         }
         .accessibilityLabel(brand.title)

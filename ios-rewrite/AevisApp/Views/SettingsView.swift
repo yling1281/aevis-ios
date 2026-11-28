@@ -95,6 +95,11 @@ struct SettingsView: View {
                             CheckInView()
                         }
                         innerDivider
+                        // 2026-11-28：QQ 接入（扫码 + 会话内发六位码确认绑定）
+                        navRow(icon: "bubble.left.and.bubble.right.fill", title: "QQ 接入", value: "") {
+                            QQBindView()
+                        }
+                        innerDivider
                         if AevisHosts.featureEnabled("growth") {
                             navRow(icon: "person.2.fill", title: "创作者与活动", value: "") {
                                 GrowthView()

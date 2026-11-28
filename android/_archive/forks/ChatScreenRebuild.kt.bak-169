@@ -1,0 +1,392 @@
+package com.aevis.android.ui
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.aevis.android.core.BackgroundStore
+import com.aevis.android.core.ChatPrefs
+import com.aevis.android.data.Api
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * 聊天页（2026-11-17 第 3 版，按截图对齐）。
+ *
+ * 视觉参照用户提供的界面截图自己实现（不是搬代码）：
+ *   · 整屏自定义背景 + 半透明气泡
+ *   · 对方=白底气泡，我=淡蓝紫气泡，圆角 20，最大宽 78%
+ *   · 括号里的动作描写自动变浅灰（同一条消息内）
+ *   · 顶栏：返回 + 名字/状态两行 + 右侧三个圆钮
+ *   · 输入条：胶囊输入框 + 麦克风 + 加号
+ *   · 加号展开时输入框只读、键盘收起
+ */
+
+internal fun chatAnnotated(
+    text: String, normal: Color, dim: Color, visibleLen: Int = -1
+): AnnotatedString {
+    val limit = if (visibleLen >= 0) minOf(visibleLen, text.length) else text.length
+    return buildAnnotatedString {
+        var depth = 0
+        for (i in 0 until limit) {
+            val c = text[i]
+            when (c) {
+                '（', '(', '【', '[' -> { depth++; withStyle(SpanStyle(color = dim)) { append(c) } }
+                '）', ')', '】', ']' -> {
+                    withStyle(SpanStyle(color = dim)) { append(c) }
+                    if (depth > 0) depth--
+                }
+                else -> {
+                    if (depth > 0) withStyle(SpanStyle(color = dim)) { append(c) }
+                    else withStyle(SpanStyle(color = normal)) { append(c) }
+                }
+            }
+        }
+    }
+}
+
+internal fun loadMemes(ctx: android.content.Context): List<String> = emptyList()
+internal fun appendMemes(list: List<String>): String = ""
+internal fun statusOf(pid: Long, kind: Int): String = ""
+
+private val BubbleWhite = Color(0xF2FFFFFF)
+private val MineBlue = Color(0xFFD8E2FF)
+private val InkDark = Color(0xFF1B1D2A)
+private val InkDim = Color(0xFF6B7189)
+
+@Composable
+fun ChatScreen(
+    pid: String,
+    onBack: () -> Unit,
+    onOpenRoleSet: (String) -> Unit = {},
+    onOpenPersona: (String) -> Unit = {},
+    onOpenLook: (String) -> Unit = {},
+    onOpenDiary: (String) -> Unit = {},
+    onOpenModels: (String) -> Unit = {}
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
+
+    var msgs by remember(pid) { mutableStateOf<List<Api.Msg>>(emptyList()) }
+    var input by remember(pid) { mutableStateOf("") }
+    var sending by remember(pid) { mutableStateOf(false) }
+    var err by remember(pid) { mutableStateOf("") }
+    var name by remember(pid) { mutableStateOf("") }
+    var plusOpen by remember(pid) { mutableStateOf(false) }
+    var panel by remember(pid) { mutableStateOf(0) }   // 0 功能 / 1 表情
+    var uploading by remember(pid) { mutableStateOf(false) }
+
+    LaunchedEffect(pid) {
+        msgs = withContext(Dispatchers.IO) { runCatching { Api.loadConv(pid) }.getOrDefault(emptyList()) }
+    }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(msgs.size) {
+        if (msgs.isNotEmpty()) runCatching { listState.animateScrollToItem(msgs.size - 1) }
+    }
+
+    fun pushOut(text: String) {
+        val after = msgs + Api.Msg("assistant", text)
+        msgs = after
+        Api.saveConv(pid, after)
+    }
+
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        uploading = true
+        scope.launch {
+            val path = withContext(Dispatchers.IO) {
+                runCatching { Api.uploadImage(ctx, uri) }.getOrNull()
+            }
+            uploading = false
+            if (path.isNullOrBlank()) err = "图片上传失败"
+            else {
+                val after = msgs + Api.Msg("user", "[图片]")
+                msgs = after
+                Api.saveConv(pid, after)
+                plusOpen = false
+            }
+        }
+    }
+
+    fun send() {
+        val text = input.trim()
+        if (text.isEmpty() || sending) return
+        input = ""
+        err = ""
+        plusOpen = false
+        focus.clearFocus()
+        val withUser = msgs + Api.Msg("user", text)
+        msgs = withUser
+        Api.saveConv(pid, withUser)
+        sending = true
+        scope.launch {
+            val isOs = ChatPrefs.chatMode == 1
+            val sys = buildString {
+                if (name.isNotBlank()) appendLine("你叫$name。")
+                if (isOs) {
+                    appendLine("【内心 OS 模式】这一轮只写一段内心独白，200-600 字；可以用括号写动作神态；不分条、不加小标题。")
+                } else {
+                    appendLine("【微信聊天模式】每条不超过 15 字；一次发 3-5 条，情绪起来 6-8 条；每条之间用换行分开；不要用括号写动作。")
+                }
+                appendLine("【状态标记】回复最后单独一行输出 [[状态]]两到六个字，用户看不到。")
+            }
+            val reply = withContext(Dispatchers.IO) {
+                Api.chat("deepseek-flash", withUser.takeLast(20), sys)
+            }
+            if (reply.isNullOrBlank()) {
+                err = Api.lastChatError.ifBlank { "发送失败" }
+                sending = false
+                return@launch
+            }
+            val clean = reply.replace(Regex("\\[\\[状态\\]\\].*"), "").trim()
+            val parts = if (isOs) listOf(clean) else splitReply(clean, "。！？～")
+            parts.forEachIndexed { i, part ->
+                if (i > 0) delay(if (part.length > 40) 900L else 650L)
+                pushOut(part)
+            }
+            sending = false
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        // 自定义背景（没设就是纯色）
+        BackgroundStore.renderBg(
+            ctx, ChatPrefs.bgKind, ChatPrefs.bgPreset,
+            ChatPrefs.bgBlur, ChatPrefs.bgOpacity, ChatPrefs.bgVersion
+        )
+
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            // ── 顶栏
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(40.dp).clip(RoundedCornerShape(50)).tapable { onBack() },
+                    contentAlignment = Alignment.Center
+                ) { Text("‹", fontSize = 26.sp, color = InkDark) }
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        name.ifBlank { "聊天" },
+                        fontSize = 18.sp, fontWeight = FontWeight.Bold, color = InkDark,
+                        maxLines = 1
+                    )
+                    Text(
+                        if (sending) "正在输入…" else "在线",
+                        fontSize = 11.sp, color = InkDim, maxLines = 1
+                    )
+                }
+
+                CircleIcon("☰") { onOpenRoleSet(pid) }
+                Spacer(Modifier.width(6.dp))
+                CircleIcon("◍") { onOpenLook(pid) }
+                Spacer(Modifier.width(6.dp))
+                CircleIcon("◎") { onOpenDiary(pid) }
+            }
+
+            if (err.isNotBlank()) {
+                Text(
+                    err, fontSize = 12.sp, color = Color(0xFFD9534F),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+                )
+            }
+
+            // ── 消息列表
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                itemsIndexed(msgs) { i, m ->
+                    val mine = m.role == "user"
+                    if (i > 0 && i % 12 == 0) {
+                        Text(
+                            "· · ·", fontSize = 11.sp, color = InkDim.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth(0.78f)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (mine) MineBlue else BubbleWhite)
+                                .padding(horizontal = 14.dp, vertical = 11.dp)
+                        ) {
+                            Text(
+                                text = chatAnnotated(m.content, InkDark, InkDim),
+                                fontSize = 15.sp, lineHeight = 23.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 输入条
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.weight(1f).height(44.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(BubbleWhite)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (input.isEmpty() && !plusOpen) {
+                        Text("输入消息", fontSize = 14.sp, color = InkDim.copy(alpha = 0.7f))
+                    }
+                    BasicTextField(
+                        value = input,
+                        onValueChange = { if (!plusOpen) input = it },
+                        readOnly = plusOpen,
+                        singleLine = false,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 14.sp, color = InkDark
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                // 发送（有字时出现），否则显示麦克风
+                if (input.isNotBlank() && !plusOpen) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(50))
+                            .background(MineBlue).tapable { send() },
+                        contentAlignment = Alignment.Center
+                    ) { Text("↑", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = InkDark) }
+                } else {
+                    Spacer(Modifier.width(8.dp))
+                    CircleIcon("🎙") { err = "语音还在接" }
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(50))
+                        .background(if (plusOpen) MineBlue else BubbleWhite)
+                        .tapable {
+                            plusOpen = !plusOpen
+                            if (plusOpen) focus.clearFocus()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(if (plusOpen) "×" else "＋", fontSize = 20.sp, color = InkDark)
+                }
+            }
+
+            // ── 面板
+            if (plusOpen) {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(Color(0xF7F7F9FF))
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (panel == 0) "功能" else "表情包",
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkDim
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (panel == 1) {
+                            Text("从表情包库导入", fontSize = 12.sp, color = Color(0xFF4A6CF7),
+                                modifier = Modifier.tapable { err = "表情包库还在接" })
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (panel == 0) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                            PanelItem("相册", uploading) { pickImage.launch("image/*") }
+                            PanelItem("拍照", false) { pickImage.launch("image/*") }
+                            PanelItem("表情", false) { panel = 1 }
+                            PanelItem("背景", false) { onOpenLook(pid) }
+                        }
+                    } else {
+                        val emojis = listOf(
+                            "🥺", "😭", "🥰", "😤", "😴", "🙈",
+                            "💔", "✨", "🐱", "🍚", "🌙", "❤️",
+                            "😳", "🤍", "🎀", "📎"
+                        )
+                        Column {
+                            emojis.chunked(4).forEach { rowItems ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    rowItems.forEach { e ->
+                                        Box(
+                                            Modifier.size(70.dp).weight(1f)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(Color.White)
+                                                .tapable {
+                                                    input = appendMemes(listOf(input, e))
+                                                    if (input.isNotBlank() && plusOpen) {
+                                                        plusOpen = false
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) { Text(e, fontSize = 26.sp) }
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircleIcon(symbol: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(38.dp).clip(RoundedCornerShape(50))
+            .background(Color(0xE6FFFFFF))
+            .tapable { onClick() },
+        contentAlignment = Alignment.Center
+    ) { Text(symbol, fontSize = 15.sp, color = InkDark) }
+}
+
+@Composable
+private fun PanelItem(label: String, busy: Boolean, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(56.dp).clip(RoundedCornerShape(16.dp))
+                .background(Color.White)
+                .tapable { if (!busy) onClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(if (busy) "…" else label.take(1), fontSize = 17.sp, color = InkDark)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, fontSize = 11.5.sp, color = InkDim)
+    }
+}

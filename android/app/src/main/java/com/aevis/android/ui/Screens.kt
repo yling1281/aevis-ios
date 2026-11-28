@@ -1335,6 +1335,8 @@ private fun SubPageHost(
         route == "font" -> FontScreen(onBack = back)
         route == "models" -> FeatureGate("modelStatus", back) { ModelScreen(onBack = back) }
         route == "wxbind" -> WxBindScreen(onBack = back)
+        // 2026-11-28：QQ 接入（扫码出六位码 → QQ 会话内发码确认 → 自动变已绑定）
+        route == "qqbind" -> QQBindScreen(onBack = back)
         route == "checkin" -> FeatureGate("growth", back) { CheckinScreen(onBack = back) }
         route == "recharge" -> FeatureGate("member", back) { RechargeScreen(onBack = back) }
         route.startsWith("chat:") -> FeatureGate("chat", back) {
@@ -1684,8 +1686,9 @@ private fun HomeTab(
         mutableStateOf<Api.QuotaState?>(com.aevis.android.core.ColdCache.loadQuota(homeCtx))
     }
     var persons by remember { mutableStateOf<List<Api.Persona>>(emptyList()) }
-    // 群聊入口的占位弹窗（2026-11-16，群号未给）
+    // 群聊入口：后台配了群号/群链接就直接跳，没配才弹说明（2026-11-28 接上）
     var qqGroupAsk by remember { mutableStateOf(false) }
+    val qqScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         runCatching { Api.me() }.getOrNull()?.let { m ->
@@ -1978,8 +1981,32 @@ private fun HomeTab(
                 HomeIcon(tr("朋友圈"), R.drawable.ic_tab_chat, Modifier.weight(1f)) { onOpenPage("moments") }
                 if (Api.featureEnabled("growth"))
                     HomeIcon(tr("签到"), R.drawable.ic_row_bell, Modifier.weight(1f)) { onOpenPage("checkin") }
-                // 群聊：2026-11-16 改成进 QQ 群（群号还没给，先弹说明，不编群号）
-                HomeIcon(tr("群聊"), R.drawable.ic_tab_chat, Modifier.weight(1f)) { qqGroupAsk = true }
+                // 群聊：2026-11-28 接上后台配置的官方群（群号 → mqqapi，链接 → 浏览器）
+                HomeIcon(tr("群聊"), R.drawable.ic_tab_chat, Modifier.weight(1f)) {
+                    qqScope.launch {
+                        val g = withContext(Dispatchers.IO) {
+                            runCatching { Api.qqStatus()?.qqGroup }.getOrNull().orEmpty()
+                        }
+                        if (g.isBlank()) {
+                            qqGroupAsk = true
+                            return@launch
+                        }
+                        val uri = if (g.startsWith("http")) Uri.parse(g)
+                        else Uri.parse(
+                            "mqqapi://card/show_pslcard?src_type=internal&version=1" +
+                                "&uin=" + g + "&card_type=group")
+                        val ok = runCatching {
+                            homeCtx.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        }.isSuccess
+                        if (!ok) {
+                            // 没装 QQ / 深链被拦：退化成浏览器打开
+                            val web = if (g.startsWith("http")) g
+                            else "https://qun.qq.com/m/qun/qunmanage/index.html?gc=" + g
+                            runCatching { homeCtx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(web))) }
+                                .onFailure { qqGroupAsk = true }
+                        }
+                    }
+                }
             }
         }
 

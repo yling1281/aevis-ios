@@ -600,6 +600,10 @@ struct ShopView: View {
             guard !order.qrContent.isEmpty else { showTip("支付链接为空，请稍后重试"); return }
             // 2.8：微信 / 支付宝不再分两套流程 —— 两边都进同一个聚合二维码弹窗。
             activePay = ActivePay(order: order, title: title, channel: channel.rawValue, isQuota: isQuota)
+            // 2026-11-28：渠道选择器还在收起时立刻present第二个sheet，iOS 会把这次
+            // 展示丢掉 —— 表现就是「第一次点支付没有二维码，退出来再点一次才有」。
+            // 等它收完再present，一次就出码。
+            try? await Task.sleep(nanoseconds: 500_000_000)
             showWeChatQR = true
         } catch {
             showTip("下单失败：\(error.localizedDescription)")

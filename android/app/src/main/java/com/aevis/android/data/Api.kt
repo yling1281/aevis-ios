@@ -1992,6 +1992,103 @@ object Api {
         return c in 200..299
     }
 
+    // ---------------- QQ 接入（2026-11-28，官方 Bot）----------------
+    //
+    // 链路：App 出「二维码 + 六位绑定码」→ 用户扫码进 QQ 落地页 → 把六位码
+    // 发给机器人 → 服务端核验 QQID 并写入 qq_bot_bind → App 轮询变「已绑定」。
+    // 二维码和六位码都是**本地生成**的（不依赖官方扫码登录能力）。
+
+    /** 一次绑定会话：六位码、落地页地址、过期秒数。*/
+    data class QqBindCode(val code: String, val url: String, val qr: String, val expire: Int)
+
+    /** 接入总状态：开关、是否已绑、绑的 QQ 昵称、人设。*/
+    data class QqStatus(
+        val enabled: Boolean, val configured: Boolean, val bound: Boolean,
+        val qqNick: String, val persona: String,
+        val botUin: String = "", val joinUrl: String = "",
+        val qqGroup: String = "",
+        val officialUrl: String = "", val appid: String = "",
+        val botName: String = "", val state: String = "", val err: String = "",
+        val boundMine: Boolean = false
+    )
+
+    /** 最近一次 QQ 接口失败原因（界面直接显示服务端原话）。*/
+    var lastQqError: String = ""
+
+    fun qqStatus(): QqStatus? {
+        lastQqError = ""
+        val (c, j) = get("/v1/qqbot/status", token())
+        if (c !in 200..299) {
+            lastQqError = j.optString("msg").ifBlank { "HTTP $c" }
+            return null
+        }
+        val d = j.optJSONObject("data") ?: run { lastQqError = "返回格式不对"; return null }
+        return QqStatus(
+            enabled = d.optBoolean("enabled"),
+            configured = d.optBoolean("configured", true),
+            bound = d.optBoolean("bound"),
+            qqNick = d.optString("qq_nick"),
+            persona = d.optString("persona"),
+            botUin = d.optString("bot_uin"),
+            joinUrl = d.optString("join_url"),
+            qqGroup = d.optString("qq_group"),
+            officialUrl = d.optString("official_url"),
+            appid = d.optString("appid"),
+            botName = d.optString("bot_name"),
+            state = d.optString("state"),
+            err = d.optString("err"),
+            boundMine = d.optBoolean("bound_mine")
+        )
+    }
+
+    /**
+     * 第一步：拿「QQ 官方扫码入口」的地址。
+     *
+     * 2026-11-28 纠正：用户绑的是**他自己的机器人**，不是共用后台那一个，
+     * 也不是发六位码。二维码内容就是 q.qq.com 的 OpenClaw 入口。
+     */
+    fun qqBindStart(persona: String): QqBindCode? {
+        lastQqError = ""
+        val (c, j) = post("/v1/qqbot/bind/start", JSONObject().put("persona", persona), token())
+        if (c !in 200..299) {
+            lastQqError = j.optString("msg").ifBlank { "HTTP $c" }
+            return null
+        }
+        val d = j.optJSONObject("data") ?: run { lastQqError = "返回格式不对"; return null }
+        val url = d.optString("official_url").ifBlank { d.optString("url") }
+        if (url.isBlank()) {
+            lastQqError = "没拿到官方入口地址"
+            return null
+        }
+        return QqBindCode(d.optString("code"), url, d.optString("qr"), d.optInt("expire", 0))
+    }
+
+    /** 第二步：把用户自己机器人的 AppID / AppSecret 交回服务端校验并落库。*/
+    fun qqBindCred(appid: String, secret: String, persona: String): Boolean {
+        lastQqError = ""
+        val body = JSONObject().put("appid", appid.trim())
+            .put("secret", secret.trim()).put("persona", persona)
+        val (c, j) = post("/v1/qqbot/bind/cred", body, token())
+        if (c !in 200..299 || j.optInt("code", 1) != 0) {
+            lastQqError = j.optString("msg").ifBlank { "HTTP $c" }
+            return false
+        }
+        return true
+    }
+
+    /** 轮询绑定结果：pending / done / expired。*/
+    fun qqBindPoll(code: String): String? {
+        val (c, j) = get("/v1/qqbot/bind/poll?code=" + URLEncoder.encode(code, "UTF-8"), token())
+        if (c !in 200..299) return null
+        return j.optJSONObject("data")?.optString("status")?.ifBlank { "pending" }
+    }
+
+    /** 解绑（换绑时先调这个）。*/
+    fun qqUnbind(): Boolean {
+        val (c, _) = post("/v1/qqbot/unbind", JSONObject(), token())
+        return c in 200..299
+    }
+
     /** 二维码内容串 → Bitmap（本地画，不依赖第三方库）。*/
     fun qrToBitmap(content: String): android.graphics.Bitmap? = runCatching {
         val size = 640

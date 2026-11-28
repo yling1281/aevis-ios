@@ -115,6 +115,12 @@ private fun moreGroups(): List<Pair<String, List<MoreItem>>> = listOf(
             "settings2", tr("通用配置"), tr("主题、背景、弹窗"),
             R.drawable.ic_set_sliders, MoreAction.Route("settings2")
         ) else null,
+        // 2026-11-28：QQ 接入（扫码 + 会话内发六位码确认），入口常驻，
+        // 后台关掉开关时页面自己显示「暂未开放」，避免用户找不到入口。
+        MoreItem(
+            "qqbind", tr("QQ 接入"), tr("扫码绑定，在 QQ 里聊"),
+            R.drawable.ic_row_addfriend, MoreAction.Route("qqbind")
+        ),
         // 2026-11-25：增长入口（群聊/企微客服/活动/邀请），链接后台热更新
         if (Api.featureEnabled("growth")) MoreItem(
             "growth", tr("社区与活动"), tr("群聊、客服、活动、邀请"),

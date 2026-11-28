@@ -3,6 +3,7 @@ package com.aevis.android.ui
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -297,16 +298,18 @@ fun LoginScreen(onDone: () -> Unit) {
         Spacer(Modifier.height(96.dp))
 
         // —— 底部：微信 / QQ / 扫码 / 找回账号 ——
+        // 2026-11-28：微信/QQ 换成官方彩色图标（带底色、不再被 tint 染成单色），
+        // 扫码这类线性图标继续用矢量 + tint。
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CircleEntry("微信", R.drawable.ic_brand_wechat,
-                Color(0xFF4AB85C), !working) {
+            CircleEntry("微信", R.drawable.brand_wechat,
+                Color(0xFF4AB85C), !working, brand = true) {
                 // 真扫码登录：出小程序码 → 微信扫 → 轮询拿 token
                 if (working) return@CircleEntry
                 wxOpen = true
             }
             Spacer(Modifier.width(14.dp))
-            CircleEntry("QQ", R.drawable.ic_brand_qq,
-                Color(0xFF428CF0), !working) {
+            CircleEntry("QQ", R.drawable.brand_qq,
+                Color(0xFF428CF0), !working, brand = true) {
                 // 2026-11-16（103）：SDK 那条路放弃（点一次崩一次），
                 // 回退成服务端拼好的 authorize 地址 → 系统浏览器 → 服务端 302 回 aevis://login。
                 if (working) return@CircleEntry
@@ -409,17 +412,27 @@ private fun BigField(icon: Int, placeholder: String, value: String,
 /** 一个圆形入口：52 圆底（13% 色）+ 图标 20，下面 11 字。 */
 @Composable
 private fun CircleEntry(title: String, icon: Int, color: Color,
-                        enabled: Boolean, onClick: () -> Unit) {
+                        enabled: Boolean, brand: Boolean = false,
+                        onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.tapable(enabled = enabled) { onClick() }
             .then(if (enabled) Modifier else Modifier.padding(0.dp))
     ) {
         Box(
-            Modifier.size(56.dp).clip(CircleShape).background(color.copy(alpha = 0.13f)),
+            Modifier.size(56.dp).clip(CircleShape)
+                .background(if (brand) Color.White else color.copy(alpha = 0.13f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(painterResource(icon), null, tint = color, modifier = Modifier.size(26.dp))
+            if (brand) {
+                // 官方彩色图标：自带底色和描边，不要再 tint
+                Image(
+                    painterResource(icon), null,
+                    modifier = Modifier.size(34.dp).clip(RoundedCornerShape(9.dp))
+                )
+            } else {
+                Icon(painterResource(icon), null, tint = color, modifier = Modifier.size(26.dp))
+            }
         }
         Spacer(Modifier.height(7.dp))
         Text(title, fontSize = 11.5.sp,

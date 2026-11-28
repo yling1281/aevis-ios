@@ -1,0 +1,2214 @@
+package com.aevis.android.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.annotation.DrawableRes
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.aevis.android.R
+import com.aevis.android.core.I18n.tr
+import com.aevis.android.core.PersonaLib
+import com.aevis.android.data.Api
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * 聊天详情页（2026-11-15 第一版）。
+ *
+ * ⚠️ 安卓以前**根本没有这个页面** ——「聊天」tab 展开只有一张空卡片，
+ * 点了没反应。用户一直在说「聊天里面其实就是一个会话」，指的就是这里。
+ *
+ * 结构按用户要求：
+ *   · 进页面直接是对话，**不再先选人**
+ *   · 顶部是对方头像 + 名字，**点头像就地换人**（横向一排可滑）
+ *   · 气泡：AI 在左、我在右；同一方连续多条时只在第一条显示头像
+ *
+ * 预留了三个外观参数（[avatarSize] / [bubbleRadius] / [gap]），
+ * 后面做「自定义外观」时直接接设置项，不用再改结构。
+ */
+/**
+ * 把一段回复拆成「一条一条」的消息。
+ *
+ * 规则（宁少勿碎）：
+ *   · 按换行拆 —— 模型（deepseek）分段用的是单个换行，不是空行；
+ *     早先按空行拆等于没拆，用户看到的是一大块挤在一个气泡里。
+ *   · 太碎的段（不到 12 字）跟前一段合并，避免「嗯。」单独成一条。
+ *   · 最多 3 条，多出来的并到最后一条。
+ *   · 只有一段但超过 120 字时，中间找句号切一刀。
+ *
+ * 2026-11-16：从 `private` 改成 `internal` —— 群聊页（GroupChatScreen）要用同一份，
+ * 抄第二份的话两边拆法迟早会不一致。
+ */
+/**
+ * 把模型回复切成"一条条消息"（2026-11-16，90 重写）。
+ *
+ * 用户：「AI 现在都是全部的输出，不一条条弹出来」——
+ * 根因不是客户端拆得不够，是模型把整段写成一大坨，光靠标点硬拆还是长条。
+ *
+ * 现在的顺序：
+ *   1. **先按行拆**（`\n`）—— 提示词要求它一条一行，行就是天然的边界；
+ *   2. 去掉空行、纯符号行；
+ *   3. 单行**超过 60 字且含分段标点**时才按标点继续拆（短句不动，避免把一句话劈两半）；
+ *   4. 条数 > 6 时**合并相邻最短的两条**，最多 6 条（防模型每句一行把界面刷屏）。
+ *
+ * `puncts` / `stripTrailing` 由调用方按用户设置传入。
+ */
+internal fun splitReply(
+    text: String,
+    puncts: String = "。！？～",
+    stripTrailing: Boolean = true
+): List<String> {
+    val t = text.replace("\r\n", "\n").trim()
+    if (t.isEmpty()) return emptyList()
+
+    // 1) 按行，去掉空行/纯符号行
+    val lines = t.split("\n").map { it.trim() }
+        .filter { line ->
+            line.isNotEmpty() && line.any { ch ->
+                ch.isLetterOrDigit() || ch in "，。！？～…、；：,.!?~"
+            }
+        }
+
+    // 2) 单行太长才按标点继续拆
+    val pieces = ArrayList<String>()
+    lines.forEach { line ->
+        val plainLen = line.count { it.isLetterOrDigit() }
+        if (plainLen > 60 && line.any { it in puncts }) {
+            pieces.addAll(splitByPunct(line, puncts))
+        } else {
+            pieces.add(line)
+        }
+    }
+
+    // 3) 太多就合并最相邻的短条，最多 6 条
+    var out: MutableList<String> = pieces.toMutableList()
+    while (out.size > 6) {
+        var bestIdx = 0
+        var bestLen = Int.MAX_VALUE
+        for (i in 0 until out.size - 1) {
+            val l = out[i].length + out[i + 1].length
+            if (l < bestLen) { bestLen = l; bestIdx = i }
+        }
+        out[bestIdx] = out[bestIdx] + " " + out[bestIdx + 1]
+        out.removeAt(bestIdx + 1)
+    }
+
+    return out.map { piece ->
+        if (stripTrailing) piece.trimEnd(*puncts.toCharArray()).trim() else piece
+    }.filter { it.isNotEmpty() }
+}
+
+/** 按句末标点拆（只在单行过长时用）。*/
+internal fun splitByPunct(text: String, puncts: String): List<String> {
+    val out = ArrayList<String>()
+    val buf = StringBuilder()
+    for (ch in text) {
+        buf.append(ch)
+        if (puncts.indexOf(ch) >= 0) {
+            val piece = buf.toString().trim()
+            if (piece.isNotEmpty()) out.add(piece)
+            buf.clear()
+        }
+    }
+    val rest = buf.toString().trim()
+    if (rest.isNotEmpty()) out.add(rest)
+    return out
+}
+
+/**
+ * 输出格式 + 状态标记（2026-11-17 重写）。
+ *
+ * 这段原来在系统提示词的 `buildString { … }` 里，回滚时连头部一起被删，
+ * 成了悬空语句。这里独立成函数，调用方 `append(styleBlock())` 即可。
+ * 两种模式给不同约束：微信模式短句多气泡，内心 OS 模式整段长文。
+ */
+internal fun styleBlock(): String = buildString {
+                // 📐 输出格式（2026-11-16，90）：**按模式给不同指令**。
+                // 普通模式要求"一条一行"，客户端才能按行拆成多条气泡；
+                // 内心 OS 要求整段写完，不要为了分条而换行。
+                if (com.aevis.android.core.ChatPrefs.chatMode == 0) {
+                    // 2026-11-16（102）：用户「喂给 AI 的系统指令有问题，它只会一整段一整段地发」。
+                    // 之前是"建议式"描述，模型经常无视 → 改成**强约束 + 示例**。
+                    append("\n【输出格式 · 必须遵守】\n")
+                    append("1. 你的回复必须分成 2–4 条，每条单独一行，行与行之间只允许一个换行。\n")
+                    append("2. 每条 8–28 个字，像人在手机上连发几条。\n")
+                    append("3. 禁止把整段话写成一行；禁止用 1. 2. 3. 或 - 开头；禁止在一个气泡里塞两句话以上。\n")
+                    append("4. 例：\n")
+                    append("（低头看你）今天又熬夜。\n")
+                    append("去把灯关了。\n")
+                    append("我等你。")
+                } else {
+                    append("\n【输出格式】整段回复一次写完：括号里写动作和心理，括号外写说出口的话。\n")
+                    append("不要为了分条而换行，也不要加序号。")
+                }
+
+                // 🔵 状态标记（2026-11-16）：让模型在回复最后单独一行给出"此刻的心情/动作"。
+                // 取舍：这是**额外几个输出 token**，比再发一次请求便宜得多。
+                append("\n【状态标记】每次回复的最后单独一行，输出：\n")
+                append("[[状态]]这里写你此刻的心情或动作（2–6 个字，不要标点，不要解释，不要换行）\n")
+                append("这一行是给系统读的，用户看不到，不要在任何别的地方提到它。")
+            }
+
+            // deepseek-web 是网页版反代，**不吃 system 消息** —— 拼上去也会被忽略，
+            // 所以对这条线路把格式要求直接塞进最后一条 user 消息里。
+            val useWeb = model == "deepseek-web"
+            val history = if (useWeb) {
+                val l = next.takeLast(20).toMutableList()
+                if (l.isNotEmpty() && l.last().role == "user") {
+                    l[l.size - 1] = Api.Msg(
+                        "user",
+                        "（回复要求：像我俩在微信上聊天，一到两句就发一条，"
+                            + "每句不超过30字，用换行分开。不要写成一段。）\n"
+                            // 最后一条是表情包时 content 是空的，这里补一句文字，
+                            // 否则模型只看到"回复要求"却不知道对方发了什么
+                            + l.last().content.ifEmpty { "[发了一个表情包]" }
+                    )
+                }
+                l
+            } else next.takeLast(20)
+            val sysForApi = if (useWeb) "" else sys
+            val reply = withContext(Dispatchers.IO) {
+                Api.chat(model, history, sysForApi)
+            }
+            if (reply == null) {
+                sending = false
+                turn = 0                      // 失败也要复位，否则永久"正在输入中"
+                err = Api.lastChatError.ifBlank { "发送失败" }
+            } else {
+                // 🔵 状态标记（2026-11-16）：模型在回复最后单独一行给 `[[状态]]…`。
+                // 先把这一行**摘掉**（用户绝不能看到），再把状态存起来给顶栏用。
+                val (cleanReply, newStatus) = com.aevis.android.core.splitStatusMarker(reply)
+                if (newStatus.isNotBlank()) {
+                    com.aevis.android.core.StatusStore.put(curPid, newStatus)
+                    statusVer++        // 顶栏立刻换
+                }
+                // 提示音（2026-11-16）：收到 AI 回复时响一声；**正在看这个会话就不响**
+                //（用户用不上"我正在看还给我响一下"）。
+                if (com.aevis.android.core.ChatPrefs.soundOn && Presence.chatPid != curPid) {
+                    runCatching {
+                        val uri = android.media.RingtoneManager.getDefaultUri(
+                            android.media.RingtoneManager.TYPE_NOTIFICATION
+                        )
+                        android.media.RingtoneManager.getRingtone(ctx, uri)?.play()
+                    }
+                }
+                // 🔴 2026-11-15 用户：「对话的时候不应该是多条消息吗？一条一条消息」——
+                // 大模型一次吐一大坨，读起来像文章；真人是一条一条发的。
+                // 这里按段落拆成 1-3 条，**逐条**落进列表，中间留停顿。
+                // 2026-11-16：只有「微信式」才拆句。线下（内心 OS）/ 逐字都是一个气泡一整段——
+                // 用户要的就是"括号描写 + 对话"全在一个气泡里，不要被拆成好几条。
+                // 合并发送优先级最高 → 整段一条；否则只有模式 2 才拆
+                val merge = com.aevis.android.core.ChatPrefs.mergeSend
+                // 渲染只看 chatMode：0 普通（拆）/ 1 内心 OS（整段）
+                val isNormal = com.aevis.android.core.ChatPrefs.chatMode == 0
+                val parts = if (!merge && isNormal) {
+                    val byLine = splitReply(
+                        cleanReply,
+                        puncts = "。！？～",
+                        stripTrailing = com.aevis.android.core.ChatPrefs.stripSplitPunct
+                    )
+                    // #7（99）：模型没换行、整段又只有一行时，splitReply 只返回 1 条 →
+                    // 普通模式和内心 OS 看起来一模一样。这里**兜一层标点拆分**，
+                    // 保证"普通"至少能拆成 2–3 条（短句仍不劈开）。
+                    // 兜底（102）：普通模式必须至少两个气泡。
+                    // 阈值：拆出来只有 1 条、且原文 > 24 字 → 按 。！？… 硬切，最多 3 条，
+                    // 切完把短于 6 字的碎片并到前一条（避免出现"嗯。"这种独立气泡）。
+                    if (byLine.size <= 1 && cleanReply.trim().length > 24) {
+                        val raw = splitByPunct(cleanReply, "。！？…")
+                            .map { if (com.aevis.android.core.ChatPrefs.stripSplitPunct)
+                                it.trimEnd('。', '！', '？', '…', '～').trim() else it.trim() }
+                            .filter { it.isNotEmpty() }
+                        val merged = ArrayList<String>()
+                        raw.forEach { piece ->
+                            if (merged.isNotEmpty() && merged.last().length < 6) {
+                                merged[merged.size - 1] = merged.last() + piece
+                            } else merged.add(piece)
+                        }
+                        if (merged.size >= 2) merged.take(3) else byLine
+                    } else byLine
+                } else listOf(cleanReply)
+                turn = 2          // 开始往界面上吐气泡 = streaming
+                parts.forEachIndexed { i, part ->
+                    if (i > 0) delay(if (part.length > 40) 900L else 650L)
+                    val done = msgs + Api.Msg("assistant", part)
+                    popFrom = msgs.size - 1      // 让这一条弹一下
+                    msgs = done
+                    Api.saveConv(curPid, done)
+                    if (i == 0) sending = false  // 第一条出来就收掉「正在输入…」
+                }
+                sending = false
+                turn = 0                          // 全部吐完 → idle
+            }
+        }
+    }
+
+    /**
+     * 发一张相册图片（2026-11-16）。
+     *
+     * 先传 `/v1/media` 拿到相对路径，再追加一条 `content="[图片]"` + `img=path` 的消息。
+     * 用 `[图片]` 这个 content 当**类型标记**：渲染时照片 180dp、表情包 120dp，
+     * 发给模型时也会变成「[发了一张图片]」而不是「[发了一个表情包]」。
+     * 上传失败只 Toast，**不往列表里塞空消息**。
+     */
+    fun sendPhoto(uri: android.net.Uri) {
+        if (uploading) return
+        scope.launch {
+            uploading = true
+            val path = withContext(Dispatchers.IO) {
+                runCatching { Api.uploadImage(ctx, uri) }.getOrNull()
+            }
+            uploading = false
+            if (path.isNullOrBlank()) {
+                Toast.makeText(ctx, "图片上传失败", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            popFrom = msgs.size
+            val next = msgs + Api.Msg(role = "user", content = "[图片]", img = path)
+            msgs = next
+            Api.saveConv(curPid, next)
+        }
+    }
+
+    // 相册选图（2026-11-16）：用 PickVisualMedia（GetContent 已废弃）
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri -> if (uri != null) sendPhoto(uri) }
+
+    // ---------------- 132：主动唤醒轮询 ----------------
+    // 只拉「当前打开的这个角色」，每 3 分钟一次；网络失败静默（下一次自然重试）。
+    // 收到就插到会话末尾（role=assistant, proactive=true）→ 落盘 → ack → 轻震一下。
+    LaunchedEffect(curPid) {
+        // 进会话即清「TA 找你了」角标
+        com.aevis.android.core.ChatPrefs.clearProactiveUnread(curPid)
+        if (!com.aevis.android.core.ChatPrefs.proactiveOn(curPid)) return@LaunchedEffect
+        while (true) {
+            val items = withContext(Dispatchers.IO) { Api.proactivePending(curPid) }
+            if (items.isNotEmpty()) {
+                val next = msgs.toMutableList()
+                items.forEach {
+                    next.add(Api.Msg(role = "assistant", content = it.text, proactive = true))
+                }
+                popFrom = msgs.size
+                msgs = next
+                withContext(Dispatchers.IO) {
+                    Api.saveConv(curPid, next)
+                    Api.proactiveAck(items.map { it.id })
+                }
+                // 只轻震一下，不弹通知
+                runCatching {
+                    view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                }
+            }
+            kotlinx.coroutines.delay(3 * 60 * 1000L)
+        }
+    }
+
+    // ---------------- 128：附件面板 ----------------
+
+    /**
+     * 一次发多张（相册多选最多 9 张）。
+     *
+     * 逐张 `Api.uploadImage` 拿到相对路径，全部成功/部分成功的都落盘成一条消息；
+     * 一张都没成功才报错（别把失败的一半塞进记录里）。
+     */
+    fun sendPhotos(uris: List<android.net.Uri>) {
+        if (uploading || uris.isEmpty()) return
+        scope.launch {
+            uploading = true
+            val next = msgs.toMutableList()
+            var added = 0
+            uris.take(9).forEach { u ->
+                val path = withContext(Dispatchers.IO) {
+                    runCatching { Api.uploadImage(ctx, u) }.getOrNull()
+                }
+                if (!path.isNullOrBlank()) {
+                    next.add(Api.Msg(role = "user", content = "[图片]", img = path))
+                    added++
+                }
+            }
+            uploading = false
+            if (added == 0) {
+                Toast.makeText(ctx, "图片上传失败", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            popFrom = msgs.size
+            msgs = next
+            Api.saveConv(curPid, next)
+        }
+    }
+
+    /** 相册多选（最多 9 张）。*/
+    val pickPhotos = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(9)
+    ) { uris -> if (uris.isNotEmpty()) sendPhotos(uris) }
+
+    /** 拍照：先建 FileProvider 临时文件，回来再当普通图片发。*/
+    val takePicture = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { ok -> if (ok) camUri?.let { sendPhoto(it) } }
+
+    /** 文件：只接受图片（其他类型接口收不了，别假装能发）。>10MB 先提示。*/
+    val pickDoc = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val (size, isImg) = withContext(Dispatchers.IO) {
+                val sz = runCatching {
+                    ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+                }.getOrNull() ?: -1L
+                val mime = runCatching { ctx.contentResolver.getType(uri) }.getOrNull().orEmpty()
+                sz to (mime.startsWith("image/") || mime.isEmpty())
+            }
+            when {
+                size > 10L * 1024 * 1024 ->
+                    Toast.makeText(ctx, "文件超过 10MB，换一张吧", Toast.LENGTH_SHORT).show()
+                !isImg ->
+                    Toast.makeText(ctx, "目前只能发图片", Toast.LENGTH_SHORT).show()
+                else -> sendPhoto(uri)
+            }
+        }
+    }
+
+    /** 最近图片（本机相册最新 8 张，给面板底部那条横滑预览用）。*/
+    LaunchedEffect(plusOpen) {
+        if (!plusOpen) return@LaunchedEffect
+        recentShots = withContext(Dispatchers.IO) {
+            runCatching {
+                val out = ArrayList<android.net.Uri>(8)
+                ctx.contentResolver.query(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(android.provider.MediaStore.Images.Media._ID),
+                    null, null,
+                    android.provider.MediaStore.Images.Media.DATE_ADDED + " DESC"
+                )?.use { c ->
+                    val idCol = c.getColumnIndexOrThrow(
+                        android.provider.MediaStore.Images.Media._ID
+                    )
+                    while (c.moveToNext() && out.size < 8) {
+                        val id = c.getLong(idCol)
+                        out.add(
+                            android.content.ContentUris.withAppendedId(
+                                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id
+                            )
+                        )
+                    }
+                }
+                out
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    // 128：面板打开时按返回键只收面板，不退出会话
+    BackHandler(enabled = plusOpen) { plusOpen = false }
+
+    /** 念一条 AI 消息（2026-11-16）：再点一次停止；播放器在页面退出时 release。*/
+    fun speak(i: Int, text: String) {
+        if (speaking == i) {
+            runCatching { player?.stop(); player?.release() }
+            player = null
+            speaking = -1
+            return
+        }
+        runCatching { player?.stop(); player?.release() }
+        player = null
+        scope.launch {
+            speaking = i
+            val spoken = stripParens(text)
+            val f = withContext(Dispatchers.IO) { ttsFile(ctx, spoken) }
+            if (f == null) {
+                speaking = -1
+                Toast.makeText(ctx, "语音暂时没开通", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            runCatching {
+                val mp = android.media.MediaPlayer()
+                mp.setDataSource(f.absolutePath)
+                mp.setOnCompletionListener {
+                    speaking = -1
+                    runCatching { it.release() }
+                }
+                mp.prepare()
+                mp.start()
+                player = mp
+            }.onFailure { speaking = -1 }
+        }
+    }
+
+    // 页面退出时释放播放器，别泄漏
+    DisposableEffect(Unit) {
+        onDispose { runCatching { player?.release() }; player = null }
+    }
+
+    // 记下"当前正在看哪个会话"，提示音据此判断要不要响（2026-11-16）
+    DisposableEffect(curPid) {
+        Presence.chatPid = curPid
+        onDispose { if (Presence.chatPid == curPid) Presence.chatPid = "" }
+    }
+
+    BackHandler { onBack() }
+
+    /**
+     * 发一张表情包（2026-11-16）。
+     *
+     * ⚠️ **不调用模型**：真人发表情包也不一定等回复，而且这一步不该消耗额度。
+     * 所以只是往会话里追加一条 `img` 消息并落盘，`sending` 不动。
+     * 下次真的说话时，`Api.chat()` 会把这条转成「[发了一个表情包]」带给模型
+     * （见 `Api.Msg.img` 的注释），模型因此知道"刚才发了个表情"。
+     */
+    fun sendEmoji(url: String) {
+        if (url.isEmpty()) return
+        emojiSheet = false
+        popFrom = msgs.size          // 让这条也弹一下
+        val next = msgs + Api.Msg(role = "user", content = "", img = url)
+        msgs = next
+        Api.saveConv(curPid, next)
+    }
+
+    // 顶栏/输入栏底色（2026-11-16，112）：没设主背景时**保持透明**（跟以前一模一样，
+    // 顶栏就是页面本色）；设了主背景才换成玻璃底，否则顶栏的字会直接压在照片上。
+    val barSkin = appSkin()
+
+    // 2026-11-16（112）：聊天背景不再铺满整页 —— 只铺「消息区」那一块，
+    // 顶栏和输入栏保持纯色（用户要的是"聊天记录有背景"，不是"整页浮在照片上"）。
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+    Column(
+        Modifier.fillMaxSize()
+            .background(Color.Transparent)
+            .statusBarsPadding()
+            // 🔴 键盘弹起时整页往上让 —— 没有这行，输入框会被输入法盖住（用户报的「输入框不会上来」）
+            .imePadding()
+    ) {
+        // ---------- 顶栏 ----------
+        //
+        // 2026-11-15 重写。上一版想用「外层 Box 包住按钮 + 菜单」来解决菜单弹到左边的问题，
+        // 结果 Box 在 Row 里没有尺寸约束，把整行的测量搞坏 —— 页面直接空白。
+        // 正确写法：菜单放进**按钮自己的 Box** 里，锚点自然就是这个 Box。
+        Row(
+            Modifier.fillMaxWidth()
+                .background(barSkin?.barFill ?: Color.Transparent)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 返回
+            Box(
+                Modifier.size(34.dp).clip(CircleShape).tapable { onBack() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_row_chevron), null,
+                    tint = ink.copy(alpha = 0.7f),
+                    modifier = Modifier.size(18.dp).rotate(180f)
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+
+            // 头像 + 名字（点开换人）
+            Row(
+                Modifier.weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .tapable { showPicker = !showPicker }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Avatar(cur?.avatar.orEmpty(), cur?.name ?: "AI", 30.dp)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        cur?.name ?: tr("对话"), fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    // 🔴 当前状态（2026-11-16）：这里**绝对不能**显示 `tagline`
+                    // （本地角色的 tagline = 人设提示词原文，会泄漏系统提示词）。
+                    // 状态文案来自 `statusOf()`，按时间/空闲时长取，每 40–90 秒淡入淡出换一次。
+                    AnimatedContent(
+                        // 126：关掉「显示回复状态」时，顶栏不显示"正在输入中"，只留普通状态
+                        targetState = if (busyTyping && com.aevis.android.core.ChatPrefs.showReplyStatusOf(curPid))
+                            tr("正在输入中") else status,
+                        transitionSpec = {
+                            fadeIn(tween(220)) togetherWith fadeOut(tween(220))
+                        },
+                        label = "statusLine"
+                    ) { s ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                s, fontSize = 11.sp, color = ink.copy(alpha = 0.45f),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            // 「正在输入中」后面跟三个会动的圆点（不是 `...` 字符）
+                            if (busyTyping && com.aevis.android.core.ChatPrefs.showReplyStatusOf(curPid)) {
+                                Spacer(Modifier.width(4.dp))
+                                TypingDots(tint = ink.copy(alpha = 0.5f), dot = 3.dp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(6.dp))
+
+            // 上下文用量（不是模型名）
+            Text(
+                contextLabelOf(msgs), fontSize = 11.sp, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ink.copy(alpha = 0.05f))
+                    .tapable { modelSheet = true }
+                    .padding(horizontal = 9.dp, vertical = 7.dp)
+            )
+
+            Spacer(Modifier.width(2.dp))
+
+            // 三个点 + 菜单（菜单在按钮 Box 内部，锚在右侧）
+            Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                        // 2026-11-16（88）：⋯ 不再弹旧菜单，直接进「角色设置」页
+                        .tapable { onOpenRoleSet(curPid) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "⋯", fontSize = 20.sp, color = ink.copy(alpha = 0.6f),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(tr("查看人设")) },
+                        onClick = { menuOpen = false; onOpenPersona(curPid) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(tr("日记")) },
+                        onClick = { menuOpen = false; onOpenDiary(curPid) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(tr("模型")) },
+                        onClick = { menuOpen = false; onOpenModels(curPid) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(tr("聊天外观")) },
+                        onClick = { menuOpen = false; onOpenLook(curPid) }
+                    )
+                    HorizontalDivider(color = ink.copy(alpha = 0.06f))
+                    // 显示方式（2026-11-16）：两项，当前项打勾
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (displayMode == 0) "✓ " else "") + tr("内心 OS"),
+                                color = if (displayMode == 0) V2.accent else ink
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            displayMode = 0
+                            com.aevis.android.core.ChatPrefs.displayMode = 0
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (displayMode == 1) "✓ " else "") + tr("逐字气泡"),
+                                color = if (displayMode == 1) V2.accent else ink
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            displayMode = 1
+                            com.aevis.android.core.ChatPrefs.displayMode = 1
+                        }
+                    )
+                    HorizontalDivider(color = ink.copy(alpha = 0.06f))
+                    // 现实感知（2026-11-16）：开了才传 env（时间/电量/网络/城市）
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (reality) "\u2713 " else "") +
+                                    if (reality) {
+                                        if (city.isNotBlank()) tr("现实感知 · 开（%s）", city)
+                                        else tr("现实感知 · 开")
+                                    } else {
+                                        tr("现实感知 · 关")
+                                    },
+                                color = if (reality) V2.accent else ink
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            val now = !reality
+                            reality = now
+                            com.aevis.android.core.ChatPrefs.realityAware = now
+                            // 第一次打开、还没问过城市 → 问一次
+                            if (now && !com.aevis.android.core.ChatPrefs.cityAsked()) {
+                                cityInput = city
+                                askCity = true
+                            }
+                        }
+                    )
+                    if (reality) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    tr("选城市…") +
+                                        if (city.isNotBlank()) "（$city）" else ""
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                cityInput = city
+                                askCity = true
+                            }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (displayMode == 2) "\u2713 " else "") + tr("微信式"),
+                                color = if (displayMode == 2) V2.accent else ink
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            displayMode = 2
+                            com.aevis.android.core.ChatPrefs.displayMode = 2
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(tr("扣费用哪个")) },
+                        onClick = { /* 分组标题，不可点 */ },
+                        enabled = false
+                    )
+                    // 扣费来源（2026-11-16）：会员额度优先 / 墨点优先
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (chargeSource == 0) "\u2713 " else "") +
+                                    tr(
+                                        "会员额度优先（本周剩 %s）",
+                                        wallet?.member?.let { "${it.weekLeft}" } ?: "—"
+                                    ),
+                                color = if (chargeSource == 0) V2.accent else ink
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            chargeSource = 0
+                            com.aevis.android.core.ChatPrefs.chargeSource = 0
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (chargeSource == 1) "\u2713 " else "") +
+                                    tr(
+                                        "墨点优先（余额 %s）",
+                                        wallet?.points?.let { "$it" } ?: "—"
+                                    ),
+                                color = if (chargeSource == 1) V2.accent else ink
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            chargeSource = 1
+                            com.aevis.android.core.ChatPrefs.chargeSource = 1
+                        }
+                    )
+                    HorizontalDivider(color = ink.copy(alpha = 0.06f))
+                    DropdownMenuItem(
+                        text = { Text(tr("清空这个对话"), color = V2.alert) },
+                        onClick = {
+                            menuOpen = false
+                            Api.clearConv(curPid)
+                            msgs = emptyList()
+                            popFrom = Int.MAX_VALUE
+                        }
+                    )
+                }
+            }
+        }
+
+
+        // ---------- 换人面板（就地展开，不跳页）----------
+        if (showPicker) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                persons.take(30).forEach { p ->
+                    val on = p.id == curPid
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.tapable {
+                            if (!on) { curPid = p.id; showPicker = false }
+                        }
+                    ) {
+                        Box(
+                            Modifier.size(46.dp).clip(CircleShape)
+                                .then(
+                                    if (on) Modifier.border(2.dp, V2.accent, CircleShape)
+                                    else Modifier
+                                )
+                        ) {
+                            Avatar(p.avatar, p.name, 46.dp)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            p.name, fontSize = 10.5.sp, maxLines = 1,
+                            color = if (on) V2.accent else ink.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 多选工具条（2026-11-16）：替代顶栏，显示选中数量 + 删除/取消
+        if (selectMode) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(barSkin?.barFill ?: MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    tr("已选 %d 条", selected.size),
+                    fontSize = V2.body, fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    tr("删除"), fontSize = V2.body,
+                    color = if (selected.isEmpty()) ink.copy(alpha = 0.3f) else V2.alert,
+                    modifier = Modifier.tapable {
+                        if (selected.isNotEmpty()) {
+                            val next = msgs.filterIndexed { k, _ -> k !in selected }
+                            msgs = next
+                            Api.saveConv(curPid, next)
+                        }
+                        selectMode = false
+                        selected = emptySet()
+                    }
+                )
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    tr("取消"), fontSize = V2.body, color = ink.copy(alpha = 0.6f),
+                    modifier = Modifier.tapable {
+                        selectMode = false
+                        selected = emptySet()
+                    }
+                )
+            }
+        }
+
+        // ---------- 消息区 ----------
+        // 聊天背景（2026-11-16，112）：只包这一块。默认（纯色）时它铺的就是主题底色，
+        // 所以「没设背景」的观感和以前完全一样；选了图/渐变才在这里透出来。
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        com.aevis.android.core.BackgroundStore.renderBg(
+            ctx = ctx,
+            kind = com.aevis.android.core.ChatPrefs.bgKind,
+            preset = com.aevis.android.core.ChatPrefs.bgPreset,
+            blur = com.aevis.android.core.ChatPrefs.bgBlur,
+            dim = com.aevis.android.core.ChatPrefs.bgDim,
+            ver = com.aevis.android.core.ChatPrefs.bgVersion,
+            modifier = Modifier.fillMaxSize()
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 12.dp, top = 10.dp, end = 12.dp,
+                // bottom 多留 6dp：最后一条别贴着输入条那条分割线
+                bottom = 16.dp
+            )
+        ) {
+            if (msgs.isEmpty()) {
+                item {
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = 60.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Avatar(cur?.avatar.orEmpty(), cur?.name ?: "AI", 64.dp)
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                tr("和 %s 说点什么", cur?.name ?: "AI"),
+                                fontSize = 13.sp, color = ink.copy(alpha = 0.42f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            items(msgs.size) { i ->
+                val m = msgs[i]
+                val mine = m.role == "user"
+                val prevSame = i > 0 && msgs[i - 1].role == m.role
+                // 选中态：整行淡淡加一层底色，一眼看出勾了哪几条
+                val isPicked = selectMode && i in selected
+                // 弹跳：新消息从 0.86 弹到 1，弹簧带过冲（阻尼小一点才有"弹"的感觉）
+                // key 带上 img：两条都是空 content 的图片消息，只用 content 会互相顶掉
+                var appeared by remember(m.content + m.img) { mutableStateOf(false) }
+                LaunchedEffect(m.content + m.img) {
+                    if (i >= popFrom) {
+                        appeared = true
+                    }
+                }
+
+                // ---------- 逐字气泡（2026-11-16）----------
+                // 只有「显示方式 = 逐字气泡」+ AI 文字消息 + 本轮新到的消息才播。
+                // 历史消息一开始就是完整长度（`i < popFrom`），重进页面不会重播。
+                // 逐字是**显示效果**，跟模式无关（2026-11-16）
+                val typing = com.aevis.android.core.ChatPrefs.typewriter && !mine && m.img.isEmpty()
+                var shownLen by remember(m.content + m.img) {
+                    mutableIntStateOf(if (typing && i >= popFrom) 0 else m.content.length)
+                }
+                LaunchedEffect(m.content, typing, appeared) {
+                    // 入场动画先播完再逐字（同时进行会抖）
+                    if (i >= popFrom && !appeared) return@LaunchedEffect
+                    val total = sanitizeGlyphs(m.content).length
+                    if (!typing || shownLen >= total) {
+                        shownLen = total
+                        return@LaunchedEffect
+                    }
+                    // 逐字也算 streaming（102 状态机）：结束时**一定**回到 idle，
+                    // 用 try/finally 保证被取消/滚出屏幕也能复位。
+                    turn = 2
+                    try {
+                    while (shownLen < total) {
+                        // 每字 18–25ms；标点/省略号多停一下，读起来才有停顿感
+                        val ch = sanitizeGlyphs(m.content).getOrNull(shownLen)
+                        // 106：按「流式速度」设置走（慢45/适中32/快22/很快12），±3ms 抖动
+                        val base = com.aevis.android.core.ChatPrefs.typeSpeedMs() +
+                            (m.content.length % 7) - 3
+                        delay(if (ch == '，' || ch == '。' || ch == '！' || ch == '？' || ch == '…') base + 60L else base)
+                        shownLen++
+                    }
+                    } finally {
+                        turn = 0
+                    }
+                }
+                // 入场（2026-11-16，89）：scaleIn(0.92) + fadeIn(160) + 上浮 it/6，
+                // 弹簧 dampingRatio 0.78 / stiffness 420（约 180–220ms，不弹过冲）。
+                // 历史消息（`i < popFrom`）直接是终态，进页面不会整屏弹一遍。
+                val popScale by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (appeared || i < popFrom) 1f else 0.92f,
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = 0.78f,
+                        stiffness = 420f
+                    ),
+                    label = "msgPop"
+                )
+                val popSlide by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (appeared || i < popFrom) 0f else 18f,
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = 0.78f,
+                        stiffness = 420f
+                    ),
+                    label = "msgSlide"
+                )
+                val popAlpha by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (appeared || i < popFrom) 1f else 0f,
+                    animationSpec = androidx.compose.animation.core.tween(160),
+                    label = "msgFade"
+                )
+
+                Row(
+                    Modifier.fillMaxWidth()
+                        .graphicsLayer {
+                            scaleX = popScale
+                            scaleY = popScale
+                            // 上浮：18dp → 0（≈ it/6）
+                            translationY = popSlide
+                            alpha = popAlpha
+                            // 从气泡自己的那一侧弹出来（我在右、AI 在左），比从中心缩放自然
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(
+                                if (mine) 1f else 0f, 0.6f
+                            )
+                        }
+                        .padding(top = if (prevSame) 3.dp else 10.dp),
+                    horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    // 126：头像显示（0 双方 / 1 只角色 / 2 都不显示）
+                    val showAvatars = com.aevis.android.core.ChatPrefs.avatarModeOf(curPid) != 2
+                    if (!mine && showAvatars) {
+                        // 连续多条只在第一条露头像，占位保持一致
+                        if (prevSame) Spacer(Modifier.width(avatarSize + gap))
+                        else {
+                            Avatar(cur?.avatar.orEmpty(), cur?.name ?: "AI", avatarSize)
+                            Spacer(Modifier.width(gap))
+                        }
+                    }
+                    val maxW = (cfg.screenWidthDp * 0.72f).dp
+                    // 表情包消息（2026-11-16）：气泡里不放文字，放图。
+                    // 内边距收到 4dp —— 图自己就有圆角，再留 12dp 会显得很空。
+                    val hasImg = m.img.isNotEmpty()
+                    Box(
+                        Modifier.widthIn(max = maxW)
+                            .clip(
+                                if (mine) RoundedCornerShape(
+                                    bubbleRadius, bubbleRadius, 4.dp, bubbleRadius
+                                ) else RoundedCornerShape(
+                                    bubbleRadius, bubbleRadius, bubbleRadius, 4.dp
+                                )
+                            )
+                            // 玻璃气泡（2026-11-15）：
+                            // 忆伴用的是 RenderEffect 真模糊 + 低版本 FastBlur 降级。
+                            // 真背景模糊要抓背景快照，先把「半透明 + 高光边」这层做上 ——
+                            // 配合任何背景图/渐变都有通透感，而且全版本一致，不掉帧。
+                            // 🔴 2026-11-15 修：暗色模式下气泡原来是白底 + 白字（`ink` 在暗色是白），
+                            //    完全看不见。现在按底色亮度分支：
+                            //    暗色 → 深灰气泡 + 白字；浅色 → 白气泡 + 深字。
+                            .background(
+                                when {
+                                    // 我的气泡：颜色来自「聊天外观 → 气泡颜色」
+                                    mine -> mineBgBase.copy(alpha = 0.92f)
+                                    aiBgBase != null -> aiBgBase
+                                    darkTheme -> Color.White.copy(alpha = 0.06f)
+                                    else -> Color.White.copy(alpha = 0.78f)
+                                }
+                            )
+                            .border(
+                                0.6.dp,
+                                // 描边跟着主题走（2026-11-16）：
+                                // 暗色给一圈很淡的白（把气泡"托"起来），
+                                // 浅色给一圈很淡的黑 —— 否则浅色气泡外面套白边等于没有边。
+                                if (darkTheme) Color.White.copy(alpha = 0.14f)
+                                else Color.Black.copy(alpha = 0.05f),
+                                if (mine) RoundedCornerShape(
+                                    bubbleRadius, bubbleRadius, 4.dp, bubbleRadius
+                                ) else RoundedCornerShape(
+                                    bubbleRadius, bubbleRadius, bubbleRadius, 4.dp
+                                )
+                            )
+                            .padding(
+                                horizontal = if (hasImg) 4.dp else 12.dp,
+                                vertical = if (hasImg) 4.dp else 9.dp
+                            )
+                            // 长按气泡 = 打开消息菜单（2026-11-16）：
+                            // 复制 / 从上下文移除 / 删除 / 回退到这条之前。
+                            .tapable(
+                                onLongClick = { if (!selectMode) msgMenu = i }
+                            ) {
+                                // 选择态下短按 = 勾选/取消
+                                if (selectMode) {
+                                    selected = if (i in selected) selected - i else selected + i
+                                }
+                            }
+                    ) {
+                        if (hasImg) {
+                            // 照片 180dp、表情包 120dp（`content == "[图片]"` 是类型标记）；
+                            // 点/长按 = 看大图（`Fit` 不裁图，表情包裁一半就没法看了）
+                            val isPhoto = m.content == "[图片]"
+                            Box(
+                                Modifier.clip(squircle(10.dp))
+                                    .tapable(
+                                        onLongClick = { bigImg = m.img },
+                                        onClick = { bigImg = m.img }
+                                    )
+                            ) {
+                                EmojiImage(
+                                    url = m.img,
+                                    modifier = Modifier.size(if (isPhoto) 180.dp else 120.dp),
+                                    radius = 10.dp,
+                                    scale = ContentScale.Fit,
+                                    placeholderBg = false,
+                                    failText = tr("图片加载失败")
+                                )
+                            }
+                        } else {
+                            val textColor = when {
+                                mine -> BubblePalette.textOn(mineBgBase)
+                                aiBgBase != null -> BubblePalette.textOn(aiBgBase)
+                                else -> ink
+                            }
+                            // 先摘掉字段清单/卡片块（2026-11-16），正文只留对话和括号描写
+                            val (bodyText, blocks) = remember(m.content) {
+                                stripFormatBlocks(m.content)
+                            }
+                            // 126：括号内容变浅（关掉就和正文同色，不再做区分）
+                            val dimColor = if (com.aevis.android.core.ChatPrefs.annotDimOf(curPid))
+                                textColor.copy(alpha = 0.6f) else textColor
+                            Column {
+                                if (bodyText.isNotEmpty()) {
+                                    Text(
+                                        // 括号内的内心 OS 用浅色，只在渲染层做；
+                                        // `shownLen` 是逐字气泡的进度，内心 OS 模式下就是完整长度。
+                                        text = chatAnnotated(bodyText, textColor, dimColor, shownLen),
+                                        fontSize = msgFont,
+                                        lineHeight = msgLine
+                                    )
+                                }
+                                if (blocks.isNotEmpty()) {
+                                    FormatBlockStrip(blocks, dimColor)
+                                }
+                            }
+                        }
+                    }
+                    // 引用缩略（2026-11-16）：被引用的那条挂在自己气泡上方
+                    if (m.quote.isNotBlank()) {
+                        Box(
+                            Modifier.fillMaxWidth(0.72f)
+                                .clip(squircle(8.dp))
+                                .background(ink.copy(alpha = 0.06f))
+                                // 点一下跳回被引用的那条（2026-11-16）；找不到就说一声
+                                .tapable {
+                                    val target = msgs.indexOfLast {
+                                        it.content.replace("\n", " ").take(40) == m.quote
+                                    }
+                                    if (target >= 0) {
+                                        scope.launch { listState.animateScrollToItem(target) }
+                                    } else {
+                                        Toast.makeText(
+                                            ctx, "原消息已删除", Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                m.quote, fontSize = 11.sp, maxLines = 2,
+                                color = ink.copy(alpha = 0.5f), lineHeight = 15.sp
+                            )
+                        }
+                        Spacer(Modifier.height(3.dp))
+                    }
+
+                    // 语音（2026-11-16）：AI 文字消息下面一个小喇叭，点一下念出来。
+                    // 再点一次停止；播放器在 DisposableEffect 里 release。
+                    // 「从上下文移除」的标记：极淡的 ⌀，让用户知道这条不再进上下文
+                    if (m.skip) {
+                        Text(
+                            "⌀", fontSize = 10.sp,
+                            color = ink.copy(alpha = 0.25f)
+                        )
+                    }
+
+                    if (!mine && m.img.isEmpty() && m.content.isNotBlank()) {
+                        Box(
+                            Modifier.padding(top = 2.dp).size(22.dp).clip(CircleShape)
+                                .tapable { speak(i, m.content) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_row_mic), null,
+                                tint = if (speaking == i) V2.accent else ink.copy(alpha = 0.45f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
+                    // 我的消息右侧也挂头像（用户报「我的头像也没有」）
+                    // 126：只有「双方都显示」这一档才挂我这侧
+                    if (mine && com.aevis.android.core.ChatPrefs.avatarModeOf(curPid) == 0) {
+                        if (prevSame) Spacer(Modifier.width(avatarSize + gap))
+                        else {
+                            Spacer(Modifier.width(gap))
+                            Avatar(myAvatar, myName, avatarSize)
+                        }
+                    }
+                }
+            }
+
+            if (sending) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.Start
+                    ) {
+                        if (com.aevis.android.core.ChatPrefs.avatarModeOf(curPid) != 2) {
+                            Avatar(cur?.avatar.orEmpty(), cur?.name ?: "AI", avatarSize)
+                            Spacer(Modifier.width(gap))
+                        }
+                        Box(
+                            Modifier.clip(
+                                RoundedCornerShape(
+                                    bubbleRadius, bubbleRadius, bubbleRadius, 4.dp
+                                )
+                            )
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.055f))
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
+                        ) {
+                            Text(
+                                tr("正在输入…"), fontSize = 14.sp,
+                                color = ink.copy(alpha = 0.4f)
+                            )
+                        }
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(6.dp)) }
+        }
+        }   // ← 消息区 Box 到此（聊天背景只覆盖到这里）
+
+        if (err.isNotEmpty()) {
+            Text(
+                err, fontSize = 12.sp, color = V2.alert,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+            )
+        }
+
+        // ---------- 输入区 ----------
+        // 2026-11-16：输入条改成**不透明底色**。
+        // 用户：「底部那个要变白，就是输入框，那个底栏要变白，它不是那个图片里」——
+        // 以前整页压着聊天背景图、输入条是透明的，看起来像输入框浮在照片上。
+        // 现在只有这一条不透明（`surface`：浅色=白卡、深色=深卡，自动跟主题），
+        // 消息区仍然透背景图（那是要的效果），中间用一条 0.5dp 分割线分开。
+        // 112：设了主背景时这一条也跟着玻璃化（同样是"不透明观感"，只是带一点透）。
+        Column(
+            Modifier.fillMaxWidth()
+                .background(barSkin?.barFill ?: MaterialTheme.colorScheme.surface)
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(0.5.dp)
+                    .background(ink.copy(alpha = 0.08f))
+            )
+            Row(
+                Modifier.fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+            // 「＋」（2026-11-16，128）：改成微信式附件面板 —— 点它收起键盘、面板从下面升起。
+            Box(
+                Modifier.size(40.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    .tapable {
+                        if (!plusOpen) {
+                            runCatching { kb?.hide() }
+                            plusOpen = true
+                        } else plusOpen = false
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_tab_plus), null,
+                    tint = ink.copy(alpha = 0.6f),
+                    // 展开时＋转成×，一眼知道再点会收起
+                    modifier = Modifier.size(18.dp).rotate(if (plusOpen) 45f else 0f)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier.weight(1f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    .padding(horizontal = 14.dp, vertical = 11.dp)
+            ) {
+                // 126：回车发送 / 回车换行
+                // 开：单行 + IME 的「发送」键直接发；关：多行，回车用来换行，只能点按钮发
+                val enterSend = com.aevis.android.core.ChatPrefs.enterSendOf(curPid)
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 15.sp, color = ink
+                    ),
+                    singleLine = enterSend,
+                    maxLines = if (enterSend) 1 else 4,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = if (enterSend)
+                            androidx.compose.ui.text.input.ImeAction.Send
+                        else androidx.compose.ui.text.input.ImeAction.Default
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSend = { if (input.isNotBlank() && !sending) send() }
+                    ),
+                    decorationBox = { inner ->
+                        if (input.isEmpty()) {
+                            Text(
+                                tr("等待输入…"), fontSize = 15.sp,
+                                color = ink.copy(alpha = 0.32f)
+                            )
+                        }
+                        inner()
+                    },
+                    // 128：点输入框就收起附件面板
+                    modifier = Modifier.fillMaxWidth()
+                        .onFocusChanged { st -> if (st.isFocused) plusOpen = false }
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            val canSend = input.isNotBlank() && !sending
+            Box(
+                Modifier.size(42.dp).clip(CircleShape)
+                    .background(
+                        if (canSend) V2.accent else ink.copy(alpha = 0.08f)
+                    )
+                    .tapable { send() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_row_chevron), null,
+                    tint = if (canSend) Color.White else ink.copy(alpha = 0.3f),
+                    modifier = Modifier.size(18.dp).rotate(-90f)
+                )
+            }
+            }
+            // 128：附件面板（高 260dp，四列网格 + 最近图片横滑）
+            androidx.compose.animation.AnimatedVisibility(
+                visible = plusOpen,
+                enter = androidx.compose.animation.expandVertically(
+                    animationSpec = androidx.compose.animation.core.tween(200)
+                ) + fadeIn(androidx.compose.animation.core.tween(160)),
+                exit = androidx.compose.animation.shrinkVertically(
+                    animationSpec = androidx.compose.animation.core.tween(170)
+                ) + fadeOut(androidx.compose.animation.core.tween(120))
+            ) {
+                AttachmentPanel(
+                    recent = recentShots,
+                    onAlbum = {
+                        plusOpen = false
+                        pickPhotos.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                            )
+                        )
+                    },
+                    onCamera = {
+                        plusOpen = false
+                        val u = runCatching {
+                            val f = java.io.File(ctx.cacheDir, "cam_" + System.currentTimeMillis() + ".jpg")
+                            f.createNewFile()
+                            androidx.core.content.FileProvider.getUriForFile(
+                                ctx, ctx.packageName + ".fileprovider", f
+                            )
+                        }.getOrNull()
+                        if (u == null) {
+                            Toast.makeText(ctx, "打不开相机", Toast.LENGTH_SHORT).show()
+                        } else {
+                            camUri = u
+                            runCatching { takePicture.launch(u) }
+                                .onFailure {
+                                    Toast.makeText(ctx, "没有可用的相机", Toast.LENGTH_SHORT).show()
+                                }
+                        }
+                    },
+                    onFile = {
+                        plusOpen = false
+                        runCatching { pickDoc.launch(arrayOf("image/*")) }
+                    },
+                    onLocation = {
+                        plusOpen = false
+                        Toast.makeText(ctx, tr("暂不支持"), Toast.LENGTH_SHORT).show()
+                    },
+                    onEmoji = { plusOpen = false; emojiSheet = true },
+                    onPickRecent = { u -> plusOpen = false; sendPhoto(u) }
+                )
+            }
+        }   // 输入条容器（不透明底 + 顶部 0.5dp 分割线）
+    }
+    }  // Box(背景)
+
+    // ---------- 模型状态：底部弹出（2026-11-15）----------
+    if (modelSheet) {
+        LaunchedEffect(modelSheet) {
+            if (modelRows == null) {
+                modelRows = withContext(Dispatchers.IO) {
+                    runCatching { Api.modelList() }.getOrElse { emptyList() }
+                }
+            }
+            // 钱包也顺手刷一下：刚扣完费，这里的数字得是新的
+            wallet = withContext(Dispatchers.IO) { runCatching { Api.wallet() }.getOrNull() }
+            // 线路测速：**只在这个面板打开时测**（不常驻轮询，省流量省电）。
+            // 清空上一轮结果，下面每一行自己一个 `LaunchedEffect(line.id)` → 并发。
+            lineLatency.clear()
+        }
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { modelSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.32f)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                Text(tr("上下文状态"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    tr("这次对话用掉了多少上下文。超过八成会开始丢早期消息。"),
+                    fontSize = 12.sp, color = ink.copy(alpha = 0.45f), lineHeight = 17.sp
+                )
+                Spacer(Modifier.height(12.dp))
+
+                // 上下文用量（用户要的就是这个，不是模型列表）
+                run {
+                    val chars = msgs.sumOf { it.content.length }
+                    val tokens = chars / 2
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(tr("约 %d tokens", tokens), fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.weight(1f))
+                            Text("${msgs.size} 条 · $chars 字", fontSize = 12.sp,
+                                color = ink.copy(alpha = 0.42f))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        val pct = (tokens / 128000f).coerceIn(0f, 1f)
+                        Box(
+                            Modifier.fillMaxWidth().height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(ink.copy(alpha = 0.08f))
+                        ) {
+                            Box(
+                                Modifier.fillMaxWidth(pct.coerceAtLeast(0.005f))
+                                    .fillMaxHeight()
+                                    .background(if (pct > 0.8f) V2.alert else V2.accent)
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "128K 窗口已用 ${String.format(java.util.Locale.US, "%.1f", pct * 100)}%"
+                                + " · 当前模型 " + Api.shortLabel(model),
+                            fontSize = 11.5.sp, color = ink.copy(alpha = 0.42f)
+                        )
+                        // 扣费可见（2026-11-16）：用户原话「好像都没扣过我的」——
+                        // 切到 `/v1/llm/chat` 之后每次都会扣，顺手把"扣了多少 / 还剩多少"摊在这儿，
+                        // 让这件事有据可查（数据来自 `Api.lastChatPoints` / `lastChatBalance`）。
+                        if (Api.lastChatPoints > 0 || Api.lastChatBalance >= 0) {
+                            Spacer(Modifier.height(4.dp))
+                            // 不只要"扣了多少"，还要能看出**从哪个池扣的** ——
+                            // 会员额度（每周刷新）和墨点是两个池，用户有权知道这次动的是哪个。
+                            val fromLabel = when (Api.lastChargeFrom) {
+                                "member" -> tr("会员额度")
+                                "points" -> tr("墨点")
+                                else -> ""
+                            }
+                            val amount = String.format(
+                                java.util.Locale.US, "%.1f", Api.lastChatPoints
+                            )
+                            Text(
+                                when (Api.lastChargeFrom) {
+                                    // 从会员周额度扣的 → 关心"本周还剩多少"
+                                    "member" -> tr(
+                                        "上一轮扣 %s（会员额度）· 本周剩 %s",
+                                        amount,
+                                        if (Api.lastQuotaLeft >= 0)
+                                            Api.lastQuotaLeft.toString() else "—"
+                                    )
+                                    // 从墨点扣的 → 关心"余额还剩多少"
+                                    "points" -> tr(
+                                        "上一轮扣 %s（墨点）· 余额 %s",
+                                        amount,
+                                        if (Api.lastChatBalance >= 0)
+                                            Api.lastChatBalance.toString() else "—"
+                                    )
+                                    // 服务端还没返回 `charge_from`：只说扣了多少，不瞎猜来源
+                                    else -> tr("上一轮扣 %s", amount)
+                                },
+                                fontSize = 11.5.sp, color = V2.accent.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(color = ink.copy(alpha = 0.06f))
+                Spacer(Modifier.height(12.dp))
+
+                // 现实感知（2026-11-16）：一行说清状态，点一下能改城市
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(squircle(10.dp))
+                        .tapable { cityInput = city; askCity = true }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            tr("现实感知：%s", if (reality) tr("开") else tr("关")),
+                            fontSize = 13.sp, color = ink.copy(alpha = 0.8f)
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            if (reality) {
+                                if (city.isNotBlank()) tr("时间 · 天气 · 电量（%s）", city)
+                                else tr("时间 · 电量 · 网络（没填城市，不查天气）")
+                            } else {
+                                tr("已关闭，角色不知道你那边的真实情况")
+                            },
+                            fontSize = 11.sp, color = ink.copy(alpha = 0.42f)
+                        )
+                    }
+                    if (reality) {
+                        Text(tr("改城市"), fontSize = 11.5.sp, color = V2.accent)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // ---------- 线路（2026-11-16）----------
+                Text(tr("线路"), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    tr("发消息走的通道。右边是打开这个面板时实测的耗时。"),
+                    fontSize = 12.sp, color = ink.copy(alpha = 0.45f), lineHeight = 17.sp
+                )
+                Spacer(Modifier.height(10.dp))
+
+                // **有几条显示几条**（2026-11-16，112）：线路是数组驱动的，
+                // 以后后端多一条 HTTPS 入口，这里自动多一行，UI 不用改。
+                // 只写中文名：不显示 host / 域名 / 端口
+                // （用户：「不要暴露真实 IP…用主域名，不用完整域名，不用暴露」）
+                // 排序（114）：通的在前（按 ms），其它失败排中间，超时排最后，
+                // 还没测出来的垫最前（灰点，等结果）。
+                fun lineRank(p: Api.PingResult?): Int = when {
+                    p == null -> -1
+                    p.fail == Api.PingFail.NONE -> 0
+                    p.fail == Api.PingFail.TIMEOUT -> 2
+                    else -> 1
+                }
+                val orderedLines = Api.lines().filter { it.chat }.sortedWith(
+                    compareBy(
+                        { lineRank(lineLatency[it.id]) },
+                        { lineLatency[it.id]?.ms ?: Long.MAX_VALUE }
+                    )
+                )
+                orderedLines.forEach { line ->
+                    // 每行一个 LaunchedEffect → 并发探测，3 条最坏也只等 6 秒
+                    LaunchedEffect(line.id, lineTick) {
+                        lineLatency[line.id] = withContext(Dispatchers.IO) {
+                            Api.pingLineById(line.id)
+                        }
+                    }
+                    val ping = lineLatency[line.id]
+                    // 118：勾选跟**实际在用**的线路走（竞速赢家），没跑过请求才回落到用户选择
+                    val activeId = Api.activeLineId().takeIf { it > 0 } ?: Api.currentLineId()
+                    val on = activeId == line.id
+                    // 状态点（114 四态）：绿=通、橙=超时、红=TLS/HTTP/网络错、灰=未测
+                    val dot = when {
+                        ping == null -> ink.copy(alpha = 0.18f)
+                        ping.fail == Api.PingFail.NONE -> Color(0xFF3FBF6F)
+                        ping.fail == Api.PingFail.TIMEOUT -> Color(0xFFE0902E)
+                        else -> V2.alert
+                    }
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clip(squircle(12.dp))
+                            .background(
+                                if (on) V2.accent.copy(alpha = 0.08f) else Color.Transparent
+                            )
+                            // 失败的行**照样能点**：点了切过去并重测，不是死行
+                            .tapable {
+                                Api.setLineById(line.id)
+                                lineTick++
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.size(6.dp).clip(CircleShape).background(dot)
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Text(
+                            line.label, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            color = if (on) V2.accent else ink
+                        )
+                        if (on) {
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                tr("使用中"), fontSize = 10.sp, color = V2.accent,
+                                modifier = Modifier.clip(squircle(5.dp))
+                                    .background(V2.accent.copy(alpha = 0.13f))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            line.note, fontSize = 11.sp, color = ink.copy(alpha = 0.38f),
+                            maxLines = 1
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            when {
+                                ping == null -> "—"
+                                ping.fail == Api.PingFail.NONE -> "${ping.ms} ms"
+                                ping.fail == Api.PingFail.TIMEOUT -> tr("超时")
+                                ping.fail == Api.PingFail.TLS -> tr("TLS 失败")
+                                ping.fail == Api.PingFail.HTTP -> "HTTP ${ping.detail}"
+                                else -> tr("网络错误")
+                            },
+                            fontSize = 12.sp,
+                            color = when {
+                                ping == null -> ink.copy(alpha = 0.4f)
+                                ping.fail == Api.PingFail.NONE -> ink.copy(alpha = 0.7f)
+                                ping.fail == Api.PingFail.TIMEOUT -> Color(0xFFE0902E)
+                                else -> V2.alert.copy(alpha = 0.9f)
+                            }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+                // 如实说明：线路表是服务端/客户端配置里的一串地址，
+                // 没配好 HTTPS 入口的那几台还不会出现在上面。
+                Text(
+                    tr("更多线路正在接入，配好就会自动出现在这里。"),
+                    fontSize = 11.sp, color = ink.copy(alpha = 0.32f)
+                )
+
+                Spacer(Modifier.height(12.dp))
+                // 自动选最快：开着时，当前线路连续 3 次网络失败会自动切另一条（`Api.chat` 里做）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("自动选最快"), fontSize = 14.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            tr("当前线路连续 3 次连不上就自动换一条"),
+                            fontSize = 11.sp, color = ink.copy(alpha = 0.42f)
+                        )
+                    }
+                    Switch(
+                        checked = autoLine,
+                        onCheckedChange = {
+                            autoLine = it
+                            com.aevis.android.core.ChatPrefs.autoLine = it
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = V2.accent,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = ink.copy(alpha = 0.18f)
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                // 用户：「上下文状态只能看上下文，还有这个当前是用在哪里了，你不能选模型」
+                // 所以这里不再列模型，只留一句指路。
+                Text(
+                    tr("换模型请点右上角三个点 →「模型」"),
+                    fontSize = 12.sp, color = ink.copy(alpha = 0.38f)
+                )
+                Spacer(Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // ---------- 问城市（现实感知第一次打开时问一次）----------
+    if (askCity) {
+        AlertDialog(
+            onDismissRequest = {
+                askCity = false
+                com.aevis.android.core.ChatPrefs.markCityAsked()
+            },
+            title = { Text(tr("用哪个城市看天气？")) },
+            text = {
+                Column {
+                    Text(
+                        tr("填一个城市名，角色就知道你那边什么天气。不填也行 —— 那就只用时间、电量、网络。"),
+                        fontSize = V2.sub, lineHeight = 19.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    BasicTextField(
+                        value = cityInput,
+                        onValueChange = { cityInput = it.take(12) },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 15.sp, color = ink
+                        ),
+                        decorationBox = { inner ->
+                            Box(
+                                Modifier.fillMaxWidth().clip(squircle(10.dp))
+                                    .background(ink.copy(alpha = 0.05f))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                if (cityInput.isEmpty()) {
+                                    Text(
+                                        tr("比如：上海"), fontSize = 15.sp,
+                                        color = ink.copy(alpha = 0.32f)
+                                    )
+                                }
+                                inner()
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    com.aevis.android.core.ChatPrefs.city = cityInput
+                    com.aevis.android.core.ChatPrefs.markCityAsked()
+                    city = cityInput.trim()
+                    askCity = false
+                }) { Text(tr("好"), color = V2.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    com.aevis.android.core.ChatPrefs.markCityAsked()
+                    askCity = false
+                }) { Text(tr("不填")) }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    // 引用中提示（2026-11-16）：挂在输入条上方，点 × 取消
+    if (pendingQuote.isNotBlank()) {
+        Row(
+            Modifier.fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .clip(squircle(10.dp))
+                .background(ink.copy(alpha = 0.05f))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(tr("引用"), fontSize = 11.sp, color = V2.accent)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                pendingQuote, fontSize = 11.5.sp, maxLines = 1,
+                color = ink.copy(alpha = 0.5f), modifier = Modifier.weight(1f)
+            )
+            Text(
+                "×", fontSize = 15.sp, color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.tapable { pendingQuote = "" }
+            )
+        }
+    }
+
+    // ---------- 长按消息菜单（2026-11-16）----------
+    if (msgMenu >= 0 && msgMenu < msgs.size) {
+        val idx = msgMenu
+        val m = msgs[idx]
+        val summary = when {
+            m.content == "[图片]" -> tr("[图片]")
+            m.content.isBlank() && m.img.isNotEmpty() -> tr("[表情]")
+            else -> m.content.replace("\n", " ").take(12)
+        }
+        ModalBottomSheet(
+            onDismissRequest = { msgMenu = -1 },
+            containerColor = dialogSurfaceColor(),
+            scrimColor = Color.Black.copy(alpha = 0.32f)
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = V2.gutter)
+                    .navigationBarsPadding()
+            ) {
+                Text(
+                    if (summary.isBlank()) tr("这条消息") else summary,
+                    fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1
+                )
+                Spacer(Modifier.height(10.dp))
+
+                MsgMenuItem(tr("复制原文")) {
+                    copyToClipboard(ctx, m.content)
+                    Toast.makeText(ctx, "已复制原文", Toast.LENGTH_SHORT).show()
+                    msgMenu = -1
+                }
+                MsgMenuItem(
+                    if (m.skip) tr("放回上下文") else tr("从上下文移除"),
+                    hint = if (m.skip) tr("之后的回复会重新参考这条")
+                    else tr("留在聊天里，但不再发给我")
+                ) {
+                    val next = msgs.toMutableList()
+                    next[idx] = m.copy(skip = !m.skip)
+                    msgs = next
+                    Api.saveConv(curPid, next)
+                    msgMenu = -1
+                }
+                MsgMenuItem(tr("引用"), hint = tr("下一句会带上这条的缩略")) {
+                    // 引用：把被引用的那条缩略存进输入待发送状态，发出去时挂在 Msg.quote 上
+                    pendingQuote = m.content.replace("\n", " ").take(40)
+                    msgMenu = -1
+                }
+                MsgMenuItem(tr("删除这条"), danger = true, hint = tr("聊天记录里也删掉")) {
+                    val next = msgs.toMutableList().also { it.removeAt(idx) }
+                    msgs = next
+                    Api.saveConv(curPid, next)
+                    msgMenu = -1
+                }
+                MsgMenuItem(tr("多选"), hint = tr("勾选几条一起删")) {
+                    selectMode = true
+                    selected = setOf(idx)
+                    msgMenu = -1
+                }
+                MsgMenuItem(tr("回退到这条之前"), danger = true) {
+                    msgMenu = -1
+                    confirmRollbackAt = idx
+                }
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    Modifier.fillMaxWidth().clip(squircle(14.dp))
+                        .background(ink.copy(alpha = 0.06f))
+                        .tapable { msgMenu = -1 }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) { Text(tr("取消"), fontSize = V2.body, color = ink.copy(alpha = 0.7f)) }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+
+    // 回退二次确认
+    if (confirmRollbackAt >= 0) {
+        val at = confirmRollbackAt
+        AlertDialog(
+            onDismissRequest = { confirmRollbackAt = -1 },
+            title = { Text(tr("回退到这里？")) },
+            text = {
+                Text(
+                    tr("这条之后的消息都会被删掉（含这条），不能恢复。"),
+                    fontSize = V2.sub, lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val next = msgs.take(at)
+                    msgs = next
+                    Api.saveConv(curPid, next)
+                    confirmRollbackAt = -1
+                }) { Text(tr("回退"), color = V2.alert) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRollbackAt = -1 }) { Text(tr("取消")) }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    // ---------- 图片大图（2026-11-16）----------
+    // 点/长按图片消息 → 全屏看大图。双指缩放这轮不做（能看清就行）。
+    val big = bigImg
+    if (big != null) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { bigImg = null }) {
+            Box(
+                Modifier.fillMaxWidth()
+                    .clip(squircle(16.dp))
+                    .background(Color.Black)
+                    .tapable { bigImg = null },
+                contentAlignment = Alignment.Center
+            ) {
+                EmojiImage(
+                    url = big,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                    radius = 16.dp,
+                    scale = ContentScale.Fit,
+                    placeholderBg = false,
+                    failText = tr("图片加载失败")
+                )
+            }
+        }
+    }
+
+    // ---------- 表情面板（2026-11-16）----------
+    // 面板本身在 `EmojiSheet` 里（群聊页共用同一份），这里只负责"选一张就发出去"
+    if (emojiSheet) {
+        EmojiSheet(
+            onPick = { url -> sendEmoji(url) },
+            onDismiss = { emojiSheet = false }
+        )
+    }
+}
+
+/** 一行状态文案：在线 · 可用率 · 单价。*/
+private fun modelStatusLine(m: com.aevis.android.data.Api.ModelInfo): String {
+    val sb = StringBuilder()
+    sb.append(if (m.online) "在线" else "可能不可用")
+    sb.append(" · 可用率 ")
+    sb.append(String.format(java.util.Locale.US, "%.1f%%", m.uptime))
+    if (m.points > 0) {
+        sb.append(" · 约 ")
+        sb.append(String.format(java.util.Locale.US, "%.2f", m.points))
+        sb.append(" 墨点/次")
+    }
+    return sb.toString()
+}
+
+
+
+/** 顶栏那个小标签：上下文用掉多少（用户要的是这个，不是模型名）。*/
+private fun contextLabelOf(msgs: List<Api.Msg>): String {
+    val t = msgs.sumOf { it.content.length } / 2
+    return when {
+        t <= 0 -> "上下文 0"
+        t < 1000 -> "上下文 $t"
+        else -> "上下文 " + String.format(java.util.Locale.US, "%.1f", t / 1000f) + "K"
+    }
+}
+
+/**
+ * 去掉消息里 `（）` 包住的描写，只留说出口的话（2026-11-16）。
+ * TTS 不该把「（他在笑）」念出来；消息原文一个字都不改。
+ */
+internal fun stripParens(s: String): String {
+    val sb = StringBuilder()
+    var depth = 0
+    for (ch in s) {
+        if (ch == '\uFF08' || ch == '(') { depth++; continue }
+        if (ch == '\uFF09' || ch == ')') { depth = (depth - 1).coerceAtLeast(0); continue }
+        if (depth == 0) sb.append(ch)
+    }
+    return sb.toString().trim().ifEmpty { s.trim() }
+}
+
+/**
+ * 取这条语音的本地 mp3（2026-11-16）。
+ *
+ * 缓存键 = 文本的 md5：同一句话再点播放不会重复请求 TTS（省钱也省时间）。
+ * 合成失败返回 null（调用方 Toast「语音暂时没开通」）。
+ */
+internal fun ttsFile(ctx: android.content.Context, text: String): java.io.File? {
+    if (text.isBlank()) return null
+    val dir = java.io.File(ctx.cacheDir, "tts").apply { if (!exists()) mkdirs() }
+    val md5 = try {
+        val d = java.security.MessageDigest.getInstance("MD5")
+        d.digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        text.hashCode().toString()
+    }
+    val f = java.io.File(dir, "$md5.mp3")
+    if (f.exists() && f.length() > 0) return f
+    val voice = com.aevis.android.data.Api.defaultVoice()
+    val bytes = com.aevis.android.data.Api.ttsSpeech(text, voice) ?: return null
+    return runCatching {
+        f.writeBytes(bytes)
+        f
+    }.getOrNull()
+}
+
+/**
+ * 气泡底部的「物品 / 状态说明」折叠条（2026-11-16）。
+ *
+ * 模型偶尔会吐 `[物品：…]` + `状态：… 颜色：…` 这种字段清单，直接铺在气泡里很丑。
+ * 这里把它收成一条小胶囊：默认折叠，点开才在气泡里显示原文（浅色 11sp）。
+ * 正文全被摘完时（只剩块），气泡里就只显示这条 —— 不留空白气泡。
+ */
+@Composable
+internal fun FormatBlockStrip(blocks: List<String>, dim: Color) {
+    var open by remember { mutableStateOf(false) }
+    Column(Modifier.padding(top = 6.dp)) {
+        Row(
+            Modifier.clip(squircle(8.dp))
+                .background(dim.copy(alpha = 0.16f))
+                .tapable { open = !open }
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(tr("物品 / 状态说明"), fontSize = 11.sp, color = dim)
+            Spacer(Modifier.width(5.dp))
+            Text(
+                if (open) tr("收起") else tr("展开"),
+                fontSize = 11.sp, color = V2.accent
+            )
+        }
+        if (open) {
+            Spacer(Modifier.height(5.dp))
+            blocks.forEach { b ->
+                Text(b, fontSize = 11.sp, lineHeight = 16.sp, color = dim)
+                Spacer(Modifier.height(3.dp))
+            }
+        }
+    }
+}
+
+/**
+ * 折叠条**展开后**给人看的那几行，渲染前洗一遍（2026-11-16）。
+ *
+ * 1. `$\text{xxx}$` / `\text{xxx}` → `xxx`
+ * 2. 其它 LaTeX 命令 `\foo{xxx}` → `xxx`
+ * 3. markdown 记号 `**` / `__` / 反引号 全去掉（气泡里是说明文字，不该出现记号）
+ */
+internal fun cleanBlockLine(raw: String): String {
+    var t = raw
+    t = Regex("\\$?\\s*\\\\text\\{([^}]*)\\}\\s*\\$?").replace(t, "$1")
+    t = Regex("\\\\[a-zA-Z]+\\{([^}]*)\\}").replace(t, "$1")
+    t = t.replace("**", "").replace("__", "").replace("`", "")
+    return t.trim()
+}
+
+/**
+ * 渲染前洗掉"画不出来的字符"（2026-11-16）。
+ *
+ * 真机气泡里出现过幽灵方框（缺字形），排查结果：
+ *   · **不是**自定义字体 —— `FontStore` 只在日记页用，聊天气泡走系统字体；
+ *   · **不是**切片丢字 —— `chatAnnotated` 是逐字符 append，`visibleLen` 只控制范围；
+ *   · 是**消息原文里带了 PUA / 变体选择符 / ZWJ / U+FFFD**，系统字体没有对应字形 → 渲染成方框。
+ * 这些字符对语义没贡献（都是表情变体或私有区占位），直接丢弃最干净。
+ */
+internal fun sanitizeGlyphs(s: String): String {
+    if (s.isEmpty()) return s
+    val sb = StringBuilder(s.length)
+    for (ch in s) {
+        val c = ch.code
+        if (c in 0xE000..0xF8FF) continue      // 私有使用区
+        if (c in 0xFE00..0xFE0F) continue      // 变体选择符
+        if (c == 0x200D || c == 0x200B) continue // ZWJ / 零宽空格
+        if (c == 0xFFFD) continue              // 替换符
+        sb.append(ch)
+    }
+    return sb.toString()
+}
+
+/** 复制到剪贴板（2026-11-16）。*/
+internal fun copyToClipboard(ctx: android.content.Context, text: String) {
+    runCatching {
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("Aevis", text))
+    }
+}
+
+/** 消息菜单的一行（2026-11-16）。`danger` = 红色（删除/回退）。 */
+@Composable
+private fun MsgMenuItem(
+    label: String,
+    hint: String = "",
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(squircle(12.dp))
+            .tapable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 11.dp)
+    ) {
+        Text(
+            label, fontSize = V2.body, fontWeight = FontWeight.Medium,
+            color = if (danger) V2.alert else ink
+        )
+        if (hint.isNotEmpty()) {
+            Spacer(Modifier.height(2.dp))
+            Text(hint, fontSize = 11.sp, color = ink.copy(alpha = 0.42f))
+        }
+    }
+}
+
+/** "当前正在看哪个会话"（2026-11-16）：提示音靠它判断"要不要响"。*/
+internal object Presence {
+    @Volatile
+    var chatPid: String = ""
+}
+
+/**
+ * 弹窗/半窗底色（2026-11-16）。
+ * `ChatPrefs.dialogStyle`：0 跟随主题 / 1 深色玻璃 —— 用户能一眼看出区别才算数。
+ * 112：设了主背景时，跟随主题那一档也用同一套玻璃底（半窗浮在照片上不该是一块死白）。
+ */
+@Composable
+internal fun dialogSurfaceColor(): androidx.compose.ui.graphics.Color =
+    if (com.aevis.android.core.ChatPrefs.dialogStyle == 1)
+        androidx.compose.ui.graphics.Color(0xFF1B1A20)
+    else appSkin()?.cardFill ?: MaterialTheme.colorScheme.surface
+
+/**
+ * 三个点依次动（2026-11-16，89）。
+ *
+ * `rememberInfiniteTransition` + 每个点 `StartOffset(i * 160)`，周期 1000ms（500ms 去 + 500ms 回），
+ * `alpha 0.35→1`、`scale 0.8→1`。**不是 `...` 字符**，是真的三个圆点 Box。
+ * 注意：这个组件只放在顶栏和列表里的输入中气泡里 —— 列表项滚出屏幕后
+ * 组合会被回收，`InfiniteTransition` 跟着停，不会在屏幕外空转。
+ */
+@Composable
+internal fun TypingDots(
+    tint: androidx.compose.ui.graphics.Color,
+    dot: androidx.compose.ui.unit.Dp = 3.dp,
+    gap: androidx.compose.ui.unit.Dp = 1.5.dp
+) {
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { i ->
+            val a by t.animateFloat(
+                initialValue = 0.35f,
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.tween(
+                        durationMillis = 500,
+                        easing = androidx.compose.animation.core.FastOutSlowInEasing
+                    ),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+                    initialStartOffset = androidx.compose.animation.core.StartOffset(i * 160)
+                ),
+                label = "dotA$i"
+            )
+            Box(
+                Modifier.padding(horizontal = gap)
+                    .size(dot)
+                    .graphicsLayer {
+                        scaleX = 0.8f + 0.2f * a
+                        scaleY = 0.8f + 0.2f * a
+                        alpha = a
+                    }
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(tint)
+            )
+        }
+    }
+}
+
+
+/**
+ * 附件面板（2026-11-16，128）。
+ *
+ * 用户要的是微信那种：点＋收起键盘、面板从下面升起来，四格「相册 / 拍照 / 文件 / 位置」，
+ * 下面再挂一条「最近图片」。位置那一格**没接地图就只提示"暂不支持"**，不做假的。
+ */
+@Composable
+private fun AttachmentPanel(
+    recent: List<android.net.Uri>,
+    onAlbum: () -> Unit,
+    onCamera: () -> Unit,
+    onFile: () -> Unit,
+    onLocation: () -> Unit,
+    onEmoji: () -> Unit,
+    onPickRecent: (android.net.Uri) -> Unit
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    Column(
+        Modifier.fillMaxWidth()
+            .heightIn(min = 260.dp)
+            .background(MaterialTheme.colorScheme.surface)
+            .navigationBarsPadding()
+            .padding(horizontal = 10.dp, vertical = 14.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            AttCell(R.drawable.ic_att_album, tr("相册"), onAlbum, Modifier.weight(1f))
+            AttCell(R.drawable.ic_att_camera, tr("拍照"), onCamera, Modifier.weight(1f))
+            AttCell(R.drawable.ic_att_file, tr("文件"), onFile, Modifier.weight(1f))
+            AttCell(R.drawable.ic_att_location, tr("位置"), onLocation, Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(squircle(12.dp))
+                .tapable { onEmoji() }
+                .padding(horizontal = 6.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_set_layers), null,
+                tint = ink.copy(alpha = 0.6f), modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(tr("表情包"), fontSize = 13.sp, color = ink.copy(alpha = 0.75f))
+            Spacer(Modifier.weight(1f))
+            Icon(
+                painterResource(R.drawable.ic_chevron), null,
+                tint = ink.copy(alpha = 0.25f), modifier = Modifier.size(14.dp)
+            )
+        }
+
+        if (recent.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                tr("最近图片"), fontSize = 11.sp,
+                color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.padding(start = 6.dp, bottom = 6.dp)
+            )
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                recent.take(8).forEach { u ->
+                    RecentShot(u) { onPickRecent(u) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttCell(@DrawableRes icon: Int, label: String, onClick: () -> Unit, modifier: Modifier) {
+    Column(
+        modifier.tapable { onClick() }.padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(52.dp).clip(squircle(16.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painterResource(icon), null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    }
+}
+
+/** 最近图片缩略图（IO 解码，失败就画个占位，不抛）。*/
+@Composable
+private fun RecentShot(uri: android.net.Uri, onClick: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val bmp by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
+        initialValue = null, uri
+    ) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    ctx.contentResolver.openInputStream(uri)?.use { ins ->
+                        val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+                        android.graphics.BitmapFactory.decodeStream(ins, null, o)
+                    }
+                }.getOrNull()
+            }
+    }
+    Box(
+        Modifier.size(58.dp).clip(squircle(9.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+            .tapable { onClick() }
+    ) {
+        bmp?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it.asImageBitmap(), contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}

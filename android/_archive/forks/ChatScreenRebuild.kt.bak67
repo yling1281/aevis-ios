@@ -1,0 +1,230 @@
+package com.aevis.android.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.aevis.android.core.ChatPrefs
+import com.aevis.android.data.Api
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * 聊天页重建（2026-11-17）。
+ *
+ * 背景：原 `ChatScreen()` 在一次错误的批量替换里被整段删掉（文件 untracked，无 git 版本），
+ * 连 `input/msgs/sending` 等状态定义一起丢了。这里按原件的行为重写一个**可编译、可用**的版本，
+ * 先保证文字收发 + 多条气泡 + 两句一行的节奏，图片/语音/表情等后续补。
+ */
+
+/** 括号内的描写染成浅色，括号外的对话正常色。visibleLen>=0 时只显示前 N 个字符（逐字用）。 */
+internal fun chatAnnotated(
+    text: String,
+    normal: Color,
+    dim: Color,
+    visibleLen: Int = -1
+): AnnotatedString {
+    val limit = if (visibleLen >= 0) minOf(visibleLen, text.length) else text.length
+    return buildAnnotatedString {
+        var depth = 0
+        for (i in 0 until limit) {
+            val c = text[i]
+            when (c) {
+                '（', '(', '【', '[' -> {
+                    depth++
+                    withStyle(SpanStyle(color = dim)) { append(c) }
+                }
+                '）', ')', '】', ']' -> {
+                    withStyle(SpanStyle(color = dim)) { append(c) }
+                    if (depth > 0) depth--
+                }
+                else -> {
+                    if (depth > 0) withStyle(SpanStyle(color = dim)) { append(c) }
+                    else withStyle(SpanStyle(color = normal)) { append(c) }
+                }
+            }
+        }
+    }
+}
+
+/** 表情库（原实现在被删的 1600 行里，先给空实现，发送表情面板以后再接）。 */
+internal fun loadMemes(ctx: android.content.Context): List<String> = emptyList()
+
+/** 把表情拼到文本末尾。 */
+internal fun appendMemes(list: List<String>): String = ""
+
+/** 当前会话的状态标记（顶栏显示的那几个字）。 */
+internal fun statusOf(pid: Long, kind: Int): String = ""
+
+@Composable
+fun ChatScreen(
+    pid: String,
+    onBack: () -> Unit,
+    onOpenRoleSet: (String) -> Unit = {},
+    onOpenPersona: (String) -> Unit = {},
+    onOpenLook: (String) -> Unit = {},
+    onOpenDiary: (String) -> Unit = {},
+    onOpenModels: (String) -> Unit = {}
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val ink = MaterialTheme.colorScheme.onSurface
+
+    var msgs by remember(pid) { mutableStateOf<List<Api.Msg>>(emptyList()) }
+    var input by remember(pid) { mutableStateOf("") }
+    var sending by remember(pid) { mutableStateOf(false) }
+    var err by remember(pid) { mutableStateOf("") }
+    var name by remember(pid) { mutableStateOf("") }
+
+    LaunchedEffect(pid) {
+        msgs = withContext(Dispatchers.IO) { runCatching { Api.loadConv(pid) }.getOrDefault(emptyList()) }
+    }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(msgs.size) {
+        if (msgs.isNotEmpty()) runCatching { listState.animateScrollToItem(msgs.size - 1) }
+    }
+
+    fun pushOut(text: String) {
+        val after = msgs + Api.Msg("assistant", text)
+        msgs = after
+        Api.saveConv(pid, after)
+    }
+
+    fun send() {
+        val text = input.trim()
+        if (text.isEmpty() || sending) return
+        input = ""
+        err = ""
+        val withUser = msgs + Api.Msg("user", text)
+        msgs = withUser
+        Api.saveConv(pid, withUser)
+        sending = true
+        scope.launch {
+            val isOs = ChatPrefs.chatMode == 1
+            val sys = buildString {
+                if (name.isNotBlank()) appendLine("你叫$name。")
+                if (isOs) {
+                    appendLine("【内心 OS 模式】这一轮只写一段内心独白，200-600 字；可以用括号写动作神态；不分条、不加小标题。")
+                } else {
+                    appendLine("【微信聊天模式】每条不超过 15 字；一次发 3-5 条，情绪起来 6-8 条；每条之间用换行分开；不要用括号写动作。")
+                }
+                appendLine("【状态标记】回复最后单独一行输出 [[状态]]两到六个字，用户看不到。")
+            }
+            val reply = withContext(Dispatchers.IO) { Api.chat("deepseek-flash", withUser.takeLast(20), sys) }
+            if (reply.isNullOrBlank()) {
+                err = Api.lastChatError.ifBlank { "发送失败" }
+                sending = false
+                return@launch
+            }
+            val clean = reply.replace(Regex("\\[\\[状态\\]\\].*"), "").trim()
+            val parts = if (isOs) listOf(clean) else splitReply(clean, "。！？～")
+            parts.forEachIndexed { i, part ->
+                if (i > 0) delay(if (part.length > 40) 900L else 650L)
+                pushOut(part)
+            }
+            sending = false
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+    ) {
+        Row(
+            Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(RoundedCornerShape(50)).tapable { onBack() },
+                contentAlignment = Alignment.Center
+            ) { Text("‹", fontSize = 26.sp, color = ink.copy(alpha = 0.75f)) }
+            Text(name.ifBlank { "聊天" }, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            if (sending) Text("正在输入…", fontSize = 12.sp, color = ink.copy(alpha = 0.4f))
+        }
+
+        if (err.isNotBlank()) {
+            Text(err, fontSize = 12.sp, color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp))
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            itemsIndexed(msgs) { _, m ->
+                val mine = m.role == "user"
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
+                ) {
+                    Box(
+                        Modifier.widthIn(max = 280.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        Text(
+                            text = chatAnnotated(m.content, ink, ink.copy(alpha = 0.55f)),
+                            fontSize = 14.5.sp, lineHeight = 21.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                if (input.isEmpty()) {
+                    Text("说点什么…", fontSize = 14.sp, color = ink.copy(alpha = 0.35f))
+                }
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = ink),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier.size(44.dp).clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+                    .tapable { send() },
+                contentAlignment = Alignment.Center
+            ) { Text("↑", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        }
+    }
+}
