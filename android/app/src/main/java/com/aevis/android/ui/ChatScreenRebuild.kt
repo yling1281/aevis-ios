@@ -12,8 +12,10 @@ import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -226,18 +228,29 @@ fun ChatScreen(
     }
 
     // 微信式贴底跟随：用户上翻看历史时不拽回底部。
+    // 2026-11-29 修复"默认不在最底下"：空列表/首次布局时 layoutInfo 的
+    // lastOrNull() 为 null、totalItemsCount 为 0，会被误判成"不在底"→ stickBottom=false，
+    // 后面消息加载完就不跟了。改成：列表还没内容时不改状态，保持初始 true。
     var stickBottom by remember(pid) { mutableStateOf(true) }
+    var didInitialScroll by remember(pid) { mutableStateOf(false) }
     LaunchedEffect(listState) {
         snapshotFlow {
             val li = listState.layoutInfo
-            li.visibleItemsInfo.lastOrNull()?.index == li.totalItemsCount - 1
+            if (li.totalItemsCount == 0 || li.visibleItemsInfo.isEmpty()) true
+            else li.visibleItemsInfo.lastOrNull()?.index == li.totalItemsCount - 1
         }.collect { stickBottom = it }
     }
     LaunchedEffect(loaded, render.size, scrollTick, stickBottom) {
         if (loaded && render.isNotEmpty() && stickBottom) {
             val extra = if (msgs.size > shown) 1 else 0
             val target = (render.size - 1 + extra).coerceAtLeast(0)
-            runCatching { listState.scrollToItem(target) }
+            // 首次进入瞬间贴底（不让用户在眼前滚一长段）；之后新消息柔滑跟上。
+            if (!didInitialScroll) {
+                runCatching { listState.scrollToItem(target) }
+                didInitialScroll = true
+            } else {
+                runCatching { listState.animateScrollToItem(target) }
+            }
         }
     }
 
@@ -353,18 +366,14 @@ fun ChatScreen(
         Box(Modifier.fillMaxSize().background(veil))
 
         Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-            // ── 顶部栏（iOS inline） ───────────────────────────────────────
+            // ── 顶部栏（2026-11-29：三点 + 日记一并挪到右上角） ─────────────
+            // 左边只留返回；标题居中；日记 + 三点并排在右，跟 iOS 右上角口径一致。
             Box(Modifier.fillMaxWidth().height(56.dp)) {
-                Row(
-                    Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Box(Modifier.align(Alignment.CenterStart).padding(start = 8.dp)) {
                     CircleIcon(R.drawable.ic_chevron, accent, rotate = 180f, onClick = onBack)
-                    Spacer(Modifier.width(4.dp))
-                    CircleIcon(R.drawable.ic_menu, accent) { moreOpen = true }
                 }
                 Column(
-                    Modifier.align(Alignment.Center).padding(horizontal = 92.dp),
+                    Modifier.align(Alignment.Center).padding(horizontal = 100.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -378,15 +387,20 @@ fun ChatScreen(
                         )
                     }
                 }
-                Box(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
+                Row(
+                    Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     CircleIcon(R.drawable.ic_diary, accent) { onOpenDiary(pid) }
+                    Spacer(Modifier.width(4.dp))
+                    CircleIcon(R.drawable.ic_menu, accent) { moreOpen = true }
                 }
             }
 
             AnimatedVisibility(
                 visible = err.isNotBlank(),
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
+                enter = fadeIn(tween(180)) + expandVertically(animationSpec = tween(200, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(140)) + shrinkVertically(animationSpec = tween(160, easing = FastOutSlowInEasing))
             ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
@@ -487,8 +501,8 @@ fun ChatScreen(
             // ── 底部悬浮输入栏 ────────────────────────────────────────────
             AnimatedVisibility(
                 visible = speechHint.isNotBlank(),
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
+                enter = fadeIn(tween(180)) + expandVertically(animationSpec = tween(200, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(140)) + shrinkVertically(animationSpec = tween(160, easing = FastOutSlowInEasing))
             ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp)

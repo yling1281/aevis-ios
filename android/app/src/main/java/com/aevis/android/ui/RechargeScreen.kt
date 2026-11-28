@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -34,94 +36,306 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 充值（2026-11-15）。
+ * 商城 / 充值页（2026-11-29 版式对齐 iOS ShopView）。
  *
- * 用户：「充值页面也没做」+「不管选的是微信还是支付宝，都通通直接跳到这个收银台」。
+ * 版式按 iOS ShopView 重做：顶部标题 + 余额卡 + 页内 tab 固定，商品区 2 列网格、
+ * 选中描边、底部贴底购买栏（按钮高 50、不跟着滚）。
  *
- * 所以这里**不自己做微信/支付宝按钮** —— 点套餐统一跳我们自己的收银台：
- *   `https://aevis.lingyan.cyou/pay/?product=pt_30&name=<用户名>`
- * 收银台里再选支付方式，手机端会直接用 `weixin://` / `alipays://` 拉起 App。
- *
- * 商品名和订单号由收银台拼（`用户名 商品名 订单号`），后台对账能认出是谁买的。
+ * 支付链路**一行没动**：墨点沿用 Api.rechargeQr、会员沿用 Api.shopOrder，
+ * 下单后抬起本文件原有的 PayDialog（本地二维码 + 订单状态轮询 + 「我已完成支付」）。
+ * PaySheetHost / 聚合二维码 / 3 秒快照轮询 / 会员快照等全局支付半窗原样保留，
+ * 供商城页、会员页继续复用。
  */
 @Composable
 fun RechargeScreen(onBack: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     var points by remember { mutableIntStateOf(-1) }
     var me by remember { mutableStateOf<Api.MeInfo?>(Api.cachedMe()) }
+
+    // 页内 tab：iOS ShopView 用 SegmentedTabs 分品类；这里只保留真能买的墨点 / 会员
+    var tab by remember { mutableIntStateOf(0) }
+
+    // 墨点六档：与 PointPacks 的商品口径完全一致，不动任何接口结构
+    val packs = defaultPointPacks
+    var selectedPack by remember { mutableStateOf<UiPointPack?>(null) }
+    var memberProducts by remember { mutableStateOf<List<Api.ShopProduct>>(emptyList()) }
+    var selectedMember by remember { mutableStateOf<Api.ShopProduct?>(null) }
+
+    var paying by remember { mutableStateOf(false) }
+    var payInfo by remember { mutableStateOf<PayInfo?>(null) }
 
     LaunchedEffect(Unit) {
         points = withContext(Dispatchers.IO) {
             runCatching { Api.balance() }.getOrNull() ?: -1
         }
         runCatching { Api.me() }.getOrNull()?.let { me = it }
+        memberProducts = withContext(Dispatchers.IO) {
+            runCatching { Api.shopProducts() }.getOrDefault(emptyList())
+        }.filter { it.kind == "member" && it.priceCents > 0 }
+        if (selectedPack == null) selectedPack = packs.first()
+        if (selectedMember == null) selectedMember = memberProducts.firstOrNull()
     }
 
     BackHandler { onBack() }
+
+    payInfo?.let { info ->
+        PayDialog(
+            info = info,
+            onClose = { payInfo = null },
+            onPaid = { qty ->
+                payInfo = null
+                Toast.makeText(ctx, "到账 $qty", Toast.LENGTH_LONG).show()
+                com.aevis.android.core.ChatPrefs.bumpUi()
+            }
+        )
+    }
+
+    // 底部购买栏触发：沿用本页原有的下单接口，不动接口/数据结构
+    fun checkout() {
+        if (paying) return
+        if (tab == 0) {
+            val p = selectedPack ?: return
+            paying = true
+            scope.launch(Dispatchers.IO) {
+                val o = runCatching { Api.rechargeQr(p.code, "wxpay") }.getOrNull()
+                withContext(Dispatchers.Main) {
+                    paying = false
+                    if (o != null) {
+                        payInfo = PayInfo(
+                            o.orderNo, "Aevis 积分 ${o.points}",
+                            o.amountYuan, "${o.points} 积分", o.qrContent, "points"
+                        )
+                    } else {
+                        Toast.makeText(
+                            ctx, Api.lastPayError.ifBlank { "下单失败" }, Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        } else {
+            val p = selectedMember ?: return
+            paying = true
+            scope.launch(Dispatchers.IO) {
+                val o = runCatching { Api.shopOrder(p.id, "wxpay") }.getOrNull()
+                withContext(Dispatchers.Main) {
+                    paying = false
+                    if (o == null) {
+                        Toast.makeText(
+                            ctx, Api.lastPayError.ifBlank { "下单失败" }, Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        payInfo = PayInfo(
+                            orderNo = o.orderId,
+                            title = p.title.ifBlank { "AEVIS 会员" },
+                            amountYuan = "%.2f".format(java.util.Locale.US, p.priceCents / 100.0),
+                            qty = "%d 天".format(if (o.days > 0) o.days else p.days),
+                            qrContent = o.qrContent,
+                            kind = "member", shop = true
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    val enabled = if (tab == 0) selectedPack != null else selectedMember != null
+    val payLabel = when {
+        tab == 0 && selectedPack != null -> "立即充值 ${selectedPack?.label.orEmpty()}"
+        tab == 1 && selectedMember != null ->
+            "立即开通 ¥%.2f".format(java.util.Locale.US, (selectedMember?.priceCents ?: 0) / 100.0)
+        else -> "请选择套餐"
+    }
 
     Column(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
     ) {
-        SubPageHeader(title = "充值", onBack = onBack)
+        SubPageHeader(title = "商城", onBack = onBack)
 
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-
-            // 当前余额
-            V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("当前余额"), fontSize = 12.sp,
-                            color = ink.copy(alpha = 0.45f))
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                if (points >= 0) "$points" else "—",
-                                fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                                color = ink, letterSpacing = (-1).sp
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text(tr("墨点"), fontSize = 12.sp,
-                                color = ink.copy(alpha = 0.42f),
-                                modifier = Modifier.padding(bottom = 6.dp))
-                        }
+        // 余额卡：玻璃 V2Card，数字 26sp（对齐 iOS pointsTab），固定不滚
+        V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    Text(tr("当前余额"), fontSize = 12.sp, color = ink.copy(alpha = 0.45f))
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            if (points >= 0) "$points" else "—",
+                            fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                            color = ink, letterSpacing = (-1).sp
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(tr("墨点"), fontSize = 12.sp, color = ink.copy(alpha = 0.42f),
+                            modifier = Modifier.padding(bottom = 5.dp))
                     }
-                    Text(
-                        tr("1 元 = 100 墨点"),
-                        fontSize = 11.sp, color = ink.copy(alpha = 0.35f)
-                    )
+                }
+                Text(tr("1 元 = 100 墨点"), fontSize = 11.sp, color = ink.copy(alpha = 0.35f))
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        SegmentedTabs(tabs = listOf(tr("墨点"), tr("会员")), selected = tab, onSelect = { tab = it })
+
+        // 内容区：tab 内滚动，不外包 ScrollView（iOS ShopView 同款）
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            Spacer(Modifier.height(V2.sectionGap))
+            when (tab) {
+                0 -> {
+                    Text(tr("选择档位"), fontSize = V2.sub, fontWeight = FontWeight.Medium,
+                        color = ink.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = V2.gutter, vertical = 4.dp))
+                    Spacer(Modifier.height(8.dp))
+                    PointGrid(packs, selectedPack) { selectedPack = it }
+                }
+                else -> {
+                    Text(tr("会员"), fontSize = V2.sub, fontWeight = FontWeight.Medium,
+                        color = ink.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = V2.gutter, vertical = 4.dp))
+                    Spacer(Modifier.height(8.dp))
+                    MemberGrid(memberProducts, selectedMember) { selectedMember = it }
                 }
             }
-
-            Spacer(Modifier.height(V2.sectionGap))
-            Text(
-                tr("选一个套餐"), fontSize = V2.sub, fontWeight = FontWeight.Medium,
-                color = ink.copy(alpha = 0.5f),
-                modifier = Modifier.padding(horizontal = V2.gutter, vertical = 4.dp)
-            )
-
-            PointPacks()
-
-            // 183：会员三档（7/30/90 天），与积分共用同一个扫码弹层
-            Spacer(Modifier.height(14.dp))
-            Text(
-                tr("会员"), fontSize = V2.sub, fontWeight = FontWeight.Medium,
-                color = ink.copy(alpha = 0.5f),
-                modifier = Modifier.padding(horizontal = V2.gutter, vertical = 4.dp)
-            )
-            MemberPacks()
-
             Spacer(Modifier.height(18.dp))
             Text(
                 tr("扫码后自动到账；若二维码打不开，可点「打开收银台」。"),
                 fontSize = 11.sp, color = ink.copy(alpha = 0.35f), lineHeight = 16.sp,
                 modifier = Modifier.padding(horizontal = V2.gutter)
             )
+            Spacer(Modifier.height(24.dp))
+        }
 
-            Spacer(Modifier.height(34.dp))
+        // 底部贴底购买栏：按钮不跟着滚（iOS safeAreaInset 同款），高 50 实底、禁用 alpha 0.45
+        Box(
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = V2.gutter, vertical = 10.dp)
+                .navigationBarsPadding()
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(50.dp)
+                    .clip(squircle(25.dp))
+                    .background(if (enabled) V2.accentDeep else V2.accentDeep.copy(alpha = 0.45f))
+                    .tapable(onClick = { if (enabled) checkout() }),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(payLabel, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    color = Color.White)
+            }
         }
     }
+}
+
+/** 墨点档位的 UI 表示（与 PointPacks 商品口径一致，不动任何接口结构）。*/
+private data class UiPointPack(val code: String, val label: String, val points: Int)
+
+/** 2 列商品网格：每行两个 weight 等宽的卡，避免 LazyVerticalGrid 嵌在 verticalScroll 里的嵌套滚动。*/
+@Composable
+private fun PointGrid(
+    packs: List<UiPointPack>,
+    selected: UiPointPack?,
+    onSelect: (UiPointPack) -> Unit
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    Column(
+        Modifier.padding(horizontal = V2.gutter),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        packs.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { p ->
+                    Box(Modifier.weight(1f)) {
+                        ShopPackCard(on = selected?.code == p.code, onClick = { onSelect(p) }) {
+                            Text("${p.points} 墨点", fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold, color = ink)
+                            Spacer(Modifier.height(3.dp))
+                            Text(p.label, fontSize = 12.sp, color = ink.copy(alpha = 0.5f))
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "¥%.0f".format(java.util.Locale.US,
+                                    p.label.removeSuffix(" 元").toDoubleOrNull() ?: 0.0),
+                                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = V2.accent
+                            )
+                        }
+                    }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** 会员商品网格：服务端商品列表，2 列卡片，选中描边强调。*/
+@Composable
+private fun MemberGrid(
+    products: List<Api.ShopProduct>,
+    selected: Api.ShopProduct?,
+    onSelect: (Api.ShopProduct) -> Unit
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    if (products.isEmpty()) {
+        Text(tr("会员档位加载中…"), fontSize = V2.tiny, color = ink.copy(alpha = 0.45f),
+            modifier = Modifier.padding(horizontal = V2.gutter, vertical = 16.dp))
+        return
+    }
+    Column(
+        Modifier.padding(horizontal = V2.gutter),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        products.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { p ->
+                    Box(Modifier.weight(1f)) {
+                        ShopPackCard(on = selected?.id == p.id, onClick = { onSelect(p) }) {
+                            Text(
+                                p.title.ifBlank { "AEVIS 会员" }, fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium, color = ink, maxLines = 1
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "¥%.2f".format(java.util.Locale.US, p.priceCents / 100.0),
+                                fontSize = 17.sp, fontWeight = FontWeight.Bold, color = V2.accent
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text("%d 天".format(p.days), fontSize = 11.5.sp,
+                                color = ink.copy(alpha = 0.5f))
+                            if (p.benefits.isNotEmpty()) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(p.benefits.joinToString(" · "), fontSize = 10.sp,
+                                    color = ink.copy(alpha = 0.5f), maxLines = 2, lineHeight = 14.sp)
+                            }
+                        }
+                    }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** 商品卡：圆角 14 玻璃底、选中 1.5dp V2.accent 描边（对齐 iOS packageCell）。*/
+@Composable
+private fun ShopPackCard(
+    on: Boolean,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val shape = squircle(14.dp)
+    Column(
+        Modifier
+            .shadow(elevation = 3.dp, shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.05f),
+                spotColor = Color.Black.copy(alpha = 0.05f))
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (on) Modifier.border(1.5.dp, V2.accent, shape) else Modifier)
+            .tapable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) { content() }
 }
 
 /**

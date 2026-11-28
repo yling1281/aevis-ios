@@ -1,17 +1,18 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// 设置 /「我的」（2026-11-22 视觉重做，照用户给的「忆伴」设置页参考图）。
+/// 设置 /「我的」（2026-11-29 按安卓对齐：账号 / 功能 / 聊天记录 / 其他 四组卡片）。
 ///
 /// 只放**真实生效**的功能（用户要求：没实现的先不要放按钮）：
 /// - 顶部用户卡片（头像 + 昵称 + 账号/会员状态，点击进账号中心）
 /// - 外观：跟随系统 / 浅色 / 深色 —— 写 `themeMode`，由 `AevisApp` 根视图统一读取生效
 /// - 配置：服务器状态（真实探测四条线路 + `/v1/models/status`）、主题配置（背景图/位置/模糊）
 /// - 消息大小：小 / 标准 / 大（`msgSize`，ChatView 里 `AE.chatFont(msgSize)` 在用）
-/// - 数据：云端同步状态 + 手动「从云端恢复聊天记录」（`CloudBackup.restoreNow`）
-/// - 退出登录
+/// - 聊天记录：云端同步 + 从云端恢复 + 导出 / 导入 JSON 备份（`LocalStore`）
+/// - 其他：退出登录 + 常驻版本号
 ///
 /// 存储键保持不变：themeMode / msgSize / aevisBgStyle / aevisBgBlur / aevisBgImagePath。
-/// 页面铺 `AppBackground()`，卡片统一磨砂玻璃 + 20 圆角，层次靠材质和留白，不靠重边框。
+/// 页面铺 `AppBackground()`，卡片统一磨砂玻璃 + 18 圆角，组标题在卡外，层次靠材质和留白。
 struct SettingsView: View {
     @EnvironmentObject private var session: Session
 
@@ -34,6 +35,13 @@ struct SettingsView: View {
     @State private var restoreMessage = ""
     @State private var showRestoreAlert = false
 
+    /// 聊天记录导出：复用 LocalStore.exportChatArchive()，结果走系统分享面板。
+    @State private var shareURL: URL?
+    /// 聊天记录导入：fileImporter + 结果提示（复用 LocalStore.importChatArchive）。
+    @State private var showImporter = false
+    @State private var importMessage = ""
+    @State private var showImportAlert = false
+
     /// 顶部用户卡片：昵称 / 会员状态来自 `/v1/me`（Session 上只有 avatar，没有昵称）。
     @State private var nickname = ""
     @State private var memberActive = false
@@ -46,10 +54,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: AE.groupGap) {
+                    // MARK: 账号
+                    groupTitle("账号")
                     userCard
 
-                    sectionCard(title: "外观", icon: "paintbrush.fill") {
+                    // MARK: 功能
+                    groupTitle("功能")
+                    sectionCard(title: "外观", icon: "paintbrush") {
                         SettingsSegment(items: ["跟随系统", "浅色", "深色"], index: $themeMode)
                         hint("跟随系统会适配设备的深浅模式。")
                     }
@@ -74,7 +86,31 @@ struct SettingsView: View {
                         SettingsSegment(items: ["小", "标准", "大"], index: $msgSize)
                     }
 
-                    sectionCard(title: "数据", icon: "icloud.fill") {
+                    sectionCard(title: "福利与记录", icon: "gift") {
+                        navRow(icon: "calendar.badge.checkmark", title: "每日签到", value: "") {
+                            CheckInView()
+                        }
+                        innerDivider
+                        // 2026-11-28：QQ 接入（扫码 + 会话内发六位码确认绑定）
+                        navRow(icon: "bubble.left.and.bubble.right", title: "QQ 接入", value: "") {
+                            QQBindView()
+                        }
+                        innerDivider
+                        if AevisHosts.featureEnabled("growth") {
+                            navRow(icon: "person.2", title: "创作者与活动", value: "") {
+                                GrowthView()
+                            }
+                            innerDivider
+                        }
+                        navRow(icon: "doc.text.magnifyingglass", title: "对话日志", value: "") {
+                            ChatLogsView()
+                        }
+                        hint("入口链接与数据来自服务端，接口未开放时显示「暂无数据」。")
+                    }
+
+                    // MARK: 聊天记录
+                    groupTitle("聊天记录")
+                    sectionCard(title: "数据", icon: "icloud") {
                         HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 14))
@@ -87,32 +123,21 @@ struct SettingsView: View {
                         }
                         innerDivider
                         restoreRow
-                        hint("恢复只补本机缺少的记录，不会删除或覆盖本地聊天。")
-                    }
-
-                    sectionCard(title: "福利与记录", icon: "gift.fill") {
-                        navRow(icon: "calendar.badge.checkmark", title: "每日签到", value: "") {
-                            CheckInView()
+                        innerDivider
+                        actionRow(icon: "square.and.arrow.up", title: "导出聊天记录") {
+                            exportChats()
                         }
                         innerDivider
-                        // 2026-11-28：QQ 接入（扫码 + 会话内发六位码确认绑定）
-                        navRow(icon: "bubble.left.and.bubble.right.fill", title: "QQ 接入", value: "") {
-                            QQBindView()
+                        actionRow(icon: "square.and.arrow.down", title: "导入聊天记录") {
+                            showImporter = true
                         }
-                        innerDivider
-                        if AevisHosts.featureEnabled("growth") {
-                            navRow(icon: "person.2.fill", title: "创作者与活动", value: "") {
-                                GrowthView()
-                            }
-                            innerDivider
-                        }
-                        navRow(icon: "doc.text.magnifyingglass", title: "对话日志", value: "") {
-                            ChatLogsView()
-                        }
-                        hint("入口链接与数据来自服务端，接口未开放时显示「暂无数据」。")
+                        hint("导出为 JSON 备份；导入只补本机缺少的会话，不覆盖现有记录。")
                     }
 
+                    // MARK: 其他
+                    groupTitle("其他")
                     logoutCard
+                    versionFooter
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 10)
@@ -128,10 +153,28 @@ struct SettingsView: View {
                 AccountCenterView()
                     .environmentObject(session)
             }
+            // 导出 → 系统分享面板（与会话列表同一套 ActivityView）
+            .sheet(isPresented: Binding(
+                get: { shareURL != nil },
+                set: { if !$0 { shareURL = nil } }
+            )) {
+                if let url = shareURL { ActivityView(items: [url]) }
+            }
+            // 导入 → 系统文件选择，复用 LocalStore 的真实合并实现
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: [.json],
+                          allowsMultipleSelection: false) { result in
+                handleImport(result)
+            }
             .alert("从云端恢复", isPresented: $showRestoreAlert) {
                 Button("好", role: .cancel) { }
             } message: {
                 Text(restoreMessage)
+            }
+            .alert("聊天记录", isPresented: $showImportAlert) {
+                Button("好", role: .cancel) { }
+            } message: {
+                Text(importMessage)
             }
         }
     }
@@ -180,7 +223,7 @@ struct SettingsView: View {
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(userCardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AE.cardRadius + 4, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: AE.accentDeep.opacity(0.26), radius: 12, y: 6)
         }
         .buttonStyle(AevisPressStyle(scale: 0.985))
@@ -322,6 +365,78 @@ struct SettingsView: View {
 
     // MARK: - 组件
 
+    /// 组标题：卡片外的小字（与安卓 HubGroup 一致，11.5pt 次要色）。
+    private func groupTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(AE.textSecondary.opacity(0.75))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 4)
+            .padding(.top, 4)
+    }
+
+    /// 普通动作行（导出/导入）：24pt 线性图标 + 标题 + 右箭头。
+    private func actionRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(AE.accent)
+                    .frame(width: 24, alignment: .center)
+                Text(title)
+                    .font(.system(size: 14.5))
+                    .foregroundStyle(AE.textPrimary)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(AE.textSecondary.opacity(0.45))
+            }
+            .frame(height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 底部版本号：常驻，读不到时兜底 2.19。
+    private var versionFooter: some View {
+        Text("版本 \(versionText)")
+            .font(.system(size: 11.5))
+            .foregroundStyle(AE.textSecondary.opacity(0.7))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 2)
+    }
+
+    private var versionText: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.19"
+    }
+
+    /// 导出：生成归档 JSON 并交给系统分享面板。
+    private func exportChats() {
+        if let url = LocalStore.exportChatArchive() {
+            shareURL = url
+        } else {
+            importMessage = "导出失败，请重试"
+            showImportAlert = true
+        }
+    }
+
+    /// 导入：用 LocalStore 的合并实现（只补不覆盖），结果用弹窗告知。
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            do {
+                let r = try LocalStore.importChatArchive(from: url)
+                importMessage = "已导入 \(r.convs) 个会话，新增 \(r.msgs) 条消息"
+            } catch {
+                importMessage = "导入失败：\(error.localizedDescription)"
+            }
+        case .failure(let e):
+            importMessage = "导入失败：\(e.localizedDescription)"
+        }
+        showImportAlert = true
+    }
+
     /// 分组卡：标题行（图标 + 标题）+ 内容，整卡磨砂玻璃。
     @ViewBuilder
     private func sectionCard<Content: View>(
@@ -331,7 +446,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(AE.accent)
                 Text(title)
                     .font(.system(size: AE.sectionTitle, weight: .semibold))
@@ -341,7 +456,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.20)
+        .glassCard(cornerRadius: 18, material: .regular, tintOpacity: 0.20)
         .shadow(color: AE.shadowColor, radius: 8, y: 3)
     }
 
@@ -355,9 +470,9 @@ struct SettingsView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 24, weight: .regular))
                     .foregroundStyle(AE.accent)
-                    .frame(width: 22, alignment: .center)
+                    .frame(width: 24, alignment: .center)
                 Text(title)
                     .font(.system(size: 14.5))
                     .foregroundStyle(AE.textPrimary)
@@ -370,7 +485,7 @@ struct SettingsView: View {
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(AE.textSecondary.opacity(0.45))
             }
-            .frame(height: 40)
+            .frame(height: 48)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -386,9 +501,9 @@ struct SettingsView: View {
     private var lineStatusBaseRow: some View {
         HStack(spacing: 12) {
             Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(AE.accent)
-                .frame(width: 22, alignment: .center)
+                .frame(width: 24, alignment: .center)
             Text("当前线路")
                 .font(.system(size: 14.5))
                 .foregroundStyle(AE.textPrimary)
@@ -398,7 +513,7 @@ struct SettingsView: View {
                 .foregroundStyle(AE.textSecondary)
                 .lineLimit(1)
         }
-        .frame(height: 40)
+        .frame(height: 48)
     }
 
     /// 当前背景：有自定义图显示「自定义」，否则显示预设名（详细调节在主题配置页）
@@ -415,10 +530,11 @@ struct SettingsView: View {
         return Button {
             restoreFromCloud()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 24, weight: .regular))
                     .foregroundStyle(AE.accent)
+                    .frame(width: 24, alignment: .center)
                 Text(restoring ? "正在从云端恢复…" : "从云端恢复聊天记录")
                     .font(.system(size: 14.5))
                     .foregroundStyle(AE.textPrimary)
@@ -427,7 +543,7 @@ struct SettingsView: View {
                     ProgressView().scaleEffect(0.7)
                 }
             }
-            .frame(height: 40)
+            .frame(height: 48)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -477,7 +593,7 @@ struct SettingsView: View {
         .padding(14)
         .frame(maxWidth: .infinity)
         // 磨砂玻璃卡；内部「退出登录」按钮背景 AE.accentSoft 保持实心，保留按钮对比度
-        .glassCard(cornerRadius: AE.cardRadius, material: .regular, tintOpacity: 0.20)
+        .glassCard(cornerRadius: 18, material: .regular, tintOpacity: 0.20)
         .shadow(color: AE.shadowColor, radius: 8, y: 3)
     }
 }

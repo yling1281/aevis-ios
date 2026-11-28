@@ -55,7 +55,7 @@ struct ChatView: View {
     /// 人设改名后本地标题跟着变（不重建 ChatView）。
     @State private var titleName = ""
 
-    // MARK: - 左上角三点 · 自绘二级菜单（2026-11-27）
+    // MARK: - 右上角三点 · 自绘二级菜单（2026-11-29 按用户要求移回右上）
     @State private var showMoreMenu = false
     @State private var showSettings = false
     @State private var showEditProfile = false
@@ -252,27 +252,26 @@ struct ChatView: View {
         // 系统侧滑照常可用（navigationBarBackButtonHidden 只影响箭头，不影响手势）。
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            // 左上角：返回 + 三点（2026-11-27 按用户要求把三点从右上挪到人物左上角）
+            // 返回在左、三点在右（2026-11-29 按用户要求三点回到右上角）
             ToolbarItem(placement: .navigationBarLeading) {
-                HStack(spacing: 14) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(AE.accent)
-                            .frame(width: 24, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("返回聊天列表")
-
-                    Button { showMoreMenu = true } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(AE.accent)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("更多操作")
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(AE.accent)
+                        .frame(width: 24, height: 28)
+                        .contentShape(Rectangle())
                 }
+                .accessibilityLabel("返回聊天列表")
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showMoreMenu = true } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(AE.accent)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("更多操作")
             }
         }
         // 三点 → 自绘二级菜单（不用系统 Menu）
@@ -547,7 +546,7 @@ struct ChatView: View {
     @ViewBuilder
     private func row(_ m: Msg) -> some View {
         let mine = m.role == "user"
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
             if !mine && avatarMode != 2 {
                 // 对方头像：空串/相对路径统一走 personaAvatarURL（空 → 占位）
                 avatar(personaAvatarURL, name: persona.name)
@@ -674,17 +673,21 @@ struct ChatView: View {
             .accessibilityLabel("按住说话")
     }
 
-    /// 括号内容变浅：`（…）` / `(…)` 用 60% 前景色（跟安卓同一套）。
+    /// 括号内容变浅：`（）()【】[]` 六种括号，用正文色 55% 透明度（与安卓 `chatAnnotated` 同一套）。
+    /// 括号本身也淡（包括不成对的单边闭括号）；`annotDim` 关闭时全部恢复正文色。
     private func annotated(_ text: String) -> AttributedString {
         var out = AttributedString()
         var depth = 0
         for ch in text {
-            if ch == "（" || ch == "(" { depth += 1 }
-            var piece = AttributedString(String(ch))
-            if depth > 0 && annotDim {
-                piece.foregroundColor = .secondary.opacity(0.6)
+            let s = String(ch)
+            let isOpen = (s == "（" || s == "(" || s == "【" || s == "[")
+            let isClose = (s == "）" || s == ")" || s == "】" || s == "]")
+            if isOpen { depth += 1 }
+            var piece = AttributedString(s)
+            if annotDim && (isOpen || isClose || depth > 0) {
+                piece.foregroundColor = AE.textPrimary.opacity(0.55)
             }
-            if ch == "）" || ch == ")" { depth = max(0, depth - 1) }
+            if isClose && depth > 0 { depth -= 1 }
             out.append(piece)
         }
         return out
@@ -727,7 +730,7 @@ struct ChatView: View {
             CachedRemoteImage(url: url, scope: "persona:\(persona.id)") {
                 avatarPlaceholder(name)
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 40, height: 40)
             .clipShape(Circle())
             .overlay(Circle().stroke(Color.white.opacity(0.85), lineWidth: 1))
         } else {
@@ -746,10 +749,10 @@ struct ChatView: View {
                 )
             )
             Text(String(name.prefix(1)))
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
         }
-        .frame(width: 32, height: 32)
+        .frame(width: 40, height: 40)
         .overlay(Circle().stroke(Color.white.opacity(0.85), lineWidth: 1))
         .shadow(color: AE.shadowColor, radius: 2, y: 1)
     }

@@ -706,6 +706,19 @@ fun Shell(onSignOut: () -> Unit) {
         }
     }
 
+    /**
+     * 立即跳转（2026-11-29）：三点菜单这类「弹层收起 → 直接进下一页」的场景不走 140ms 回弹等待。
+     * 用户反馈「点角色设置为什么要反应一下再点进来」——菜单收起本身就是过渡，再叠加 140ms 就是卡顿感。
+     * 导航状态处理与 goLater 一致，只是不 delay。
+     */
+    fun goNow(route: String?) {
+        navSeq++
+        navLock = false
+        if (route != null && route == backTo) backTo = null
+        else if (route != null) backTo = page
+        page = route
+    }
+
     /** Dock 切 tab 同理：先让按压和胶囊动效走完再换内容。*/
     fun tabLater(i: Int) {
         if (navLock || i == idx) return
@@ -975,6 +988,9 @@ fun Shell(onSignOut: () -> Unit) {
                             // go / back 也走延迟：二级页里点「模型」「查看人设」这些
                             // 同样是"点了就跳"，弹回来那一下一样要看得见
                             go = { goLater(it) },
+                            // 三点菜单进子页立即跳（2026-11-29）：菜单收起已是过渡，
+                            // 再等 140ms 回弹只会显得"点了没反应"
+                            goNow = { goNow(it) },
                             // 返回**不再**走 goLater（那会记 backTo）；统一 goBack()
                             back = { goBack() },
                             setBackTo = { backTo = it },
@@ -1212,6 +1228,7 @@ internal fun FeatureGate(flag: String, onBack: () -> Unit, content: @Composable 
 private fun SubPageHost(
     route: String,
     go: (String?) -> Unit,
+    goNow: (String?) -> Unit = {},
     back: () -> Unit,
     setBackTo: (String?) -> Unit,
     onSignOut: () -> Unit
@@ -1339,11 +1356,11 @@ private fun SubPageHost(
             ChatScreen(
                 pid = route.removePrefix("chat:"),
                 onBack = back,
-                onOpenRoleSet = { go("chatset:" + it) },
-                onOpenPersona = { go("persona:" + it) },
-                onOpenLook = { setBackTo("chat:" + it); go("chatlook") },
-                onOpenDiary = { setBackTo("chat:" + it); go("diary:" + it) },
-                onOpenModels = { setBackTo("chat:" + it); go("models") }
+                onOpenRoleSet = { goNow("chatset:" + it) },
+                onOpenPersona = { goNow("persona:" + it) },
+                onOpenLook = { setBackTo("chat:" + it); goNow("chatlook") },
+                onOpenDiary = { setBackTo("chat:" + it); goNow("diary:" + it) },
+                onOpenModels = { setBackTo("chat:" + it); goNow("models") }
             )
         }
         // 个人账号页（2026-11-16，92）：头像+昵称点进来

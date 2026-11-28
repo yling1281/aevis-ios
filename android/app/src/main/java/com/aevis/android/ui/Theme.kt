@@ -53,7 +53,7 @@ object V2 {
     /** 白字按钮固定深底（iOS AE.accentDeep：改浅会毁掉对比度）。*/
     val accentDeep = Color(0xFF2F3A56)
 
-    /** 登录页品牌紫：iOS AE.brandPurple 刻意保留，登录页专用，不随全局去紫。*/
+    /** 历史 token：iOS AE.brandPurple #9B8AF0，仅为兼容旧引用保留；登录页 2026-11-22 已「去柔紫」，改走 V2.accent，勿再用于登录页。*/
     val brandPurple = Color(0xFF9B8AF0)
 
     /** 六支气泡预设色，顺序与 iOS 完全一致（气泡是可换色功能，保留）。*/

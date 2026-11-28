@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,26 +44,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 登录门 —— **逐条照 iOS `Features/Login/LoginView.swift` 的抖音版式**。
+ * 登录门 —— 视觉对齐 iOS `Views/LoginView.swift` 2026-11-22「去柔紫」改版。
  *
- * 用户 2026-11-13：「登录界面也没一样，苹果可以，但是安卓你没做」。
- * 之前这页是「Aevis 大标题 + 一张卡片两个输入框」，跟 iOS 完全是两个 App。
- *
- * iOS 那一版的结构（数值全部照抄，单位 pt → dp）：
+ * iOS 那一版的结构（数值 pt → dp）：
  * ```
- *                                          帮助            ← 15pt 次要色，右对齐
- * 登录发现更多精彩                                          ← 25pt semibold
- * 验证码只发给已注册的邮箱；还没有账号就点「去注册」            ← 12.5pt 次要色
+ *                                          帮助            ← 12 次要色，右对齐
+ * 登录发现更多精彩                                          ← 22 semibold
+ * 验证码会发送到你的邮箱，未注册的邮箱自动创建账号。            ← 13 次要色
  * ┌────────────────────────────┐
- * │ ✉  请输入邮箱               │                        ← 16 圆角，5.5% 底
+ * │ ✉  请输入邮箱               │                        ← 白卡 + 1px 暖灰描边，16 圆角
  * └────────────────────────────┘
- * ⇄ 密码登录      没有账号，去注册                          ← 13.5pt
- * [        验证并登录        ]                            ← 整宽胶囊，16.5pt，禁用 35% 透明
- * ○ 已阅读并同意 用户协议 和 隐私政策                       ← 11.5pt
- *                              (间距 96)
- *   ⭕微信    ⭕QQ    ⭕扫码    (找回账号)                   ← 52 圆底 + 11pt 字
+ * ⇄ 密码登录      没有账号，去注册                          ← 13
+ * [        验证并登录        ]                            ← 12 圆角矩形，高 50，实底墨靛深，禁用 45% 透明
+ * ○ 已阅读并同意 用户协议 和 隐私政策                       ← 12
+ *   ⭕微信    ⭕QQ    ⭕扫码    (找回账号)
  * ```
  *
+ * 唯一强调色是墨靛深（浅 #2F3A56 / 深 #A9B7D8）：没有柔紫、发光、渐变和胶囊按钮。
  * 三条不能破的（跟 iOS 一致）：强制登录没有跳过；协议必须自己勾；没勾点登录只提示。
  */
 private enum class Mode { Code, Password, Register }
@@ -98,6 +96,8 @@ fun LoginScreen(onDone: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     val secondary = ink.copy(alpha = 0.55f)
     val tertiary = ink.copy(alpha = 0.38f)
+    // 唯一强调色：浅 V2.accent(#2F3A56) / 深 V2.accentDark(#A9B7D8)，对齐 iOS LK.accent。
+    val accent = loginAccent()
 
     fun open(url: String) {
         runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -224,11 +224,11 @@ fun LoginScreen(onDone: () -> Unit) {
                     codeSent = false
                 }, verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(painterResource(R.drawable.ic_login_swap), null, tint = V2.brandPurple,
+                Icon(painterResource(R.drawable.ic_login_swap), null, tint = accent,
                     modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(5.dp))
                 Text(if (mode == Mode.Code) "密码登录" else "验证码登录",
-                    fontSize = 13.5.sp, color = V2.brandPurple)
+                    fontSize = 13.5.sp, color = accent)
             }
             Spacer(Modifier.width(16.dp))
             Text(
@@ -242,16 +242,16 @@ fun LoginScreen(onDone: () -> Unit) {
         }
         Spacer(Modifier.height(22.dp))
 
-        // —— 主按钮：整宽胶囊，禁用态是淡色（不是灰块）——
+        // —— 主按钮：整宽 12 圆角矩形，实底墨靛深（无发光/渐变），禁用态 45% 透明 ——
         Box(
             Modifier.fillMaxWidth()
-                .clip(CircleShape)
-                .background(if (enabled && !working) V2.brandPurple else V2.brandPurple.copy(alpha = 0.35f))
-                .tapable(enabled = enabled && !working) { primary() }
-                .padding(vertical = 17.dp),
+                .height(50.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (enabled && !working) accent else accent.copy(alpha = 0.45f))
+                .tapable(enabled = enabled && !working) { primary() },
             contentAlignment = Alignment.Center
         ) {
-            Text(title, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
         }
 
         Spacer(Modifier.height(14.dp))
@@ -259,10 +259,10 @@ fun LoginScreen(onDone: () -> Unit) {
         // —— 协议 ——
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Box(
-                Modifier.padding(top = 2.dp).size(16.dp).clip(CircleShape)
+                Modifier.padding(top = 2.dp).size(16.dp).clip(RoundedCornerShape(5.dp))
                     .then(
-                        if (agreed) Modifier.background(V2.brandPurple)
-                        else Modifier.border(1.5.dp, secondary.copy(alpha = 0.6f), CircleShape)
+                        if (agreed) Modifier.background(accent)
+                        else Modifier.border(1.5.dp, ink.copy(alpha = 0.30f), RoundedCornerShape(5.dp))
                     )
                     .tapable { agreed = !agreed },
                 contentAlignment = Alignment.Center
@@ -275,11 +275,11 @@ fun LoginScreen(onDone: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Column {
                 Row {
-                    Text(tr("已阅读并同意 "), fontSize = 11.5.sp, color = secondary)
-                    Text(tr("用户协议"), fontSize = 11.5.sp, color = V2.brandPurple,
+                    Text(tr("已阅读并同意 "), fontSize = 12.sp, color = secondary)
+                    Text(tr("用户协议"), fontSize = 12.sp, color = accent,
                         modifier = Modifier.tapable { open("https://aevis.lingyan.cyou/terms.html") })
-                    Text(tr(" 和 "), fontSize = 11.5.sp, color = secondary)
-                    Text(tr("隐私政策"), fontSize = 11.5.sp, color = V2.brandPurple,
+                    Text(tr(" 和 "), fontSize = 12.sp, color = secondary)
+                    Text(tr("隐私政策"), fontSize = 12.sp, color = accent,
                         modifier = Modifier.tapable { open("https://aevis.lingyan.cyou/privacy.html") })
                 }
                 Spacer(Modifier.height(2.dp))
@@ -361,7 +361,18 @@ fun LoginScreen(onDone: () -> Unit) {
     }
 }
 
-/** 大圆角输入框（抖音同款）：16 圆角、5.5% 底、左侧图标 18、正文 15.5。 */
+/** 唯一强调色：浅 V2.accent(#2F3A56) / 深 V2.accentDark(#A9B7D8)，对齐 iOS LK.accent。 */
+@Composable
+private fun loginAccent(): Color =
+    if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) V2.accentDark else V2.accent
+
+/** 1px 细描边：浅暖灰 #E3DED4 / 深低透明白，对齐 iOS LK.hairline。 */
+@Composable
+private fun loginHairline(): Color =
+    if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) Color.White.copy(alpha = 0.14f)
+    else Color(0xFFE3DED4)
+
+/** 输入卡片：白底 + 1px 暖灰描边 + 16 圆角，左侧图标 18、正文 15.5（对齐 iOS formCard）。 */
 @Composable
 private fun BigField(icon: Int, placeholder: String, value: String,
                      onChange: (String) -> Unit,
@@ -371,7 +382,8 @@ private fun BigField(icon: Int, placeholder: String, value: String,
     Row(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(ink.copy(alpha = 0.055f))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, loginHairline(), RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -385,7 +397,7 @@ private fun BigField(icon: Int, placeholder: String, value: String,
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 15.5.sp, color = ink
             ),
-            cursorBrush = SolidColor(V2.brandPurple),
+            cursorBrush = SolidColor(loginAccent()),
             visualTransformation =
                 if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(
