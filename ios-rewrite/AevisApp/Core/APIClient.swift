@@ -54,10 +54,10 @@ struct APIClient {
              pinning: true, note: "主线路"),
         Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",
              pinning: false, note: "备用"),
-        // 2026-11-28：港区（HK）的 AEVIS 正式域名。放到最后只作回落 —— 国内用户优先走 4-4/北京，
-        // 海外（含 CI runner）只有这条能通（api.lingyan.cyou 会被整体超时，q7m3ax DNS 都解不出）。
+        // 2026-11-28：港区（HK）入口。aevis.cn 已腾出来做备案、将停服，改走 aevis.lingyan.cyou。
+        // 放到最后只作回落 —— 国内用户优先走 4-4/北京，海外（含 CI runner）靠这条。
         // LE 正式证书，所以 pinning = false。
-        Line(id: "hk", name: "港区", base: "https://aevis.cn",
+        Line(id: "hk", name: "港区", base: "https://aevis.lingyan.cyou",
              pinning: false, note: "海外入口"),
     ]
 
@@ -1228,7 +1228,7 @@ struct APIClient {
         let orderID: String      // 查单用：墨点=orderNo，会员=order_id
         let payURL: String       // 易支付收银台地址（老服务端 / 兜底二维码内容）
         let kind: Kind
-        /// 2.8 聚合短链：`https://aevis.cn/prod-api/aevis/v1/shop/paylink/<订单号>`，
+        /// 2.8 聚合短链：`https://aevis.lingyan.cyou/prod-api/aevis/v1/shop/paylink/<订单号>`，
         /// 按扫码 App 的 UA 自动跳微信或支付宝。空串 = 老服务端还没下发。
         var payLink: String = ""
         var uses: Int = 0        // 按次订单：购买的次数（后端 order 响应新增）
@@ -1664,7 +1664,7 @@ struct APIClient {
     }
 
     /// 回调前缀（服务端 redirect_uri），WKWebView 拦到它就从 query 取 code
-    static let qqCallbackPrefix = "https://aevis.cn/prod-api/aevis/v1/auth/qq/callback"
+    static let qqCallbackPrefix = "https://aevis.lingyan.cyou/prod-api/aevis/v1/auth/qq/callback"
 
     // MARK: - Web 扫码登录 / 支付（与网页版 unified_site/assets/qrlogin.js 同接口）
 

@@ -229,7 +229,7 @@ struct LoginView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("切换线路，当前 \(currentLineChipText)")
-            Button("帮助") { tip = "如需帮助，请联系 aevis.cn 客服。" }
+            Button("帮助") { tip = "如需帮助，请联系 Aevis 客服。" }
                 .font(.system(size: 12))
                 .foregroundStyle(AE.textSecondary)
                 .buttonStyle(.plain)

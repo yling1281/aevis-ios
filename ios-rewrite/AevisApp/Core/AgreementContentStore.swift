@@ -10,7 +10,7 @@ import Foundation
 ///
 /// ## 内容来源
 /// - 硬编码兜底：Bundle 里打包一份 fallback HTML（app 发布时内置）
-/// - 云端热更新：`https://aevis.cn/terms.html` 和 `https://aevis.cn/privacy.html`
+/// - 云端热更新：`https://aevis.lingyan.cyou/terms.html` 和 `https://aevis.lingyan.cyou/privacy.html`
 ///   （或走后端 API `/v1/app/agreements` 返回版本号和内容）
 ///
 /// ## 版本号格式
@@ -35,8 +35,8 @@ final class AgreementContentStore: ObservableObject {
         /// 云端 URL
         var remoteURL: URL {
             switch self {
-            case .terms: return URL(string: "https://aevis.cn/terms.html")!
-            case .privacy: return URL(string: "https://aevis.cn/privacy.html")!
+            case .terms: return URL(string: "https://aevis.lingyan.cyou/terms.html")!
+            case .privacy: return URL(string: "https://aevis.lingyan.cyou/privacy.html")!
             }
         }
         
