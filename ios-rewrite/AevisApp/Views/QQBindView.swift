@@ -3,16 +3,17 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import UIKit
 
-/// QQ 接入（2026-11-28 第二次纠正：绑的是**用户自己的机器人**）。
+/// QQ 接入（2026-11-28 第三次口径：机器人是用户在 QQ 开放平台自己注册的，我们只提供通道）。
 ///
-/// 用户原话：「是要绑定用户自己的机器人啊…QQ 扫完码会提示这是一个什么 QQ 机器人，
-/// 需要你自己去绑定，绑定你的哪个机器人」——
+/// 用户原话：「QQ 机器人不应该是他们注册的吗，我们只是提供一个接口；
+///            QQ 群不是有链接吗」——
 ///
-///   1. 二维码内容是 QQ 官方 OpenClaw 扫码入口（q.qq.com），不是自建落地页；
-///   2. 扫码后在 QQ 里登录开放平台，创建/选择属于他自己的机器人；
+///   1. 二维码内容是 QQ 开放平台的机器人入口（q.qq.com），不代注册；
+///   2. 用户扫码后在 QQ 里创建/选择属于他自己的机器人；
 ///   3. 页面直接给出这个机器人的 AppID / AppSecret，复制回 App 填；
-///   4. 服务端校验后按这份凭据单开一条 Bot 连接 —— 机器人是他的，人设挂他的账号。
+///   4. 服务端只做三件事：校验凭据、起一条连接、转发消息并按账号扣墨点。
 ///
+/// 群聊不做群管理，只给一条邀请链接直接进群。
 /// 一个账号只能绑一个机器人；换绑要先解绑。
 struct QQBindView: View {
     @EnvironmentObject private var session: Session
@@ -26,6 +27,7 @@ struct QQBindView: View {
 
     @State private var officialURL = ""
     @State private var officialQR: UIImage?
+    @State private var qqGroup = ""
 
     @State private var appid = ""
     @State private var botName = ""
@@ -49,6 +51,11 @@ struct QQBindView: View {
                     emptyCard("QQ 接入暂未开放", "后台打开开关后这里就能用")
                 } else {
                     stepBar
+                    Text("机器人是你在 QQ 开放平台自己注册的，Aevis 只提供一条通道：帮你连上、帮你回消息、按你的账号扣墨点。")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AE.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 2)
                     mainCard
                     if !err.isEmpty {
                         Text(err).font(.system(size: 12.5)).foregroundStyle(.red)
@@ -57,6 +64,7 @@ struct QQBindView: View {
                     actionButton
                     if stage != Self.stageBound { personaSection }
                     if stage == Self.stageBound { unbindRow }
+                    if !qqGroup.isEmpty { groupRow }
                 }
             }
             .padding(.horizontal, 16)
@@ -109,7 +117,7 @@ struct QQBindView: View {
                 Text("第 1 步 · 用手机 QQ 扫这个码")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AE.textPrimary)
-                Text("扫码后登录 QQ 开放平台，创建或选择你自己的机器人")
+                Text("在 QQ 里创建或选择你自己的机器人（注册在 QQ 那边，不是我们替你建）")
                     .font(.system(size: 11.5))
                     .foregroundStyle(AE.textSecondary)
                     .multilineTextAlignment(.center)
@@ -128,8 +136,8 @@ struct QQBindView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("1. 手机 QQ 扫码，登录 QQ 开放平台")
-                    Text("2. 点「创建机器人」，或用你已经有的那个")
+                    Text("1. 手机 QQ 扫码，进 QQ 开放平台的机器人页")
+                    Text("2. 在 QQ 里点「创建机器人」，或用你已经有的那个")
                     Text("3. 复制页面上这个机器人的 AppID 和 AppSecret")
                     Text("4. 回来点「我复制好了」，填进来就绑上了")
                 }
@@ -322,6 +330,40 @@ struct QQBindView: View {
         .padding(.top, 2)
     }
 
+    /// 群入口：后台只配一条邀请链接（或群号），点一下直接进群，不做群管理。
+    private var groupURL: URL? {
+        let s = qqGroup.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return nil }
+        if s.lowercased().hasPrefix("http") { return URL(string: s) }
+        if s.allSatisfy({ $0.isNumber }) {
+            return URL(string: "mqqapi://card/show_pslcard?src_type=internal&version=1&uin=\(s)&card_type=group&source=qrcode")
+        }
+        return nil
+    }
+
+    private var groupRow: some View {
+        Group {
+            if let u = groupURL {
+                Link(destination: u) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.3.fill").font(.system(size: 13))
+                        Text("进 QQ 群").font(.system(size: 13, weight: .medium))
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 11))
+                            .foregroundStyle(AE.textSecondary)
+                    }
+                    .foregroundStyle(AE.accent)
+                    .padding(.horizontal, 14)
+                    .frame(height: 46)
+                    .background(AE.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     private var unbindRow: some View {
         Button {
             Task { await doUnbind() }
@@ -363,6 +405,8 @@ struct QQBindView: View {
             botName = (d["bot_name"] as? String) ?? ""
             linkState = (d["state"] as? String) ?? ""
             persona = (d["persona"] as? String) ?? ""
+            qqGroup = (d["qq_group"] as? String) ?? ""
+            if qqGroup.isEmpty { qqGroup = (d["join_url"] as? String) ?? "" }
             let mine = (d["bound_mine"] as? Bool) ?? false
             let bound = (d["bound"] as? Bool) ?? false
             stage = (mine || (bound && !appid.isEmpty)) ? Self.stageBound : Self.stageScan

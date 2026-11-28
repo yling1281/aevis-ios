@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UIKit
 
 /// 主页：用量额度卡 + 服务入口（商城 → ShopView、会员 → MemberView、
 /// 人设广场 / 表情包广场 → PlazaView，均为独立页面，不串返回层级）。
@@ -27,6 +28,7 @@ struct HomeView: View {
     @State private var showPlaza = false       // 人设/表情包广场（本页内 sheet 即可）
     @State private var plazaTab = 0
     @State private var showCheckIn = false     // 每日签到（2.8）
+    @State private var qqGroup = ""            // QQ 群邀请链接（后台一条配置，直接跳群）
     @State private var tip = ""
     @State private var serviceExpanded = true
 
@@ -88,6 +90,7 @@ struct HomeView: View {
             // 拆成两个独立 Task 后额度 ~0.3s 就显示，不被问候/天气链路拖住。
             Task { await loadUsage() }
             Task { await loadGreeting() }
+            Task { await loadQQGroup() }
         }
         .refreshable {
             // 下拉刷新：额度与问候/天气并发，谁先回来谁先显示，不让天气拖住额度
@@ -587,8 +590,42 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 问候区数据
+    // MARK: - QQ 群（一条邀请链接，不做群管理）
 
+    /// 进群：后台配的是 http 链接就直接开；是纯群号就拼 mqqapi 深链。
+    /// 没装 QQ / 深链被拦 → 退回浏览器打开群管理页，不弹「即将上线」。
+    private func openQQGroup() {
+        let s = qqGroup.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else {
+            showTip("群里还没配链接")
+            return
+        }
+        let isWeb = s.lowercased().hasPrefix("http")
+        let deep = isWeb ? s
+            : "mqqapi://card/show_pslcard?src_type=internal&version=1&uin=\(s)&card_type=group&source=qrcode"
+        guard let u = URL(string: deep) else {
+            showTip("群链接无效")
+            return
+        }
+        UIApplication.shared.open(u, options: [:]) { ok in
+            guard !ok else { return }
+            let web = isWeb ? s : "https://qun.qq.com/m/qun/qunmanage/index.html?gc=\(s)"
+            if let w = URL(string: web) { UIApplication.shared.open(w) }
+        }
+    }
+
+    /// 群入口来自 `/v1/qqbot/status`：后台「QQ 接入 → 群链接」那一条，
+    /// 没单独配时服务端会回退到「增长 → 群邀请链接」，所以通常都有值。
+    private func loadQQGroup() async {
+        guard let token = session.token, !token.isEmpty else { return }
+        guard let j = try? await APIClient.request("/v1/qqbot/status", token: token),
+              let d = j["data"] as? [String: Any] else { return }
+        var g = (d["qq_group"] as? String) ?? ""
+        if g.isEmpty { g = (d["join_url"] as? String) ?? "" }
+        await MainActor.run { qqGroup = g }
+    }
+
+    // MARK: - 问候区数据
     /// 昵称 / 头像（`/v1/me`）+ 天气（定位坐标查 wttr.in，失败回落南昌）。
     /// 顺序刻意安排成「先人后天气」：昵称/头像先渲染，天气延后 1.5 秒再去定位，
     /// 避免用户一进主页就被权限弹窗吓到；下拉刷新不再延迟。
@@ -707,6 +744,10 @@ struct HomeView: View {
         if AevisHosts.featureEnabled("stickers") {
             items.append(HomeEntry(label: "表情包", symbol: "face.smiling.fill", color: Color.hex(0x48A88B)))
         }
+        // 群聊：后台配了邀请链接/群号才出现，点一下直接跳 QQ 进群（不做群管理）
+        if !qqGroup.isEmpty {
+            items.append(HomeEntry(label: "群聊", symbol: "person.3.fill", color: Color.hex(0x2C9FD8)))
+        }
         return items
     }
 
@@ -733,6 +774,8 @@ struct HomeView: View {
             case "表情包":
                 plazaTab = 1
                 if let onPlaza { onPlaza(1) } else { showPlaza = true }
+            case "群聊":
+                openQQGroup()
             default:
                 showTip("「\(item.label)」即将上线")
             }
