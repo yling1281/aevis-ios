@@ -33,12 +33,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * QQ 接入（2026-11-28 第二次纠正：绑的是**用户自己的机器人**）。
+ * QQ 接入（2026-11-28 第三次口径：机器人是用户在 QQ 开放平台自己注册的，我们只提供通道）。
  *
  * 用户原话：「是要绑定用户自己的机器人啊…QQ 扫完码会提示这是一个什么 QQ 机器人，
  * 需要你自己去绑定，绑定你的哪个机器人」——
  *
- *   1. 二维码内容是 QQ 官方 OpenClaw 扫码入口（q.qq.com），不是我们自建落地页；
+ *   1. 二维码内容是 QQ 开放平台的机器人入口（q.qq.com），我们不代注册；
  *   2. 用户扫码后在 QQ 里登录开放平台，创建/选择属于他自己的机器人；
  *   3. 页面直接给出这个机器人的 AppID / AppSecret，用户复制回来填；
  *   4. 服务端校验后按这份凭据单开一条 Bot 连接 —— 机器人是他的，人设挂他的账号。
@@ -162,13 +162,13 @@ fun QQBindScreen(onBack: () -> Unit) {
                         Text(tr("用手机 QQ 扫这个码"), fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold, color = ink)
                         Spacer(Modifier.height(4.dp))
-                        Text(tr("扫码后登录 QQ 开放平台，创建或选择你自己的机器人"),
+                        Text(tr("在 QQ 里创建或选择你自己的机器人（注册在 QQ 那边，不是我们替你建）"),
                             fontSize = 11.5.sp, color = ink.copy(alpha = 0.5f),
                             textAlign = TextAlign.Center, lineHeight = 16.sp)
                         Spacer(Modifier.height(12.dp))
                         val bmp = qr
                         if (bmp != null) {
-                            Image(bitmap = bmp.asImageBitmap(), contentDescription = "QQ 官方入口",
+                            Image(bitmap = bmp.asImageBitmap(), contentDescription = "QQ 开放平台入口",
                                 modifier = Modifier.size(200.dp))
                         } else {
                             Box(Modifier.size(200.dp), contentAlignment = Alignment.Center) {
@@ -179,7 +179,7 @@ fun QQBindScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(12.dp))
                         Column(Modifier.fillMaxWidth()) {
                             listOf(
-                                "1. 手机 QQ 扫码，登录 QQ 开放平台",
+                                "1. 手机 QQ 扫码，进 QQ 开放平台的机器人页",
                                 "2. 点「创建机器人」，或用你已经有的那个",
                                 "3. 复制页面上这个机器人的 AppID 和 AppSecret",
                                 "4. 回来点下面「我复制好了」，填进来就绑上了"
