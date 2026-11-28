@@ -1,0 +1,5 @@
+=== ApiSmoke @ https://aevis.cn ===
+app config: PASS http=200 body={"code":200,"data":{"account_base":"","announcement":"","chat_enabled":true,"lines":[{"base":"https://api.lingyan.cyou","name":"福建"},{"base":"https://q7m3ax.lin
+llm models: PASS http=200 body={"code":0,"data":{"default":"deepseek-flash","models":[{"billing":"per_token","cacheHitPointsPerM":3.0,"default":true,"estPointsPerMsg":0.9,"id":"deepseek-flash
+recover stat: PASS http=404 body={"code":404,"data":null,"msg":"恢复码不存在"} 
+=== 3/3 passed ===
