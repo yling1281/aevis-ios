@@ -16,8 +16,16 @@ import UIKit
 final class AppUpdateCenter: ObservableObject {
     static let shared = AppUpdateCenter()
 
-    /// 4-4 后端（与小程序同源）
-    private let base = "https://aevis.cn/prod-api/aevis"
+    /// 更新检查走 **APIClient 的线路回落**，不再写死域名。
+    ///
+    /// 2026-11-28 实测：国内（福建机、真机同网段）访问 `aevis.cn` 20 秒超时、直接 000，
+    /// 而这里原来写死 `https://aevis.cn/prod-api/aevis` —— 结果国内用户**永远收不到更新**，
+    /// 服务端 force 改成什么都不会弹。港区那台在两端（101 与港区）的自测都是好的，
+    /// 所以这个 bug 在服务器侧怎么测都测不出来。
+    ///
+    /// 现在统一交给 `APIClient.request(_:)`：按线路表逐条回落（直连/北京/港区），
+    /// 每条线路自己的 pinning 也由它处理，谁通就用谁。
+    private let updatePath = "/v1/app/update"
 
     @Published var latest: UpdateInfo?
     @Published var dismissed = false
@@ -68,17 +76,14 @@ final class AppUpdateCenter: ObservableObject {
         defer { checking = false }
 
         let ver = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.0"
-        var comps = URLComponents(string: base + "/v1/app/update")
-        comps?.queryItems = [
-            URLQueryItem(name: "platform", value: "ios"),
-            URLQueryItem(name: "version", value: ver),
-        ]
-        guard let url = comps?.url else { return }
+        let path = updatePath + "?platform=ios&version=" + (ver.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed) ?? ver)
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            let payload = (json["data"] as? [String: Any]) ?? [:]
+            // APIClient.request 内部已有「逐条线路回落 + 每线 pinning + 业务码解包」，
+            // data 的键也会补到顶层，所以下面两种读法都成立。
+            let json = try await APIClient.request(path)
+            let payload = (json["data"] as? [String: Any]) ?? json
             lastCheck = Date()
 
             // 服务端布尔兼容（2026-11-25）：`update` / `force` 不能只按 `as? Bool` 读。
