@@ -180,22 +180,24 @@ enum AevisHosts {
     /// 拦截会让用户永远吃旧值）。失败 / 空配置分支保留旧缓存，下次启动仍会再拉。
     ///
     /// 用 `APIClient.rawGet` 而不是 `request`：后者会读 `lines` → 读 `allAccountLines` →
-    /// 回到这里，是环。`rawGet` 在**指定线路**上裸发一次请求，不参与回落。
-    /// 调度入口**固定港区 aevis.lingyan.cyou**（2026-11-28：aevis.cn 腾出来备案、将停服）。
-    /// 原来打北京 q7m3ax.lingyan.cyou —— 海外 DNS 根本解不出这个域名，等于冷启动永远拿不到配置。
-    /// aevis.lingyan.cyou 解析到 38.76.168.61，国内海外都能解析，`/v1/` 已反代回主 API。
-    /// 内置线路以后加新主力（新机）也绝不从新机拉配置 —— 调度源只有一个，避免两套真源。
-    private static let configLine = APIClient.Line(
-        id: "hk-config", name: "港区", base: "https://aevis.lingyan.cyou",
-        pinning: false, note: ""
-    )
-
+    /// 回到这里，是环。`rawGet` 在**指定线路**上裸发一次请求。
+    ///
+    /// 2026-11-28：调度源改为**按内置线路逐条回落**（独立IP → 北京 → 港区），不再固定单条港区。
+    /// 实测国内北京 36ms / 独立IP 72ms，港区 1000-1600ms —— 让所有用户冷启动都走港区，
+    /// 等于白白多等 1 秒以上。港区只是一条**普通候选线路**（跟北京平级），放到最后：
+    /// 国内用户被前两条秒回，海外（前两条 DNS 解不出 / 超时）才回落到港区。
+    /// 数据真源始终只有一个（各入口都反代回同一主库），只是入口不同，不是两套真源。
     static func refresh() async {
-        guard !configLine.base.isEmpty,
-              let r = await APIClient.rawGet("/v1/app/config", line: configLine, timeout: 5),
-              (200..<400).contains(r.status),
-              let json = (try? JSONSerialization.jsonObject(with: r.data)) as? [String: Any]
-        else { return }   // 调度机不可达：保留旧缓存，下次启动再拉
+        var configJSON: [String: Any]?
+        for line in APIClient.builtInLines {
+            guard let r = await APIClient.rawGet("/v1/app/config", line: line, timeout: 3),
+                  (200..<400).contains(r.status),
+                  let parsed = (try? JSONSerialization.jsonObject(with: r.data)) as? [String: Any]
+            else { continue }
+            configJSON = parsed
+            break
+        }
+        guard let json = configJSON else { return }   // 调度入口全不可达：保留旧缓存，下次启动再拉
 
         let parsed = parse(json: json)
         if parsed.isEmpty {
