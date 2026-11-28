@@ -54,6 +54,11 @@ struct APIClient {
              pinning: true, note: "主线路"),
         Line(id: "bj", name: "北京", base: "https://q7m3ax.lingyan.cyou",
              pinning: false, note: "备用"),
+        // 2026-11-28：香港的 AEVIS 正式域名。放到最后只作回落 —— 国内用户优先走 4-4/北京，
+        // 海外（含 CI runner）只有这条能通（api.lingyan.cyou 会被整体超时，q7m3ax DNS 都解不出）。
+        // LE 正式证书，所以 pinning = false。
+        Line(id: "hk", name: "香港", base: "https://aevis.cn",
+             pinning: false, note: "海外入口"),
     ]
 
     /// 生效中的线路表：内置 ∪ 云端下发（按 base 去重、内置优先、云端已按实测 RTT 排序）。
