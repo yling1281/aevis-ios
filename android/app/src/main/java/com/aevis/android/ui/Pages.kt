@@ -298,19 +298,35 @@ fun MallScreen(
     }
 
     PageScaffold(title, onBack) {
-        // ---------- 余额（商城顶部一行）----------
-        if (!isPlaza && points >= 0) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
+        // ---------- 余额（2026-11-29：按 iOS ShopView 的玻璃余额卡重做）----------
+        if (!isPlaza) {
+            V2Card(
+                Modifier.padding(horizontal = V2.gutter, vertical = 6.dp)
             ) {
-                Text(tr("墨点余额"), fontSize = V2.micro, color = ink.copy(alpha = 0.42f))
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "$points", fontSize = V2.body, fontWeight = FontWeight.SemiBold,
-                    // 2026-11-24：墨点夜间配色用语义色，不再写死浅色紫
-                    color = pointAccentColor()
-                )
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("当前余额"), fontSize = 12.sp, color = ink.copy(alpha = 0.45f))
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                if (points >= 0) "$points" else "—",
+                                fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                                // 2026-11-24：墨点夜间配色用语义色，不再写死浅色紫
+                                color = pointAccentColor(), letterSpacing = (-1).sp
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                tr("墨点"), fontSize = 12.sp,
+                                color = ink.copy(alpha = 0.42f),
+                                modifier = Modifier.padding(bottom = 5.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        tr("1 元 = 100 墨点"), fontSize = 11.sp,
+                        color = ink.copy(alpha = 0.35f)
+                    )
+                }
             }
         }
 

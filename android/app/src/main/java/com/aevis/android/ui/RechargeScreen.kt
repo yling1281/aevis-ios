@@ -230,11 +230,20 @@ fun RechargeScreen(onBack: () -> Unit) {
 }
 
 /** 墨点档位的 UI 表示（与 PointPacks 商品口径一致，不动任何接口结构）。*/
-private data class UiPointPack(val code: String, val label: String, val points: Int)
+internal data class UiPointPack(val code: String, val label: String, val points: Int)
+
+internal val defaultPointPacks = listOf(
+    UiPointPack("pt_1", "1 元", 100),
+    UiPointPack("pt_6", "6 元", 600),
+    UiPointPack("pt_18", "18 元", 1800),
+    UiPointPack("pt_30", "30 元", 3000),
+    UiPointPack("pt_68", "68 元", 6800),
+    UiPointPack("pt_128", "128 元", 12800)
+)
 
 /** 2 列商品网格：每行两个 weight 等宽的卡，避免 LazyVerticalGrid 嵌在 verticalScroll 里的嵌套滚动。*/
 @Composable
-private fun PointGrid(
+internal fun PointGrid(
     packs: List<UiPointPack>,
     selected: UiPointPack?,
     onSelect: (UiPointPack) -> Unit
@@ -318,7 +327,7 @@ private fun MemberGrid(
 
 /** 商品卡：圆角 14 玻璃底、选中 1.5dp V2.accent 描边（对齐 iOS packageCell）。*/
 @Composable
-private fun ShopPackCard(
+internal fun ShopPackCard(
     on: Boolean,
     onClick: () -> Unit,
     content: @Composable () -> Unit
@@ -654,14 +663,8 @@ internal fun PointPacks() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val packs = listOf(
-        Triple("pt_1", "1 元", 100),
-        Triple("pt_6", "6 元", 600),
-        Triple("pt_18", "18 元", 1800),
-        Triple("pt_30", "30 元", 3000),
-        Triple("pt_68", "68 元", 6800),
-        Triple("pt_128", "128 元", 12800)
-    )
+    val packs = defaultPointPacks
+    var selected by remember { mutableStateOf<UiPointPack?>(null) }
 
     // 2026-11-27 用户：聚合支付 —— 不再让用户选微信/支付宝，点套餐直接出同一张二维码，
     // 扫码的 App（微信/支付宝）由服务端按 UA 自动分流。
@@ -680,50 +683,68 @@ internal fun PointPacks() {
         )
     }
 
-    // 2026-11-27：支付方式芯片整条移除（聚合二维码，微信/支付宝扫同一张）。
-    V2Card(Modifier.padding(horizontal = V2.gutter), pad = 0.dp) {
-        packs.forEachIndexed { i, (code, label, pts) ->
-            if (i > 0) Box(
-                Modifier.fillMaxWidth().height(0.5.dp)
-                    .background(ink.copy(alpha = 0.07f))
-            )
+    fun buy(pack: UiPointPack) {
+        if (paying) return
+        paying = true
+        scope.launch(Dispatchers.IO) {
+            val o = runCatching { Api.rechargeQr(pack.code, channel) }.getOrNull()
+            withContext(Dispatchers.Main) {
+                paying = false
+                if (o != null) {
+                    payInfo = PayInfo(
+                        o.orderNo, "Aevis 积分 ${o.points}",
+                        o.amountYuan, "${o.points} 积分", o.qrContent, "points"
+                    )
+                } else {
+                    Toast.makeText(
+                        ctx, Api.lastPayError.ifBlank { "下单失败" }, Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    // 2026-11-29：按 iOS ShopView 的 2 列网格商品卡重做（原来是单列 list 行）。
+    // 点卡片 = 选中 + 直接下单，下单链路 Api.rechargeQr → PayDialog 原样保留。
+    Column(
+        Modifier.padding(horizontal = V2.gutter),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        packs.chunked(2).forEach { row ->
             Row(
-                Modifier.fillMaxWidth()
-                    .tapable {
-                        if (paying) return@tapable
-                        paying = true
-                        scope.launch(Dispatchers.IO) {
-                            val o = runCatching { Api.rechargeQr(code, channel) }.getOrNull()
-                            withContext(Dispatchers.Main) {
-                                paying = false
-                                if (o != null) {
-                                    payInfo = PayInfo(
-                                        o.orderNo, "Aevis 积分 ${o.points}",
-                                        o.amountYuan, "${o.points} 积分", o.qrContent, "points"
-                                    )
-                                } else {
-                                    Toast.makeText(
-                                        ctx, Api.lastPayError.ifBlank { "下单失败" }, Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            }
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                row.forEach { pack ->
+                    Box(Modifier.weight(1f)) {
+                        ShopPackCard(
+                            on = selected == pack,
+                            onClick = { selected = pack; buy(pack) }
+                        ) {
+                            Text(
+                                pack.points.toString(),
+                                fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                                color = ink, letterSpacing = (-0.6).sp
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(tr("墨点"), fontSize = 11.sp, color = ink.copy(alpha = 0.42f))
+                            Spacer(Modifier.height(9.dp))
+                            Text(
+                                pack.label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                color = if (selected == pack) V2.accent else ink.copy(alpha = 0.75f)
+                            )
                         }
                     }
-                    .padding(horizontal = V2.gutter, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(label, fontSize = V2.body, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(2.dp))
-                    Text("$pts 墨点", fontSize = 11.5.sp, color = ink.copy(alpha = 0.42f))
                 }
-                Text(
-                    tr("去支付"), fontSize = 12.5.sp, color = V2.accent,
-                    modifier = Modifier.clip(RoundedCornerShape(9.dp))
-                        .background(V2.accent.copy(alpha = 0.12f))
-                        .padding(horizontal = 11.dp, vertical = 5.dp)
-                )
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
+        }
+        if (paying) {
+            Text(
+                tr("正在创建订单…"), fontSize = 11.5.sp,
+                color = ink.copy(alpha = 0.45f),
+                modifier = Modifier.padding(top = 2.dp)
+            )
         }
     }
 }
