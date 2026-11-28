@@ -62,7 +62,7 @@ object Api {
     private val API2LINE get() = d("Mi4uKilgdXU7KjNodDYzND0jOzR0OSM1L2BiYmNj")
 
     /// 上一次请求用的哪条线。**默认直连优先** ——
-    /// 2026-11-14 实测：直连 56ms、中转反代 1493ms、aevis.cn 5192ms，
+    /// 2026-11-14 实测：直连 56ms、中转反代 1493ms、aevis.lingyan.cyou 5192ms，
     /// 差 26 倍，没理由让用户先等慢线超时。直连一旦失败就切到备用，
     /// 下次也不会再去撞（除非进程重启）。
     @Volatile
@@ -1843,7 +1843,7 @@ object Api {
      * 向**我们服务端**要一次性支付链接。
      *
      * 用户给的架构：App 先打我们服务端 → 服务端生成订单 + 一次性 token（5 分钟）→
-     * 返回 `https://aevis.cn/pay/?t=xxx`。URL 里**不含用户名**，过期即销毁。
+     * 返回 `https://aevis.lingyan.cyou/pay/?t=xxx`。URL 里**不含用户名**，过期即销毁。
      */
     fun paySession(product: String): String? = paySessionInfo(product)?.first
 
@@ -3304,7 +3304,7 @@ object Api {
 
     // ---------------- 网页授权登录（2026-11-13）----------------
     //
-    // 浏览器打开 aevis.cn/recharge → 点「用 Aevis App 授权」→ `aevis://weblogin?t=…`
+    // 浏览器打开 aevis.lingyan.cyou/recharge → 点「用 Aevis App 授权」→ `aevis://weblogin?t=…`
     // → 这里看一眼票、弹确认框、点允许。网页那边自己轮询拿到登录态。
 
     /** 确认框要显示的东西：四位验证码 + 是哪个设备在请求。 */
