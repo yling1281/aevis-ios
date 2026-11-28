@@ -24,7 +24,7 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 201
+        versionCode = 203
         // 2026-11-16（113）：版本名跟着 build 走（112 → 1.1.02，113 → 1.1.03）；
         // 界面上只显示 versionName，versionCode 只给系统覆盖安装用。
         // 2026-11-24：1.1.91 → 1.1.92，带「App 内直接下载安装 APK」，开更新提醒。
@@ -39,7 +39,9 @@ android {
         //             「发现 → 群聊」接上后台配置的官方群；充值到账自动检测。
         // 2026-11-28：1.1.100 → 1.1.101。口径改「机器人是你在 QQ 开放平台自己注册的，
         //             我们只提供通道」；群聊直接用后台邀请链接；海外线路走 aevis.cn。
-        versionName = "1.1.101"
+        // 2026-11-28：1.1.101 → 1.1.102。aevis.cn 让位备案，全量切 aevis.lingyan.cyou
+        //             （客服/条款/隐私/官网/支付链接）；内置线路不变（独立IP 主 / 北京 备）。
+        versionName = "1.1.103"
     }
 
     signingConfigs {

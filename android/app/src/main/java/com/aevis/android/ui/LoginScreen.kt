@@ -173,7 +173,7 @@ fun LoginScreen(onDone: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Text(tr("帮助"), fontSize = 15.sp, color = secondary,
                 modifier = Modifier.padding(top = 4.dp)
-                    .tapable { open("https://aevis.cn/support.html") })
+                    .tapable { open("https://aevis.lingyan.cyou/support.html") })
         }
         Spacer(Modifier.height(26.dp))
 
@@ -224,11 +224,11 @@ fun LoginScreen(onDone: () -> Unit) {
                     codeSent = false
                 }, verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(painterResource(R.drawable.ic_login_swap), null, tint = V2.accent,
+                Icon(painterResource(R.drawable.ic_login_swap), null, tint = V2.brandPurple,
                     modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(5.dp))
                 Text(if (mode == Mode.Code) "密码登录" else "验证码登录",
-                    fontSize = 13.5.sp, color = V2.accent)
+                    fontSize = 13.5.sp, color = V2.brandPurple)
             }
             Spacer(Modifier.width(16.dp))
             Text(
@@ -246,7 +246,7 @@ fun LoginScreen(onDone: () -> Unit) {
         Box(
             Modifier.fillMaxWidth()
                 .clip(CircleShape)
-                .background(if (enabled && !working) V2.accent else V2.accent.copy(alpha = 0.35f))
+                .background(if (enabled && !working) V2.brandPurple else V2.brandPurple.copy(alpha = 0.35f))
                 .tapable(enabled = enabled && !working) { primary() }
                 .padding(vertical = 17.dp),
             contentAlignment = Alignment.Center
@@ -261,7 +261,7 @@ fun LoginScreen(onDone: () -> Unit) {
             Box(
                 Modifier.padding(top = 2.dp).size(16.dp).clip(CircleShape)
                     .then(
-                        if (agreed) Modifier.background(V2.accent)
+                        if (agreed) Modifier.background(V2.brandPurple)
                         else Modifier.border(1.5.dp, secondary.copy(alpha = 0.6f), CircleShape)
                     )
                     .tapable { agreed = !agreed },
@@ -276,11 +276,11 @@ fun LoginScreen(onDone: () -> Unit) {
             Column {
                 Row {
                     Text(tr("已阅读并同意 "), fontSize = 11.5.sp, color = secondary)
-                    Text(tr("用户协议"), fontSize = 11.5.sp, color = V2.accent,
-                        modifier = Modifier.tapable { open("https://aevis.cn/terms.html") })
+                    Text(tr("用户协议"), fontSize = 11.5.sp, color = V2.brandPurple,
+                        modifier = Modifier.tapable { open("https://aevis.lingyan.cyou/terms.html") })
                     Text(tr(" 和 "), fontSize = 11.5.sp, color = secondary)
-                    Text(tr("隐私政策"), fontSize = 11.5.sp, color = V2.accent,
-                        modifier = Modifier.tapable { open("https://aevis.cn/privacy.html") })
+                    Text(tr("隐私政策"), fontSize = 11.5.sp, color = V2.brandPurple,
+                        modifier = Modifier.tapable { open("https://aevis.lingyan.cyou/privacy.html") })
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(tr("未注册的邮箱验证通过后将自动创建账号。"),
@@ -333,7 +333,7 @@ fun LoginScreen(onDone: () -> Unit) {
             Text(tr("找回账号"), fontSize = 13.5.sp, color = secondary,
                 modifier = Modifier.clip(CircleShape)
                     .border(0.8.dp, secondary.copy(alpha = 0.35f), CircleShape)
-                    .tapable { open("https://aevis.cn/support.html") }
+                    .tapable { open("https://aevis.lingyan.cyou/support.html") }
                     .padding(horizontal = 18.dp, vertical = 11.dp))
         }
     }
@@ -385,7 +385,7 @@ private fun BigField(icon: Int, placeholder: String, value: String,
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 15.5.sp, color = ink
             ),
-            cursorBrush = SolidColor(V2.accent),
+            cursorBrush = SolidColor(V2.brandPurple),
             visualTransformation =
                 if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(

@@ -125,10 +125,12 @@ internal fun SegmentedContent(
         modifier = modifier,
         transitionSpec = {
             val forward = targetState > initialState
+            // 2026-11-29 对齐 iOS AEMotion：统一 220ms 翻页曲线（原 tween 220 数值相同，
+            // 这里只是收敛到同一处 token，方向保持左右、位移 w/12 不变）
             (
                 fadeIn(tween(180)) +
                     slideInHorizontally(
-                        animationSpec = tween(220),
+                        animationSpec = AEMotion.slideSpec(),
                         initialOffsetX = { w -> if (forward) w / 12 else -w / 12 }
                     )
                 )

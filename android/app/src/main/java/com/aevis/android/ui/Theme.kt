@@ -28,22 +28,35 @@ import androidx.compose.ui.unit.sp
  * 不要那么密」—— 所以这一版整体把留白和字号都抬了一档，底色换成**米白**。
  */
 object V2 {
-    /** 米白底（2026-11-13 用户：「背景可以米白色」）。iOS / 小程序同一支色。*/
-    val bgLight = Color(0xFFFAF7F1)
-    val bgDark = Color(0xFF16151A)
+    // ─────────────────────────────────────────────────────────────────────
+    // 2026-11-29 全量向 iOS 靠齐。iOS 在 11-22/11-25 做过两次视觉重做，
+    // 权威 token 在 ios-rewrite/AevisApp/Models/Models.swift 的 `AE`
+    // 和 Views/GlassComponents.swift 的 `AEGlass`（本文件旧注释引用的
+    // `DesignSystem/V2.swift` 并不存在）。逐条对齐这两处，别再写魔法数。
+    // ─────────────────────────────────────────────────────────────────────
+    /** 底色：对齐 iOS AE.bgLight #F7F5F0 / bgDark #141416（旧值偏黄偏灰）。*/
+    val bgLight = Color(0xFFF7F5F0)
+    val bgDark = Color(0xFF141416)
     val cardLight = Color(0xFFFFFFFF)
-    val cardDark = Color(0xFF201E26)
-    val wellLight = Color(0xFFF2EDE3)
-    val wellDark = Color(0xFF2A2733)
+    val cardDark = Color(0xFF1E2028)     // = iOS AE.card 深色
+    val wellLight = Color(0xFFEAEDF4)    // = iOS AE.accentSoft 浅色
+    val wellDark = Color(0xFF2B3346)     // = iOS AE.accentSoft 深色
     /** 米白底上的细分割线 */
     val lineLight = Color(0xFFEDE6D9)
-    val lineDark = Color(0xFF2E2B38)
+    val lineDark = Color(0xFF3A404E)     // = iOS AE.cardStroke 深色
     val alert = Color(0xFFE5484D)
 
-    /** 主色 —— 跟 iOS `AppSettings.accentPalette[0]` 同一个值（#9B8AF0）。*/
-    val accent = Color(0xFF9B8AF0)
+    /** 主强调色：对齐 iOS AE.accent —— 深墨靛蓝（浅）/ 提亮蓝（深），2026-11-22「去掉旧紫」。*/
+    val accent = Color(0xFF2F3A56)          // = iOS AE.accent 浅色 / accentDeep 实底
+    val accentDark = Color(0xFFA9B7D8)      // = iOS AE.accent 深色提亮
+    val accentLift = Color(0xFF4A5676)      // = iOS AE.accentLift 高光
+    /** 白字按钮固定深底（iOS AE.accentDeep：改浅会毁掉对比度）。*/
+    val accentDeep = Color(0xFF2F3A56)
 
-    /** 六支主题色，顺序与 iOS 完全一致。*/
+    /** 登录页品牌紫：iOS AE.brandPurple 刻意保留，登录页专用，不随全局去紫。*/
+    val brandPurple = Color(0xFF9B8AF0)
+
+    /** 六支气泡预设色，顺序与 iOS 完全一致（气泡是可换色功能，保留）。*/
     val accentPalette = listOf(
         Color(0xFF9B8AF0), // 淡紫
         Color(0xFF6FA8E8), // 淡蓝
@@ -53,29 +66,30 @@ object V2 {
         Color(0xFF669E33)  // 绿
     )
 
-    // 圆角 / 间距：比上一版都大一号，别挤
-    val cardRadius = 22.dp   // = iOS V2.cardRadius
+    // 圆角分档：对齐 iOS AE + AEGlass（28 大卡 / 20 常规卡+气泡 / 14 按钮）
+    val cardRadius = 20.dp       // = iOS AE.cardRadius（常规卡）
+    val heroCardRadius = 28.dp   // = iOS AEGlass.cardRadius（用量卡/大卡）
+    val bubbleRadius = 20.dp     // = iOS AEGlass.bubbleRadius
+    val buttonRadius = 14.dp     // = iOS AE.buttonRadius
     val rowRadius = 18.dp
-    /** 卡片描边：极淡一层，iOS 那张卡就是靠它"立起来"的（不是靠阴影）。*/
-    val strokeLight = Color(0x14000000)
-    val strokeDark = Color(0x1FFFFFFF)
-    val gutter = 18.dp       // = iOS V2.gutter
+    /** 卡片描边：iOS AEGlass.strokeOpacity=0（参考图无描边，靠材质+极淡阴影分离）。*/
+    val strokeLight = Color(0x00000000)
+    val strokeDark = Color(0x00000000)
+    val gutter = 18.dp
     val cardPad = 18.dp
     val rowHeight = 64.dp
-    val iconBox = 38.dp      // = iOS V2.iconBox
+    val iconBox = 38.dp
     val iconRadius = 13.dp
-    val sectionGap = 14.dp   // iOS: 卡片与下一节标题之间 14
+    val sectionGap = 14.dp
 
-    // 字号：**逐条对齐 iOS `V2.swift`**（26 / 20 / 15 / 13.5 / 12 / 11）。
-    // 2026-11-14 用户：「就是纯安卓，不对，纯苹果那种味道」——
-    // 上一版整体比 iOS 大 1~2pt（body 16 vs 15、标题 28 vs 20），
-    // 加起来就成了"安卓那种撑开的观感"。
-    val display = 26.sp
-    val title = 20.sp
-    val body = 15.sp
+    // 字号：对齐 iOS AE（title17 / body15 / caption11 / sectionTitle16 / heroTitle34）
+    val display = 34.sp          // = iOS AE.heroTitle（页面大标题）
+    val title = 17.sp            // = iOS AE.title（旧 20 偏大，安卓观感的来源之一）
+    val sectionTitle = 16.sp     // = iOS AE.sectionTitle
+    val body = 15.sp             // = iOS AE.body（已对齐）
     val sub = 13.5.sp
     val tiny = 12.sp
-    val micro = 11.sp
+    val micro = 11.sp            // = iOS AE.caption
 }
 
 @Composable
@@ -96,17 +110,17 @@ fun AevisTheme(content: @Composable () -> Unit) {
         else -> systemDark
     }
     val scheme0 = if (dark) {
+        // 深色主色用提亮蓝（iOS AE.accent dark=#A9B7D8），否则深墨蓝在深底上看不清
         darkColorScheme(
-            primary = V2.accent, background = V2.bgDark, surface = V2.cardDark,
-            onBackground = Color(0xFFF3F1EE), onSurface = Color(0xFFF3F1EE),
+            primary = V2.accentDark, background = V2.bgDark, surface = V2.cardDark,
+            onBackground = Color(0xFFF2F1EC), onSurface = Color(0xFFF2F1EC),
             surfaceVariant = V2.wellDark, outline = V2.lineDark
         )
     } else {
-        // 浅色：米白底 + 纯白卡片 + 近黑的字。三个值都在 `V2` 里定死了，
-        // 别在这儿另调 —— iOS / 小程序用的是同一支米白。
+        // 浅色：米白底 + 纯白卡片 + 深墨字（对齐 iOS AE.textPrimary #1C2231）
         lightColorScheme(
             primary = V2.accent, background = V2.bgLight, surface = V2.cardLight,
-            onBackground = Color(0xFF1D1B17), onSurface = Color(0xFF1D1B17),
+            onBackground = Color(0xFF1C2231), onSurface = Color(0xFF1C2231),
             surfaceVariant = V2.wellLight, outline = V2.lineLight
         )
     }

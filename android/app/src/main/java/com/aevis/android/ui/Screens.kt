@@ -48,6 +48,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
@@ -81,11 +82,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * iOS 那张「V2Card」：**连续圆角**、纯白、0.5dp 极淡描边、无阴影。
+ * iOS 那张「V2Card」：**连续圆角 + 无描边 + 极淡阴影**（2026-11-29 全量向 iOS 靠齐）。
  *
- * 2026-11-14 用户：「该圆润的地方没圆润起来，该白的地方没白起来」——
- * 之前用的是 `RoundedCornerShape`（正圆弧）+ 没描边，卡片看着"平、方、灰"。
- * 现在换成 squircle（超椭圆），再补一层 8% 的描边把边"立"起来。
+ * 对齐 iOS `AEGlass`：参考图卡片**无描边**，靠材质提亮 + 几乎看不见的阴影
+ * （黑 0.05 / r22 / y9）做分离，而不是靠那圈 8% 描边——那是"安卓味"的来源。
+ * 圆角用 squircle（超椭圆）对标 iOS `.continuous`。
  */
 @Composable
 fun V2Card(
@@ -94,18 +95,19 @@ fun V2Card(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = squircle(V2.cardRadius)
-    // 毛玻璃（2026-11-16，112）：只在「设了主背景」时切换，`default` 还是原来那张纯白卡
-    // （连描边粗细都不变 —— 0.5dp vs 1dp 的差别在老观感里一眼就能看出来）。
     val skin = appSkin()
     val fill = skin?.cardFill ?: MaterialTheme.colorScheme.surface
-    val stroke = skin?.cardStroke
-        ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     Column(
         modifier
             .fillMaxWidth()
+            // iOS AEGlass 阴影：黑 0.05、blur 22、y 9，只做分离感，不是投影
+            .shadow(elevation = 3.dp, shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.05f),
+                spotColor = Color.Black.copy(alpha = 0.05f))
             .clip(shape)
             .background(fill)
-            .border(if (skin == null) 0.5.dp else 1.dp, stroke, shape)
+            // 无描边：iOS AEGlass.strokeOpacity = 0。skin 模式靠 cardFill 的
+            // 半透明提亮区分层级，不再补那圈亮边。
             .padding(pad),
         content = content
     )
@@ -729,10 +731,8 @@ fun Shell(onSignOut: () -> Unit) {
         label = "pageOpen"
     )
 
-    // 位移量要在这里折算成 px —— `slideIn*` 的 lambda 里没有 Density 作用域
-    val density = LocalDensity.current
-    val shiftPx = with(density) { com.aevis.android.core.AnimPrefs.shiftDp.dp.toPx() }
-    val pageDamping = com.aevis.android.core.AnimPrefs.damping
+    // 2026-11-29：页面转场统一走 AEMotion（左右翻页），不再用 AnimPrefs.shiftDp
+    // 折算 px，故删掉这里的 density/shiftPx。用户可调的「上浮位移」仍作用于 tapable 按压。
 
     Box(Modifier.fillMaxSize()) {
         // 主背景在 `MainActivity` 最外层画（整个 App 只画一次，登录页也吃同一张）；
@@ -885,15 +885,21 @@ fun Shell(onSignOut: () -> Unit) {
                     AnimatedContent(
                         targetState = idx,
                         transitionSpec = {
-                            // 前进往下、后退往上；位移只取 shiftDp 的一半，切 tab 不该像翻页那么夸张
-                            val dir = if (targetState > initialState) 1 else -1
+                            // 2026-11-29 对齐 iOS：切 tab 也走左右方向（不再上下），
+                            // 位移只取 1/12 宽，比整页翻页克制；曲线统一 AEMotion 220ms。
+                            val forward = targetState > initialState
                             (
                                 fadeIn(tween(190)) +
-                                    slideInVertically(
-                                        animationSpec = tween(230),
-                                        initialOffsetY = { (shiftPx / 2f * dir).toInt() }
+                                    slideInHorizontally(
+                                        animationSpec = AEMotion.slideSpec(),
+                                        initialOffsetX = { w -> if (forward) w / 12 else -w / 12 }
                                     )
-                                ).togetherWith(fadeOut(tween(120)))
+                                ).togetherWith(
+                                    fadeOut(tween(120)) + slideOutHorizontally(
+                                        animationSpec = AEMotion.slideSpec(),
+                                        targetOffsetX = { w -> if (forward) -w / 12 else w / 12 }
+                                    )
+                                )
                         },
                         label = "tab"
                     ) { i ->
@@ -943,16 +949,11 @@ fun Shell(onSignOut: () -> Unit) {
         }
 
         // ---------- 二级页覆盖层 ----------
+        // 2026-11-29 对齐 iOS AEMotion：整页右进 / 返回右出，easeInOut 220ms，不弹跳。
         AnimatedVisibility(
             visible = sub != null,
-            enter = slideInHorizontally(
-                animationSpec = spring(dampingRatio = pageDamping, stiffness = 330f),
-                initialOffsetX = { it }
-            ) + fadeIn(tween(110)),
-            exit = slideOutHorizontally(
-                animationSpec = tween(200),
-                targetOffsetX = { it }
-            ) + fadeOut(tween(160))
+            enter = AEMotion.enterForward,
+            exit = AEMotion.exitBackward
         ) {
             // 兜一层底色：滑动过程中不能透出下面的主页。
             // ChatScreen / GroupChatScreen 自己带背景，设置类页面靠这层兜底。
@@ -963,13 +964,8 @@ fun Shell(onSignOut: () -> Unit) {
                 AnimatedContent(
                     targetState = lastSub,
                     transitionSpec = {
-                        (
-                            fadeIn(tween(180)) +
-                                slideInVertically(
-                                    animationSpec = tween(200),
-                                    initialOffsetY = { shiftPx.toInt() }
-                                )
-                            ).togetherWith(fadeOut(tween(120)))
+                        // 2026-11-29 对齐 iOS AEMotion：子页走左右翻页，不再上下冒出
+                        AEMotion.enterForward.togetherWith(AEMotion.exitBackward)
                     },
                     label = "subPage"
                 ) { route ->
@@ -1414,18 +1410,21 @@ private fun SubPageHost(
 internal fun EnterOnce(key: Any, index: Int, content: @Composable () -> Unit) {
     var shown by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
-        kotlinx.coroutines.delay(index.coerceAtMost(12) * 26L)
+        // 2026-11-29 对齐 iOS AEMotion.staggerDelay：每级 50ms（原 26ms），封顶 12 级
+        kotlinx.coroutines.delay(index.coerceAtMost(12) * AEMotion.STAGGER_STEP_MS.toLong())
         shown = true
     }
     val p by animateFloatAsState(
         targetValue = if (shown) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 380f),
+        // 对齐 iOS riseAnimation：spring(response 0.5, damping 0.86)，几乎不弹
+        animationSpec = AEMotion.riseSpec,
         label = "enterOnce"
     )
     Box(
         Modifier.graphicsLayer {
             alpha = p.coerceIn(0f, 1f)
-            translationY = (1f - p) * 10.dp.toPx()
+            // 对齐 iOS StaggerIn.distance = 14pt（原 10dp）
+            translationY = (1f - p) * AEMotion.RISE_DISTANCE_DP.dp.toPx()
         }
     ) { content() }
 }
@@ -1741,6 +1740,8 @@ private fun HomeTab(
     ) {
 
         // ---------- 顶部问候 ----------
+        // 2026-11-29 对齐 iOS HomeView：首屏元素依次轻微上跳（stagger 0/1…）
+        EnterOnce("home-greeting", 0) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = V2.gutter, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1777,10 +1778,12 @@ private fun HomeTab(
                     tint = ink.copy(alpha = 0.62f), modifier = Modifier.size(18.dp))
             }
         }
+        }
 
         // ---------- 用量额度卡（2026-11-24 对标参考图重做）----------
         // 大数字 = 剩余百分比；横条满时蓝色渐变、用掉部分变灰、猫头随剩余量滑动；
         // 免费用量条数 + 重置时间单独一行；墨点是独立单位，拆开显示、不参与本周额度。
+        EnterOnce("home-usage", 1) {
         V2Card(Modifier.padding(horizontal = V2.gutter, vertical = 4.dp)) {
             // 标题行 + 两个入口胶囊
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1937,10 +1940,12 @@ private fun HomeTab(
                 }
             }
         }
+        }
 
         Spacer(Modifier.height(16.dp))
 
         // ---------- 服务 ----------
+        EnterOnce("home-service", 2) {
         SectionTitle(tr("服务"))
         V2Card(Modifier.padding(horizontal = V2.gutter)) {
             // 7 格 = 4 + 3（「表情」2026-11-16 撤掉，表情包入口收进「广场」里了）。
@@ -1968,6 +1973,7 @@ private fun HomeTab(
                 // 「更多」是基础设置入口，保持可达（里面有线路状态）
                 HomeIcon(tr("更多"), R.drawable.ic_row_status, Modifier.weight(1f)) { onOpenPage("settingsmore") }
             }
+        }
         }
 
         Spacer(Modifier.height(16.dp))

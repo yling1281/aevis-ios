@@ -85,11 +85,14 @@ internal fun loadMemes(ctx: android.content.Context): List<String> = emptyList()
 internal fun appendMemes(list: List<String>): String = ""
 internal fun statusOf(pid: Long, kind: Int): String = ""
 
-private val BubbleWhite = Color(0xF2FFFFFF)
-private val MineBlue = Color(0xFFD8E2FF)
+// 2026-11-29 全量向 iOS 靠齐：气泡改半透明磨砂（对齐 AEGlass）。
+// iOS：AI 气泡 white.opacity(0.70)、我的气泡深靛蓝半透明、圆角20连续、无描边。
+private val BubbleWhite = Color.White.copy(alpha = 0.70f)   // = iOS AEGlass.bubbleFillOpacity
+private val MineBlue = Color(0xFF2F3A56).copy(alpha = 0.86f) // 深墨靛蓝实底（我的气泡，白字）
+private val BubbleInk = Color(0xFF1C2231)                    // = iOS AE.textPrimary（AI 气泡深字）
 private val InkDark = Color(0xFF1B1D2A)
 private val InkDim = Color(0xFF6B7189)
-private val AccentBlue = Color(0xFF4A6CF7)
+private val AccentBlue = Color(0xFF4A5676)                   // = iOS AE.accentLift（去亮蓝）
 
 @Composable
 fun ChatScreen(
@@ -373,12 +376,15 @@ fun ChatScreen(
                         }
                         Box(
                             Modifier.widthIn(max = 258.dp)
-                                .clip(RoundedCornerShape(18.dp))
+                                .clip(squircle(V2.bubbleRadius))   // iOS 连续圆角 20
                                 .background(if (mine) MineBlue else BubbleWhite)
                                 .padding(horizontal = 13.dp, vertical = 10.dp)
                         ) {
+                            // 我的气泡深墨底配白字；对方气泡半透明白配深字（对齐 iOS）
                             Text(
-                                text = chatAnnotated(m.content, InkDark, InkDim),
+                                text = chatAnnotated(m.content,
+                                    if (mine) Color.White else BubbleInk,
+                                    if (mine) Color.White.copy(alpha = 0.75f) else InkDim),
                                 fontSize = 15.sp, lineHeight = 23.sp
                             )
                         }
@@ -439,7 +445,8 @@ fun ChatScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "＋", fontSize = 20.sp, color = InkDark,
+                        "＋", fontSize = 20.sp,
+                        color = if (plusOpen) Color.White else InkDark,
                         modifier = Modifier.graphicsLayer { rotationZ = rot }
                     )
                 }
