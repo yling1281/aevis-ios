@@ -181,12 +181,12 @@ enum AevisHosts {
     ///
     /// 用 `APIClient.rawGet` 而不是 `request`：后者会读 `lines` → 读 `allAccountLines` →
     /// 回到这里，是环。`rawGet` 在**指定线路**上裸发一次请求，不参与回落。
-    /// 调度入口**固定香港 aevis.cn**（2026-11-28 用户口径：只有香港机有 AEVIS 的正式域名）。
+    /// 调度入口**固定港区 aevis.cn**（2026-11-28 用户口径：AEVIS 正式域名只在港区那台）。
     /// 原来打北京 q7m3ax.lingyan.cyou —— 海外 DNS 根本解不出这个域名，等于冷启动永远拿不到配置。
     /// aevis.cn 解析到 38.76.168.61，国内海外都能解析，`/v1/` 已反代回主 API。
     /// 内置线路以后加新主力（新机）也绝不从新机拉配置 —— 调度源只有一个，避免两套真源。
     private static let configLine = APIClient.Line(
-        id: "hk-config", name: "香港", base: "https://aevis.cn",
+        id: "hk-config", name: "港区", base: "https://aevis.cn",
         pinning: false, note: ""
     )
 
