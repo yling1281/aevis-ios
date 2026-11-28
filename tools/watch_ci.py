@@ -140,15 +140,44 @@ def main():
         return 1
 
     # ——— 成功：把这次的发布信息打出来 ———
-    tag = "build-%s" % run_number
-    release, error = get("https://api.github.com/repos/%s/releases/tags/%s" % (REPO, tag))
+    # 🔴 2026-11-25 事故：原来这里写死 `build-<run>`，那是旧工程 build-ipa.yml 的
+    # release 名。rewrite 流水线发的是 `ipa-rw-<run>`，资产名也不同
+    # （Aevis-rewrite-unsigned.ipa vs Aevis-unsigned.ipa）。
+    # 结果 run#49 成功后脚本报了「发布 build-49」——那个其实是 2026-09-25 的旧包，
+    # 提交 f2a0ee77，6.4 MB；真包 2.16 MB。照脚本提示去下 build-49 的 IPA
+    # 就会把两个月前的旧 App 当 2.7 发出去（真的发生了）。
+    # 修法：① 按 workflow 名选 tag 前缀；② 必须核对 release body 里的提交 sha；
+    #       ③ 明确打印「该下哪个资产」，不再让人从资产列表里猜。
+    wf_name = (state.get("name") or "").lower()
+    is_rewrite = "rewrite" in wf_name
+    if is_rewrite:
+        candidates = ["ipa-rw-%s" % run_number]
+    else:
+        candidates = ["build-%s" % run_number, "check-%s" % run_number]
+
+    release, error = None, None
+    for tag in candidates:
+        release, error = get("https://api.github.com/repos/%s/releases/tags/%s" % (REPO, tag))
+        if release:
+            break
     if not release:
-        print("找不到 build 发布（可能是自检包）：", error, flush=True)
-        release, error = get("https://api.github.com/repos/%s/releases/tags/check-%s" % (REPO, run_number))
-    if release:
-        print("\n发布 %s" % release["tag_name"], flush=True)
-        for asset in release["assets"]:
-            print("   %-26s %9d B" % (asset["name"], asset["size"]), flush=True)
+        print("找不到发布（%s）：%s" % (", ".join(candidates), error), flush=True)
+        return 1
+
+    head = state.get("head_sha") or ""
+    body = release.get("body") or ""
+    if head[:8] and head[:8] not in body:
+        print("!! 发布 %s 的提交与本 run 不一致（本 run %s，发布说明未含该 sha）——"
+              "不要下载，先查 release。" % (release["tag_name"], head[:8]), flush=True)
+        return 1
+
+    print("\n发布 %s" % release["tag_name"], flush=True)
+    print("提交 %s  /  workflow %s" % (head[:8], state.get("name")), flush=True)
+    for asset in release["assets"]:
+        print("   %-26s %9d B" % (asset["name"], asset["size"]), flush=True)
+    prefer = ("Aevis-rewrite-unsigned.ipa" if is_rewrite else "Aevis-unsigned.ipa")
+    hit = next((a for a in release["assets"] if a["name"] == prefer), None)
+    print("应下载资产：%s%s" % (prefer, "" if hit else "  ⚠ 不存在！"), flush=True)
     return 0
 
 
