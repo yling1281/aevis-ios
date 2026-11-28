@@ -181,7 +181,7 @@ struct QQBindView: View {
             } else {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 44))
-                    .foregroundStyle(Color(hex: 0x34C759))
+                    .foregroundStyle(Color.hex(0x34C759))
                 Text("已绑定你的机器人")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AE.accent)
@@ -237,7 +237,7 @@ struct QQBindView: View {
 
     private var linkColor: Color {
         switch linkState {
-        case "online": return Color(hex: 0x34C759)
+        case "online": return Color.hex(0x34C759)
         case "error": return .red
         default: return AE.textSecondary
         }
