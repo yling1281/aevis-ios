@@ -24,7 +24,7 @@ android {
         applicationId = "com.aevis.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 199
+        versionCode = 200
         // 2026-11-16（113）：版本名跟着 build 走（112 → 1.1.02，113 → 1.1.03）；
         // 界面上只显示 versionName，versionCode 只给系统覆盖安装用。
         // 2026-11-24：1.1.91 → 1.1.92，带「App 内直接下载安装 APK」，开更新提醒。
@@ -37,7 +37,7 @@ android {
         // 老客户端照样验得过）；主线路 4-4 证书补齐 AKI/SKI，严格校验不再报链缺陷。
         // 2026-11-28：1.1.97 → 1.1.98。QQ 接入改成「扫码即绑」（不再手输六位码）；
         //             「发现 → 群聊」接上后台配置的官方群；充值到账自动检测。
-        versionName = "1.1.99"
+        versionName = "1.1.100"
     }
 
     signingConfigs {
